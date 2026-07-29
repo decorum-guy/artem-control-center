@@ -165,13 +165,97 @@ def test_coffee_action_capabilities_require_all_live_server_side_gates(tmp_path)
         "home.coffee.turn_on"
     }
 
-    adapter._observed_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    asyncio.run(adapter._mark_websocket_disconnected())
     assert all(
         not action.enabled
         for action in {
             service.id: service for service in adapter.services()
         }["coffee-machine"].actions
     )
+
+
+def test_ha_transport_liveness_is_independent_from_idle_entity_timestamps(
+    tmp_path,
+):
+    clock = [datetime(2026, 7, 29, 12, 0, tzinfo=timezone.utc)]
+    settings = IntegrationSettings(
+        ha_url="http://ha.test",
+        ha_token="test-token",
+        state_cache_path=str(tmp_path / "ha-cache.json"),
+        ha_stale_after_seconds=90,
+        writes_enabled=True,
+        coffee_actions_enabled=True,
+        alice_base_url="https://alice.test",
+        alice_control_center_token="dedicated-token",
+    )
+    adapter = HomeAssistantAdapter(
+        settings,
+        panel_mode="production",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=_ha_states())
+        ),
+        clock=lambda: clock[0],
+    )
+    publisher = SnapshotPublisher(
+        mode="production",
+        services_builder=adapter.services,
+    )
+    adapter.set_on_change(publisher.rebuild)
+
+    async def exercise():
+        await adapter.fetch_initial_snapshot()
+        initial = {service.id: service for service in adapter.services()}
+        assert initial["home-assistant"].source == "live"
+        assert initial["coffee-machine"].source == "live"
+        assert adapter.coffee_action_allowed("turn_off")
+
+        await adapter._mark_websocket_connected()
+        connected_revision = publisher.revision
+        clock[0] += timedelta(minutes=6)
+
+        idle = {service.id: service for service in adapter.services()}
+        assert idle["home-assistant"].source == "live"
+        assert idle["coffee-machine"].source == "live"
+        assert idle["coffee-machine"].data["machine"]["stale"] is False
+        assert idle["coffee-machine"].data["machine"]["entityLastChangedAt"] == (
+            "2026-07-29T11:54:09Z"
+        )
+        assert adapter.coffee_action_allowed("turn_off")
+
+        # Repeated technical connectivity observations do not publish revisions.
+        await adapter._mark_websocket_connected()
+        assert publisher.revision == connected_revision
+
+        await adapter._mark_websocket_disconnected()
+        disconnected = {service.id: service for service in adapter.services()}
+        assert disconnected["home-assistant"].source == "cached"
+        assert disconnected["coffee-machine"].source == "cached"
+        assert not adapter.coffee_action_allowed("turn_off")
+
+        clock[0] += timedelta(seconds=91)
+        await publisher.rebuild()
+        stale = {service.id: service for service in adapter.services()}
+        assert stale["home-assistant"].source == "stale"
+        assert stale["coffee-machine"].source == "stale"
+        assert not adapter.coffee_action_allowed("turn_off")
+
+        await adapter._mark_websocket_connected()
+        assert {service.id: service for service in adapter.services()}[
+            "home-assistant"
+        ].source == "stale"
+        await adapter.fetch_initial_snapshot()
+        recovered = {service.id: service for service in adapter.services()}
+        assert recovered["home-assistant"].source == "live"
+        assert recovered["coffee-machine"].source == "live"
+        assert recovered["home-assistant"].data["transport"][
+            "websocketConnected"
+        ]
+        assert recovered["home-assistant"].data["transport"][
+            "snapshotConfirmed"
+        ]
+        assert adapter.coffee_action_allowed("turn_off")
+
+    asyncio.run(exercise())
 
 
 def test_ha_allowlisted_event_publishes_only_meaningful_snapshot(tmp_path):

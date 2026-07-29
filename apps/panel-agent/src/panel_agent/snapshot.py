@@ -159,6 +159,9 @@ _TECHNICAL_FIELDS = {
     "detailsObservedAt",
     "lastSuccessfulObservedAt",
     "timingPolicyFetchedAt",
+    "lastSuccessfulRestAt",
+    "lastTransportConnectedAt",
+    "lastTransportFailureAt",
 }
 
 

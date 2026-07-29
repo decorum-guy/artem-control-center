@@ -43,17 +43,24 @@ class HomeAssistantAdapter:
         transport: Optional[httpx.AsyncBaseTransport] = None,
         panel_mode: str = "read_only",
         on_change: Callable[[], Awaitable[None]] | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._settings = settings
         self._transport = transport
         self._states: Dict[str, Dict[str, Any]] = {}
         self._observed_at: Optional[datetime] = None
+        self._last_successful_rest_at: Optional[datetime] = None
+        self._last_transport_connected_at: Optional[datetime] = None
+        self._last_transport_failure_at: Optional[datetime] = None
+        self._websocket_connected = False
+        self._snapshot_confirmed_for_transport = False
         self._source = "unavailable"
         self._latency_ms: Optional[int] = None
         self._task: Optional[asyncio.Task[None]] = None
         self._stale_task: Optional[asyncio.Task[None]] = None
         self._panel_mode = panel_mode
         self._on_change = on_change
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._load_cache()
 
     @property
@@ -87,7 +94,7 @@ class HomeAssistantAdapter:
         self._stale_task = None
 
     async def fetch_initial_snapshot(self) -> None:
-        started = datetime.now(timezone.utc)
+        started = self._clock()
         async with httpx.AsyncClient(
             base_url=self._settings.ha_url,
             headers={"Authorization": f"Bearer {self._settings.ha_token}"},
@@ -100,8 +107,11 @@ class HomeAssistantAdapter:
         if not isinstance(payload, list):
             raise ValueError("Home Assistant states response must be a list")
         self._replace_states(payload)
+        self._last_successful_rest_at = self._clock()
+        self._snapshot_confirmed_for_transport = True
+        self._source = "live"
         self._latency_ms = int(
-            (datetime.now(timezone.utc) - started).total_seconds() * 1000
+            (self._clock() - started).total_seconds() * 1000
         )
         await self._notify_change()
 
@@ -127,8 +137,8 @@ class HomeAssistantAdapter:
             and self._settings.coffee_actions_enabled
             and self._panel_mode in {"production", "integration_test", "fixtures"}
             and self.configured
-            and self._source == "live"
-            and not self._is_stale()
+            and self._transport_is_live()
+            and self._snapshot_confirmed_for_transport
             and state == expected
             and state not in {"unknown", "unavailable"}
             and self._settings.alice_base_url
@@ -146,22 +156,17 @@ class HomeAssistantAdapter:
         if self._states.get(entity_id) == sanitized and self._source == "live":
             return False
         self._states[entity_id] = sanitized
-        self._observed_at = datetime.now(timezone.utc)
-        self._source = "live"
+        self._observed_at = self._clock()
+        if self._transport_is_live():
+            self._source = "live"
         self._save_cache()
         await self._notify_change()
         return True
 
     def services(self) -> List[ServiceSnapshot]:
-        observed = self._observed_at or datetime.now(timezone.utc)
+        observed = self._observed_at or self._clock()
         stale = self._is_stale()
-        source = (
-            "stale"
-            if stale and self._states
-            else self._source
-            if self._states
-            else "unavailable"
-        )
+        source = self._current_source()
         missing = [entity for entity in REQUIRED_ENTITIES if entity not in self._states]
         ha_health = (
             "offline"
@@ -172,7 +177,11 @@ class HomeAssistantAdapter:
             if missing
             else "healthy"
         )
-        freshness = _freshness_label(observed)
+        freshness = (
+            "WebSocket подключен"
+            if self._websocket_connected and self._transport_is_live()
+            else _freshness_label(observed, now=self._clock())
+        )
 
         coffee = self._states.get(COFFEE_ENTITY)
         available = bool(
@@ -257,6 +266,17 @@ class HomeAssistantAdapter:
                     "adapter": "home-assistant-rest-websocket",
                     "missingEntities": missing,
                     "writesEnabled": self._settings.writes_enabled,
+                    "transport": {
+                        "websocketConnected": self._websocket_connected,
+                        "snapshotConfirmed": self._snapshot_confirmed_for_transport,
+                        "lastSuccessfulRestAt": _iso(self._last_successful_rest_at),
+                        "lastTransportConnectedAt": _iso(
+                            self._last_transport_connected_at
+                        ),
+                        "lastTransportFailureAt": _iso(
+                            self._last_transport_failure_at
+                        ),
+                    },
                 },
             ),
             ServiceSnapshot(
@@ -357,6 +377,20 @@ class HomeAssistantAdapter:
                             }
                         )
                     )
+                    subscription = json.loads(await socket.recv())
+                    if (
+                        subscription.get("type") != "result"
+                        or subscription.get("id") != 1
+                        or not subscription.get("success")
+                    ):
+                        raise ValueError(
+                            "Home Assistant WebSocket subscription failed"
+                        )
+                    await self._mark_websocket_connected()
+                    try:
+                        await self.fetch_initial_snapshot()
+                    except (httpx.HTTPError, ValueError):
+                        await self._mark_cached_or_unavailable()
                     delay = 1
                     async for raw in socket:
                         message = json.loads(raw)
@@ -366,10 +400,11 @@ class HomeAssistantAdapter:
                         new_state = data.get("new_state")
                         if entity_id in REQUIRED_ENTITIES and isinstance(new_state, dict):
                             await self.apply_state_changed(entity_id, new_state)
+                    raise ConnectionError("Home Assistant WebSocket closed")
             except asyncio.CancelledError:
                 raise
             except Exception:
-                await self._mark_cached_or_unavailable()
+                await self._mark_websocket_disconnected()
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30)
 
@@ -393,19 +428,71 @@ class HomeAssistantAdapter:
             for item in payload
             if isinstance(item, dict) and item.get("entity_id") in allowlist
         }
-        self._observed_at = datetime.now(timezone.utc)
-        self._source = "live"
+        self._observed_at = self._clock()
         self._save_cache()
 
     def _is_stale(self) -> bool:
-        if not self._observed_at:
+        if self._transport_is_live():
+            return False
+        if not self._states:
             return True
-        age = (datetime.now(timezone.utc) - self._observed_at).total_seconds()
+        anchor = (
+            self._last_transport_failure_at
+            or self._last_successful_rest_at
+            or self._observed_at
+        )
+        if anchor is None:
+            return True
+        age = (self._clock() - anchor).total_seconds()
         return age > self._settings.ha_stale_after_seconds
 
-    async def _mark_cached_or_unavailable(self) -> None:
+    def _transport_is_live(self) -> bool:
+        if self._websocket_connected and self._snapshot_confirmed_for_transport:
+            return True
+        if not self._last_successful_rest_at:
+            return False
+        if (
+            self._last_transport_failure_at
+            and self._last_transport_failure_at >= self._last_successful_rest_at
+        ):
+            return False
+        age = (self._clock() - self._last_successful_rest_at).total_seconds()
+        return age <= self._settings.ha_stale_after_seconds
+
+    def _current_source(self) -> str:
+        if not self._states:
+            return "unavailable"
+        if self._transport_is_live():
+            return "live"
+        if self._is_stale():
+            return "stale"
+        return "cached"
+
+    async def _mark_websocket_connected(self) -> None:
+        changed = not self._websocket_connected
+        self._websocket_connected = True
+        self._last_transport_connected_at = self._clock()
+        if self._snapshot_confirmed_for_transport:
+            self._source = "live"
+        if changed:
+            await self._notify_change()
+
+    async def _mark_websocket_disconnected(self) -> None:
+        was_connected = self._websocket_connected
+        should_record_failure = was_connected or self._source == "live"
+        self._websocket_connected = False
+        self._snapshot_confirmed_for_transport = False
+        if should_record_failure:
+            self._last_transport_failure_at = self._clock()
+        await self._mark_cached_or_unavailable(force_notify=was_connected)
+
+    async def _mark_cached_or_unavailable(
+        self,
+        *,
+        force_notify: bool = False,
+    ) -> None:
         next_source = "cached" if self._states else "unavailable"
-        if self._source != next_source:
+        if self._source != next_source or force_notify:
             self._source = next_source
             await self._notify_change()
 
@@ -539,9 +626,17 @@ def _coffee_summary(state: str, timing_available: bool) -> str:
     return "Home Assistant entity недоступна"
 
 
-def _freshness_label(observed_at: datetime) -> str:
+def _freshness_label(
+    observed_at: datetime,
+    *,
+    now: datetime | None = None,
+) -> str:
     seconds = max(
         0,
-        int((datetime.now(timezone.utc) - observed_at).total_seconds()),
+        int(((now or datetime.now(timezone.utc)) - observed_at).total_seconds()),
     )
     return "только что" if seconds < 10 else f"{seconds} сек назад"
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None

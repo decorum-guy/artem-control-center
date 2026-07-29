@@ -7,8 +7,8 @@ Deployment status: **not deployed**
 
 | Project | Local path | GitHub repository | Base | Feature branch | Implementation commit | Draft PR | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Artem Control Center | `/Users/aartemida/Documents/artem-control-panel-proj/artem-control-center` | `decorum-guy/artem-control-center` | `main` | `feat/local-integrations-foundation` | reviewed base `f55394f`; rollout-correction commit is PR HEAD | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) | Draft; not deployed |
-| AliceTG Bot | `/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` | `decorum-guy/AliceTG_Bot` | `main` | `feat/control-center-ha-timing` | `b4a8825d2c3725052a40414ae93a7e70bdd937d1` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) | Draft; not deployed |
+| Artem Control Center | `/Users/aartemida/Documents/artem-control-panel-proj/artem-control-center` | `decorum-guy/artem-control-center` | `main` | `feat/local-integrations-foundation` | reviewed base `cdebb69`; transport-liveness correction is PR HEAD | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) | Draft; not deployed |
+| AliceTG Bot | `/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` | `decorum-guy/AliceTG_Bot` | `main` | `feat/control-center-ha-timing` | `75cb62d350ea0b6d9f11f9f927f9226fb11a1de4` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) | Draft; not deployed |
 | AVALAR Website | `/Users/aartemida/Documents/AVALAR` | `decorum-guy/AVALAR` | `stage` | `feat/control-center-integration` | `ef7d1197fc85d8a3c5e2273044d6525d0d36e53f` | [#1](https://github.com/decorum-guy/AVALAR/pull/1) | Draft; not deployed |
 | Home Assistant config | `/Users/aartemida/Documents/Homeassistant/HomeAssistant_Server_Config` | no Git repository | n/a | n/a | mirrored in Control Center commit `f6523bf…` | [Control Center #14](https://github.com/decorum-guy/artem-control-center/pull/14) | Local non-secret files changed; server unchanged |
 | AVALAR Exchange MCP | no local clone | `decorum-guy/avalar_exchange_mcp` | `main` | none | none | none | Read-only; unchanged |

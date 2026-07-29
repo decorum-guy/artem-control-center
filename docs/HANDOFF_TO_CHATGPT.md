@@ -40,7 +40,7 @@ constant; fixture values arrive through the same typed dashboard API shape.
 
 | Source → consumer | Transport | Cadence / recovery |
 | --- | --- | --- |
-| Home Assistant → Panel Agent | REST initial snapshot + WebSocket `state_changed` | reconnect with bounded backoff; allow-listed entities only |
+| Home Assistant → Panel Agent | REST initial snapshot + authenticated WebSocket `state_changed` | transport liveness is connection-based; reconnect performs REST reconciliation |
 | AliceTG Bot settings → Panel Agent | fixed typed HTTP | request-driven with sanitized last-known cache |
 | AVALAR Site → Panel Agent | HTTP live/ready polling | shared-hosting polling only; no daemon/WebSocket |
 | Panel Agent → browser | SSE `/api/v1/events` | non-durable revision hints |
@@ -84,6 +84,12 @@ Notification settings contain only:
 Timing and delivery receipts are rejected from notification PATCH. PATCH uses
 an opaque `expectedRevision`, forbids unknown fields, saves atomically and
 reschedules active alerts once only when settings effectively changed.
+Telegram handlers call the same atomic
+`AppStateStore.mutate_coffee_notification_settings` primitive for all six
+notification values. Every effective Telegram change updates the persistent
+opaque revision and `updatedAt`; unchanged mutations preserve both. Therefore
+a dashboard PATCH using a revision obtained before a Telegram change receives
+`409`. Timing and PushWard show-seconds remain outside this revision domain.
 
 Timing GET/PATCH reads and writes the two HA helpers. PATCH:
 
@@ -135,6 +141,24 @@ revision and update `generatedAt`. Volatile freshness/latency/observation
 timestamps do not by themselves create revisions. Subscriber queues hold only
 the latest revision, so slow/disconnected browsers cannot block adapters or
 leak unbounded memory.
+
+Home Assistant transport liveness is independent from entity timestamps:
+
+- `last_changed` and `last_updated` remain device observations only;
+- a successful REST snapshot is live during startup/reconnect grace;
+- authenticated and subscribed WebSocket plus a confirmed snapshot remains
+  live indefinitely even when no allow-listed entity changes;
+- disconnect records transport failure immediately and exposes last-known
+  state as `cached`, then `stale` after `PANEL_HA_STALE_AFTER_SECONDS`;
+- reconnect performs a fresh REST snapshot before actions become available
+  again;
+- WebSocket ping/pong and repeated connectivity observations do not publish
+  snapshot revisions.
+
+Sanitized HA service data exposes `websocketConnected`, `snapshotConfirmed`,
+`lastSuccessfulRestAt`, `lastTransportConnectedAt` and
+`lastTransportFailureAt`. These timestamps are diagnostic metadata and are
+excluded from snapshot fingerprinting.
 
 SSE event types:
 
@@ -217,8 +241,8 @@ token.
 
 | Project | Branch | Review commit at handoff preparation | Draft PR |
 | --- | --- | --- | --- |
-| Artem Control Center | `feat/local-integrations-foundation` | reviewed base `f55394f`; rollout-correction commit is the PR HEAD | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) |
-| AliceTG Bot | `feat/control-center-ha-timing` | `b4a8825d2c3725052a40414ae93a7e70bdd937d1` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) |
+| Artem Control Center | `feat/local-integrations-foundation` | reviewed base `cdebb69`; transport-liveness correction is the PR HEAD | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) |
+| AliceTG Bot | `feat/control-center-ha-timing` | `75cb62d350ea0b6d9f11f9f927f9226fb11a1de4` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) |
 | AVALAR | `feat/control-center-integration` | `ef7d119` | [#1](https://github.com/decorum-guy/AVALAR/pull/1); unchanged by this slice |
 
 Use the PR metadata as the authoritative full SHA after documentation
@@ -274,9 +298,9 @@ git diff --check
 
 Current verified totals:
 
-- AliceTG Bot: 28 tests;
+- AliceTG Bot: 34 tests;
 - dashboard unit: 11 tests;
-- Panel Agent: 34 tests;
+- Panel Agent: 35 tests;
 - Home Assistant mirror contracts: 4 tests;
 - Playwright Chromium: 12 tests.
 
@@ -341,9 +365,17 @@ No step below was run in this session.
   cached/stale/uninitialized timing is `503` while liveness remains `200`.
 - Snapshot SSE connects, emits heartbeat and causes a full GET after a newer
   revision; temporary GET failure keeps the last successful UI.
+- Leave HA entities unchanged beyond `PANEL_HA_STALE_AFTER_SECONDS` while the
+  authenticated WebSocket stays connected: source remains `live` and the
+  state-appropriate coffee action remains available.
+- Disconnect the WebSocket: source becomes `cached`, then `stale`; actions are
+  disabled. Reconnect and REST reconciliation restore `live` and capabilities.
 - GET timing returns current HA values and a changing opaque revision.
 - Change timing through Telegram; Bot refresh and dashboard refresh show it
   without restart.
+- Change a notification toggle through Telegram; Bot revision and `updatedAt`
+  change, and a Control Center PATCH with the pre-change revision returns
+  `409`.
 - With writes still disabled, all PATCH/action calls return policy-disabled.
 - After enabling a settings gate, PATCH returns only after HA/bot read-back.
 - Stale revision returns `409` and UI asks for refresh.

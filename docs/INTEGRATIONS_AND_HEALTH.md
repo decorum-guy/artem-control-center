@@ -105,6 +105,14 @@ REST initialization, allow-listed WebSocket events, reconnect/stale changes
 and managed HTTP integration polling trigger rebuilds. Only a meaningful
 normalized change publishes a new process-local monotonic revision.
 
+Home Assistant freshness is transport-based, not entity-change-based. A
+successfully authenticated/subscribed WebSocket keeps the confirmed snapshot
+live even when no allow-listed entity changes for hours. Entity `last_changed`
+and `last_updated` remain device timestamps. Disconnect immediately exposes
+last-known data as cached; the stale timeout begins from transport failure.
+Reconnect performs REST reconciliation before write capabilities return.
+WebSocket ping/pong does not itself create snapshot revisions.
+
 `GET /api/v1/events` is a loopback-only SSE stream with `connected`,
 `snapshot` and `heartbeat` events. It carries revision hints, not raw HA events
 or service credentials. Browser recovery always uses
