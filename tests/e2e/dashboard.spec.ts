@@ -162,8 +162,47 @@ test("coffee settings explain revision conflicts and source outage", async ({ pa
   await expect(page.getByRole("status")).toContainText("временно недоступны");
 });
 
+test("dirty timing draft survives background refresh and exposes Telegram conflict", async ({ page }) => {
+  let telegramChanged = false;
+  await page.route("**/api/v1/settings/coffee/timing", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: 1,
+        source: "home-assistant",
+        transport: "alice-tg-bot",
+        revision: telegramChanged ? "telegram-revision-2" : "telegram-revision-1",
+        observedAt: "2026-07-29T16:00:00Z",
+        warmupMinutes: telegramChanged ? 17 : 15,
+        longRunningMinutes: 60,
+        sourceMode: "live",
+        writesEnabled: true
+      })
+    });
+  });
+
+  await page.goto("/settings");
+  const warmup = page.getByLabel("Время разогрева");
+  await expect(warmup).toHaveValue("15");
+  await warmup.fill("14");
+  telegramChanged = true;
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange"))
+  );
+  await expect(page.getByTestId("timing-conflict"))
+    .toContainText("изменились в Telegram");
+  await expect(warmup).toHaveValue("14");
+  await page.getByRole("button", { name: "Загрузить актуальные" }).click();
+  await expect(warmup).toHaveValue("17");
+});
+
 test("coffee actions stay policy-disabled by default and show confirmed HA result when enabled", async ({ page }) => {
-  await page.goto("/home");
+  await page.goto("/home?scenario=coffee-stale");
   await expect(
     page.getByTestId("widget-coffee-machine").getByRole("button")
   ).toBeDisabled();
@@ -175,4 +214,6 @@ test("coffee actions stay policy-disabled by default and show confirmed HA resul
   await expect(turnOn).toBeEnabled();
   await turnOn.click();
   await expect(page.getByRole("status")).toContainText("Home Assistant подтвердил");
+  await expect(page.getByTestId("widget-coffee-machine"))
+    .not.toHaveAttribute("data-stage", "off");
 });

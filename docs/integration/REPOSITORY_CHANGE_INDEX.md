@@ -7,8 +7,8 @@ Deployment status: **not deployed**
 
 | Project | Local path | GitHub repository | Base | Feature branch | Implementation commit | Draft PR | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Artem Control Center | `/Users/aartemida/Documents/artem-control-panel-proj/artem-control-center` | `decorum-guy/artem-control-center` | `main` | `feat/local-integrations-foundation` | Coffee implementation `0b8f2e4`; PR HEAD includes handoff docs | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) | Draft; not deployed |
-| AliceTG Bot | `/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` | `decorum-guy/AliceTG_Bot` | `main` | `feat/control-center-ha-timing` | `5338df9` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) | Draft; not deployed |
+| Artem Control Center | `/Users/aartemida/Documents/artem-control-panel-proj/artem-control-center` | `decorum-guy/artem-control-center` | `main` | `feat/local-integrations-foundation` | reviewed base `f55394f`; rollout-correction commit is PR HEAD | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) | Draft; not deployed |
+| AliceTG Bot | `/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` | `decorum-guy/AliceTG_Bot` | `main` | `feat/control-center-ha-timing` | `b4a8825d2c3725052a40414ae93a7e70bdd937d1` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) | Draft; not deployed |
 | AVALAR Website | `/Users/aartemida/Documents/AVALAR` | `decorum-guy/AVALAR` | `stage` | `feat/control-center-integration` | `ef7d1197fc85d8a3c5e2273044d6525d0d36e53f` | [#1](https://github.com/decorum-guy/AVALAR/pull/1) | Draft; not deployed |
 | Home Assistant config | `/Users/aartemida/Documents/Homeassistant/HomeAssistant_Server_Config` | no Git repository | n/a | n/a | mirrored in Control Center commit `f6523bf…` | [Control Center #14](https://github.com/decorum-guy/artem-control-center/pull/14) | Local non-secret files changed; server unchanged |
 | AVALAR Exchange MCP | no local clone | `decorum-guy/avalar_exchange_mcp` | `main` | none | none | none | Read-only; unchanged |
@@ -151,8 +151,8 @@ Rollback: no verified application rollback exists; do not register one.
   confirmation.
 - Global and three narrow coffee gates all default to disabled.
 
-Validation: ESLint, TypeScript, 7 frontend unit tests, 26 FastAPI/adapter tests,
-production build, HA patch tests, YAML/JSON validation and 11 Playwright
+Validation: ESLint, TypeScript, 11 frontend unit tests, 34 FastAPI/adapter
+tests, production build, 4 HA patch contract tests, YAML/JSON validation and 12 Playwright
 Chromium tests.
 
 ## Runtime baseline

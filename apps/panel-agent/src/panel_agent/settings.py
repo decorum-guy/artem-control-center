@@ -31,6 +31,7 @@ class IntegrationSettings:
     coffee_timing_writes_enabled: bool = False
     coffee_notification_writes_enabled: bool = False
     coffee_actions_enabled: bool = False
+    sse_heartbeat_seconds: int = 20
 
     @classmethod
     def from_env(cls) -> "IntegrationSettings":
@@ -101,6 +102,10 @@ class IntegrationSettings:
             coffee_actions_enabled=_bool_env(
                 "PANEL_COFFEE_ACTIONS_ENABLED",
                 False,
+            ),
+            sse_heartbeat_seconds=max(
+                5,
+                int(os.getenv("PANEL_SSE_HEARTBEAT_SECONDS", "20")),
             ),
         )
 

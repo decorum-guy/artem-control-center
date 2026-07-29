@@ -31,5 +31,9 @@ python scripts/migrate_coffee_timing_to_ha.py apply  # separately approved
 `apply` verifies both timing values before setting
 `input_boolean.coffee_timing_initialized`. It is never part of bot/HA startup.
 Do not initialize by editing `.storage` or by adding YAML `initial` values.
+Before initialization, verify
+`binary_sensor.coffee_machine_running_too_long` is unavailable and cannot
+become true. After initialization it may become true only from the confirmed
+activation timestamp plus the canonical long-running threshold.
 
 This change did not run any remote mode, HA reload/restart or device action.

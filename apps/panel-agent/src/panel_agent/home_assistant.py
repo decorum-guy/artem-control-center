@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -41,6 +41,8 @@ class HomeAssistantAdapter:
         settings: IntegrationSettings,
         *,
         transport: Optional[httpx.AsyncBaseTransport] = None,
+        panel_mode: str = "read_only",
+        on_change: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
         self._transport = transport
@@ -49,11 +51,20 @@ class HomeAssistantAdapter:
         self._source = "unavailable"
         self._latency_ms: Optional[int] = None
         self._task: Optional[asyncio.Task[None]] = None
+        self._stale_task: Optional[asyncio.Task[None]] = None
+        self._panel_mode = panel_mode
+        self._on_change = on_change
         self._load_cache()
 
     @property
     def configured(self) -> bool:
         return bool(self._settings.ha_url and self._settings.ha_token)
+
+    def set_on_change(
+        self,
+        callback: Callable[[], Awaitable[None]] | None,
+    ) -> None:
+        self._on_change = callback
 
     async def start(self) -> None:
         if not self.configured:
@@ -61,14 +72,19 @@ class HomeAssistantAdapter:
         try:
             await self.fetch_initial_snapshot()
         except (httpx.HTTPError, ValueError):
-            self._mark_cached_or_unavailable()
+            await self._mark_cached_or_unavailable()
         self._task = asyncio.create_task(self._subscribe_forever())
+        self._stale_task = asyncio.create_task(self._watch_staleness())
 
     async def close(self) -> None:
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
         self._task = None
+        if self._stale_task:
+            self._stale_task.cancel()
+            await asyncio.gather(self._stale_task, return_exceptions=True)
+        self._stale_task = None
 
     async def fetch_initial_snapshot(self) -> None:
         started = datetime.now(timezone.utc)
@@ -87,6 +103,7 @@ class HomeAssistantAdapter:
         self._latency_ms = int(
             (datetime.now(timezone.utc) - started).total_seconds() * 1000
         )
+        await self._notify_change()
 
     def coffee_confirmation(self) -> dict[str, Any]:
         coffee = self._states.get(COFFEE_ENTITY) or {}
@@ -100,6 +117,40 @@ class HomeAssistantAdapter:
             if self._observed_at
             else None,
         }
+
+    def coffee_action_allowed(self, action: str) -> bool:
+        coffee = self._states.get(COFFEE_ENTITY) or {}
+        state = coffee.get("state")
+        expected = "off" if action == "turn_on" else "on"
+        return bool(
+            self._settings.writes_enabled
+            and self._settings.coffee_actions_enabled
+            and self._panel_mode in {"production", "integration_test", "fixtures"}
+            and self.configured
+            and self._source == "live"
+            and not self._is_stale()
+            and state == expected
+            and state not in {"unknown", "unavailable"}
+            and self._settings.alice_base_url
+            and self._settings.alice_control_center_token
+        )
+
+    async def apply_state_changed(
+        self,
+        entity_id: str,
+        new_state: Dict[str, Any],
+    ) -> bool:
+        if entity_id not in REQUIRED_ENTITIES:
+            return False
+        sanitized = _sanitize_state(entity_id, new_state)
+        if self._states.get(entity_id) == sanitized and self._source == "live":
+            return False
+        self._states[entity_id] = sanitized
+        self._observed_at = datetime.now(timezone.utc)
+        self._source = "live"
+        self._save_cache()
+        await self._notify_change()
+        return True
 
     def services(self) -> List[ServiceSnapshot]:
         observed = self._observed_at or datetime.now(timezone.utc)
@@ -165,17 +216,17 @@ class HomeAssistantAdapter:
             else "healthy"
         )
 
-        disabled_actions = [
+        coffee_actions = [
             ActionDescriptor(
                 id="home.coffee.turn_on",
                 title="Включить",
-                enabled=False,
+                enabled=self.coffee_action_allowed("turn_on"),
                 risk="medium",
             ),
             ActionDescriptor(
                 id="home.coffee.turn_off",
                 title="Выключить",
-                enabled=False,
+                enabled=self.coffee_action_allowed("turn_off"),
                 risk="low",
             ),
         ]
@@ -214,7 +265,7 @@ class HomeAssistantAdapter:
                 health=coffee_health,
                 summary=_coffee_summary(machine_state, timing_available),
                 dataContract="home.coffee-machine.v1",
-                actions=disabled_actions,
+                actions=coffee_actions,
                 source=source,
                 presentation=ServicePresentation(
                     category="home-device",
@@ -314,16 +365,26 @@ class HomeAssistantAdapter:
                         entity_id = data.get("entity_id")
                         new_state = data.get("new_state")
                         if entity_id in REQUIRED_ENTITIES and isinstance(new_state, dict):
-                            self._states[entity_id] = _sanitize_state(entity_id, new_state)
-                            self._observed_at = datetime.now(timezone.utc)
-                            self._source = "live"
-                            self._save_cache()
+                            await self.apply_state_changed(entity_id, new_state)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self._mark_cached_or_unavailable()
+                await self._mark_cached_or_unavailable()
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30)
+
+    async def _watch_staleness(self) -> None:
+        was_stale = self._is_stale()
+        interval = max(1.0, min(15.0, self._settings.ha_stale_after_seconds / 3))
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                stale = self._is_stale()
+                if stale != was_stale:
+                    was_stale = stale
+                    await self._notify_change()
+            except asyncio.CancelledError:
+                raise
 
     def _replace_states(self, payload: Iterable[Any]) -> None:
         allowlist = set(REQUIRED_ENTITIES)
@@ -342,8 +403,15 @@ class HomeAssistantAdapter:
         age = (datetime.now(timezone.utc) - self._observed_at).total_seconds()
         return age > self._settings.ha_stale_after_seconds
 
-    def _mark_cached_or_unavailable(self) -> None:
-        self._source = "cached" if self._states else "unavailable"
+    async def _mark_cached_or_unavailable(self) -> None:
+        next_source = "cached" if self._states else "unavailable"
+        if self._source != next_source:
+            self._source = next_source
+            await self._notify_change()
+
+    async def _notify_change(self) -> None:
+        if self._on_change is not None:
+            await self._on_change()
 
     def _load_cache(self) -> None:
         if not self._settings.state_cache_path:

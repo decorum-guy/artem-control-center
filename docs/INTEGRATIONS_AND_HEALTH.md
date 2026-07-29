@@ -98,6 +98,31 @@ Capabilities:
 - backup own config/database;
 - open Desktop mode.
 
+### Browser snapshot delivery
+
+Panel Agent owns one canonical normalized `DashboardSnapshot`. Home Assistant
+REST initialization, allow-listed WebSocket events, reconnect/stale changes
+and managed HTTP integration polling trigger rebuilds. Only a meaningful
+normalized change publishes a new process-local monotonic revision.
+
+`GET /api/v1/events` is a loopback-only SSE stream with `connected`,
+`snapshot` and `heartbeat` events. It carries revision hints, not raw HA events
+or service credentials. Browser recovery always uses
+`GET /api/v1/snapshot`; SSE is non-durable and keeps no event history.
+
+Browser behavior:
+
+- initial full snapshot, then SSE;
+- newer revision or reconnect → deduplicated full snapshot;
+- 45-second full reconciliation while SSE is healthy;
+- 5-second visible-tab fallback while SSE is unavailable;
+- no aggressive polling while hidden;
+- immediate reconciliation on visibility restore;
+- last successful snapshot remains visible during temporary failures.
+
+The Panel Agent stays loopback-bound by default. No wildcard CORS or external
+callback listener is introduced.
+
 Actions:
 
 - restart Chromium;

@@ -80,4 +80,24 @@ describe("coffee presentation", () => {
     expect(view.stage).toBe("unavailable");
     expect(view.progress).toBeNull();
   });
+
+  it("advances warming to ready and running-too-long from a presentation clock", () => {
+    const timed = {
+      ...base,
+      machine: {
+        ...base.machine,
+        turnedOnAt: "2026-07-29T12:00:00Z"
+      },
+      timingPolicy: {
+        ...base.timingPolicy,
+        warmupDurationSeconds: 120,
+        longRunningThresholdSeconds: 300,
+        sourceAvailable: true
+      }
+    };
+    expect(coffeePresentation(timed, "2026-07-29T12:01:00Z").stage).toBe("warming");
+    expect(coffeePresentation(timed, "2026-07-29T12:02:00Z").stage).toBe("ready");
+    expect(coffeePresentation(timed, "2026-07-29T12:05:00Z").stage)
+      .toBe("running_too_long");
+  });
 });

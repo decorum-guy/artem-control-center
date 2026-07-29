@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from time import monotonic
-from typing import Any, Callable, Dict, List, Optional, Protocol
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 
 import httpx
 
@@ -25,6 +25,7 @@ class HttpIntegrationAdapter:
         transport: Optional[httpx.AsyncBaseTransport] = None,
         details_provider: DetailsProvider | None = None,
         clock: Callable[[], float] = monotonic,
+        on_change: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._settings = settings
         self._transport = transport
@@ -35,10 +36,17 @@ class HttpIntegrationAdapter:
         self._lock: asyncio.Lock | None = None
         self._lock_loop: asyncio.AbstractEventLoop | None = None
         self._task: asyncio.Task[None] | None = None
+        self._on_change = on_change
 
     @property
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
+
+    def set_on_change(
+        self,
+        callback: Callable[[], Awaitable[None]] | None,
+    ) -> None:
+        self._on_change = callback
 
     async def start(self) -> None:
         await self.refresh()
@@ -78,6 +86,8 @@ class HttpIntegrationAdapter:
                 self._read_alice(),
             )
             self._services = [self._with_last_known(result) for result in results]
+            if self._on_change is not None:
+                await self._on_change()
             return all(service.source == "live" for service in self._services)
 
     def services(self) -> List[ServiceSnapshot]:

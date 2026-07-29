@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import FastAPI, HTTPException, Query, Response, status
+from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from .alice_control import AliceControlError
 from .contracts import (
@@ -20,6 +23,7 @@ from .contracts import (
 from .fixtures import load_fixture_document, services_for_scenario
 from .integrations import IntegrationRuntime
 from .settings import IntegrationSettings
+from .snapshot import SnapshotPublisher
 
 
 def configured_mode() -> PanelMode:
@@ -31,16 +35,24 @@ def configured_mode() -> PanelMode:
 
 MODE = configured_mode()
 SETTINGS = IntegrationSettings.from_env()
-runtime = IntegrationRuntime(SETTINGS)
+runtime = IntegrationRuntime(SETTINGS, mode=MODE)
+snapshot_publisher = SnapshotPublisher(
+    mode=MODE,
+    services_builder=runtime.services,
+    heartbeat_seconds=SETTINGS.sse_heartbeat_seconds,
+)
+runtime.set_snapshot_callback(snapshot_publisher.rebuild)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if MODE not in {"fixtures", "integration_test"}:
         await runtime.start()
+        await snapshot_publisher.rebuild()
     try:
         yield
     finally:
+        await snapshot_publisher.close()
         await runtime.close()
 
 
@@ -51,6 +63,7 @@ app = FastAPI(
 )
 fixture_services: List[ServiceSnapshot] = []
 revision = 1
+fixture_coffee_state_override: str | None = None
 fixture_timing = {
     "schemaVersion": 1,
     "source": "home-assistant",
@@ -107,26 +120,56 @@ def list_fixtures() -> dict:
 
 
 @app.get("/api/v1/snapshot", response_model=DashboardSnapshot)
-def snapshot(scenario: str = Query(default="ha-healthy")) -> DashboardSnapshot:
-    document = load_fixture_document()
+async def snapshot(
+    response: Response,
+    scenario: str = Query(default="ha-healthy"),
+) -> DashboardSnapshot:
+    response.headers["Cache-Control"] = "no-store"
     if MODE in {"fixtures", "integration_test"}:
+        document = load_fixture_document()
         try:
             services = services_for_scenario(scenario)
         except KeyError:
             raise HTTPException(status_code=404, detail="Unknown fixture scenario")
         services.extend(fixture_services)
-        coffee_actions_enabled = (
-            scenario == "coffee-off"
-            and _write_allowed(SETTINGS.coffee_actions_enabled)
-        )
         for service in services:
             if service.id == "coffee-machine":
+                machine = service.data.get("machine", {})
+                if (
+                    isinstance(machine, dict)
+                    and fixture_coffee_state_override in {"on", "off"}
+                ):
+                    machine["state"] = fixture_coffee_state_override
+                    machine["available"] = True
+                    machine["stale"] = False
+                    service.summary = (
+                        "Включена"
+                        if fixture_coffee_state_override == "on"
+                        else "Выключена"
+                    )
+                machine_state = (
+                    machine.get("state") if isinstance(machine, dict) else None
+                )
                 for action in service.actions:
-                    action.enabled = coffee_actions_enabled
+                    action.enabled = bool(
+                        _write_allowed(SETTINGS.coffee_actions_enabled)
+                        and (
+                            (
+                                action.id == "home.coffee.turn_on"
+                                and machine_state == "off"
+                            )
+                            or (
+                                action.id == "home.coffee.turn_off"
+                                and machine_state == "on"
+                            )
+                        )
+                    )
         fixture_scenario = scenario
     else:
-        services = runtime.services()
-        fixture_scenario = None
+        current = snapshot_publisher.snapshot
+        if current is None:
+            current = await snapshot_publisher.rebuild()
+        return current
     generated_at = (
         document["generatedAt"]
         if fixture_scenario
@@ -138,6 +181,25 @@ def snapshot(scenario: str = Query(default="ha-healthy")) -> DashboardSnapshot:
         mode=MODE,
         fixtureScenario=fixture_scenario,
         services=services,
+    )
+
+
+@app.get("/api/v1/events")
+async def events(request: Request) -> StreamingResponse:
+    async def stream():
+        async for event in snapshot_publisher.event_stream(
+            request.is_disconnected
+        ):
+            yield event
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 
@@ -155,7 +217,8 @@ def add_fixture_service(service: ServiceSnapshot) -> ServiceSnapshot:
 
 
 @app.get("/api/v1/settings/coffee/timing", response_model=CoffeeTimingSettings)
-async def coffee_timing_settings() -> CoffeeTimingSettings:
+async def coffee_timing_settings(response: Response) -> CoffeeTimingSettings:
+    response.headers["Cache-Control"] = "no-store"
     if MODE in {"fixtures", "integration_test"}:
         payload, source_mode = dict(fixture_timing), "fixture"
     else:
@@ -207,6 +270,7 @@ async def patch_coffee_timing_settings(
         ):
             raise HTTPException(status_code=503, detail="home_assistant_confirmation_failed")
         source_mode = "live"
+        await snapshot_publisher.rebuild()
     response.headers["Cache-Control"] = "no-store"
     return CoffeeTimingSettings(
         **result,
@@ -219,7 +283,8 @@ async def patch_coffee_timing_settings(
     "/api/v1/settings/notifications/coffee",
     response_model=CoffeeNotificationSettings,
 )
-async def coffee_notification_settings() -> CoffeeNotificationSettings:
+async def coffee_notification_settings(response: Response) -> CoffeeNotificationSettings:
+    response.headers["Cache-Control"] = "no-store"
     if MODE in {"fixtures", "integration_test"}:
         payload, source_mode = dict(fixture_notifications), "fixture"
     else:
@@ -265,6 +330,7 @@ async def patch_coffee_notification_settings(
         except AliceControlError as exc:
             _raise_alice_error(exc)
         source_mode = "live"
+        await snapshot_publisher.rebuild()
     response.headers["Cache-Control"] = "no-store"
     return CoffeeNotificationSettings(
         **result,
@@ -278,8 +344,13 @@ async def coffee_action(
     action: CoffeeActionRequest,
     response: Response,
 ) -> CoffeeActionResponse:
+    global fixture_coffee_state_override, revision
     _require_write(SETTINGS.coffee_actions_enabled)
     if MODE in {"fixtures", "integration_test"}:
+        fixture_coffee_state_override = (
+            "on" if action.action == "turn_on" else "off"
+        )
+        revision += 1
         result = {
             "schemaVersion": 1,
             "authority": "home-assistant",
@@ -290,8 +361,8 @@ async def coffee_action(
             "observedAt": "2026-07-29T16:05:00Z",
         }
     else:
-        if not runtime.home_assistant.configured:
-            raise HTTPException(status_code=503, detail="home_assistant_not_configured")
+        if not runtime.home_assistant.coffee_action_allowed(action.action):
+            raise HTTPException(status_code=403, detail="coffee_action_unavailable")
         try:
             result = await runtime.alice_control.coffee_action(action.model_dump())
             await runtime.home_assistant.fetch_initial_snapshot()
@@ -302,12 +373,17 @@ async def coffee_action(
         expected = "on" if action.action == "turn_on" else "off"
         if runtime.home_assistant.coffee_confirmation()["state"] != expected:
             raise HTTPException(status_code=503, detail="home_assistant_confirmation_failed")
+        await snapshot_publisher.rebuild()
     response.headers["Cache-Control"] = "no-store"
     return CoffeeActionResponse(**result)
 
 
 def _write_allowed(narrow_gate: bool) -> bool:
-    return SETTINGS.writes_enabled and narrow_gate
+    return (
+        MODE in {"fixtures", "integration_test", "production"}
+        and SETTINGS.writes_enabled
+        and narrow_gate
+    )
 
 
 def _require_write(narrow_gate: bool) -> None:

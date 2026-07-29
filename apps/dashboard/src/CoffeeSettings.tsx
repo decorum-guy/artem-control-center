@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CoffeeNotificationSettings,
   CoffeeTimingSettings
@@ -17,8 +17,12 @@ export function CoffeeSettingsPanel() {
     useState<CoffeeNotificationSettings | null>(null);
   const [warmup, setWarmup] = useState("");
   const [longRunning, setLongRunning] = useState("");
+  const [timingDirty, setTimingDirty] = useState(false);
+  const [serverTimingChanged, setServerTimingChanged] = useState(false);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const timingRef = useRef<CoffeeTimingSettings | null>(null);
+  const timingDirtyRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -26,11 +30,17 @@ export function CoffeeSettingsPanel() {
         getCoffeeTiming(),
         getCoffeeNotifications()
       ]);
+      const previous = timingRef.current;
+      timingRef.current = nextTiming;
       setTiming(nextTiming);
       setNotifications(nextNotifications);
-      setWarmup(String(nextTiming.warmupMinutes));
-      setLongRunning(String(nextTiming.longRunningMinutes));
-      setNotice(null);
+      if (!timingDirtyRef.current) {
+        setWarmup(String(nextTiming.warmupMinutes));
+        setLongRunning(String(nextTiming.longRunningMinutes));
+        setServerTimingChanged(false);
+      } else if (previous && previous.revision !== nextTiming.revision) {
+        setServerTimingChanged(true);
+      }
     } catch {
       setNotice("Настройки кофемашины временно недоступны.");
     }
@@ -39,11 +49,22 @@ export function CoffeeSettingsPanel() {
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 30_000);
-    return () => window.clearInterval(timer);
+    const onVisibilityChange = () => {
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [refresh]);
 
   async function saveTiming() {
     if (!timing) return;
+    if (serverTimingChanged) {
+      setNotice("Значения изменились в Telegram. Сначала загрузите актуальные значения.");
+      return;
+    }
     const warmupMinutes = Number(warmup);
     const longRunningMinutes = Number(longRunning);
     if (!Number.isInteger(warmupMinutes) || !Number.isInteger(longRunningMinutes)) {
@@ -57,11 +78,19 @@ export function CoffeeSettingsPanel() {
         warmupMinutes,
         longRunningMinutes
       });
+      timingRef.current = updated;
       setTiming(updated);
       setWarmup(String(updated.warmupMinutes));
       setLongRunning(String(updated.longRunningMinutes));
+      timingDirtyRef.current = false;
+      setTimingDirty(false);
+      setServerTimingChanged(false);
       setNotice("Сохранено и подтверждено Home Assistant.");
     } catch (error) {
+      if (error instanceof CoffeeApiError && error.status === 409) {
+        await refresh();
+        setServerTimingChanged(true);
+      }
       setNotice(settingsError(error));
     } finally {
       setPending(false);
@@ -87,6 +116,9 @@ export function CoffeeSettingsPanel() {
       setNotifications(updated);
       setNotice("Настройки уведомлений сохранены.");
     } catch (error) {
+      if (error instanceof CoffeeApiError && error.status === 409) {
+        await refresh();
+      }
       setNotice(settingsError(error));
     } finally {
       setPending(false);
@@ -126,8 +158,12 @@ export function CoffeeSettingsPanel() {
                   inputMode="numeric"
                   type="number"
                   step="1"
-                  value={warmup}
-                  onChange={(event) => setWarmup(event.target.value)}
+                value={warmup}
+                  onChange={(event) => {
+                    setWarmup(event.target.value);
+                    timingDirtyRef.current = true;
+                    setTimingDirty(true);
+                  }}
                   disabled={pending || !timing.writesEnabled}
                 />
                 <i>мин</i>
@@ -142,7 +178,11 @@ export function CoffeeSettingsPanel() {
                   type="number"
                   step="1"
                   value={longRunning}
-                  onChange={(event) => setLongRunning(event.target.value)}
+                  onChange={(event) => {
+                    setLongRunning(event.target.value);
+                    timingDirtyRef.current = true;
+                    setTimingDirty(true);
+                  }}
                   disabled={pending || !timing.writesEnabled}
                 />
                 <i>мин</i>
@@ -155,6 +195,29 @@ export function CoffeeSettingsPanel() {
             >
               {pending ? "Сохраняем…" : "Сохранить"}
             </button>
+            {serverTimingChanged && (
+              <div className="timing-conflict" data-testid="timing-conflict">
+                <span>Значения изменились в Telegram.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!timingRef.current) return;
+                    setWarmup(String(timingRef.current.warmupMinutes));
+                    setLongRunning(String(timingRef.current.longRunningMinutes));
+                    timingDirtyRef.current = false;
+                    setTimingDirty(false);
+                    setServerTimingChanged(false);
+                    setNotice("Загружены актуальные значения.");
+                  }}
+                  disabled={pending}
+                >
+                  Загрузить актуальные
+                </button>
+              </div>
+            )}
+            {timingDirty && !serverTimingChanged && (
+              <span className="muted">Есть несохранённые изменения.</span>
+            )}
           </div>
         ) : (
           <p className="muted">Получаем значения из Home Assistant…</p>

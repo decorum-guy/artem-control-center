@@ -77,3 +77,19 @@ test("safe scripts target the discovered HA entities", () => {
   );
   assert.doesNotMatch(packageText, /\boverheat(?:ed|ing)?\b/i);
 });
+
+test("long-running warning is unavailable before timing initialization", () => {
+  const binarySensors = config.template.find((entry) => entry.binary_sensor)
+    .binary_sensor;
+  const warning = binarySensors.find(
+    (entity) => entity.unique_id === "coffee_machine_running_too_long",
+  );
+  assert.match(
+    warning.state,
+    /is_state\('input_boolean\.coffee_timing_initialized', 'on'\)/,
+  );
+  assert.match(
+    warning.availability,
+    /is_state\('input_boolean\.coffee_timing_initialized', 'on'\)/,
+  );
+});

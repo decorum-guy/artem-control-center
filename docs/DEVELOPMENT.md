@@ -211,6 +211,7 @@ PANEL_WRITES_ENABLED
 PANEL_COFFEE_TIMING_WRITES_ENABLED
 PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED
 PANEL_COFFEE_ACTIONS_ENABLED
+PANEL_SSE_HEARTBEAT_SECONDS
 ```
 
 AVALAR public health is polled every 20–30 seconds by short HTTP requests.
@@ -224,6 +225,11 @@ token. `PANEL_WRITES_ENABLED` and all three narrow coffee gates default to
 false. Coffee mutation endpoints exist but reject requests until both the
 global and matching narrow gate are enabled. Fixtures are never merged into a
 read-only snapshot.
+
+The dashboard obtains its initial state from `/api/v1/snapshot`, listens for
+revision hints on `/api/v1/events`, and always reconciles through another full
+snapshot GET. SSE is non-durable; fallback polling and visibility restore make
+missed events safe.
 
 The development gallery visibly identifies non-production mode. Ordinary user
 routes do not expose development mode or fixture controls.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   CoffeeData,
   KettleData,
@@ -82,7 +82,44 @@ export function CoffeeWidget({
   actionPending?: boolean;
 }) {
   const data = service.data as unknown as CoffeeData;
-  const view = coffeePresentation(data, generatedAt);
+  const [presentationTime, setPresentationTime] = useState(() => Date.parse(generatedAt));
+  const clockAnchor = useRef({
+    snapshotTime: Date.parse(generatedAt),
+    wallTime: Date.now()
+  });
+  const clockEnabled =
+    data.machine.state === "on" &&
+    data.machine.available &&
+    !data.machine.stale &&
+    !data.timingPolicy.stale &&
+    data.timingPolicy.warmupDurationSeconds !== null &&
+    data.timingPolicy.longRunningThresholdSeconds !== null;
+
+  useEffect(() => {
+    const next = Date.parse(generatedAt);
+    const snapshotTime = Number.isFinite(next) ? next : Date.now();
+    clockAnchor.current = { snapshotTime, wallTime: Date.now() };
+    setPresentationTime(snapshotTime);
+  }, [generatedAt, data.machine.turnedOnAt]);
+
+  useEffect(() => {
+    if (!clockEnabled) return;
+    const timer = window.setInterval(
+      () => {
+        const anchor = clockAnchor.current;
+        setPresentationTime(
+          anchor.snapshotTime + Math.max(0, Date.now() - anchor.wallTime)
+        );
+      },
+      1_000
+    );
+    return () => window.clearInterval(timer);
+  }, [clockEnabled]);
+
+  const view = coffeePresentation(
+    data,
+    new Date(presentationTime).toISOString()
+  );
   const duration = formatDuration(view.runningSeconds);
   const remaining = formatDuration(view.remainingSeconds);
   const warming = view.stage === "warming" && view.progress !== null;

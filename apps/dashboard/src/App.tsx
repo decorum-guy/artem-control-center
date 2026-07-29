@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
 import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import {
@@ -13,6 +13,7 @@ import { ProductShell, type RoutePath } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { CoffeeWidget, GenericServiceWidget } from "./widgets";
 import { executeCoffeeAction } from "./coffeeApi";
+import { SnapshotCoordinator } from "./snapshotStream";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -66,21 +67,28 @@ export function App() {
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [coffeeActionPending, setCoffeeActionPending] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/v1/snapshot?scenario=${encodeURIComponent(scenario)}`);
-      if (!response.ok) throw new Error(`Snapshot failed: ${response.status}`);
-      setSnapshot((await response.json()) as DashboardSnapshot);
-      setError(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Snapshot unavailable");
-    }
-  }, [scenario]);
+  const snapshotCoordinator = useRef<SnapshotCoordinator | null>(null);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const coordinator = new SnapshotCoordinator({
+      scenario,
+      onSnapshot: setSnapshot,
+      onError: (message) => setError(message || null)
+    });
+    snapshotCoordinator.current = coordinator;
+    coordinator.start();
+    return () => {
+      coordinator.stop();
+      if (snapshotCoordinator.current === coordinator) {
+        snapshotCoordinator.current = null;
+      }
+    };
+  }, [scenario]);
+
+  const reconcileSnapshot = useCallback(
+    () => snapshotCoordinator.current?.refresh() ?? Promise.resolve(false),
+    []
+  );
 
   useEffect(() => {
     const onPopState = () => setRoute(routeFromLocation());
@@ -121,7 +129,7 @@ export function App() {
       body: JSON.stringify(service)
     });
     if (!response.ok) throw new Error(`Fixture update failed: ${response.status}`);
-    await load();
+    await reconcileSnapshot();
   }
 
   async function runCoffeeAction(service: ServiceSnapshot, actionId: string) {
@@ -132,30 +140,11 @@ export function App() {
     setActionNotice(`${service.title}: команда отправлена, ждём подтверждение Home Assistant…`);
     try {
       const result = await executeCoffeeAction(action, crypto.randomUUID());
-      setSnapshot((current) => current && {
-        ...current,
-        services: current.services.map((item) =>
-          item.id !== service.id
-            ? item
-            : {
-                ...item,
-                summary: result.confirmedState === "on" ? "Включена" : "Выключена",
-                data: {
-                  ...(item.data as Record<string, unknown>),
-                  machine: {
-                    ...((item.data as { machine: Record<string, unknown> }).machine),
-                    state: result.confirmedState,
-                    available: true,
-                    observedAt: result.observedAt ?? current.generatedAt,
-                    stale: false
-                  }
-                }
-              }
-        )
-      });
-      setActionNotice(
-        `${service.title}: Home Assistant подтвердил состояние «${result.confirmedState === "on" ? "включена" : "выключена"}».`
-      );
+      setActionNotice(`${service.title}: команда подтверждена, обновляем данные панели…`);
+      const reconciled = await reconcileSnapshot();
+      setActionNotice(reconciled
+        ? `${service.title}: Home Assistant подтвердил состояние «${result.confirmedState === "on" ? "включена" : "выключена"}».`
+        : `${service.title}: команда подтверждена, но данные панели ещё обновляются.`);
     } catch {
       setActionNotice(
         `${service.title}: подтверждение не получено. Проверьте текущее состояние перед повтором.`

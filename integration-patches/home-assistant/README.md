@@ -32,7 +32,9 @@ marker. It never runs automatically at HA or bot startup. HA restarts restore
 the last helper values and activation timestamp instead of resetting them.
 
 The long-running entity means “works too long”. It is not an overheat or
-temperature signal.
+temperature signal. Its state and availability both require
+`input_boolean.coffee_timing_initialized` to be on, so uninitialized helper
+values cannot produce a warning.
 
 ## Later deployment
 

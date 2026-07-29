@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from panel_agent.home_assistant import HomeAssistantAdapter
 from panel_agent.http_integrations import HttpIntegrationAdapter
 from panel_agent.settings import IntegrationSettings
+from panel_agent.snapshot import SnapshotPublisher
 from panel_agent.ssh_details import (
     AvalarSshDetailsAdapter,
     SshDetailsError,
@@ -132,6 +134,85 @@ def test_uninitialized_timing_and_unknown_activation_do_not_create_fake_progress
     assert coffee.data["timingPolicy"]["sourceAvailable"] is False
 
 
+def test_coffee_action_capabilities_require_all_live_server_side_gates(tmp_path):
+    settings = IntegrationSettings(
+        ha_url="http://ha.test",
+        ha_token="test-token",
+        state_cache_path=str(tmp_path / "ha-cache.json"),
+        writes_enabled=True,
+        coffee_actions_enabled=True,
+        alice_base_url="https://alice.test",
+        alice_control_center_token="dedicated-token",
+    )
+    adapter = HomeAssistantAdapter(
+        settings,
+        panel_mode="production",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=_ha_states())
+        ),
+    )
+    asyncio.run(adapter.fetch_initial_snapshot())
+
+    coffee = {service.id: service for service in adapter.services()}["coffee-machine"]
+    enabled = {action.id for action in coffee.actions if action.enabled}
+    assert enabled == {"home.coffee.turn_off"}
+    assert adapter.coffee_action_allowed("turn_off")
+    assert not adapter.coffee_action_allowed("turn_on")
+
+    adapter._states["switch.kofemashina"]["state"] = "off"
+    coffee = {service.id: service for service in adapter.services()}["coffee-machine"]
+    assert {action.id for action in coffee.actions if action.enabled} == {
+        "home.coffee.turn_on"
+    }
+
+    adapter._observed_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    assert all(
+        not action.enabled
+        for action in {
+            service.id: service for service in adapter.services()
+        }["coffee-machine"].actions
+    )
+
+
+def test_ha_allowlisted_event_publishes_only_meaningful_snapshot(tmp_path):
+    adapter = HomeAssistantAdapter(
+        IntegrationSettings(
+            ha_url="http://ha.test",
+            ha_token="test-token",
+            state_cache_path=str(tmp_path / "ha-cache.json"),
+        ),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=_ha_states())
+        ),
+    )
+    publisher = SnapshotPublisher(
+        mode="read_only",
+        services_builder=adapter.services,
+    )
+    adapter.set_on_change(publisher.rebuild)
+
+    async def exercise():
+        await adapter.fetch_initial_snapshot()
+        assert publisher.revision == 1
+        coffee = next(
+            state
+            for state in _ha_states()
+            if state["entity_id"] == "switch.kofemashina"
+        )
+        assert not await adapter.apply_state_changed("switch.kofemashina", coffee)
+        assert publisher.revision == 1
+        changed = dict(coffee, state="off", last_updated="2026-07-29T12:00:00Z")
+        assert await adapter.apply_state_changed("switch.kofemashina", changed)
+        assert publisher.revision == 2
+        assert not await adapter.apply_state_changed(
+            "sensor.not_allowlisted",
+            {"state": "private"},
+        )
+        assert publisher.revision == 2
+
+    asyncio.run(exercise())
+
+
 def test_http_adapters_keep_main_and_stage_capabilities_separate():
     class Details:
         def details_for(self, service_id: str):
@@ -230,6 +311,41 @@ def test_http_refresh_transitions_cached_stale_unavailable_and_recovers():
     state["available"] = True
     asyncio.run(adapter.refresh())
     assert all(service.source == "live" for service in adapter.services())
+
+
+def test_http_refresh_publishes_service_health_change():
+    state = {"available": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not state["available"]:
+            raise httpx.ConnectError("offline", request=request)
+        status = "live" if request.url.path.endswith("/live") else "ready"
+        if request.url.path.endswith("/details"):
+            return httpx.Response(401)
+        return httpx.Response(200, json={"status": status})
+
+    adapter = HttpIntegrationAdapter(
+        IntegrationSettings(
+            avalar_main_url="https://main.test",
+            integration_stale_after_seconds=0,
+            integration_unavailable_after_seconds=1,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    publisher = SnapshotPublisher(
+        mode="read_only",
+        services_builder=adapter.services,
+    )
+    adapter.set_on_change(publisher.rebuild)
+
+    async def exercise():
+        await adapter.refresh()
+        live_revision = publisher.revision
+        state["available"] = False
+        await adapter.refresh()
+        assert publisher.revision > live_revision
+
+    asyncio.run(exercise())
 
 
 def test_periodic_http_refresh_does_not_overlap_and_shutdown_cancels():

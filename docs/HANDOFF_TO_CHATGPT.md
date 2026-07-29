@@ -13,6 +13,7 @@ is included.
 
 ```text
 Dashboard browser
+  <- SSE revision hints + HTTP snapshot reconciliation
   -> typed localhost Panel Agent API
   -> fixed AliceTG Bot internal coffee API
   -> Home Assistant helpers/device
@@ -34,6 +35,20 @@ Dashboard browser
 The 60-minute value is a `running too long` warning threshold, not warm-up and
 not a physical overheat signal. Frontend code contains no 13/15/60 timing
 constant; fixture values arrive through the same typed dashboard API shape.
+
+### Transport matrix
+
+| Source → consumer | Transport | Cadence / recovery |
+| --- | --- | --- |
+| Home Assistant → Panel Agent | REST initial snapshot + WebSocket `state_changed` | reconnect with bounded backoff; allow-listed entities only |
+| AliceTG Bot settings → Panel Agent | fixed typed HTTP | request-driven with sanitized last-known cache |
+| AVALAR Site → Panel Agent | HTTP live/ready polling | shared-hosting polling only; no daemon/WebSocket |
+| Panel Agent → browser | SSE `/api/v1/events` | non-durable revision hints |
+| Browser → Panel Agent | GET `/api/v1/snapshot` | initial, after SSE, after reconnect, visibility restore and periodic fallback |
+
+`DashboardSnapshot` is the canonical browser reconciliation payload. SSE never
+contains raw HA state or secrets and does not guarantee durable delivery.
+Missing any event is recovered by a complete snapshot GET.
 
 ## 2. Implemented endpoints
 
@@ -88,6 +103,8 @@ a confirmed no-op and does not create a new activation cycle.
 ### Panel Agent
 
 ```text
+GET   /api/v1/snapshot
+GET   /api/v1/events
 GET   /api/v1/settings/coffee/timing
 PATCH /api/v1/settings/coffee/timing
 GET   /api/v1/settings/notifications/coffee
@@ -112,6 +129,26 @@ to `false`. Timing and action mutations additionally refresh the Panel Agent HA
 snapshot and compare the new helper/device state with the bot-confirmed result.
 Mutation responses use `Cache-Control: no-store`.
 
+`SnapshotPublisher` owns the latest normalized snapshot. Meaningful service,
+source, health, capability or data changes increment a process-local monotonic
+revision and update `generatedAt`. Volatile freshness/latency/observation
+timestamps do not by themselves create revisions. Subscriber queues hold only
+the latest revision, so slow/disconnected browsers cannot block adapters or
+leak unbounded memory.
+
+SSE event types:
+
+- `connected` with current revision and generation time;
+- `snapshot` with the new revision;
+- `heartbeat` with current revision.
+
+The browser performs a deduplicated full GET after a newer revision and after
+every reconnect. It keeps a calm 45-second reconciliation while SSE is healthy,
+falls back to 5-second polling while visible if SSE fails, uses a non-aggressive
+60-second interval while hidden, and refreshes immediately on visibility
+restore. One coordinator owns an AbortController and coalesces concurrent
+refresh requests.
+
 GET responses expose `live`, `stale` or fixture source mode. The server-side
 Alice client retains the latest successful GET as an in-memory stale fallback.
 
@@ -129,8 +166,15 @@ Alice client retains the latest successful GET as an in-memory stale fallback.
 
 Home and Overview coffee buttons use the typed action endpoint. Disabled gates
 have an explicit explanation. Enabled turn-on requires confirmation, displays
-pending state and reports only the HA-confirmed result. Timeout/unknown result
-never produces fake success.
+pending state and reports only the HA-confirmed result. After confirmation the
+browser fetches a complete snapshot; it never manually mutates the coffee
+service. Timeout/unknown result never produces fake success.
+
+Coffee elapsed/progress/remaining presentation uses a local one-second clock
+anchored to the last snapshot time. It derives state only from HA
+`turnedOnAt` and canonical timing helpers; stale/unavailable timing disables
+precise derivation. Warming can therefore become ready and later
+running-too-long without waiting for another snapshot.
 
 ## 3. Environment variables
 
@@ -162,6 +206,7 @@ PANEL_COFFEE_TIMING_WRITES_ENABLED
 PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED
 PANEL_COFFEE_ACTIONS_ENABLED
 PANEL_HTTP_REQUEST_TIMEOUT_SECONDS
+PANEL_SSE_HEARTBEAT_SECONDS
 ```
 
 `PANEL_ALICE_CONTROL_CENTER_TOKEN` and `CONTROL_CENTER_API_TOKEN` must contain
@@ -172,8 +217,8 @@ token.
 
 | Project | Branch | Review commit at handoff preparation | Draft PR |
 | --- | --- | --- | --- |
-| Artem Control Center | `feat/local-integrations-foundation` | Coffee implementation `0b8f2e4`; the later handoff-doc commit is the PR HEAD | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) |
-| AliceTG Bot | `feat/control-center-ha-timing` | `5338df9` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) |
+| Artem Control Center | `feat/local-integrations-foundation` | reviewed base `f55394f`; rollout-correction commit is the PR HEAD | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) |
+| AliceTG Bot | `feat/control-center-ha-timing` | `b4a8825d2c3725052a40414ae93a7e70bdd937d1` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) |
 | AVALAR | `feat/control-center-integration` | `ef7d119` | [#1](https://github.com/decorum-guy/AVALAR/pull/1); unchanged by this slice |
 
 Use the PR metadata as the authoritative full SHA after documentation
@@ -196,9 +241,9 @@ AliceTG Bot:
 Control Center:
 
 - dashboard: `App.tsx`, `CoffeeSettings.tsx`, `coffeeApi.ts`, `pages.tsx`,
-  `widgets.tsx`, `styles.css`;
+  `snapshotStream.ts`, `widgets.tsx`, `styles.css`;
 - Panel Agent: `alice_control.py`, `contracts.py`, `home_assistant.py`,
-  `integrations.py`, `main.py`, `settings.py`;
+  `integrations.py`, `main.py`, `settings.py`, `snapshot.py`;
 - shared TypeScript contracts;
 - Panel Agent and Playwright tests;
 - development and integration documentation.
@@ -229,10 +274,11 @@ git diff --check
 
 Current verified totals:
 
-- AliceTG Bot: 13 tests;
-- dashboard unit: 7 tests;
-- Panel Agent: 26 tests;
-- Playwright Chromium: 11 tests.
+- AliceTG Bot: 28 tests;
+- dashboard unit: 11 tests;
+- Panel Agent: 34 tests;
+- Home Assistant mirror contracts: 4 tests;
+- Playwright Chromium: 12 tests.
 
 Screenshots, generated from fixtures and excluded from Git:
 
@@ -260,7 +306,9 @@ Expected entities/scripts:
 - `script.coffee_turn_off`.
 
 The helpers have no permanent `initial`. Initialization is explicit and
-idempotent; restart restores the prior HA state.
+idempotent; restart restores the prior HA state. The long-running binary sensor
+requires `input_boolean.coffee_timing_initialized == on` in both state and
+availability templates, so pre-bootstrap helper values cannot raise a warning.
 
 ## 8. Deployment and migration order
 
@@ -289,6 +337,10 @@ No step below was run in this session.
 ## 9. Rollout verification
 
 - Bot health is live/ready and timing helpers are available.
+- Bot readiness is `200` only for fresh, initialized canonical timing;
+  cached/stale/uninitialized timing is `503` while liveness remains `200`.
+- Snapshot SSE connects, emits heartbeat and causes a full GET after a newer
+  revision; temporary GET failure keeps the last successful UI.
 - GET timing returns current HA values and a changing opaque revision.
 - Change timing through Telegram; Bot refresh and dashboard refresh show it
   without restart.
@@ -324,6 +376,10 @@ No step below was run in this session.
 - `requestId` idempotency is bounded and in-memory; it does not survive a bot
   restart. Durable idempotency is a later hardening task.
 - Panel GET cache is in-memory; durable sanitized settings cache is later.
+- Snapshot revisions and subscriber state are process-local and intentionally
+  non-durable; a Panel Agent restart is recovered by full snapshot GET.
+- Loopback-only deployment remains the current security boundary. LAN/public
+  authentication is a future deployment gate, not added here.
 - Delivery receipts remain bot-internal and have no dashboard UI.
 - Dashboard screenshots and E2E mutations use deterministic fixtures.
 - Calendar, tasks, backups and unrelated service actions remain fixture or
@@ -340,4 +396,3 @@ Perform a GitHub-only security and rollout review of PR #1 and PR #14:
 
 Do not broaden that review into AVALAR, a general notification platform or UI
 redesign.
-
