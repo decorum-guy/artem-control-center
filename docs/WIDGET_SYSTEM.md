@@ -2,155 +2,90 @@
 
 ## 1. Goal
 
-Artem Control Center must never require a developer to manually add a project or service to a hard-coded screen after it has already been enabled in the project registry.
+Artem Control Center must never require a developer to manually add a project/service to a hard-coded screen after it has been enabled in Project Registry.
 
-The system uses two connected registries:
+Two connected registries:
 
 1. **Project Registry** — projects, environments, services, capabilities, health, actions and backup profiles.
-2. **Widget Registry** — visual components capable of presenting those data contracts.
+2. **Widget Registry** — visual definitions capable of presenting normalized data contracts.
 
-An enabled service must automatically become visible in the UI even when no specialized widget exists for it.
+Every enabled service must become visible even when no specialized widget exists.
 
-## 2. Non-negotiable automatic appearance contract
+## 2. Automatic appearance contract
 
-After a project/service is enabled and configuration validation succeeds:
+After enable and validation:
 
-1. Panel Agent increments the registry revision.
-2. Panel Agent publishes a fresh project catalog snapshot and a registry-change event.
-3. Frontend reconciles its local catalog with the new revision.
+1. Panel Agent increments registry revision.
+2. Panel Agent publishes full catalog snapshot plus change event.
+3. Frontend reconciles Registry Store.
 4. Widget Resolver searches for a compatible specialized widget.
-5. If none exists, it creates a **Generic Service Widget** from the service metadata and capabilities.
-6. The service appears automatically in `Services` and in the `New items` placement area.
-7. The UI shows a visible onboarding result, not only a success toast.
+5. If absent, it creates `core.generic-service`.
+6. Service appears in `Services` and `New items`.
+7. Layout Reconciler places it without overwriting existing layout.
+8. Playwright confirms visibility/detail navigation.
 
 No service may silently exist only in backend configuration.
 
-A service is considered successfully onboarded only when:
+Frontend reconnect always starts with full snapshot. Events are an optimization, not sole truth.
 
-- registry validation passed;
-- backend probes/adapters were registered;
-- frontend received the new registry revision;
-- a visible generic or specialized widget instance was materialized;
-- the user can open its detail view;
-- automated UI test confirms that the service is present.
+## 3. Forbidden implementation patterns
 
-## 3. Registry data flow
-
-```text
-Settings UI / config/projects.yaml
-              ↓
-Panel Agent schema validation
-              ↓
-Project Registry + capability graph
-              ↓
-registry revision + snapshot/events
-              ↓
-Frontend Registry Store
-              ↓
-Widget Resolver
-       ┌──────┴────────┐
-       ↓               ↓
-specialized widget   generic fallback widget
-       └──────┬────────┘
-              ↓
-Layout Reconciler
-              ↓
-Services catalog + dashboard placement
-```
-
-Required events:
-
-- `registry.snapshot`;
-- `project.added`;
-- `project.updated`;
-- `project.enabled`;
-- `project.disabled`;
-- `project.removed`;
-- `service.added`;
-- `service.updated`;
-- `capabilities.changed`;
-- `widget.definition.added`;
-- `widget.instance.created`;
-- `layout.reconciled`.
-
-Frontend reconnect always begins with a complete snapshot. Events are an optimization, not the sole source of truth.
-
-## 4. No hard-coded service lists
-
-Forbidden patterns:
-
-- manually importing every project into a page;
+- manually importing each project into a page;
 - `if project.id === ...` chains for ordinary rendering;
-- requiring a frontend release to display a monitor-only service;
-- assuming every service has restart/deploy/backup actions;
-- hiding unsupported services without a fallback card;
-- using widget presence as proof that backend onboarding succeeded.
+- requiring frontend release to display monitor-only service;
+- assuming every service has restart/deploy/backup;
+- hiding unknown service instead of generic fallback;
+- considering backend config success sufficient without visible UI reconciliation.
 
-Allowed project-specific code:
+Project-specific code is allowed only for domain visualization, formatters and explicitly registered action presentation.
 
-- optional specialized widget;
-- adapter-specific formatter;
-- domain visualization such as coffee warm-up;
-- carefully registered action presentation.
+## 4. Generic Service Widget
 
-The generic path must remain functional for every schema-valid service.
+Supports:
 
-## 5. Generic Service Widget
-
-The generic fallback widget supports:
-
-- project/service name;
-- environment;
-- current normalized status;
-- latency where available;
-- last successful check;
-- stale timestamp;
+- name/environment;
+- normalized status;
+- latency;
+- last successful check/freshness;
 - dependency summary;
 - incident indicator;
-- version/commit/config revision where available;
-- zero, one or multiple actions generated from capability policy;
-- backup freshness where enabled;
+- version/commit/config revision;
+- zero, one or several policy-provided actions;
+- backup freshness;
 - open/details navigation.
 
 A monitor-only service intentionally has no action bar.
 
-The generic widget is not a temporary broken state. It is a supported production presentation for integrations that do not need a custom design.
+## 5. Widget categories
 
-## 6. Widget types
-
-### 6.1 Core generic widgets
-
-Provided by the platform:
+### Core generic
 
 - service status;
 - project group;
 - incident summary;
-- metric;
-- text/status value;
+- metric/value;
+- text/status;
 - link/launcher;
 - action launcher;
 - backup freshness;
 - calendar agenda;
 - tasks;
 - weather;
-- system health.
+- system health;
+- generic Home Assistant device.
 
-### 6.2 First-party specialized widgets
-
-Built for important domain experiences but registered through the same widget contract:
+### First-party specialized
 
 - coffee-machine warm-up;
-- Home Assistant authority/fallback state;
+- HA authority/fallback status;
 - AVALAR deployment timeline;
 - AVALAR Exchange dependency chain;
 - proxy allow-list status;
 - multi-location weather scene.
 
-### 6.3 Custom coded widgets
+### Custom coded
 
-Codex/developers create widgets through one template and registry API. A custom widget is not wired directly into a page.
-
-Required package contents:
+Codex/developers use one package template:
 
 ```text
 widgets/<widget-id>/
@@ -160,32 +95,30 @@ widgets/<widget-id>/
 ├── data.contract.ts
 ├── fixtures.ts
 ├── Widget.test.tsx
-├── Widget.stories.tsx or preview fixture
+├── preview fixture
 └── README.md
 ```
 
-### 6.4 No-code declarative widgets
+Custom widgets register globally and are not manually wired into pages.
 
-Planned after the working prototype and MVP.
+### No-code declarative — later phase
 
-Users create widgets from safe presets without writing JavaScript. Presets may include:
+Safe presets may include:
 
-- status from HTTP/health source;
-- link tile;
+- status/health;
+- link;
 - clock/countdown;
 - text/note;
-- metric/value;
+- metric;
 - check result;
-- grouped service summary;
-- image/icon with link;
+- grouped services;
+- image/icon launcher;
 - registered action launcher;
-- simple JSON field mapping through a backend adapter.
+- sanitized JSON field mapping through Panel Agent.
 
-No-code widgets are declarative only. They cannot execute arbitrary JavaScript, shell commands or unrestricted network requests.
+No arbitrary JavaScript, HTML, shell or direct browser network access.
 
-## 7. Widget manifest contract
-
-Each widget definition declares:
+## 6. Widget manifest
 
 ```ts
 type WidgetManifest = {
@@ -207,25 +140,46 @@ type WidgetManifest = {
 }
 ```
 
-Widget code receives normalized presentation data and allowed action descriptors. It does not receive raw secrets or unrestricted backend access.
-
-## 8. Widget resolution
+Widget receives normalized presentation data and allowed action descriptors only. It never receives secrets or unrestricted backend access.
 
 Resolution order:
 
-1. explicit widget instance selected by the user;
-2. specialized widget explicitly assigned by project configuration;
+1. explicit user assignment;
+2. configured specialized widget;
 3. highest-priority compatible specialized widget;
 4. compatible core generic widget;
-5. Generic Service Widget as mandatory fallback.
+5. mandatory `core.generic-service`.
 
-A widget update cannot silently acquire new write permissions. Permissions/capabilities are granted by Panel Agent policy, not by the React component.
+A widget update cannot silently acquire write permissions.
 
-## 9. Coffee Machine Widget — mandatory MVP P0
+## 7. Coffee Machine Widget — mandatory MVP P0
 
-The coffee-machine widget is a first-class mandatory MVP feature and must still follow the standard widget plugin contract.
+`home.coffee-machine` is a first-class P0 widget using the normal plugin contract.
 
-Required states:
+### Authority
+
+Home Assistant is the only authoritative runtime source.
+
+The widget reads from HA:
+
+- current state/availability;
+- last activation timestamp;
+- warm-up start;
+- duration or target-ready time;
+- ready/running/too-long state;
+- command verification.
+
+`AliceTG_Bot` is not a coffee-state provider. Its outage must not make the widget unavailable while HA is healthy.
+
+Exact entity IDs and warm-up mapping must be discovered read-only from:
+
+```text
+/Users/aartemida/Documents/Homeassistant
+```
+
+and documented in `docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md`.
+
+### Required states
 
 - `off`;
 - `turning_on`;
@@ -235,190 +189,182 @@ Required states:
 - `running_too_long`;
 - `turning_off`;
 - `unavailable`;
-- `stale`;
-- `edge_fallback` where later supported.
+- `stale`.
 
-Required data:
+### Required data
 
-- authoritative source (`remote HA`, `AliceTG_Bot`, later `local edge`);
-- on/off state;
-- started-at timestamp;
-- warm-up duration or real progress source;
+- `authority: home-assistant`;
+- entity state;
+- start/last-on timestamp;
+- HA warm-up source;
 - remaining time;
-- ready state;
-- long-running duration;
-- last update timestamp;
-- action availability and reason when disabled.
+- real/derivable progress;
+- running duration;
+- freshness;
+- allowed actions and disabled reason.
 
-Required interactions:
+### Progress rules
 
-- turn on;
-- turn off;
-- open detail;
+Preferred source order:
+
+1. explicit HA progress/remaining-time entity;
+2. HA warm-up start + HA duration;
+3. HA last-on helper + HA duration;
+4. `last_changed` only if configuration inspection proves correctness;
+5. no percentage if none is trustworthy.
+
+Never hard-code a guessed duration.
+
+### Interactions
+
+- turn on through existing HA script/service;
+- turn off through existing HA script/service;
+- details;
 - visible action lifecycle;
-- state verification after command;
-- no duplicated timer reset on repeated `turn_on`;
-- safety warning when running too long.
+- state verification in HA;
+- duplicate turn-on does not reset timer;
+- long-running safety warning.
 
-Required visual behavior:
+### Visual behavior
 
-- animated real progress, never invented progress;
-- distinct stage transitions rather than an arbitrary smooth color gradient;
+- animated real progress only;
+- distinct stage transitions;
 - restrained steam/heat animation;
-- rewarding but calm `ready` transition;
-- persistent long-running warning without aggressive flashing;
-- reduced-motion and low-performance variants.
+- calm ready transition;
+- persistent non-flashing long-running warning;
+- reduced-motion/low-performance versions;
+- deterministic fixtures for every state.
 
-The widget must be testable with deterministic fixtures for every state.
+Full HA mapping rules: `docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`.
 
-## 10. Layout system
+## 8. Kettle widget
+
+The kettle is HA-controlled and included from the beginning, but lower priority.
+
+MVP may use `core.generic-home-device`:
+
+- HA availability/on/off;
+- freshness;
+- existing HA script/service actions;
+- HA verification.
+
+Coffee-specific warm-up assumptions must not be reused.
+
+## 9. Layout system
 
 ### MVP
 
-- stable default layouts authored in configuration;
-- responsive landscape and handheld layouts;
-- automatic materialization of new items;
-- pin/unpin and show/hide may be introduced once base Settings UI exists;
-- no service disappears because it lacks a manual grid entry.
+- stable configured defaults;
+- responsive landscape/handheld layouts;
+- automatic new-item materialization;
+- full Services catalog;
+- basic show/hide/pin when Settings supports it;
+- no service disappears due to missing manual grid entry.
 
 ### Post-MVP
 
 User can:
 
-- drag widgets;
-- resize supported widgets;
-- move widgets between dashboard pages/sections;
+- drag;
+- resize within manifest limits;
+- move between pages/sections;
 - pin/unpin;
-- hide without disabling the underlying project;
-- restore default layout;
-- create multiple named layouts;
-- use separate layouts for `ambient`, `control` and `handheld` modes.
+- hide without disabling project;
+- restore defaults;
+- create named layouts;
+- keep separate ambient/control/handheld profiles;
+- undo layout changes.
 
-Layout state is separate from project state:
+Project state and layout state are independent.
 
-- disabling a project stops probes/actions/schedules;
-- hiding a widget changes presentation only;
-- removing a widget instance does not delete project configuration;
-- re-enabling a project creates/reconciles a visible widget if no instance exists.
+## 10. New-item placement
 
-## 11. New item placement
+New enabled widgets:
 
-New enabled services/widgets follow a deterministic policy:
-
-1. always appear in the complete Services catalog;
+1. always enter Services catalog;
 2. appear in `Settings → New items`;
-3. receive a generic widget instance;
-4. enter a designated dashboard inbox/default area unless project policy says `catalog_only`;
-5. show a visible `new` badge until acknowledged or positioned;
-6. never overwrite or unexpectedly move existing user layout items.
+3. receive a generic/specialized instance;
+4. enter inbox/default area unless `catalog_only`;
+5. show `new` until acknowledged;
+6. never overwrite or unexpectedly move existing items.
 
-Post-MVP drag-and-drop uses collision-safe layout reconciliation. When a new item has no free space, it is placed below the current layout or in the inbox, not discarded.
+When no space exists, place below or in inbox — never discard.
 
-## 12. Layout persistence and sync
+## 11. Layout persistence
 
-Layout records include:
+Store through Panel Agent:
 
 - schema version;
-- profile/user;
-- display target;
-- mode;
-- breakpoint/orientation;
+- profile/user/display;
+- mode/breakpoint/orientation;
 - widget instance ids;
 - positions/sizes;
 - hidden/pinned state;
-- last modified timestamp;
-- source (`default`, `user`, `migration`).
+- modified timestamp/source.
 
-Layouts are stored by Panel Agent and included in Control Center configuration backup. They contain no secrets.
+Include layouts in Control Center config backup; no secrets.
 
-## 13. User widget builder — later phase
+## 12. User widget builder — late phase
 
-Planned Settings flow:
+Flow:
 
 1. choose preset;
-2. enter title/icon;
-3. choose data source adapter;
-4. enter link or select registered source;
-5. select refresh/check interval within platform limits;
-6. map supported fields;
-7. choose display template;
-8. configure stale/error behavior;
-9. preview with safe fixture/live read-only test;
-10. save and place in layout.
+2. title/icon;
+3. registered data source;
+4. optional permitted link;
+5. bounded refresh interval;
+6. safe field mapping;
+7. display template;
+8. stale/error behavior;
+9. preview;
+10. save/place.
 
-Potential configurable fields:
+Network requests go through Panel Agent with allow-list, rate limits and SSRF protection. Write actions reference existing registered action IDs only.
 
-- URL or registered endpoint reference;
-- refresh interval;
-- timeout;
-- expected status/text;
-- JSON field path from sanitized backend response;
-- units/number formatting;
-- icon;
-- link behavior;
-- threshold rules;
-- date/time/countdown;
-- size preset;
-- visibility by mode;
-- optional registered action reference.
+## 13. Settings UI
 
-Limits:
+Without code editing:
 
-- network access goes through Panel Agent adapters;
-- minimum refresh intervals prevent request storms;
-- domains/endpoints follow allow-list and SSRF protection;
-- no arbitrary scripts;
-- write actions can only reference existing registered action ids;
-- user widget failure is isolated and cannot crash the dashboard.
-
-## 14. Settings UI requirements
-
-Settings must allow ordinary configuration without editing code:
-
-- enable/disable projects;
-- enable/disable individual services/capabilities;
+- enable/disable projects/services/capabilities;
 - show/hide/pin widgets;
-- choose a specialized or generic compatible widget;
-- configure widget-safe settings;
-- manage weather locations;
-- manage backup destinations/policies;
-- view registry and layout revisions;
-- preview changes;
-- export configuration without secrets;
-- restore defaults with confirmation.
+- choose compatible widget;
+- edit safe widget settings;
+- weather locations;
+- backup destinations/policies;
+- registry/layout revisions;
+- preview;
+- export config without secrets;
+- reset defaults with confirmation.
 
-Complex architecture changes, arbitrary code, adapter implementation and unrestricted shell commands are not exposed as user settings.
+Arbitrary code, adapters, shell or privilege escalation are never ordinary settings.
 
-## 15. Testing requirements
+## 14. Required tests
 
-Automated tests must cover:
-
-- enabled service automatically appears after registry update;
-- monitor-only service renders without buttons;
-- service with multiple actions renders policy-provided controls;
-- specialized widget resolves when compatible;
-- generic fallback resolves when specialized widget is absent;
-- disabled service disappears from active UI and stops polling;
-- re-enabled service returns without losing history;
-- new item placement never deletes existing layout items;
-- widget error boundary isolates one failing widget;
-- layout migration preserves widget ids;
-- coffee widget fixtures cover every state;
+- enabled service automatically appears;
+- monitor-only renders with no buttons;
+- multi-action controls come only from policy;
+- specialized resolution;
+- generic fallback;
+- disable stops polling and hides active UI;
+- re-enable preserves history;
+- placement never deletes existing layout;
+- widget error isolation;
+- layout migration preserves ids;
+- all coffee fixtures;
+- coffee widget remains available when Alice bot fixture is down but HA is healthy;
 - no-code widget cannot request arbitrary network/shell access.
 
-## 16. Definition of Done
+## 15. Definition of Done
 
-A new service is not considered integrated until it is visible and testable in the UI.
+A service is integrated only when visible and testable.
 
-A new widget is not complete until it has:
+A widget is complete only with:
 
 - manifest;
-- typed data contract;
-- settings schema;
+- typed data/settings contracts;
 - loading/stale/offline/error states;
-- reduced-motion behavior where animated;
-- fixtures;
-- tests;
-- accessibility labels;
+- fixtures/tests;
+- accessibility;
+- reduced-motion;
 - performance classification;
-- generic fallback behavior for unsupported data.
+- secure action/data boundaries.
