@@ -205,8 +205,9 @@ single cut-over point; dual sending is not allowed.
 
 ## 6. Bot settings API contract
 
-These endpoints are a future contract only. They are **not implemented** in
-this Control Center change.
+These endpoints are implemented in the AliceTG Bot feature branch and consumed
+by Panel Agent in the Control Center feature branch. They remain undeployed and
+all production mutation gates remain disabled.
 
 ### Security and transport
 
