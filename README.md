@@ -15,6 +15,8 @@
 - **Темы:** обязательные отдельные дневная и ночная темы с автоматическим переключением и ручным override.
 - **Motion design:** выразительные, плавные и функциональные анимации входят уже в первый визуальный MVP.
 - **Coffee widget:** анимированный виджет разогрева, готовности и long-running warning кофемашины — обязательная P0-функция MVP.
+- **Home Assistant device ownership:** кофемашиной и чайником управляет Home Assistant. Состояние кофемашины, время последнего включения и логика разогрева берутся из HA; `AliceTG_Bot` не является источником истины для coffee widget.
+- **Device priority:** кофемашина — первый приоритет Home-раздела; чайник подключается через тот же HA adapter, но может начинать с более простого generic device widget.
 - **Project onboarding:** проекты подключаются декларативно по capabilities. Проект может быть monitor-only, иметь одну кнопку, несколько actions, backup или вообще не иметь управления.
 - **Automatic UI materialization:** после enable новый project/service автоматически появляется в UI. Специализированный widget используется при наличии, иначе создаётся обязательный Generic Service Widget; ручное дописывание списка сервисов в frontend запрещено.
 - **Widget platform:** coded widgets подключаются через единый manifest/data/settings contract; drag-and-drop layouts планируются после MVP, no-code preset widgets — в более поздней версии.
@@ -28,7 +30,7 @@
 ## Главные разделы панели
 
 1. **Overview** — часы, дата, погода, ближайшие события, задачи, состояние дома, backups и общий статус сервисов.
-2. **Home** — кофемашина, чайник, свет, розетки, климат, сцены и критичные локальные действия.
+2. **Home** — приоритетный HA-виджет кофемашины, чайник, свет, розетки, климат, сцены и критичные локальные действия.
 3. **Services** — автоматически сформированный каталог проектов/services, health, latency, incidents, deployment state и только разрешённые actions.
 4. **Calendar & Tasks** — календарь iPhone/iCloud/Google/Exchange через адаптер источника и задачи TickTick.
 5. **Automations** — запуск n8n, checks, scheduled maintenance и других зарегистрированных workflows.
@@ -46,6 +48,7 @@
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты и границы ответственности.
 - [`docs/PROJECT_ONBOARDING.md`](docs/PROJECT_ONBOARDING.md) — capability-based подключение, отключение и настройка проектов.
 - [`docs/WIDGET_SYSTEM.md`](docs/WIDGET_SYSTEM.md) — автоматическое появление сервисов, widget plug-ins, layout system и no-code widgets.
+- [`docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`](docs/HOME_ASSISTANT_DEVICE_CONTRACT.md) — HA как единственный источник состояния кофемашины/чайника и правила поиска warm-up данных.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — разработка на Mac и финальная проверка на Windows/Linux.
 - [`docs/INTEGRATIONS_AND_HEALTH.md`](docs/INTEGRATIONS_AND_HEALTH.md) — реестр проектов, health-контракты и control actions.
 - [`docs/BACKUP_STRATEGY.md`](docs/BACKUP_STRATEGY.md) — создание, скачивание, проверка, хранение и синхронизация резервных копий.
