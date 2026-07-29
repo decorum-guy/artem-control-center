@@ -1,124 +1,202 @@
 # Home Assistant Resilience Strategy
 
-## 1. Current constraint
+## 1. Current state and clarification
 
 The current Home Assistant instance is remote and remains the authoritative controller during the first implementation phase.
 
-Artem Control Center must remain useful in two different failure cases:
+Home Assistant itself does not currently have a dedicated Git repository in this project. `decorum-guy/AliceTG_Bot` is the repository of the Telegram assistant integrated into the HA stack, not the repository of Home Assistant Core/config/data.
 
-1. the remote Home Assistant host fails while the laptop still has Internet/LAN;
-2. the laptop/home network loses Internet while local LAN devices remain reachable.
+Artem Control Center must distinguish:
 
-These cases are not equivalent and must be shown separately in the UI.
+1. remote HA host/service failure while Internet/LAN still work;
+2. home Internet loss while LAN devices remain reachable;
+3. local LAN failure;
+4. failure of an individual device/integration;
+5. failure of `AliceTG_Bot` while HA remains healthy.
 
-## 2. Do not use uncontrolled active-active Home Assistant
+These states are not interchangeable and must be displayed separately.
 
-A second fully active Home Assistant instance with copied automations is not the default design.
+## 2. Hosting decision
+
+### Do not make the Samsung laptop the only permanent HA primary in the initial architecture
+
+The laptop is valuable as:
+
+- UI/kiosk;
+- local edge controller;
+- backup target;
+- monitoring node;
+- temporary recovery/standby host;
+- ordinary portable computer when needed.
+
+It is not the preferred single critical HA host because:
+
+- it is old consumer hardware;
+- battery health is weak/unknown;
+- internal storage is a single failure domain;
+- the laptop may be moved, closed, rebooted or used interactively;
+- Windows-first maintenance and later Linux migration create planned interruptions;
+- panel/Chromium/Waydroid workloads share resources with HA;
+- external HDD can improve backup capacity but not remove host failure risk.
+
+This is a reliability decision based on the described use, not a claim that HA technically cannot run on the laptop.
+
+### Preferred long-term topology
+
+```text
+Dedicated compact local HA server
+        ├── Home Assistant primary
+        ├── local integrations/automations
+        └── native backups
+
+Samsung laptop
+        ├── Artem Control Center UI
+        ├── local edge actions
+        ├── monitoring
+        ├── backup copy/sync
+        └── optional stopped recovery environment
+
+Remote server
+        ├── off-site backup/relay
+        ├── external integrations
+        └── remote monitoring
+```
+
+A future compact server can be a low-power mini PC or another reliable dedicated host with SSD and preferably protected power. Exact hardware is a later purchasing decision and is not fixed in this repository.
+
+## 3. Do not use uncontrolled active-active Home Assistant
+
+A second fully active HA instance with copied automations is not the default design.
 
 Risks:
 
 - duplicate automations;
 - competing commands to the same device;
-- divergent entity registries and helper state;
+- divergent entity/helper state;
 - duplicated notifications and timers;
 - unclear authority after connectivity returns;
 - unsafe automatic failback.
 
-The project therefore uses three layers instead.
+The project uses explicit layers and authority modes instead.
 
-## 3. Layer A — Remote primary HA
+## 4. Layer A — Remote primary HA
 
-Primary responsibilities:
+First implementation responsibilities:
 
 - complete automation set;
+- canonical entity state;
 - integrations requiring remote services;
-- persistent smart-home history;
-- Telegram/Alice workflows;
-- normal coffee and kettle logic;
+- persistent history;
+- normal coffee/kettle logic;
 - notifications;
-- canonical entity state.
+- Telegram/Alice workflows through `AliceTG_Bot`.
 
-Control Center communicates through authenticated Home Assistant APIs and existing application endpoints.
+Control Center communicates through authenticated HA APIs and existing safe application endpoints.
 
-## 4. Layer B — Local Edge Controller
+## 5. Layer B — Local Edge Controller
 
-The local edge controller is part of Panel Agent or a small dedicated companion service.
+The local edge controller is part of Panel Agent or a small companion service.
 
-It implements only a limited allow-list of critical LAN-capable actions, for example:
+It implements only an allow-list of critical LAN-capable actions, for example:
 
 - coffee machine smart plug on/off;
-- kettle smart plug on/off;
-- selected lights/scenes;
-- selected local relays;
+- kettle on/off;
+- selected lights/relays;
 - emergency all-off;
 - local status probes.
 
-An edge action is allowed only when all conditions are true:
+An edge action is allowed only when:
 
-- the device has a reliable local protocol or local bridge;
+- the device has a reliable local protocol or bridge;
 - credentials can be stored securely;
-- the action is idempotent or its state can be verified;
+- action is idempotent or state-verifiable;
 - conflict behavior with primary HA is understood;
-- the action is explicitly listed in configuration.
+- action is explicitly registered;
+- required safety timers/protections are preserved or clearly disclosed.
 
-Possible local transports, depending on actual devices:
+Possible transports depend on actual devices:
 
 - local HTTP API;
-- MQTT on the home LAN;
+- MQTT;
 - ESPHome native API;
 - vendor LAN protocol;
-- local bridge controlled by Home Assistant-compatible protocol.
+- local bridge.
 
-Cloud-only devices cannot become offline-capable merely by adding Control Center.
+Cloud-only devices do not become offline-capable merely because Control Center exists.
 
-### Authority modes
+## 6. Authority modes
 
-Panel Agent maintains one of these modes:
+Panel Agent maintains an explicit mode:
 
-- `primary-online`: use remote HA for all normal actions;
-- `primary-degraded`: remote HA reachable but a dependency is degraded;
-- `edge-fallback`: use only approved local actions;
-- `offline-observe`: no safe write path, display cached state only;
-- `standby-activation`: controlled warm-standby procedure in progress.
+- `remote-primary-online`;
+- `remote-primary-degraded`;
+- `edge-fallback`;
+- `offline-observe`;
+- `standby-activation`;
+- `local-primary`;
+- `split-brain-risk`.
 
-Fallback is visible in the UI. It must never silently pretend that the full smart home is available.
+Fallback is always visible. In `split-brain-risk`, normal write actions are blocked until authority is resolved.
 
-## 5. Layer C — Warm standby HA
+## 7. Layer C — Laptop warm standby
 
-A secondary Home Assistant installation may be prepared on the laptop, but normally remains stopped.
+A secondary HA environment may be prepared on the laptop, but normally remains stopped.
 
 Purpose:
 
-- faster recovery from loss of the remote HA host;
-- manual or carefully controlled activation;
-- restoration from recent encrypted backups.
+- test restore procedures;
+- faster temporary recovery from remote host loss;
+- validate a future local-primary migration;
+- preserve a runnable emergency environment.
 
 Recommended behavior:
 
-1. Primary HA creates encrypted automatic backups.
-2. Backups are copied to a second destination available to the laptop.
-3. Control Center monitors backup age and restore-key availability.
-4. Warm standby periodically receives a tested backup, but remains stopped.
-5. Activation requires an explicit failover flow.
-6. Primary access is fenced/disabled before the standby begins controlling shared devices where possible.
-7. Failback is a separate confirmed operation, not an automatic side effect of restored connectivity.
+1. Primary HA creates native encrypted backups.
+2. Control Center downloads a copy to the laptop.
+3. Optional encrypted copy is synced to cloud/external drive.
+4. Backup age and last restore test are monitored.
+5. Standby remains stopped during normal operation.
+6. Activation requires explicit failover flow.
+7. Primary is fenced/disabled where possible before standby controls shared devices.
+8. Failback is a separate confirmed procedure.
 
-This is warm standby, not seamless high availability.
+This is warm standby, not seamless HA clustering.
 
-## 6. Failover flow
+## 8. Future dedicated local primary
+
+A dedicated compact server becomes the preferred candidate when the goal changes from experimental fallback to reliable local smart-home operation.
+
+Decision gate:
+
+- local device protocols have been inventoried;
+- native HA backup/restore has been tested;
+- power/network placement is stable;
+- sufficient storage and backup destinations exist;
+- remote access does not require public administrative ports;
+- migration and rollback runbook exists;
+- monitoring covers server, HA, storage and backups.
+
+After migration:
+
+- dedicated server is authoritative local HA;
+- laptop remains UI/edge/backup node;
+- remote server becomes off-site/relay/integration layer;
+- laptop can be moved or rebooted without disabling the whole smart home.
+
+## 9. Failover flow
 
 ```text
 Primary HA unhealthy
         ↓
-Confirm Internet/LAN status
+Classify Internet / LAN / host / application failure
         ↓
-Use edge fallback for critical actions
+Use only verified local edge actions where available
         ↓
-Offer warm-standby activation only if outage persists
+Show latest backup and missing capabilities
         ↓
-Show backup timestamp and missing capabilities
+Offer standby activation only after explicit decision
         ↓
-Require hold + second confirmation
+Hold + second confirmation
         ↓
 Fence primary where possible
         ↓
@@ -129,31 +207,32 @@ Verify selected entities and automations
 Mark temporary authority explicitly
 ```
 
-Automatic activation is deferred until fencing, device ownership and split-brain behavior are proven.
+Automatic full activation is deferred until fencing and split-brain behavior are proven.
 
-## 7. Backup requirements
+## 10. Backup requirements
 
 Control Center monitors:
 
 - last attempted backup;
 - last successful backup;
-- backup age;
-- backup destination availability;
-- encrypted emergency/restore key availability as a boolean only;
-- last restore test date;
+- backup age/size;
+- laptop copy;
+- optional cloud/external-drive copies;
+- destination availability;
+- encryption-key availability as boolean only;
+- checksum/archive verification;
+- last restore test;
 - standby configuration age.
 
-Do not display or store the actual encryption key in frontend state.
+Do not expose the encryption key in frontend state.
 
-Suggested policy:
+HA backup and `AliceTG_Bot` backup are separate artifacts:
 
-- frequent encrypted primary backups;
-- at least one copy outside the primary HA host;
-- retention policy;
-- periodic restore test;
-- alert when backup or restore test is stale.
+- HA native backup protects HA runtime/config/data according to selected HA mechanism;
+- Git protects bot source code;
+- bot runtime state/config may require a dedicated encrypted backup profile.
 
-## 8. UI behavior during failures
+## 11. UI behavior during failures
 
 ### Internet lost, LAN available
 
@@ -162,44 +241,59 @@ Show:
 - Internet offline;
 - remote HA unavailable;
 - local edge available/unavailable;
-- which controls remain functional;
+- functional controls only;
 - cached remote states with timestamps.
 
 ### Primary HA down, Internet available
 
 Show:
 
-- remote host/service failure;
-- cloud services may still work;
+- remote host/application failure;
+- other cloud services may work;
 - local edge controls;
-- restart/recovery actions if configured;
-- standby readiness.
+- restricted restart/recovery actions;
+- standby and backup readiness.
+
+### AliceTG Bot down, HA healthy
+
+Show:
+
+- HA remains authoritative;
+- bot-specific coffee/Telegram flows unavailable;
+- direct HA actions only if separately registered and safe;
+- bot restart action without marking whole HA offline.
 
 ### LAN lost
 
-Do not offer local device actions. Show network recovery diagnostics only.
+Disable local device actions and show network diagnostics.
 
 ### Stale state
 
-Every cached entity displays:
+Every cached entity displays timestamp/stale badge. Write actions remain disabled unless a direct local read/verification path exists.
 
-- last update time;
-- stale badge;
-- disabled or guarded actions unless a direct local read/verification is available.
+## 12. Implementation prerequisites
 
-## 9. Implementation prerequisites
-
-Before implementing edge control, inventory each important device:
+Before edge/local-primary work, inventory each important device:
 
 - entity id;
-- physical device/model;
-- current HA integration;
+- physical model;
+- HA integration;
 - local/cloud classification;
-- local API availability;
+- local API;
 - credentials;
 - state read method;
 - command verification;
 - conflict behavior;
-- safe fallback actions.
+- safe fallback actions;
+- safety timers/protections.
 
-The first candidate is the coffee machine path because existing Home Assistant and AliceTG Bot logic is already known. The edge implementation must preserve safety timers or clearly state which protections are unavailable during fallback.
+The coffee machine path is the first candidate because existing HA and `AliceTG_Bot` logic is known. Local implementation must preserve safety behavior or explicitly state what is unavailable.
+
+## 13. First-release decision
+
+1. Keep remote HA authoritative.
+2. Build reliable monitoring and backups.
+3. Add selected local edge actions after device audit.
+4. Use laptop for backup copies and optional stopped standby tests.
+5. Do not make laptop the sole permanent HA host.
+6. Plan a separate compact local server when budget and local-first requirements justify it.
