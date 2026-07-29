@@ -60,6 +60,7 @@
 - [`config/backups.example.yaml`](config/backups.example.yaml) — backup profiles и destinations.
 - [`config/widgets.example.yaml`](config/widgets.example.yaml) — widget definitions, instances и auto-materialization policy.
 - [`config/layouts.example.yaml`](config/layouts.example.yaml) — default layouts и будущие drag/resize capabilities.
+- [`config/widget-user-presets.example.yaml`](config/widget-user-presets.example.yaml) — поздняя no-code модель безопасных пользовательских widgets.
 - [GitHub Issues](../../issues) — исполнимый backlog по реализации, widgets, integrations, health, backups, security и миграции ОС.
 
 ## Базовый принцип
