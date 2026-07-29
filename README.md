@@ -44,6 +44,7 @@
 Ключевые документы:
 
 - [`AGENTS.md`](AGENTS.md) — обязательные правила для Codex и других разработчиков.
+- [`docs/CODEX_INITIALIZATION_PROMPT.md`](docs/CODEX_INITIALIZATION_PROMPT.md) — готовый стартовый prompt для первой Codex-сессии с read-only discovery внешних проектов.
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — продуктовая спецификация и UX.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты и границы ответственности.
 - [`docs/PROJECT_ONBOARDING.md`](docs/PROJECT_ONBOARDING.md) — capability-based подключение, отключение и настройка проектов.
