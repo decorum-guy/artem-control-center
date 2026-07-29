@@ -166,10 +166,9 @@ The widget reads from HA:
 - last activation timestamp;
 - command verification.
 
-`AliceTG_Bot` provides the current user-configurable warm-up duration and
-long-running threshold through a separate read-only timing-policy contract. It
-is not a coffee-state provider. Its outage must not make the widget unavailable
-while HA is healthy.
+Canonical HA helpers provide the current user-configurable warm-up duration and
+long-running threshold. `AliceTG_Bot` is only a Telegram editor for those
+helpers. Its outage must not affect device state or timing while HA is healthy.
 
 Exact entity IDs and warm-up mapping must be discovered read-only from:
 
@@ -195,7 +194,7 @@ and documented in `docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md`.
 
 - HA device-state object with `authority: home-assistant`;
 - exact entity state, availability, confirmed last-on timestamp, and freshness;
-- separate bot timing-policy object with duration, threshold, revision,
+- separate HA timing-policy object with duration, threshold, revision,
   fetch time, and stale state;
 - derived remaining time/progress;
 - running duration;
@@ -205,7 +204,7 @@ and documented in `docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md`.
 ### Progress rules
 
 Progress requires both a confirmed HA activation time and sufficiently fresh
-bot timing policy. A cached policy is allowed with explicit timestamp/stale
+HA timing policy. A cached HA policy is allowed with explicit timestamp/stale
 state. Missing or stale policy produces `running` without percentage. Never
 hard-code the discovered 13/60-minute values.
 

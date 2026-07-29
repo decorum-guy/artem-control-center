@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "deviceAuthority": "home-assistant",
+  "entities": {
+    "coffee": "switch.kofemashina",
+    "coffeeWarmupMinutes": "input_number.coffee_warmup_minutes",
+    "coffeeLongRunningMinutes": "input_number.coffee_long_running_minutes",
+    "coffeeTimingInitialized": "input_boolean.coffee_timing_initialized",
+    "coffeeLastTurnedOn": "input_datetime.coffee_last_turned_on",
+    "coffeeRunning": "binary_sensor.coffee_machine_running",
+    "coffeeRunningTooLong": "binary_sensor.coffee_machine_running_too_long",
+    "coffeeReadyAt": "sensor.coffee_ready_at",
+    "coffeeTimingPolicyRevision": "sensor.coffee_timing_policy_revision",
+    "kettle": "water_heater.chainik",
+    "kettleKeepWarm": "switch.chainik_podderzhanie_tepla",
+    "kettleLight": "switch.chainik_podsvetka",
+    "kettleSilent": "switch.chainik_bez_zvuka"
+  },
+  "scripts": {
+    "coffeeOn": "script.coffee_turn_on",
+    "coffeeOff": "script.coffee_turn_off",
+    "kettleBoil": "script.kettle_boil",
+    "kettleStop": "script.kettle_stop"
+  }
+}

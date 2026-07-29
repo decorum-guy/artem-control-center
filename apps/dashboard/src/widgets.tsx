@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   CoffeeData,
   KettleData,
@@ -71,16 +71,55 @@ export function CoffeeWidget({
   generatedAt,
   manifest,
   variant = "featured",
-  onAction
+  onAction,
+  actionPending = false
 }: {
   service: ServiceSnapshot;
   generatedAt: string;
   manifest: WidgetManifest;
   variant?: "featured" | "home" | "gallery";
   onAction?: (service: ServiceSnapshot, actionId: string) => void;
+  actionPending?: boolean;
 }) {
   const data = service.data as unknown as CoffeeData;
-  const view = coffeePresentation(data, generatedAt);
+  const [presentationTime, setPresentationTime] = useState(() => Date.parse(generatedAt));
+  const clockAnchor = useRef({
+    snapshotTime: Date.parse(generatedAt),
+    wallTime: Date.now()
+  });
+  const clockEnabled =
+    data.machine.state === "on" &&
+    data.machine.available &&
+    !data.machine.stale &&
+    !data.timingPolicy.stale &&
+    data.timingPolicy.warmupDurationSeconds !== null &&
+    data.timingPolicy.longRunningThresholdSeconds !== null;
+
+  useEffect(() => {
+    const next = Date.parse(generatedAt);
+    const snapshotTime = Number.isFinite(next) ? next : Date.now();
+    clockAnchor.current = { snapshotTime, wallTime: Date.now() };
+    setPresentationTime(snapshotTime);
+  }, [generatedAt, data.machine.turnedOnAt]);
+
+  useEffect(() => {
+    if (!clockEnabled) return;
+    const timer = window.setInterval(
+      () => {
+        const anchor = clockAnchor.current;
+        setPresentationTime(
+          anchor.snapshotTime + Math.max(0, Date.now() - anchor.wallTime)
+        );
+      },
+      1_000
+    );
+    return () => window.clearInterval(timer);
+  }, [clockEnabled]);
+
+  const view = coffeePresentation(
+    data,
+    new Date(presentationTime).toISOString()
+  );
   const duration = formatDuration(view.runningSeconds);
   const remaining = formatDuration(view.remainingSeconds);
   const warming = view.stage === "warming" && view.progress !== null;
@@ -139,11 +178,14 @@ export function CoffeeWidget({
           <button
             className="primary-action"
             type="button"
-            disabled={!activeAction.enabled || !onAction}
+            disabled={!activeAction.enabled || !onAction || actionPending}
             onClick={() => onAction?.(service, activeAction.id)}
           >
-            {activeAction.title}
+            {actionPending ? "Подтверждаем…" : activeAction.title}
           </button>
+        )}
+        {activeAction && !activeAction.enabled && (
+          <span className="action-hint">Управление отключено политикой панели.</span>
         )}
       </div>
 
@@ -194,6 +236,13 @@ export function HomeDeviceWidget({
 
 export function ServiceRow({ service }: { service: ServiceSnapshot }) {
   const incidents = service.presentation?.incidents ?? (service.health === "healthy" ? 0 : 1);
+  const sourceLabels = {
+    live: "live",
+    cached: "cache",
+    fixture: "fixture",
+    stale: "stale",
+    unavailable: "нет данных"
+  } as const;
   return (
     <article className="service-row" data-testid={`widget-${service.id}`}>
       <div className="service-row__identity">
@@ -211,6 +260,10 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
         <div>
           <dt>Свежесть</dt>
           <dd>{service.presentation?.freshnessLabel ?? "нет данных"}</dd>
+        </div>
+        <div>
+          <dt>Источник</dt>
+          <dd>{sourceLabels[service.source]}</dd>
         </div>
         <div>
           <dt>Latency</dt>

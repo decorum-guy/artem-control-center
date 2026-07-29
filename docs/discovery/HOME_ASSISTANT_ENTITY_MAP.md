@@ -3,21 +3,48 @@
 Discovery date: 2026-07-29  
 Sources: `/Users/aartemida/Documents/Homeassistant` and read-only SSH alias
 `ha-vps`  
-Mode: read-only
+Initial mode: read-only discovery
+
+## 2026-07-29 implementation follow-up
+
+The user subsequently authorized local changes. The local HA configuration now
+includes `packages/coffee_control_center.yaml` and a connected
+`homeassistant.packages` include. The review bundle is under
+`integration-patches/home-assistant/`.
+
+Canonical entities added locally, not deployed:
+
+- `input_number.coffee_warmup_minutes` (no permanent `initial`);
+- `input_number.coffee_long_running_minutes` (no permanent `initial`);
+- `input_boolean.coffee_timing_initialized`;
+- `input_datetime.coffee_last_turned_on`;
+- `binary_sensor.coffee_machine_running`;
+- `binary_sensor.coffee_machine_running_too_long`;
+- `sensor.coffee_ready_at`;
+- `sensor.coffee_timing_policy_revision`;
+- `script.coffee_turn_on`, `script.coffee_turn_off`;
+- `script.kettle_boil`, `script.kettle_stop`.
+
+The exact `off → on` automation records the HA entity timestamp and cannot fire
+for startup, reconnect or duplicate `on` updates. Timing policy is now
+canonical in HA. AliceTG Bot is a Telegram editor for the helpers and a
+separately monitored service, not timing authority. No HA reload/restart or
+device action was performed.
 
 ## Scope and safety
 
-This report separates Home Assistant device state from `AliceTG_Bot` timing
-policy. Home Assistant is the only authority Artem Control Center may use for
-coffee-machine/kettle physical state, commands, or command verification. The bot
-is the current authority for user-configurable warm-up duration and long-running
-threshold only.
+This report originally separated Home Assistant device state from bot-owned
+timing. The implementation follow-up supersedes that split: Home Assistant is
+now the authority for physical state, timing helpers, commands and verification.
+The bot only edits the HA timing helpers.
 
-No external file was changed. No Home Assistant service, deploy, restart, migration,
-or production API write was executed. `secrets.yaml`, real `.env` files, tokens,
-passwords, private webhook values, runtime state JSON, databases, and `.storage`
-were not read. Secret references such as `!secret internal_webhook_secret` were seen
-only as symbolic references.
+During initial discovery no external file was changed. During the authorized
+follow-up, only the local non-secret HA configuration files listed above were
+changed. No Home Assistant service, deploy, restart, migration, or production
+API write was executed. A later authorized baseline read only target HA
+recorder rows and allow-listed coffee fields from bot state; see
+`COFFEE_RUNTIME_BASELINE.md`. `secrets.yaml`, real `.env` files, tokens,
+passwords, private webhook values and `.storage` were not read.
 
 The live host check was limited to service/container state, Git metadata,
 non-secret YAML, hashes, and targeted source references. At 2026-07-29 the
@@ -32,6 +59,9 @@ Home Assistant configuration:
 - `HomeAssistant_Server_Config/config/automations.yaml`
 - `HomeAssistant_Server_Config/config/scripts.yaml`
 - `HomeAssistant_Server_Config/config/scenes.yaml`
+- `HomeAssistant_Server_Config/ha-push.sh`
+- `HomeAssistant_Server_Config/ha-push.env.example`
+- `HomeAssistant_Server_Config/DEPLOYMENT.md`
 - `HomeAssistant_Server_Config/docker-compose.yml`
 
 Related bot source, used only to identify HA calls and to separate bot-owned timing:
@@ -173,8 +203,9 @@ was found in the provided configuration.
 
 Its source defaults are currently 13 minutes for warmed-up and 60 minutes for
 long-running. Users can change both through Telegram. They are examples and
-fixtures, never frontend constants. Production must fetch the current values
-through a separate read-only bot timing-policy contract.
+fixtures, never frontend constants. This was the discovery-time model. The
+implementation follow-up migrates the values into canonical HA helpers;
+bot-local values are legacy migration input.
 
 The bot ignores duplicate `turn_on` when HA already reports the switch as on.
 Its scheduler also ignores duplicate `state=on` events and preserves the
@@ -187,8 +218,8 @@ existing `coffee_on_since`.
   `unavailable`;
 - healthy HA with an old cached sample → `stale`;
 - HA `on` with a newly observed command still verifying → `turning_on`;
-- HA `on` plus confirmed HA activation time plus sufficiently fresh bot timing
-  policy → derive `warming`, `ready`, `running_too_long`, progress, and
+- HA `on` plus confirmed HA activation time plus sufficiently fresh HA timing
+  helpers → derive `warming`, `ready`, `running_too_long`, progress, and
   remaining time;
 - HA `on` with missing/stale timing policy or unproved activation time →
   `running` with `progress: null`, `remainingSeconds: null`, and a clear reason;
@@ -205,9 +236,9 @@ Production calculation is authorized only after both inputs are trustworthy:
 
 ```text
 elapsed = now - HA.turnedOnAt
-progress = clamp(elapsed / botPolicy.warmupDurationSeconds, 0..1)
-remainingSeconds = max(botPolicy.warmupDurationSeconds - elapsed, 0)
-worksTooLong = elapsed >= botPolicy.longRunningThresholdSeconds
+progress = clamp(elapsed / haPolicy.warmupDurationSeconds, 0..1)
+remainingSeconds = max(haPolicy.warmupDurationSeconds - elapsed, 0)
+worksTooLong = elapsed >= haPolicy.longRunningThresholdSeconds
 ```
 
 The adapter must reject nonsensical clock skew, require freshness timestamps, and
@@ -244,15 +275,14 @@ Panel Agent should use:
 - HA WebSocket subscription for live state transitions and timestamps;
 - HA REST `/api/states/{entity_id}` for initial/recovery snapshots;
 - HA history only to recover a provable activation transition after reconnect;
-- authenticated read-only bot timing-policy endpoint plus timestamped Panel
-  Agent cache;
+- allow-listed HA timing helpers plus timestamped Panel Agent cache;
 - registered HA service calls for future approved actions;
 - no dependency on `AliceTG_Bot` for rendering coffee/kettle state.
 
-Coffee remains visible when the bot is down as long as authenticated HA state
-is healthy. A fresh cached policy may continue timing presentation; a stale or
-missing policy removes progress and explains the degradation. Bot health is a
-separate Generic Service Widget.
+Coffee state and timing remain visible when the bot is down as long as
+authenticated HA state/helpers are healthy. A fresh cached HA policy may
+continue timing presentation; stale/missing HA timing removes progress and
+explains the degradation. Bot health is a separate Generic Service Widget.
 
 ## Safety behavior
 
@@ -265,22 +295,18 @@ separate Generic Service Widget.
 - No production write action is enabled by this discovery.
 - No long-running auto-shutoff was found. The UI must not claim one exists.
 
-## Gaps and required external changes
+## Remaining deployment gaps
 
-NOT APPLIED — READ-ONLY DISCOVERY.
+The durable activation helper, timing helpers/marker and stable device scripts
+are implemented locally and mirrored in the Control Center PR, but are not
+deployed. Bot timing refresh and explicit bootstrap are implemented in its
+Draft PR, also not deployed.
 
-1. Add HA-owned, durable coffee activation timestamp (helper/template trigger
-   sensor) that survives bot outage and has documented restart semantics.
-2. Add an authenticated read-only bot endpoint such as
-   `GET /api/v1/coffee/timing-policy`, returning only
-   `warmup_duration_seconds`, `long_running_threshold_seconds`, `updated_at`,
-   and `revision`.
-3. Cache timing policy with fetch time, revision, and stale state. Never expose
-   Telegram/HA tokens, chat IDs, webhook URLs, or unrelated bot configuration.
-4. Prefer dedicated HA scripts for coffee/kettle actions if safety preconditions,
-   idempotency, and verification should be centralized.
-5. Confirm the live HA entity registry and service schemas with a scoped
-   read-only development credential.
+1. Run HA `check_config` and deploy/restart only in an approved window.
+2. Run migration `status`, `dry-run`, then separately approve `apply`.
+3. Confirm restored values across a real HA restart.
+4. Validate scoped live API credentials and command verification without
+   enabling production writes in Panel Agent.
 
 ## Live host confirmation
 
@@ -298,10 +324,9 @@ Read-only SSH on 2026-07-29 confirmed:
 - no file-backed HA warm-up, ready, progress, remaining-time, or long-running
   entity was found.
 
-These observations do not authorize production service calls. They establish
-the bot as timing-policy authority, not physical-state authority.
-6. Confirm whether history retention is sufficient to recover activation after
-   reconnect.
+These historical observations do not authorize production service calls.
+Target architecture supersedes bot-local timing: HA helpers are canonical and
+bot state is migration input only.
 
 ## Conclusion confidence
 
@@ -311,11 +336,11 @@ the bot as timing-policy authority, not physical-state authority.
 | Direct coffee services are `switch.turn_on/off` | High |
 | Kettle entity is `water_heater.chainik` | High for bot-configured runtime; medium until live HA read |
 | Provided HA YAML contains no warm-up helper/duration/ready sensor | High |
-| User-configurable warm-up/long-running policy currently lives in bot state | High |
-| `last_changed` is the only discovered HA activation timestamp | High |
+| Pre-deployment runtime timing policy currently lives in bot state | High |
+| Prepared durable activation helper records exact `off → on` | High; not deployed |
 | `last_changed` is durable across HA restarts | Not verified; do not assume |
 | HA has an automatic coffee safety shutoff | Not found / unknown |
 | Coffee widget can read HA while Alice bot is down | High, by direct HA adapter design |
 
-External folder confirmation: `/Users/aartemida/Documents/Homeassistant` was not
-modified.
+Authorized non-secret local files under `/Users/aartemida/Documents/Homeassistant`
+were modified. No server configuration, service or device state was changed.

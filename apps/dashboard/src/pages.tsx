@@ -13,11 +13,13 @@ import {
   HomeDeviceWidget,
   ServiceRow
 } from "./widgets";
+import { CoffeeSettingsPanel } from "./CoffeeSettings";
 
 interface PageProps {
   snapshot: DashboardSnapshot;
   onNavigate: (path: RoutePath) => void;
   onCoffeeAction?: (service: ServiceSnapshot, actionId: string) => void;
+  coffeeActionPending?: boolean;
 }
 
 function PageHeading({
@@ -46,7 +48,7 @@ function findManifestService(
   return service ? { service, manifest: resolveManifest(service) } : null;
 }
 
-export function OverviewPage({ snapshot, onNavigate, onCoffeeAction }: PageProps) {
+export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActionPending }: PageProps) {
   const ordered = servicesByPriority(snapshot.services);
   const coffee = findManifestService(ordered, "home.coffee-machine");
   const homeAuthority = ordered.find(
@@ -79,6 +81,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction }: PageProps
                 generatedAt={snapshot.generatedAt}
                 manifest={coffee.manifest}
                 onAction={onCoffeeAction}
+                actionPending={coffeeActionPending}
               />
             </ErrorBoundary>
           ) : (
@@ -183,7 +186,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction }: PageProps
   );
 }
 
-export function HomePage({ snapshot, onCoffeeAction }: PageProps) {
+export function HomePage({ snapshot, onCoffeeAction, coffeeActionPending }: PageProps) {
   const ordered = servicesByPriority(snapshot.services);
   const coffee = findManifestService(ordered, "home.coffee-machine");
   const homeDevices = ordered.filter(
@@ -218,6 +221,7 @@ export function HomePage({ snapshot, onCoffeeAction }: PageProps) {
               manifest={coffee.manifest}
               variant="home"
               onAction={onCoffeeAction}
+              actionPending={coffeeActionPending}
             />
           </ErrorBoundary>
         )}
@@ -374,6 +378,7 @@ export function SettingsPage({
         title="Настройки"
         description="Внешний вид и поведение этого экрана. Production credentials здесь не хранятся."
       />
+      <CoffeeSettingsPanel />
       <section className="settings-section">
         <div>
           <h2>Тема</h2>

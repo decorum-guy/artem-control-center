@@ -1,0 +1,20 @@
+diff --git a/config/configuration.yaml b/config/configuration.yaml
+index 25a8f67..782e7b3 100644
+--- a/config/configuration.yaml
++++ b/config/configuration.yaml
+@@ -1,6 +1,9 @@
+ # Loads default set of integrations. Do not remove.
+ default_config:
+ 
++homeassistant:
++  packages: !include_dir_named packages
++
+ # Load frontend themes from the themes folder
+ frontend:
+   themes: !include_dir_merge_named themes
+diff --git a/config/packages/coffee_control_center.yaml b/config/packages/coffee_control_center.yaml
+new file mode 100644
+--- /dev/null
++++ b/config/packages/coffee_control_center.yaml
+@@ -0,0 +1 @@
++See the reviewable file included at config/packages/coffee_control_center.yaml in this patch bundle.

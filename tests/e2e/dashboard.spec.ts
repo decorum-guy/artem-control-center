@@ -37,16 +37,16 @@ test("navigation opens Home and Services without exposing internal gallery", asy
 
   await page.getByRole("link", { name: "Сервисы" }).click();
   await expect(page.getByTestId("route-services")).toBeVisible();
+  await expect(page.getByText("AVALAR Main", { exact: true })).toBeVisible();
   await expect(page.getByText("AVALAR Stage", { exact: true })).toBeVisible();
   await expect(page.getByText("AliceTG Bot", { exact: true })).toBeVisible();
   await expect(page.getByText("Кофемашина", { exact: true })).toHaveCount(0);
 });
 
-test("coffee remains a healthy HA device when Alice timing policy is unavailable", async ({ page }) => {
+test("coffee state and HA timing remain healthy when Alice is unavailable", async ({ page }) => {
   await page.goto("/home?scenario=alice-down-ha-healthy");
   await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", "ready");
-  await expect(page.getByTestId("widget-coffee-machine"))
-    .toContainText("свежая cached timing policy");
+  await expect(page.getByTestId("widget-coffee-machine")).not.toContainText("устарели");
   await expect(page.getByTestId("widget-coffee-machine")).not.toContainText("Недоступна");
 });
 
@@ -112,4 +112,108 @@ test("all product routes render intentional non-development states", async ({ pa
     await expect(page.getByTestId(`route-${route}`)).toBeVisible();
     await expect(page.getByText("Fixture", { exact: true })).toHaveCount(0);
   }
+});
+
+test("coffee settings use API values and persist timing and notification changes", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.getByTestId("coffee-settings")).toBeVisible();
+  await expect(page.getByLabel("Время разогрева")).toHaveValue("15");
+  await expect(page.getByLabel("Предупредить о долгой работе через")).toHaveValue("60");
+  await page.getByLabel("Время разогрева").fill("13");
+  await page.getByRole("button", { name: "Сохранить" }).click();
+  await expect(page.getByRole("status")).toContainText("подтверждено Home Assistant");
+  await expect(page.getByLabel("Время разогрева")).toHaveValue("13");
+
+  const telegram = page.getByText("Разогрев завершён")
+    .locator("..")
+    .getByLabel("Telegram");
+  await expect(telegram).not.toBeChecked();
+  await telegram.click();
+  await expect(telegram).toBeChecked();
+  await expect(page.getByRole("status")).toContainText("уведомлений сохранены");
+});
+
+test("coffee settings explain revision conflicts and source outage", async ({ page }) => {
+  await page.route("**/api/v1/settings/coffee/timing", async (route) => {
+    if (route.request().method() === "PATCH") {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "revision_conflict" })
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto("/settings");
+  await expect(page.getByLabel("Время разогрева")).toHaveValue(/\d+/);
+  await page.getByLabel("Время разогрева").fill("14");
+  await page.getByRole("button", { name: "Сохранить" }).click();
+  await expect(page.getByRole("status")).toContainText("изменились в Telegram");
+
+  await page.route("**/api/v1/settings/coffee/timing", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "home_assistant_unavailable" })
+    })
+  );
+  await page.reload();
+  await expect(page.getByRole("status")).toContainText("временно недоступны");
+});
+
+test("dirty timing draft survives background refresh and exposes Telegram conflict", async ({ page }) => {
+  let telegramChanged = false;
+  await page.route("**/api/v1/settings/coffee/timing", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: 1,
+        source: "home-assistant",
+        transport: "alice-tg-bot",
+        revision: telegramChanged ? "telegram-revision-2" : "telegram-revision-1",
+        observedAt: "2026-07-29T16:00:00Z",
+        warmupMinutes: telegramChanged ? 17 : 15,
+        longRunningMinutes: 60,
+        sourceMode: "live",
+        writesEnabled: true
+      })
+    });
+  });
+
+  await page.goto("/settings");
+  const warmup = page.getByLabel("Время разогрева");
+  await expect(warmup).toHaveValue("15");
+  await warmup.fill("14");
+  telegramChanged = true;
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange"))
+  );
+  await expect(page.getByTestId("timing-conflict"))
+    .toContainText("изменились в Telegram");
+  await expect(warmup).toHaveValue("14");
+  await page.getByRole("button", { name: "Загрузить актуальные" }).click();
+  await expect(warmup).toHaveValue("17");
+});
+
+test("coffee actions stay policy-disabled by default and show confirmed HA result when enabled", async ({ page }) => {
+  await page.goto("/home?scenario=coffee-stale");
+  await expect(
+    page.getByTestId("widget-coffee-machine").getByRole("button")
+  ).toBeDisabled();
+  await expect(page.getByText("Управление отключено политикой панели.")).toBeVisible();
+
+  await page.goto("/home?scenario=coffee-off");
+  page.on("dialog", (dialog) => void dialog.accept());
+  const turnOn = page.getByRole("button", { name: "Включить" });
+  await expect(turnOn).toBeEnabled();
+  await turnOn.click();
+  await expect(page.getByRole("status")).toContainText("Home Assistant подтвердил");
+  await expect(page.getByTestId("widget-coffee-machine"))
+    .not.toHaveAttribute("data-stage", "off");
 });

@@ -16,15 +16,18 @@ def test_fixture_snapshot_covers_bot_independence(monkeypatch):
 
     response = client.get("/api/v1/snapshot?scenario=alice-down-ha-healthy")
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
     services = {service["id"]: service for service in response.json()["services"]}
     assert services["home-assistant"]["health"] == "healthy"
     assert services["coffee-machine"]["health"] == "healthy"
     assert services["coffee-machine"]["data"]["machine"]["state"] == "on"
-    assert services["coffee-machine"]["data"]["timingPolicy"]["sourceAvailable"] is False
+    assert services["coffee-machine"]["data"]["timingPolicy"]["source"] == "home-assistant"
+    assert services["coffee-machine"]["data"]["timingPolicy"]["sourceAvailable"] is True
     assert services["coffee-machine"]["data"]["timingPolicy"]["stale"] is False
     assert services["coffee-machine"]["presentation"]["overview"] == "primary"
     assert services["home-assistant"]["presentation"]["role"] == "home-authority"
     assert services["alice-tg-bot"]["health"] == "offline"
+    assert services["alice-tg-bot"]["data"]["coffeeTimingAuthority"] is False
 
 
 def test_fixture_service_update_is_visible(monkeypatch):
@@ -65,6 +68,23 @@ def test_fixture_mutation_is_not_available_in_read_only(monkeypatch):
     assert client.get("/health/ready").json()["writesEnabled"] is False
 
 
+def test_read_only_mode_disables_narrow_writes_even_if_env_gates_are_true(monkeypatch):
+    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_COFFEE_TIMING_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_COFFEE_ACTIONS_ENABLED", "true")
+    module = load_app(monkeypatch, "read_only")
+    client = TestClient(module.app)
+
+    assert client.patch(
+        "/api/v1/settings/coffee/timing",
+        json={"expectedRevision": "stale", "warmupMinutes": 15},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/actions/home/coffee",
+        json={"action": "turn_on", "requestId": "read-only-request-01"},
+    ).status_code == 403
+
+
 def test_required_fixture_catalog_is_complete(monkeypatch):
     module = load_app(monkeypatch, "fixtures")
     client = TestClient(module.app)
@@ -101,4 +121,108 @@ def test_ha_offline_is_not_overridden_by_available_bot_policy(monkeypatch):
     coffee = services["coffee-machine"]
     assert coffee["data"]["machine"]["available"] is False
     assert coffee["data"]["machine"]["state"] == "unavailable"
-    assert coffee["data"]["timingPolicy"]["sourceAvailable"] is True
+    assert coffee["data"]["timingPolicy"]["sourceAvailable"] is False
+    assert coffee["data"]["timingPolicy"]["stale"] is True
+
+
+def test_avalar_main_and_stage_are_registry_services_with_separate_policy(monkeypatch):
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+    services = client.get("/api/v1/snapshot").json()["services"]
+    avalar = [
+        service
+        for service in services
+        if service.get("presentation", {}).get("group") == "AVALAR"
+    ]
+
+    assert [service["id"] for service in avalar] == [
+        "avalar-site-main",
+        "avalar-site-stage",
+    ]
+    main_actions = {action["id"] for action in avalar[0]["actions"]}
+    stage_actions = {action["id"] for action in avalar[1]["actions"]}
+    assert "avalar.main.deploy" not in main_actions
+    assert main_actions == {"avalar.main.smoke"}
+    assert stage_actions == {"avalar.stage.smoke", "avalar.stage.deploy"}
+    assert all(not action["enabled"] for service in avalar for action in service["actions"])
+
+
+def test_coffee_settings_render_live_fixture_values_and_writes_are_narrowly_gated(
+    monkeypatch,
+):
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+    timing = client.get("/api/v1/settings/coffee/timing").json()
+    notifications_response = client.get("/api/v1/settings/notifications/coffee")
+    notifications = notifications_response.json()
+
+    assert (timing["warmupMinutes"], timing["longRunningMinutes"]) == (15, 60)
+    assert client.get("/api/v1/settings/coffee/timing").headers["cache-control"] == "no-store"
+    assert notifications_response.headers["cache-control"] == "no-store"
+    assert timing["writesEnabled"] is False
+    assert notifications["warmup"]["channels"] == {
+        "telegram": False,
+        "iphone": True,
+    }
+    assert client.patch(
+        "/api/v1/settings/coffee/timing",
+        json={"expectedRevision": timing["revision"], "warmupMinutes": 13},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/actions/home/coffee",
+        json={"action": "turn_on", "requestId": "fixture-request-01"},
+    ).status_code == 403
+
+
+def test_coffee_narrow_gates_enable_only_their_contracts(monkeypatch):
+    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_COFFEE_TIMING_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_COFFEE_ACTIONS_ENABLED", "true")
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+
+    timing = client.get("/api/v1/settings/coffee/timing").json()
+    updated = client.patch(
+        "/api/v1/settings/coffee/timing",
+        json={"expectedRevision": timing["revision"], "warmupMinutes": 13},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["warmupMinutes"] == 13
+    assert updated.headers["cache-control"] == "no-store"
+
+    notifications = client.get("/api/v1/settings/notifications/coffee").json()
+    assert notifications["writesEnabled"] is False
+    assert client.patch(
+        "/api/v1/settings/notifications/coffee",
+        json={
+            "expectedRevision": notifications["revision"],
+            "warmup": {"enabled": False},
+        },
+    ).status_code == 403
+
+    action = client.post(
+        "/api/v1/actions/home/coffee",
+        json={"action": "turn_on", "requestId": "fixture-request-02"},
+    )
+    assert action.status_code == 200
+    assert action.json()["confirmedState"] == "on"
+    assert action.headers["cache-control"] == "no-store"
+
+
+def test_production_action_endpoint_rechecks_live_capability(monkeypatch):
+    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_COFFEE_ACTIONS_ENABLED", "true")
+    monkeypatch.setenv("PANEL_HA_URL", "https://ha.test")
+    monkeypatch.setenv("PANEL_HA_TOKEN", "test-token")
+    monkeypatch.setenv("PANEL_ALICE_BASE_URL", "https://alice.test")
+    monkeypatch.setenv("PANEL_ALICE_CONTROL_CENTER_TOKEN", "dedicated-token")
+    module = load_app(monkeypatch, "production")
+    client = TestClient(module.app)
+
+    # No live HA snapshot exists, so a stale browser cannot bypass server policy.
+    response = client.post(
+        "/api/v1/actions/home/coffee",
+        json={"action": "turn_on", "requestId": "production-request-01"},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "coffee_action_unavailable"

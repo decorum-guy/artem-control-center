@@ -1,5 +1,6 @@
 export type PanelMode = "fixtures" | "read_only" | "integration_test" | "production";
 export type HealthState = "healthy" | "degraded" | "offline" | "stale";
+export type SourceMode = "live" | "cached" | "fixture" | "stale" | "unavailable";
 export type CoffeeStage =
   | "off"
   | "turning_on"
@@ -57,7 +58,7 @@ export interface CoffeeMachineState {
 }
 
 export interface CoffeeTimingPolicy {
-  source: "alice-tg-bot";
+  source: "home-assistant";
   warmupDurationSeconds: number | null;
   longRunningThresholdSeconds: number | null;
   fetchedAt: string | null;
@@ -96,6 +97,7 @@ export interface ServiceSnapshot {
   enabled: boolean;
   dataContract: string;
   health: HealthState;
+  source: SourceMode;
   summary: string;
   actions: ActionDescriptor[];
   data: CoffeeData | KettleData | Record<string, unknown>;
@@ -108,6 +110,47 @@ export interface DashboardSnapshot {
   mode: PanelMode;
   fixtureScenario: string | null;
   services: ServiceSnapshot[];
+}
+
+export interface CoffeeTimingSettings {
+  schemaVersion: 1;
+  source: "home-assistant";
+  transport: "alice-tg-bot";
+  revision: string;
+  observedAt: string;
+  warmupMinutes: number;
+  longRunningMinutes: number;
+  sourceMode: SourceMode;
+  writesEnabled: boolean;
+}
+
+export interface CoffeeNotificationEventSettings {
+  enabled: boolean;
+  channels: {
+    telegram: boolean;
+    iphone: boolean;
+  };
+}
+
+export interface CoffeeNotificationSettings {
+  schemaVersion: 1;
+  source: "alice-tg-bot";
+  revision: string;
+  updatedAt: string | null;
+  warmup: CoffeeNotificationEventSettings;
+  longRunning: CoffeeNotificationEventSettings;
+  sourceMode: SourceMode;
+  writesEnabled: boolean;
+}
+
+export interface CoffeeActionResponse {
+  schemaVersion: 1;
+  authority: "home-assistant";
+  action: "turn_on" | "turn_off";
+  requestId: string;
+  confirmedState: "on" | "off";
+  alreadyInState: boolean;
+  observedAt: string | null;
 }
 
 export interface WidgetManifest {

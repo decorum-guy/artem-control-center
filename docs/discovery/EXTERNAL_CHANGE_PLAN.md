@@ -1,6 +1,18 @@
 # External Change Plan
 
-Every item is `NOT APPLIED — READ-ONLY DISCOVERY`.
+## Implementation status update
+
+- Home Assistant canonical package: **APPLIED LOCALLY, NOT DEPLOYED**. Review
+  bundle: `integration-patches/home-assistant/`.
+- AliceTG Bot timing migration and health: **IMPLEMENTED ON FEATURE BRANCH,
+  NOT DEPLOYED**, Draft PR `decorum-guy/AliceTG_Bot#1`.
+- AVALAR application health and safe wrapper: **IMPLEMENTED ON FEATURE BRANCH,
+  NOT DEPLOYED**, Draft PR `decorum-guy/AVALAR#1`.
+- AVALAR Exchange MCP: **NOT CHANGED** in this session.
+
+The tables below preserve the original discovery backlog. Items satisfied by
+the feature branches above are no longer current unresolved gaps; deployment
+and operational acceptance remain separate work.
 
 ## Home Assistant
 
@@ -20,16 +32,17 @@ no direct device bypass, no restore on the panel laptop.
 ## AliceTG Bot
 
 Repository/folder:
-`/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` (read-only)
+`/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot`
 
 | Phase | Required change | Why Control Center needs it | Contract | Acceptance tests |
 | --- | --- | --- | --- | --- |
-| Prototype | Authenticated read-only `GET /api/v1/coffee/timing-policy` | Users change warm-up and long-running values through Telegram; frontend constants would drift | `{warmup_duration_seconds, long_running_threshold_seconds, updated_at, revision}` only | current values, changed values, auth failure, schema bounds, no secret/config leakage |
-| Prototype | Cache/freshness semantics | Coffee state must survive bot outage without pretending timing is current | fetched time, source revision, stale threshold, last-known policy | bot down fresh cache, bot down stale cache, missing cache, restart |
+| Prototype | Managed HA helper refresh | Recover timing after HA outage without bot restart | 30-second default, bounded backoff, one refresh task, last success/stale status | startup outage, recovery, revision change once, unchanged no duplicate, cancellation |
+| Prototype | Explicit helper bootstrap | Initialize durable HA policy without restart resets | `status`, `dry-run`, explicit `apply`; verify both helpers then HA marker | defaults, legacy values, preserve existing non-default, idempotency, HA failure |
 
-Security: endpoint must expose no Telegram/HA tokens, chat IDs, webhook URLs,
-arbitrary bot state, or write capability. Coffee on/off remains exclusively a
-Home Assistant action. `NOT APPLIED — READ-ONLY DISCOVERY`.
+The former read-only bot timing endpoint proposal is superseded by canonical HA
+helpers. The implemented bot health details expose only helper connectivity,
+not timing values or secrets. Coffee on/off remains exclusively a Home
+Assistant action.
 
 ## AVALAR Website
 
@@ -39,10 +52,11 @@ alias `avalar-reg`
 | Phase | Required change | Why | Contract | Acceptance tests |
 | --- | --- | --- | --- | --- |
 | Prototype | HTTP/browser monitor-only probes | Observe stage/main before changing site | homepage/routes/assets/TLS/freshness | independent stage/main failure fixtures |
-| MVP | Minimal public live and protected ready/details | Distinguish PHP/router from content/runtime failures | `/health/live`, protected ready/details, deployment marker | dependency failures, auth/redaction, bounded latency |
+| MVP | Stateless public live/ready | Distinguish PHP execution from invalid required content without daemon/env dependencies | `/health/live`, `/health/ready`; minimal public-safe JSON | missing/invalid data, no paths/env/raw errors, bounded latency |
+| MVP | Fixed read-only SSH details | Read commit/branch/deployment state on shared hosting | `status-main`, `status-stage`, `details-main`, `details-stage` JSON | timeout, invalid/oversized output, host failure, stale cache |
 | MVP | Registered backup handler | Deploy safety and recovery | allow-listed data/config/uploads; manifest/checksum/archive | isolated restore to stage |
 | MVP | Harden/remove legacy write-capable admin component | Close unknown public write surface | deny public route or strong authenticated admin boundary | route/auth/CSRF/path tests |
-| Later | Replace/wrap current `~/avalar.sh stage` with a safe named deploy handler | Current handler has no discovered lock/backup/marker/rollback and uses a permissive TLS-disabled smoke | precheck → lock → backup → exact FF target → marker → strict TLS health/browser verify | concurrency, dirty checkout, TLS failure, failed health, separate rollback |
+| Later | Prove and enable the reviewed Stage wrapper | Existing workflow is wrapped but real duration is unmeasured | dry-run → operator gate → lock/cooldown → timeout ≤150s → strict live/ready/root verify | concurrency, timeout, TLS failure, failed health; keep disabled until measured |
 | Later | Separate rollback | Recover verified previous release | recorded deployment id only | code/data rollback and post-health |
 
 Security: no arbitrary target/ref/path; forced command or restricted host API;
@@ -79,6 +93,7 @@ internal paths, or unrestricted systemd unit names.
 7. Stage deploy and explicit rollback.
 8. Higher-risk maintenance/network actions.
 
-No external change was applied. SSH commands were limited to read-only
-inspection; no deploy, fetch/pull, restart, reload, firewall, migration, or API
-write was executed.
+Local authorized feature branches and the non-secret HA workspace were changed;
+none was deployed. SSH was used for discovery only; no deploy, fetch/pull,
+restart, reload, firewall, migration, or API write was executed. One transient
+REG.RU `/tmp` capture file was created and removed during discovery.

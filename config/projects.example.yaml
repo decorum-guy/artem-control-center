@@ -49,16 +49,14 @@ projects:
                 adapter: web_application
                 base_url_env: AVALAR_STAGE_URL
               details:
-                adapter: protected_http
-                url_env: AVALAR_STAGE_DETAILS_URL
-                token_env: AVALAR_STAGE_MONITORING_TOKEN
+                adapter: fixed_ssh_json
+                command_id: avalar.details.stage
               open:
                 url_env: AVALAR_STAGE_URL
               actions:
-                - avalar.deploy.stage
-                - avalar.smoke.stage
-              backups:
-                - avalar-site-stage
+                - avalar.stage.deploy
+                - avalar.stage.smoke
+              backups: []
             presentation:
               widget: core.generic-service
       - id: main
@@ -69,15 +67,13 @@ projects:
                 adapter: web_application
                 base_url_env: AVALAR_MAIN_URL
               details:
-                adapter: protected_http
-                url_env: AVALAR_MAIN_DETAILS_URL
-                token_env: AVALAR_MAIN_MONITORING_TOKEN
+                adapter: fixed_ssh_json
+                command_id: avalar.details.main
               open:
                 url_env: AVALAR_MAIN_URL
               actions:
-                - avalar.smoke.main
-              backups:
-                - avalar-site-main
+                - avalar.main.smoke
+              backups: []
             presentation:
               widget: core.generic-service
 
@@ -169,12 +165,13 @@ projects:
                 token_env: HA_MONITORING_TOKEN
                 entity_id: switch.kofemashina
                 timing_policy:
-                  adapter: alice_tg_bot_read_only
-                  endpoint_ref: alice_coffee_timing_policy
+                  adapter: home_assistant_helpers
+                  warmup_entity_id: input_number.coffee_warmup_minutes
+                  long_running_entity_id: input_number.coffee_long_running_minutes
+                  activation_entity_id: input_datetime.coffee_last_turned_on
                   cache_with_freshness: true
-                  enabled: false
-                  enablement: external_contract_not_applied
-                progress_policy: stage_without_percentage
+                  enabled: true
+                progress_policy: confirmed_activation_plus_canonical_duration
               actions:
                 - home.coffee.turn_on
                 - home.coffee.turn_off
@@ -205,7 +202,7 @@ projects:
 
           - id: alice-tg-bot
             repository: decorum-guy/AliceTG_Bot
-            note: Git repository belongs to the HA Telegram bot, not to Home Assistant itself. It is monitored separately and is not the coffee/kettle state authority.
+            note: Git repository belongs to the HA Telegram bot. It is monitored separately and is neither device nor timing-policy authority; Telegram writes canonical HA helpers.
             capabilities:
               monitor:
                 adapter: structured_http

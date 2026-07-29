@@ -1,0 +1,156 @@
+# Canonical coffee and kettle contract for Artem Control Center.
+# This package defines data and scripts only; it does not trigger deployment or
+# execute device actions during validation.
+
+input_number:
+  coffee_warmup_minutes:
+    name: Coffee warm-up duration
+    icon: mdi:coffee-maker
+    min: 1
+    max: 120
+    step: 1
+    mode: box
+    unit_of_measurement: min
+
+  coffee_long_running_minutes:
+    name: Coffee long-running threshold
+    icon: mdi:timer-alert-outline
+    min: 1
+    max: 720
+    step: 1
+    mode: box
+    unit_of_measurement: min
+
+input_boolean:
+  coffee_timing_initialized:
+    name: Coffee timing policy initialized
+    icon: mdi:check-decagram-outline
+
+input_datetime:
+  coffee_last_turned_on:
+    name: Coffee last confirmed turn-on
+    icon: mdi:clock-start
+    has_date: true
+    has_time: true
+
+automation:
+  - id: coffee_capture_confirmed_turn_on
+    alias: Coffee - capture confirmed turn-on
+    description: >-
+      Stores the entity timestamp only for a confirmed off-to-on transition.
+      Duplicate on events, reconnects and Home Assistant startup do not reset it.
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: switch.kofemashina
+        from: "off"
+        to: "on"
+    condition: []
+    action:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.coffee_last_turned_on
+        data:
+          timestamp: "{{ as_timestamp(trigger.to_state.last_changed) }}"
+
+template:
+  - binary_sensor:
+      - name: Coffee machine running
+        unique_id: coffee_machine_running
+        icon: mdi:coffee-maker
+        state: "{{ is_state('switch.kofemashina', 'on') }}"
+        availability: "{{ states('switch.kofemashina') not in ['unknown', 'unavailable'] }}"
+
+      - name: Coffee machine running too long
+        unique_id: coffee_machine_running_too_long
+        icon: mdi:timer-alert-outline
+        state: >-
+          {% set started = states('input_datetime.coffee_last_turned_on') %}
+          {% set threshold = states('input_number.coffee_long_running_minutes') | float(0) %}
+          {{ is_state('input_boolean.coffee_timing_initialized', 'on')
+             and is_state('switch.kofemashina', 'on')
+             and as_timestamp(started, 0) > 0
+             and threshold > 0
+             and (as_timestamp(now()) - as_timestamp(started, 0)) >= threshold * 60 }}
+        availability: >-
+          {{ is_state('input_boolean.coffee_timing_initialized', 'on')
+             and states('switch.kofemashina') not in ['unknown', 'unavailable']
+             and states('input_datetime.coffee_last_turned_on') not in ['unknown', 'unavailable']
+             and states('input_number.coffee_long_running_minutes') not in ['unknown', 'unavailable'] }}
+
+  - sensor:
+      - name: Coffee ready at
+        unique_id: coffee_ready_at
+        icon: mdi:coffee-outline
+        device_class: timestamp
+        state: >-
+          {% set started = states('input_datetime.coffee_last_turned_on') %}
+          {% set duration = states('input_number.coffee_warmup_minutes') | float(0) %}
+          {% if as_timestamp(started, 0) > 0 and duration > 0 %}
+            {{ (as_datetime(started) + timedelta(minutes=duration)).isoformat() }}
+          {% else %}
+            {{ none }}
+          {% endif %}
+        availability: >-
+          {{ is_state('input_boolean.coffee_timing_initialized', 'on')
+             and states('input_datetime.coffee_last_turned_on') not in ['unknown', 'unavailable']
+             and states('input_number.coffee_warmup_minutes') not in ['unknown', 'unavailable'] }}
+
+      - name: Coffee timing policy revision
+        unique_id: coffee_timing_policy_revision
+        icon: mdi:file-clock-outline
+        state: >-
+          {{ states('input_number.coffee_warmup_minutes')
+             ~ ':'
+             ~ states('input_number.coffee_long_running_minutes') }}
+        attributes:
+          warmup_minutes: "{{ states('input_number.coffee_warmup_minutes') | float(0) }}"
+          long_running_minutes: "{{ states('input_number.coffee_long_running_minutes') | float(0) }}"
+        availability: >-
+          {{ is_state('input_boolean.coffee_timing_initialized', 'on')
+             and states('input_number.coffee_warmup_minutes') not in ['unknown', 'unavailable']
+             and states('input_number.coffee_long_running_minutes') not in ['unknown', 'unavailable'] }}
+
+script:
+  coffee_turn_on:
+    alias: Coffee - turn on
+    icon: mdi:coffee-maker
+    mode: single
+    sequence:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.kofemashina
+
+  coffee_turn_off:
+    alias: Coffee - turn off
+    icon: mdi:coffee-maker-off
+    mode: single
+    sequence:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.kofemashina
+
+  kettle_boil:
+    alias: Kettle - boil
+    icon: mdi:kettle-steam
+    mode: single
+    sequence:
+      - service: water_heater.set_temperature
+        target:
+          entity_id: water_heater.chainik
+        data:
+          temperature: 100
+
+  kettle_stop:
+    alias: Kettle - stop
+    icon: mdi:kettle-off
+    mode: single
+    sequence:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.chainik_podderzhanie_tepla
+      - service: water_heater.set_operation_mode
+        target:
+          entity_id: water_heater.chainik
+        data:
+          operation_mode: "off"

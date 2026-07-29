@@ -96,8 +96,9 @@ Home Assistant управляет текущими устройствами:
 
 `AliceTG_Bot` — отдельный child service HA stack. Он не является source of
 truth физического состояния кофемашины/чайника и не исполняет команды Control
-Center. Он является текущим read-only источником изменяемой пользователем
-coffee timing policy; его outage не должен скрывать HA state.
+Center. Telegram изменяет canonical timing helpers в Home Assistant; bot-local
+state — только migration input. Его outage не должен скрывать HA state или
+уже подтверждённую HA timing policy.
 
 Перед реальной интеграцией Codex обязан read-only изучить:
 
@@ -135,7 +136,7 @@ docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md
 
 - state и timestamps только из HA;
 - real progress только из подтверждённого HA activation time + актуальной/cached
-  bot timing policy;
+  HA timing policy;
 - при отсутствии достоверного duration показывать stage без fake percentage;
 - no timer reset на duplicate `turn_on`;
 - remaining time и last activation;

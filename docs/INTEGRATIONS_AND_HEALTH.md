@@ -98,6 +98,39 @@ Capabilities:
 - backup own config/database;
 - open Desktop mode.
 
+### Browser snapshot delivery
+
+Panel Agent owns one canonical normalized `DashboardSnapshot`. Home Assistant
+REST initialization, allow-listed WebSocket events, reconnect/stale changes
+and managed HTTP integration polling trigger rebuilds. Only a meaningful
+normalized change publishes a new process-local monotonic revision.
+
+Home Assistant freshness is transport-based, not entity-change-based. A
+successfully authenticated/subscribed WebSocket keeps the confirmed snapshot
+live even when no allow-listed entity changes for hours. Entity `last_changed`
+and `last_updated` remain device timestamps. Disconnect immediately exposes
+last-known data as cached; the stale timeout begins from transport failure.
+Reconnect performs REST reconciliation before write capabilities return.
+WebSocket ping/pong does not itself create snapshot revisions.
+
+`GET /api/v1/events` is a loopback-only SSE stream with `connected`,
+`snapshot` and `heartbeat` events. It carries revision hints, not raw HA events
+or service credentials. Browser recovery always uses
+`GET /api/v1/snapshot`; SSE is non-durable and keeps no event history.
+
+Browser behavior:
+
+- initial full snapshot, then SSE;
+- newer revision or reconnect → deduplicated full snapshot;
+- 45-second full reconciliation while SSE is healthy;
+- 5-second visible-tab fallback while SSE is unavailable;
+- no aggressive polling while hidden;
+- immediate reconciliation on visibility restore;
+- last successful snapshot remains visible during temporary failures.
+
+The Panel Agent stays loopback-bound by default. No wildcard CORS or external
+callback listener is introduced.
+
 Actions:
 
 - restart Chromium;
@@ -170,10 +203,10 @@ Verified behavior from repository:
 Required health additions:
 
 - `/health/live` — process/event loop;
-- `/health/ready` — Telegram mode, HA API, required state files;
-- protected `/health/details` — polling errors, timer scheduler, storage, PushWard error summary;
-- authenticated read-only `GET /api/v1/coffee/timing-policy`, exposing only
-  warm-up duration, long-running threshold, updated time, and revision;
+- `/health/ready` — Telegram transport, HA API and canonical timing helpers;
+- protected `/health/details` — sanitized HA/timing-helper readiness, version,
+  commit and observation time;
+- Telegram timing changes use `input_number.set_value` and confirming HA reads;
 - idempotency support for control requests.
 
 Actions:
@@ -215,10 +248,16 @@ Monitor independently:
 
 Required health additions:
 
-- public minimal `/health/live` or `/healthz`;
-- protected `/health/ready`/`details` or equivalent host adapter;
-- environment and deployment marker;
-- sanitized recent errors.
+- public stateless `/health/live`;
+- public stateless `/health/ready`, validating required content JSON;
+- optional sanitized source/deployment details through fixed read-only SSH
+  commands on a slower cadence.
+
+REG.RU shared hosting is not expected to sustain a daemon or Control Center
+listener. PHP health does not depend on process environment variables.
+`/health/details` is intentionally absent; there is no reviewed shared-hosting
+secret-storage contract. Panel Agent curls Main and Stage independently and may
+run `details-main`/`details-stage` through the allow-listed SSH adapter.
 
 ### Stage deployment
 
@@ -231,20 +270,24 @@ ssh avalar-reg "~/avalar.sh stage"
 
 Implementation:
 
-- current live handler is not yet safe enough for Control Center: discovery
-  found no lock, backup, marker, or rollback and found a permissive TLS-disabled
-  curl smoke;
+- current live handler remains an implementation detail; the repo-side adapter
+  adds dry-run-first policy, lock/cooldown, a 120-second default timeout and
+  strict post-operation curl smoke;
 - exact fixed handler, not arbitrary shell;
 - target explicitly `stage`;
 - optional validated ref/commit parameter only if deploy script supports it;
 - precheck repository/deployment state;
 - execute restricted server-side action;
 - capture sanitized output;
-- verify deployed marker, health and browser smoke;
+- verify public live/ready/root smoke and optional SSH commit details;
 - audit correlation id;
 - rollback action separate and not inferred automatically.
 
 Main deployment is a different high-risk capability and remains disabled until separately specified.
+
+Stage deployment also remains disabled until a real run proves it reliably
+fits the shared-hosting session limit. Backup and rollback capabilities are not
+registered because no verified implementation exists.
 
 Backups:
 

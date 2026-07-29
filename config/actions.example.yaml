@@ -35,9 +35,9 @@ actions:
     executor:
       type: home_assistant_registered_action
       handler_ref: ha_coffee_turn_on
-      service: switch.turn_on
-      entity_id: switch.kofemashina
-      note: Existing HA domain service; enable only after scoped live capability validation and separate write approval.
+      service: script.turn_on
+      entity_id: script.coffee_turn_on
+      note: Stable HA package script; enable only after deployment, scoped live capability validation and separate write approval.
     verify:
       type: home_assistant_entity
       entity_id: switch.kofemashina
@@ -60,8 +60,8 @@ actions:
     executor:
       type: home_assistant_registered_action
       handler_ref: ha_coffee_turn_off
-      service: switch.turn_off
-      entity_id: switch.kofemashina
+      service: script.turn_on
+      entity_id: script.coffee_turn_off
     verify:
       type: home_assistant_entity
       entity_id: switch.kofemashina
@@ -84,11 +84,9 @@ actions:
     executor:
       type: home_assistant_registered_action
       handler_ref: ha_kettle_turn_on
-      service: water_heater.set_temperature
-      entity_id: water_heater.chainik
-      fixed_data:
-        temperature: 100
-      note: Existing HA flow used by the inspected integration; verify resulting HA state.
+      service: script.turn_on
+      entity_id: script.kettle_boil
+      note: Stable HA package script preserves the discovered water-heater flow.
     verify:
       type: home_assistant_entity
       entity_id: water_heater.chainik
@@ -111,13 +109,8 @@ actions:
     executor:
       type: home_assistant_registered_action
       handler_ref: ha_kettle_turn_off
-      sequence:
-        - service: switch.turn_off
-          entity_id: switch.chainik_podderzhanie_tepla
-        - service: water_heater.set_operation_mode
-          entity_id: water_heater.chainik
-          data:
-            operation_mode: "off"
+      service: script.turn_on
+      entity_id: script.kettle_stop
     verify:
       type: home_assistant_entity
       entity_id: water_heater.chainik
@@ -155,9 +148,9 @@ actions:
       service_id: home-stack/remote-primary/alice-tg-bot
       timeout_seconds: 120
 
-  - id: avalar.deploy.stage
+  - id: avalar.stage.deploy
     enabled: false
-    enablement: external_contract_not_applied
+    enablement: draft_external_contract_not_deployed
     title: Deploy AVALAR stage
     target: avalar-site/stage/website
     risk: high
@@ -167,23 +160,16 @@ actions:
     parameters:
       type: object
       additionalProperties: false
-      properties:
-        ref:
-          type: [string, "null"]
-          pattern: '^[A-Za-z0-9._/-]{1,120}$'
-        note:
-          type: [string, "null"]
-          maxLength: 240
+      properties: {}
     preconditions:
       - stage_host_reachable
       - no_deploy_in_progress
       - deployment_script_checksum_valid
     executor:
-      type: restricted_remote_action
-      target_ref: avalar_stage_host
-      action: deploy_stage
-      fixed_procedure: 'ssh avalar-reg "~/avalar.sh stage"'
-      note: Current handler is not safe enough for Control Center; see discovery gap plan.
+      type: local_allowlisted_wrapper
+      handler_ref: avalar_stage_deploy
+      fixed_procedure: './scripts/control-center-action.sh deploy-stage --execute'
+      note: Wrapper delegates to the existing AVALAR update script; remains disabled until its Draft PR is deployed and registered locally.
       allow_arbitrary_command: false
     verify:
       type: check_group
@@ -191,18 +177,38 @@ actions:
         - avalar_stage_deployment_marker
         - avalar_stage_health
         - avalar_stage_browser_smoke
-      timeout_seconds: 600
+      timeout_seconds: 150
     audit: required
 
-  - id: avalar.smoke.stage
+  - id: avalar.stage.smoke
     title: Check AVALAR stage
     target: avalar-site/stage/website
     risk: low
     confirmation: instant
     executor:
-      type: registered_remote_action
-      target_ref: avalar_stage_host
-      action: run_stage_smoke
+      type: local_allowlisted_wrapper
+      handler_ref: avalar_stage_smoke
+      fixed_procedure: './scripts/control-center-action.sh smoke-stage'
+    verify:
+      type: command_result
+      timeout_seconds: 180
+
+  - id: avalar.main.smoke
+    enabled: false
+    enablement: draft_external_contract_not_deployed
+    title: Check AVALAR main
+    target: avalar-site/main/website
+    risk: low
+    confirmation: instant
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+    executor:
+      type: local_allowlisted_wrapper
+      handler_ref: avalar_main_smoke
+      fixed_procedure: './scripts/control-center-action.sh smoke-main'
+      allow_arbitrary_command: false
     verify:
       type: command_result
       timeout_seconds: 180

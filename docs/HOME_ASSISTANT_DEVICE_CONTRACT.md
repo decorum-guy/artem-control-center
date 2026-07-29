@@ -16,9 +16,10 @@ For the coffee machine, Home Assistant is the **only authoritative runtime sourc
 - execution of turn-on/turn-off;
 - command verification after turn-on/turn-off.
 
-`AliceTG_Bot` is the current source of the **user-configurable timing policy**:
-warm-up duration and long-running threshold. It is never the physical device
-state authority and never executes Control Center coffee commands.
+Home Assistant helpers are the canonical source of the **user-configurable
+timing policy**: warm-up duration and long-running threshold. `AliceTG_Bot`
+is a Telegram editor for those helpers, never physical state/timing authority,
+and never executes Control Center coffee commands.
 
 ## 2. Local discovery source
 
@@ -74,19 +75,20 @@ type CoffeeMachineState = {
 }
 
 type CoffeeTimingPolicy = {
-  source: 'alice-tg-bot'
+  source: 'home-assistant'
   warmupDurationSeconds: number | null
   longRunningThresholdSeconds: number | null
   fetchedAt: string | null
   stale: boolean
   sourceAvailable: boolean
   sourceRevision: string | null
+  initialized: boolean
 }
 ```
 
 The composite presentation model derives `warming`, `ready`,
-`running_too_long`, progress, and remaining time. The bot policy never replaces
-HA state.
+`running_too_long`, progress, and remaining time. Bot health never replaces or
+overrides HA state/timing.
 
 ## 4. Warm-up progress rules
 
@@ -94,20 +96,22 @@ Required inputs:
 
 1. a confirmed HA `turnedOnAt` from a real `off → on` transition or a durable
    HA helper/history recovery;
-2. the current read-only `CoffeeTimingPolicy` from `AliceTG_Bot`, or a cached
-   copy with explicit freshness;
+2. the canonical `CoffeeTimingPolicy` from HA helpers, or an allow-listed
+   last-known cache with explicit freshness;
 3. a common calculation timestamp.
 
-The discovered 13-minute and 60-minute values are fixtures/current defaults,
-not frontend constants. Users can change them through Telegram.
+Bootstrap defaults are 13 minutes and 60 minutes, but they are written exactly
+once by an explicit verified migration. The helpers have no permanent
+`initial`; restored user values survive HA restart. Current runtime warm-up was
+observed at 15 minutes. None of these values is a frontend constant.
 
 When progress can be derived safely:
 
 ```text
 elapsed = now - HA.turnedOnAt
-progress = clamp(elapsed / botPolicy.warmupDurationSeconds, 0..1)
-remaining = max(botPolicy.warmupDurationSeconds - elapsed, 0)
-worksTooLong = elapsed >= botPolicy.longRunningThresholdSeconds
+progress = clamp(elapsed / haPolicy.warmupDurationSeconds, 0..1)
+remaining = max(haPolicy.warmupDurationSeconds - elapsed, 0)
+worksTooLong = elapsed >= haPolicy.longRunningThresholdSeconds
 ```
 
 Calculation is disabled when HA activation time or timing policy is missing,
@@ -151,7 +155,7 @@ Command success requires the corresponding HA state transition. HTTP success alo
 - process health;
 - Telegram availability;
 - its own schedules/timers/state;
-- current coffee timing policy;
+- HA connectivity and timing-helper availability;
 - bot-specific workflows;
 - restart and backup capability.
 
@@ -160,10 +164,19 @@ Rules:
 - bot outage must not mark HA or the coffee device offline;
 - coffee widget reads HA even if the bot is unavailable;
 - coffee controls target HA, not a bot-specific HTTP endpoint;
-- a fresh cached timing policy may continue to drive presentation while clearly
-  identifying its source and fetch time;
-- a stale/missing policy degrades timing only, not device availability;
-- bot timing values cannot make coffee state current when HA is unavailable.
+- Telegram changes write the canonical HA helpers and require HA read-back;
+- bot-local defaults are migration input only and never runtime authority;
+- bot outage does not affect current timing while HA remains healthy;
+- cached HA timing may be shown with source and timestamp when HA is offline,
+  but cannot make the physical state current.
+
+Notification ownership is separate from device/timing authority:
+`AliceTG_Bot` owns coffee notification policy, per-channel delivery receipts
+and retries, while Panel Agent owns service-health, backup and operation
+notifications. See
+[`NOTIFICATION_ARCHITECTURE.md`](NOTIFICATION_ARCHITECTURE.md). The browser is
+not a notification executor and Panel Agent must not duplicate bot-owned coffee
+events.
 
 ## 7. Coffee-machine widget
 
@@ -175,7 +188,7 @@ It displays:
 - current state and freshness;
 - last activation time;
 - HA-confirmed activation time;
-- current/cached bot timing-policy freshness;
+- current/cached HA timing-policy freshness;
 - real remaining time/progress only when both inputs are trustworthy;
 - ready state;
 - running duration;

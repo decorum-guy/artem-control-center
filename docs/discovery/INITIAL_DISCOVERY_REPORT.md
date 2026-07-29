@@ -2,6 +2,30 @@
 
 Discovery date: 2026-07-29
 
+## Implementation follow-up
+
+This report preserves the initial state at discovery time. Since then:
+
+- the Control Center foundation was merged to `main` at `44c3e2d`;
+- canonical HA coffee helpers/scripts were added locally and packaged for
+  review, without HA reload/restart;
+- AliceTG Bot now reads/writes verified HA timing helpers on
+  `feat/control-center-ha-timing` (Draft PR #1);
+- AVALAR health and allow-listed wrapper contracts are on
+  `feat/control-center-integration` (Draft PR #1, base `stage`);
+- Panel Agent now contains REST/WebSocket HA, Alice health and separate AVALAR
+  Main/Stage read-only adapters;
+- HA timing policy, not bot-local state, is the canonical coffee timing source.
+- HA helpers have no permanent `initial`; explicit bootstrap verifies both
+  values before setting a durable initialization marker.
+- Bot policy and Panel Agent integration states refresh in managed background
+  loops and recover without process restart.
+- AVALAR uses stateless curl health and optional short SSH details; no daemon,
+  PHP runtime metadata environment or HTTP details endpoint is required.
+
+The discovery statements below are historical facts from before these changes,
+not current unresolved gaps.
+
 ## Verified from writable repository
 
 - Repository root is
@@ -29,8 +53,9 @@ Discovery date: 2026-07-29
 - HA forwards coffee on/off transition and `last_changed` to `AliceTG_Bot`.
 - The provided HA YAML has no coffee warm-up duration/progress/ready/long-running
   helper or template sensor.
-- Warm-up and long-running thresholds are bot-owned persisted settings, not HA
-  state.
+- Before deployment, warm-up and long-running thresholds remain in bot
+  persisted state; the prepared canonical architecture moves them to durable HA
+  helpers with explicit one-time initialization.
 - No automatic coffee shutoff was found.
 - `AliceTG_Bot` is not required for a direct HA WebSocket/REST state adapter.
 - Read-only `ha-vps` inspection confirmed the production include topology,
@@ -103,8 +128,8 @@ Chromium dashboard
     ├─ HA WebSocket/REST (future scoped read-only first)
     │   ├─ switch.kofemashina
     │   └─ water_heater.chainik
-    ├─ AliceTG Bot read-only timing-policy adapter + freshness cache
-    ├─ AVALAR website monitor-only baseline
+    ├─ AliceTG Bot independent health monitor
+    ├─ AVALAR Main/Stage stateless curl monitors + optional SSH details
     └─ AVALAR Exchange monitor-only baseline
 
 External write paths remain disabled:
@@ -120,8 +145,8 @@ Coffee Widget
   ├─ Panel Agent HA adapter
   │   → HA API/WebSocket
   │   → switch.kofemashina state/activation/command verification
-  └─ Panel Agent timing-policy adapter/cache
-      → AliceTG Bot read-only duration/long-running threshold
+  └─ HA timing helpers + allow-listed Panel Agent cache
+      → warm-up duration / long-running threshold / initialization marker
 
 AliceTG_Bot health ── separate service widget
 
@@ -145,13 +170,12 @@ Generic Service Widget
 ## Highest-risk unknowns
 
 1. Live HA may contain UI-created entities absent from the copied YAML.
-2. HA has no discovered durable coffee activation timestamp, and the bot has no
-   dedicated safe read-only timing-policy endpoint; fake progress is forbidden.
-3. `last_changed` restart/history behavior is not sufficient as a durable
-   activation helper.
+2. The prepared durable HA activation/timing package is not deployed; fake
+   progress remains forbidden until helpers are initialized and fresh.
+3. Persistence across a real HA restart remains an acceptance gate.
 4. No HA coffee automatic shutoff was found.
-5. AVALAR server handler lacks discovered lock/backup/marker/rollback and uses
-   a permissive TLS-disabled smoke.
+5. AVALAR has no verified backup/rollback or deployment marker, and actual Stage
+   deploy duration has not been measured against the shared-hosting limit.
 6. AVALAR legacy admin component needs security review.
 7. Exchange deployment marker remains stale even though GitHub main and runtime
    are now both version `0.9.2`.
@@ -161,8 +185,8 @@ Generic Service Widget
 
 - First implement a deterministic registry/snapshot vertical slice.
 - Keep real HA read integration behind a separate scoped development credential.
-- Add a durable HA activation-time contract and a safe read-only bot
-  timing-policy endpoint before production warm-up percentage.
+- Deploy and explicitly initialize the prepared durable HA activation/timing
+  contract before production warm-up percentage.
 - Start AVALAR and Exchange as monitor-only.
 - Add actions only after external contracts and acceptance tests are applied in
   their owning projects.
@@ -171,7 +195,7 @@ Generic Service Widget
 
 - Live HA entity registry/history and current attribute payloads.
 - Production HA version/installation and backup freshness.
-- AVALAR runtime PHP version/extensions, backup contents, and reliable rollback.
+- AVALAR backup contents, reliable rollback, and bounded Stage deploy duration.
 - Exchange deployment-marker reconciliation and truthful deployed-at metadata.
 - Exchange provider readiness beyond the current explicit `unknown`.
 - Cloud backup destination and Windows hardware metrics.
@@ -179,7 +203,7 @@ Generic Service Widget
 ## Findings that change existing docs/config
 
 - Coffee controls must not route through `AliceTG_Bot`.
-- Bot timing defaults cannot be presented as HA warm-up truth.
+- Bot legacy/default values cannot be presented as current HA warm-up truth.
 - Placeholder HA warm-up entity IDs in examples imply entities not found.
 - AVALAR `/healthz` examples describe nonexistent endpoints.
 - Current AVALAR deploy wrapper differs from the historical command text.

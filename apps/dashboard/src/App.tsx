@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
 import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import {
@@ -12,6 +12,8 @@ import { reconcileLayout, resolveManifest } from "./registry";
 import { ProductShell, type RoutePath } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { CoffeeWidget, GenericServiceWidget } from "./widgets";
+import { executeCoffeeAction } from "./coffeeApi";
+import { SnapshotCoordinator } from "./snapshotStream";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -64,21 +66,29 @@ export function App() {
   const [kiosk, setKiosk] = useState(false);
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/v1/snapshot?scenario=${encodeURIComponent(scenario)}`);
-      if (!response.ok) throw new Error(`Snapshot failed: ${response.status}`);
-      setSnapshot((await response.json()) as DashboardSnapshot);
-      setError(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Snapshot unavailable");
-    }
-  }, [scenario]);
+  const [coffeeActionPending, setCoffeeActionPending] = useState(false);
+  const snapshotCoordinator = useRef<SnapshotCoordinator | null>(null);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const coordinator = new SnapshotCoordinator({
+      scenario,
+      onSnapshot: setSnapshot,
+      onError: (message) => setError(message || null)
+    });
+    snapshotCoordinator.current = coordinator;
+    coordinator.start();
+    return () => {
+      coordinator.stop();
+      if (snapshotCoordinator.current === coordinator) {
+        snapshotCoordinator.current = null;
+      }
+    };
+  }, [scenario]);
+
+  const reconcileSnapshot = useCallback(
+    () => snapshotCoordinator.current?.refresh() ?? Promise.resolve(false),
+    []
+  );
 
   useEffect(() => {
     const onPopState = () => setRoute(routeFromLocation());
@@ -108,6 +118,7 @@ export function App() {
       enabled: true,
       dataContract: "future.contract.v1",
       health: "healthy",
+      source: "fixture",
       summary: "Registry update materialized automatically",
       actions: [],
       data: {}
@@ -118,14 +129,30 @@ export function App() {
       body: JSON.stringify(service)
     });
     if (!response.ok) throw new Error(`Fixture update failed: ${response.status}`);
-    await load();
+    await reconcileSnapshot();
   }
 
-  function explainSafeAction(service: ServiceSnapshot, actionId: string) {
-    setActionNotice(
-      `${service.title}: ${actionId} не отправлена — production actions отключены в foundation.`
-    );
-    window.setTimeout(() => setActionNotice(null), 5000);
+  async function runCoffeeAction(service: ServiceSnapshot, actionId: string) {
+    if (coffeeActionPending) return;
+    const action = actionId.endsWith("turn_on") ? "turn_on" : "turn_off";
+    if (action === "turn_on" && !window.confirm("Включить кофемашину?")) return;
+    setCoffeeActionPending(true);
+    setActionNotice(`${service.title}: команда отправлена, ждём подтверждение Home Assistant…`);
+    try {
+      const result = await executeCoffeeAction(action, crypto.randomUUID());
+      setActionNotice(`${service.title}: команда подтверждена, обновляем данные панели…`);
+      const reconciled = await reconcileSnapshot();
+      setActionNotice(reconciled
+        ? `${service.title}: Home Assistant подтвердил состояние «${result.confirmedState === "on" ? "включена" : "выключена"}».`
+        : `${service.title}: команда подтверждена, но данные панели ещё обновляются.`);
+    } catch {
+      setActionNotice(
+        `${service.title}: подтверждение не получено. Проверьте текущее состояние перед повтором.`
+      );
+    } finally {
+      setCoffeeActionPending(false);
+      window.setTimeout(() => setActionNotice(null), 6000);
+    }
   }
 
   const appClassName = [
@@ -238,14 +265,16 @@ export function App() {
             <OverviewPage
               snapshot={snapshot}
               onNavigate={navigate}
-              onCoffeeAction={explainSafeAction}
+              onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
+              coffeeActionPending={coffeeActionPending}
             />
           )}
           {route === "/home" && (
             <HomePage
               snapshot={snapshot}
               onNavigate={navigate}
-              onCoffeeAction={explainSafeAction}
+              onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
+              coffeeActionPending={coffeeActionPending}
             />
           )}
           {route === "/services" && <ServicesPage snapshot={snapshot} onNavigate={navigate} />}

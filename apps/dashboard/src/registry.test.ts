@@ -9,6 +9,7 @@ function service(id: string, dataContract = "service.health.v1"): ServiceSnapsho
     enabled: true,
     dataContract,
     health: "healthy",
+    source: "fixture",
     summary: "fixture",
     actions: [],
     data: {}
