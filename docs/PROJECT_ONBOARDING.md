@@ -15,7 +15,9 @@
 - **service** — отдельный runtime, например frontend, backend, worker или bot;
 - **component** — зависимость внутри service health: database, relay, API provider, storage;
 - **action** — отдельная разрешённая операция;
-- **backup profile** — способ создать и сохранить резервную копию.
+- **backup profile** — способ создать и сохранить резервную копию;
+- **widget definition** — зарегистрированный тип визуального представления;
+- **widget instance** — конкретное размещение widget в пользовательском layout.
 
 Один project может содержать несколько environments и services. Например, AVALAR Website имеет отдельные `stage` и `main`, которые мониторятся и управляются независимо.
 
@@ -57,7 +59,7 @@ monitor + selected actions + backup; restore отдельно и с повыше
 
 ## 4. Declarative registration
 
-Проекты регистрируются в `config/projects.yaml` или через будущий Settings UI, который сохраняет ту же schema.
+Проекты регистрируются в `config/projects.yaml` или через Settings UI, который сохраняет ту же schema.
 
 Пример monitor-only:
 
@@ -96,7 +98,7 @@ Frontend не содержит заранее зашитое число кноп
 
 ## 5. Onboarding flow
 
-Будущий UI `Settings → Projects → Add`:
+UI `Settings → Projects → Add`:
 
 1. Задать project name и stable id.
 2. Выбрать тип источника: HTTP, Home Assistant, systemd/Docker host agent, Uptime Kuma, GitHub, n8n, custom adapter.
@@ -109,19 +111,43 @@ Frontend не содержит заранее зашитое число кноп
 9. При необходимости добавить backup profile и destinations.
 10. Preview карточки проекта.
 11. Enable project.
+12. Дождаться нового registry revision и frontend reconciliation.
+13. Показать созданный generic/specialized widget и ссылку `Открыть в Services`.
 
 Подключение можно сделать и через YAML. UI и YAML используют одну schema и один validator.
 
-## 6. Enable, disable and remove
+## 6. Automatic UI materialization
 
-- `enabled: false` временно скрывает probes/actions, но сохраняет config/history.
+Onboarding не считается завершённым после одной записи backend-конфигурации.
+
+После enable:
+
+1. Panel Agent увеличивает registry revision.
+2. Frontend получает полный catalog snapshot либо registry event.
+3. Widget Resolver ищет compatible specialized widget.
+4. При отсутствии specialized widget создаётся обязательный `core.generic-service`.
+5. Service автоматически появляется в полном каталоге `Services`.
+6. Новый widget появляется в `New items` и в default/inbox placement area, если не установлен `catalog_only`.
+7. Automated test подтверждает, что service виден и его detail открывается.
+
+Нельзя требовать отдельный frontend commit только для того, чтобы новый monitor-only service появился на экране.
+
+No service may silently exist only in Panel Agent config.
+
+Полный widget contract: `docs/WIDGET_SYSTEM.md`.
+
+## 7. Enable, disable and remove
+
+- `enabled: false` временно скрывает active probes/actions, но сохраняет config/history/layout references.
 - capability можно отключить отдельно: например, оставить мониторинг и убрать restart.
 - action можно отключить без удаления project.
 - удаление project не удаляет backups автоматически.
-- отключённый project не должен продолжать polling или scheduled backups.
+- отключённый project не продолжает polling или scheduled backups.
 - secrets удаляются отдельной подтверждаемой операцией.
+- hide widget не равен disable project: скрытый widget не останавливает monitoring.
+- re-enable project запускает UI reconciliation и возвращает widget, если active instance отсутствует.
 
-## 7. Action independence
+## 8. Action independence
 
 Actions не выводятся из названия или типа проекта. Каждая action регистрируется отдельно.
 
@@ -141,9 +167,9 @@ Actions не выводятся из названия или типа проек
 
 Таким образом, проект может иметь 0, 1 или любое разумное число управляющих действий.
 
-## 8. Adapter contract
+## 9. Adapter contract
 
-Каждый adapter обязан объявить:
+Каждый adapter объявляет:
 
 - поддерживаемые capabilities;
 - configuration schema;
@@ -151,13 +177,14 @@ Actions не выводятся из названия или типа проек
 - health mapping;
 - timeout/retry/cache policy;
 - offline/stale behavior;
-- actions и их schemas;
+- actions и schemas;
 - backup support;
+- compatible widget data contracts;
 - version compatibility.
 
 Adapter не может автоматически включать опасную capability после обновления. Новые write-capabilities требуют явного opt-in.
 
-## 9. Validation and testing
+## 10. Validation and testing
 
 Перед enable:
 
@@ -168,11 +195,22 @@ Adapter не может автоматически включать опасну
 - action ids unique;
 - verification strategy exists для write actions;
 - backup destination writable для enabled backup profiles;
-- no secret is rendered into browser state.
+- no secret is rendered into browser state;
+- compatible widget exists or generic fallback is available.
+
+После enable:
+
+- registry revision changed;
+- service appears in catalog;
+- widget instance materialized;
+- actions match capability policy;
+- monitor-only service has no empty action bar;
+- disabling stops polling;
+- re-enabling restores visibility without losing history.
 
 Для custom adapter обязательны unit tests и fixture без production secrets.
 
-## 10. Discovery without unsafe assumptions
+## 11. Discovery without unsafe assumptions
 
 Panel Agent может предложить найденные endpoints или services, но не должен:
 
@@ -180,11 +218,13 @@ Panel Agent может предложить найденные endpoints или 
 - создавать arbitrary shell action;
 - включать deploy по наличию `deploy.sh`;
 - копировать весь server filesystem в backup;
-- считать repository existence доказательством active deployment.
+- считать repository existence доказательством active deployment;
+- автоматически назначать write-capability найденному widget;
+- скрывать unknown service вместо generic fallback.
 
 Discovery создаёт draft config. Владелец явно утверждает capabilities.
 
-## 11. UI behavior
+## 12. UI behavior
 
 Project card показывает только реально доступные элементы:
 
@@ -194,12 +234,41 @@ Project card показывает только реально доступные
 - backup-capable: backup status и кнопка создания backup;
 - disabled action: причина policy/dependency, а не пустая кнопка.
 
-Карточка не должна выглядеть сломанной, если у проекта нет действий.
+Карточка не выглядит сломанной, если у проекта нет действий.
 
-## 12. Versioning and migration
+Enabled service всегда доступен в Services catalog. Dashboard placement является дополнительным представлением, а не единственным способом найти service.
+
+## 13. Settings UI
+
+Обычные настройки выполняются внутри приложения:
+
+- add/edit/disable/remove project;
+- add environment/service;
+- enable/disable capability;
+- add/remove registered action;
+- select compatible widget;
+- show/hide/pin widget;
+- configure safe widget settings;
+- manage backup profile/destination;
+- preview config and card;
+- view registry revision;
+- export config without secrets.
+
+Не выносятся в обычные user settings:
+
+- arbitrary code;
+- adapter implementation;
+- raw shell command;
+- unrestricted API request;
+- privilege escalation;
+- schema-breaking architecture changes.
+
+## 14. Versioning and migration
 
 - config имеет schema version;
 - migrations выполняются Panel Agent;
-- неизвестная capability не игнорируется молча;
+- unknown capability не игнорируется молча;
 - backup config экспортируется отдельно от secrets;
-- перед несовместимой migration создаётся локальная копия config database.
+- layout/widget references migrate by stable ids;
+- before incompatible migration create local config/database backup;
+- migration must reconcile UI and report orphaned widgets/services explicitly.
