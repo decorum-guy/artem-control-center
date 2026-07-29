@@ -3,136 +3,151 @@
 Date: 2026-07-29  
 Deployment status: **not deployed**
 
-## Published work
+## Published feature work
 
-| Project | Local path | GitHub repository | Base | Feature branch | Reviewed implementation commit(s) | Draft PR | Status |
+| Project | Local path | GitHub repository | Base | Feature branch | Implementation commit | Draft PR | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Artem Control Center | `/Users/aartemida/Documents/artem-control-panel-proj/artem-control-center` | `decorum-guy/artem-control-center` | `main` (`44c3e2d`) | `feat/local-integrations-foundation` | `f4984891afdcdcf39d5b1cdf636a40173ef3c6dc`, `e8cae62ccceeb25dd00301fee9a7fd9e031c4c43` | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) | Draft; not deployed |
-| AliceTG Bot | `/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` | `decorum-guy/AliceTG_Bot` | `main` (`494e534`) | `feat/control-center-ha-timing` | `f3ea866`, `5186dc1f9d133c7092db102a8255af9200bbb63d` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) | Draft; not deployed |
-| AVALAR Website | `/Users/aartemida/Documents/AVALAR` | `decorum-guy/AVALAR` | `stage` (`540b053`) | `feat/control-center-integration` | `f814a60`, `f8cebd04d027f51d5994eb7aaff75488b9011b07`, `5e666bf` | [#1](https://github.com/decorum-guy/AVALAR/pull/1) | Draft; not deployed |
-| Home Assistant config | `/Users/aartemida/Documents/Homeassistant/HomeAssistant_Server_Config` | no Git repository | n/a | n/a | review bundle in this PR | [Control Center #14](https://github.com/decorum-guy/artem-control-center/pull/14) | Applied locally; not pushed to server |
+| Artem Control Center | `/Users/aartemida/Documents/artem-control-panel-proj/artem-control-center` | `decorum-guy/artem-control-center` | `main` | `feat/local-integrations-foundation` | `f6523bf929df9de74112a7f7e9d38b712006d210` | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) | Draft; not deployed |
+| AliceTG Bot | `/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` | `decorum-guy/AliceTG_Bot` | `main` | `feat/control-center-ha-timing` | `3bea6d85b6fa6f0876ab18030f04e4fe76a8265c` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) | Draft; not deployed |
+| AVALAR Website | `/Users/aartemida/Documents/AVALAR` | `decorum-guy/AVALAR` | `stage` | `feat/control-center-integration` | `ef7d1197fc85d8a3c5e2273044d6525d0d36e53f` | [#1](https://github.com/decorum-guy/AVALAR/pull/1) | Draft; not deployed |
+| Home Assistant config | `/Users/aartemida/Documents/Homeassistant/HomeAssistant_Server_Config` | no Git repository | n/a | n/a | mirrored in Control Center commit `f6523bf…` | [Control Center #14](https://github.com/decorum-guy/artem-control-center/pull/14) | Local non-secret files changed; server unchanged |
 | AVALAR Exchange MCP | no local clone | `decorum-guy/avalar_exchange_mcp` | `main` | none | none | none | Read-only; unchanged |
 
-## Home Assistant
+## Home Assistant package
 
-Changed local non-secret files:
+Review bundle: `integration-patches/home-assistant/`.
 
-- `config/configuration.yaml`;
-- `config/packages/coffee_control_center.yaml`;
-- `ha-push.sh`;
-- `ha-push.env.example`;
-- `DEPLOYMENT.md`.
-
-The package defines:
+Entities:
 
 - `input_number.coffee_warmup_minutes`;
 - `input_number.coffee_long_running_minutes`;
+- `input_boolean.coffee_timing_initialized`;
 - `input_datetime.coffee_last_turned_on`;
-- `binary_sensor.coffee_machine_running`;
-- `binary_sensor.coffee_machine_running_too_long`;
-- `sensor.coffee_ready_at`;
-- `sensor.coffee_timing_policy_revision`;
+- normalized running, running-too-long, ready-at and timing-revision entities;
 - stable coffee on/off and kettle boil/stop scripts.
 
-The activation automation accepts only `switch.kofemashina: off → on` and
-stores HA’s confirmed entity timestamp. Duplicate `on`, reconnect and HA
-startup do not match the trigger.
+Timing helpers and activation datetime have no permanent YAML `initial`.
+Home Assistant therefore restores their last state after restart. Exact
+`switch.kofemashina: off → on` records the activation timestamp; startup,
+`unknown/unavailable → on`, reconnect and duplicate `on` do not match.
 
-The existing `ha-push.sh` remains the operator implementation. It now has a
-read-only default `plan`, resolves its own directory and supports either SSH
-aliases or direct `user@host` values through `HA_READ_REMOTE`,
-`HA_WRITE_REMOTE` and `HA_REMOTE_ROOT`. It does not modify SSH config. The
-reviewable package and deployment/rollback instructions are in
-`integration-patches/home-assistant/`.
+`script.kettle_stop` first turns off
+`switch.chainik_podderzhanie_tepla`, then sets
+`water_heater.chainik` operation mode to `off`.
 
-Validation: package YAML parse, include-tag-aware `configuration.yaml` parse,
-entity naming and exact transition/script tests. A real container
-`check_config` is still a deployment gate; no local HA runtime/Docker daemon
-was available.
+Initialization is external and explicit: bot migration `status`, `dry-run`,
+then separately approved `apply`. It verifies both timing values before setting
+the HA marker. It is never called by HA or bot startup.
 
-Deployment: run `ha-push.sh plan`, review diffs, then separately authorize
-`ha-push.sh apply`; it backs up, uploads and checks config without automatic
-restart. Restart only in a maintenance window.
+Portable deployment uses the existing `ha-push.sh`, which resolves its own
+directory and accepts aliases or direct `HA_READ_REMOTE`, `HA_WRITE_REMOTE` and
+`HA_REMOTE_ROOT`. `plan` is read-only. `apply` backs up/uploads/checks config
+but does not restart HA.
 
-Rollback: restore the timestamped remote backup or follow
-`integration-patches/home-assistant/ROLLBACK.md`, check config, then perform an
-approved restart.
+Validation: YAML/include parsing, no-`initial` contract, marker/entity naming,
+exact transition and kettle action-order tests. Real container `check_config`
+and restart persistence remain deployment gates.
+
+Rollback: restore the timestamped configuration backup or remove the package
+and package include after config validation. Do not reset helper values merely
+when rolling back the bot.
 
 ## AliceTG Bot
 
-Timing values are read from and written to HA helpers. Telegram writes use
-`input_number.set_value` and a confirming read; HA outage never causes a local
-default write. The explicit migration is dry-run by default, refuses to
-overwrite non-default HA values, writes an idempotency marker only after
-success, and is not called at application startup.
+The bot reads and writes canonical HA helpers. Its explicit bootstrap:
 
-Health contracts:
+1. checks the durable HA initialization marker;
+2. prefers explicit legacy values, otherwise preserves configured non-default
+   HA values or uses defaults 13/60;
+3. writes only values that need initialization;
+4. verifies both values;
+5. sets the marker last.
 
-- `GET /health/live`;
+No default is written when HA is unavailable and initialized HA values are
+never overwritten. Current production runtime observed before deployment uses
+15 minutes warm-up and 60 minutes long-running warning.
+
+A managed refresh loop runs at a configurable 30-second default, with bounded
+backoff, no overlapping cycle, last confirmed revision/fetch time, stale state,
+automatic HA recovery and graceful cancellation. Revision changes reschedule
+active alerts once; unchanged revisions create no duplicates. Health endpoints
+report this state but do not drive recovery.
+
+Health contracts remain:
+
+- public-safe `GET /health/live`;
 - `GET /health/ready`;
-- protected `GET /health/details`.
+- protected sanitized `GET /health/details`.
 
-Tests: Python 3.13 compileall; seven migration/helper/outage/health tests;
-`git diff --check`.
+Validation: Python compileall and 9 tests covering helper reads/writes, outage,
+one-time initialization, preservation, recovery, stale state, revision
+reschedule, cancellation and health.
 
-Deployment: merge only after review, deploy the HA helpers first, run migration
-dry-run, apply only if its plan is correct, then restart/rebuild the bot in a
-separate approved operation.
-
-Rollback: restore the prior bot image/commit; do not delete HA helper values.
-The bot can be rolled back independently of coffee physical control.
+Rollback: restore the prior bot image/commit; retain canonical HA helper values
+and marker.
 
 ## AVALAR Website
 
-The existing local `scripts/update.sh` was found under the repository’s local
-Git exclude. The feature branch now tracks it so a fresh clone receives the
-same engine. It implements stage-to-main promotion and fixed stage/production
-deploy/restart calls through `avalar-reg`, or a portable
-`AVALAR_SSH_HOST=user@host` override.
+Shared-hosting architecture has no daemon, listener, worker or PHP environment
+metadata dependency.
 
-The feature adds:
+HTTP:
 
-- `/health/live`;
-- `/health/ready`;
-- protected `/health/details`;
-- `scripts/control-center-action.sh` with only `status`, `smoke-main`,
-  `smoke-stage` and dry-run-first `deploy-stage`.
+- public stateless `GET /health/live`;
+- public stateless `GET /health/ready`;
+- no HTTP `/health/details`.
 
-Executable Stage deploy delegates to the existing update script, applies an
-exclusive lock and cooldown, requires an external timeout utility and verifies
-Stage readiness. Main deploy, backup, rollback and arbitrary commands are not
-available.
+Ready validates required `data.json` existence/readability/JSON validity.
+Responses exclude paths, environment, raw errors, secrets and user data.
 
-Tests: PHP syntax for application files; health auth/redaction/readiness tests;
-shell syntax; JSON dry-run; arbitrary command and production-deploy rejection;
-`git diff --check`.
+SSH-only details use `scripts/control-center-status.sh` with fixed
+`status-main`, `status-stage`, `details-main` and `details-stage` operations.
+The sanitized result includes environment, commit, branch, deployment
+revision, approximate deployed time, worktree state and observation time.
 
-Deployment: review/merge to `stage`, deploy Stage separately, set sanitized
-marker environment variables, verify endpoints/smoke, then use the existing
-reviewed stage-to-main promotion process. Do not merge the feature branch
-blindly into both branches.
+`scripts/control-center-action.sh` allows only status Main/Stage, smoke
+Main/Stage and dry-run-first Stage deploy. Smoke curls live, ready and root.
+Execute mode additionally requires an explicit operator gate, lock, cooldown,
+timeout (120-second default, maximum 150) and post-deploy smoke. Main deploy,
+restart, backup, rollback and arbitrary commands are absent.
 
-Rollback: revert the Stage release through the existing operator process.
-Application-level recorded rollback remains unavailable and must be designed
-before Control Center exposes it.
+Read-only discovery found clean Main/Stage checkouts, no static marker and
+`~/avalar.sh status` at roughly 0.16 seconds. No real deploy duration was
+measured, so Stage execution remains disabled.
+
+Validation: all PHP files passed syntax checks; Bash syntax, stateless health,
+status JSON/schema/redaction, Main/Stage smoke, dry-run, allow-list, production
+deploy rejection and timeout-bound tests passed.
+
+Deployment: review/merge only through normal project flow, deploy Stage in a
+separate approved window, then propagate to Main. No deployment occurred.
+
+Rollback: no verified application rollback exists; do not register one.
 
 ## Control Center runtime
 
-Implemented read-only foundations:
+- HA REST initial snapshot and WebSocket reconnect remain read-only.
+- HA normalization requires the initialization marker and never fabricates an
+  activation timestamp or progress.
+- HTTP integrations poll independently at a configurable 30-second default.
+- Last-known services transition `live → cached → stale → unavailable` and
+  recover without Panel Agent restart.
+- Optional AVALAR SSH details poll on a separate 180-second default cadence.
+- SSH uses a fixed alias/script/operation list, subprocess argument array,
+  host-key verification, timeout, bounded output, strict sanitized JSON and
+  cached/stale details; it is disabled by default.
+- AVALAR Main priority 90 precedes Stage priority 80. Main has no deploy
+  capability. Stage deploy exists only as a disabled descriptor.
+- Fixtures remain isolated from read-only/production snapshots.
 
-- HA REST initial state plus WebSocket state subscription/reconnect;
-- allow-listed last-known HA cache and stale timeout;
-- canonical coffee/kettle/helper validation and normalization;
-- Alice health adapter independent from coffee authority;
-- separate AVALAR Main/Stage health/details mapping;
-- source modes: `live`, `cached`, `fixture`, `stale`, `unavailable`;
-- AVALAR Main before Stage in registry priority;
-- disabled registered actions only for handlers that now have a real wrapper:
-  Main smoke, Stage smoke and Stage deploy.
+Validation: ESLint, TypeScript, 7 frontend unit tests, 18 FastAPI/adapter tests,
+production build, HA patch tests, YAML/JSON validation and 8 Playwright
+Chromium tests.
 
-There is no action execution endpoint. All action descriptors remain disabled.
-Production/read-only snapshots never include fixtures.
+## Runtime baseline
 
-Validation: ESLint, TypeScript, seven frontend unit tests, eight FastAPI/adapter
-tests, production build, HA patch tests, YAML/JSON validation and Playwright
-Chromium.
+`docs/discovery/COFFEE_RUNTIME_BASELINE.md` records one sanitized read-only
+snapshot. HA and bot activation timestamps matched exactly. Warm-up was 15
+minutes and the long-running warning was 60 minutes. The iPhone warm-up
+delivery flag became true after the deadline; no 60-minute warning was awaited.
+No identifiers or secrets are included.
