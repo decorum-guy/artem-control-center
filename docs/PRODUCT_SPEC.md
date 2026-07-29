@@ -6,14 +6,14 @@ Artem Control Center превращает Samsung Notebook 9 Pro 13" в перс
 
 - информационный экран на столе;
 - панель умного дома;
-- центр мониторинга личных и рабочих сервисов;
+- автоматически формируемый центр мониторинга личных и рабочих сервисов;
 - capability-based control plane;
 - календарь и список задач;
 - менеджер резервных копий;
 - безопасный launcher автоматизаций и deployments;
 - обычный ноутбук для более длительных действий.
 
-Первый MVP не должен быть «технически работающим, но некрасивым». Design system, day/night themes, touch feedback и signature animations входят в первую вертикальную версию.
+Первый MVP не должен быть «технически работающим, но некрасивым». Design system, day/night themes, touch feedback, coffee-machine visualization и signature animations входят в первую вертикальную версию.
 
 ## 2. Host usage modes
 
@@ -27,7 +27,7 @@ Artem Control Center превращает Samsung Notebook 9 Pro 13" в перс
 - выбранная weather location, текущая погода и краткий прогноз;
 - ближайшее событие календаря;
 - ближайшие/просроченные задачи;
-- состояние кофемашины;
+- обязательный live coffee-machine widget;
 - агрегированный статус сервисов;
 - freshness последних критичных backups;
 - питание, батарея и сеть;
@@ -49,7 +49,8 @@ Artem Control Center превращает Samsung Notebook 9 Pro 13" в перс
 - быстрые действия;
 - подробные состояния;
 - переходы между Home, Services, Calendar, Tasks, Automations, Backups, Apps и Settings;
-- actions строятся динамически по capabilities проекта.
+- actions строятся динамически по capabilities проекта;
+- widgets строятся через Widget Registry, а не hard-coded page lists.
 
 ### Desktop mode
 
@@ -85,6 +86,7 @@ Artem Control Center превращает Samsung Notebook 9 Pro 13" в перс
 - часы и дата;
 - next event;
 - focus tasks;
+- обязательный coffee-machine widget;
 - summary cards Home/Services/Backups;
 - active incidents;
 - quick actions.
@@ -97,25 +99,30 @@ Artem Control Center превращает Samsung Notebook 9 Pro 13" в перс
 - розетки;
 - климат;
 - сцены;
-- локально доступные offline actions;
+- локально доступные Edge actions;
 - доступность remote HA и local edge.
 
 ### Services
 
-Для каждого project/environment/service:
+Services — автоматически сформированный полный каталог enabled projects/environments/services.
+
+Для каждого service:
 
 - status;
 - latency;
 - last successful check;
-- version/commit where available;
+- version/commit/config revision where available;
 - dependencies;
 - incident history;
 - enabled capabilities;
 - allowed actions, которых может быть ноль;
 - backup state where enabled;
-- audit history.
+- audit history;
+- generic или specialized widget presentation.
 
 Monitor-only сервис не показывает пустую action bar и считается полноценным supported project.
+
+Новый enabled service автоматически появляется в Services. Ручное дописывание его ID во frontend запрещено.
 
 ### Calendar
 
@@ -182,19 +189,34 @@ Monitor-only сервис не показывает пустую action bar и �
 
 ### Settings
 
+Settings предоставляет обычные пользовательские настройки без редактирования кода:
+
 - add/edit/disable/remove project;
 - add environments/services;
 - enable/disable capabilities;
 - configure actions independently;
 - configure backup profiles/destinations;
 - manage saved weather locations;
-- theme and ambient preferences;
+- enable/disable/show/hide/pin widgets;
+- choose compatible generic/specialized widget;
+- edit widget-safe settings;
+- preview dashboard/layout;
+- manage theme and ambient preferences;
 - integration credentials through secure backend flow;
 - export config without secrets.
 
-## 4. Project onboarding
+Не выносятся в Settings:
 
-Подключение нового проекта не требует фиксированного набора кнопок и по возможности не требует изменений dashboard core.
+- arbitrary code;
+- adapter implementation;
+- raw shell commands;
+- unrestricted network calls;
+- privilege escalation;
+- schema-breaking architecture changes.
+
+## 4. Project onboarding and automatic UI appearance
+
+Подключение нового проекта не требует фиксированного набора кнопок и не требует изменений dashboard core.
 
 Capabilities:
 
@@ -218,9 +240,114 @@ Capabilities:
 - temporarily disabled;
 - split by stage/main/production environments.
 
-Frontend строит доступные controls по server-provided schema. Подробнее: `docs/PROJECT_ONBOARDING.md`.
+После enable:
 
-## 5. Weather
+1. Panel Agent validates config.
+2. Registry revision changes.
+3. Frontend receives complete catalog snapshot/event.
+4. Widget Resolver chooses a specialized widget.
+5. If none exists, Generic Service Widget is mandatory.
+6. Service appears in Services and `New items`.
+7. UI test confirms visibility.
+
+Onboarding is not successful while a service exists only in backend configuration.
+
+Подробнее: `docs/PROJECT_ONBOARDING.md` и `docs/WIDGET_SYSTEM.md`.
+
+## 5. Widget platform
+
+### MVP
+
+- Widget Registry;
+- widget manifest/data/settings contract;
+- Generic Service Widget;
+- automatic materialization and layout reconciliation;
+- mandatory specialized coffee widget;
+- weather, services, backups, calendar/tasks and system widgets;
+- stable default layouts;
+- safe show/hide/pin where Settings scope permits.
+
+### Post-MVP layouts
+
+User can:
+
+- drag widgets;
+- resize within widget limits;
+- move between pages/sections;
+- pin/unpin;
+- hide without disabling project;
+- reset layout;
+- create named layouts;
+- use separate ambient/control/handheld layouts.
+
+A new widget must never overwrite or silently displace existing layout content. It goes to a deterministic free location or `New items` inbox.
+
+### Custom coded widgets
+
+Codex creates widgets through one template containing manifest, typed contract, settings schema, fixtures and tests. A custom widget is registered globally and is not manually imported into an individual page.
+
+### No-code user widgets — later phase
+
+Planned presets:
+
+- link;
+- HTTP/status check;
+- metric/value;
+- text/note;
+- clock/countdown;
+- grouped services;
+- image/icon launcher;
+- registered action launcher;
+- simple sanitized JSON field mapping.
+
+Possible user settings include link, registered source, refresh interval, timeout, formatting, thresholds, icon, date/time and layout size.
+
+No arbitrary JavaScript, HTML, shell or direct browser fetch is allowed.
+
+## 6. Coffee Machine Widget — mandatory P0 MVP
+
+The coffee-machine widget is not optional and is not postponed after MVP.
+
+States:
+
+- off;
+- turning on;
+- warming;
+- ready;
+- running;
+- running too long;
+- turning off;
+- unavailable;
+- stale;
+- later Edge fallback where verified.
+
+Shows:
+
+- source authority;
+- state and freshness;
+- start time;
+- real warm-up progress or known duration-based progress;
+- remaining time;
+- ready status;
+- running duration;
+- long-running warning;
+- command lifecycle.
+
+Behavior:
+
+- animated real progress, never invented;
+- distinct stage/color transitions rather than meaningless continuous gradient;
+- restrained steam/heat visualization;
+- calm ready transition;
+- visible long-running warning;
+- turn on/off and detail actions;
+- duplicate `turn_on` does not restart timers;
+- success only after source state verification;
+- reduced-motion and low-performance variants;
+- deterministic Mac fixtures for every state;
+- final touch/performance validation on Windows.
+
+## 7. Weather
 
 Погода обязательна в MVP и поддерживает несколько сохранённых локаций.
 
@@ -237,7 +364,7 @@ Frontend строит доступные controls по server-provided schema. �
 - изменить порядок locations;
 - удалить location без удаления weather history других мест.
 
-Geocoding обязан показывать нормализованный адрес и координаты до сохранения. Прогноз для названного района may proxy ближайшую weather grid point и не является измерением именно у конкретного дома; UI показывает выбранную точку и provider freshness.
+Geocoding показывает нормализованный адрес и координаты до сохранения. Прогноз района может представлять ближайшую weather grid point; UI показывает выбранную точку и provider freshness.
 
 ### Data
 
@@ -252,17 +379,9 @@ Geocoding обязан показывать нормализованный ад�
 - cached last-known response;
 - explicit stale state.
 
-Источник погоды и geocoder сменные adapters. Секреты поставщика хранятся только в Panel Agent.
+Источник погоды и geocoder — сменные adapters. Cache изолирован по location.
 
-### UI
-
-- location switcher на Overview;
-- swipe и visible dropdown/chips;
-- weather ambience ограничена по CPU/GPU;
-- day/night theme может учитывать sunrise/sunset выбранной default location;
-- provider outage не блокирует UI и не смешивает cached data разных locations.
-
-## 6. Day and night themes
+## 8. Day and night themes
 
 Обязательны две полноценные темы, а не простая инверсия цветов.
 
@@ -290,11 +409,11 @@ Geocoding обязан показывать нормализованный ад�
 - сохранение выбора;
 - мягкая анимированная смена токенов темы.
 
-## 7. Animation quality bar
+## 9. Animation quality bar
 
 Красивые анимации обязательны уже для MVP.
 
-Первый runnable vertical slice должен содержать:
+Первый runnable vertical slice содержит:
 
 - touch press/release feedback;
 - shared-layout Overview card → detail;
@@ -305,16 +424,17 @@ Geocoding обязан показывать нормализованный ад�
 - weather ambience;
 - coffee warming/ready transitions;
 - service incident/restart timeline;
+- backup lifecycle;
 - reduced-motion mode;
 - automatic effects reduction при слабом FPS/high load.
 
 Fake progress запрещён. Skeleton используется только при полном отсутствии cached data.
 
-## 8. Backups
+## 10. Backups
 
 Backup capability независима от deploy/restart.
 
-Manual backup flow:
+Manual flow:
 
 ```text
 select profile
@@ -329,47 +449,36 @@ select profile
 → success | partial | failed
 ```
 
-`partial` означает, что не все destinations успешны.
+Поддерживаются local SSD, optional cloud drive, future external HDD/SSD, retention, quotas, encryption and restore-test status.
 
-Поддерживаются:
-
-- local SSD;
-- optional cloud drive;
-- future external HDD/SSD;
-- per-project retention;
-- quotas/free-space checks;
-- encrypted confidential backups;
-- restore-test status.
-
-Подробнее: `docs/BACKUP_STRATEGY.md`.
-
-## 9. Home Assistant role
+## 11. Home Assistant role — fixed
 
 - Home Assistant сам по себе сейчас не имеет отдельного Git repository в проекте.
-- `decorum-guy/AliceTG_Bot` — Git repository Telegram-бота, интегрированного в HA stack.
+- `decorum-guy/AliceTG_Bot` — repository Telegram-бота в HA stack.
 - Remote HA остаётся authoritative в первом этапе.
-- Laptop может выполнять limited local edge actions и хранить backups/standby.
-- Laptop не принимается как единственный permanent HA primary из-за мобильности, старого железа, single-disk failure domain и необходимости иногда использовать его как обычный ноутбук.
-- Предпочтительная долгосрочная схема — отдельный компактный local server для HA, а ноутбук остаётся UI/edge/backup node.
+- Samsung laptop **никогда не запускает Home Assistant**: ни primary, ни standby, ни test instance.
+- Laptop выполняет только Control Center, monitoring, backups и отдельно проверенные local Edge actions.
+- Предпочтительная долгосрочная схема — отдельный compact local server для HA.
+- Restore tests выполняются на отдельном approved host, не на panel laptop.
 
-## 10. AVALAR deployment
+## 12. AVALAR deployment
 
-Для AVALAR Website stage должна быть отдельная registered deploy action, эквивалентная существующей операторской процедуре:
+Для AVALAR Website stage должна быть отдельная registered deploy action, эквивалентная:
 
 ```text
 avalar-reg ./deploy.sh stage
 ```
 
-Control Center не передаёт произвольный shell. Action запускает только заранее зарегистрированный handler, показывает target/ref, выполняет prechecks, deploy, health/browser verification и audit. Main deployment/rollback подключаются отдельно и не выводятся автоматически из stage capability.
+Control Center не передаёт произвольный shell. Action запускает зарегистрированный handler, показывает target/ref, выполняет prechecks, deploy, health/browser verification и audit. Main deployment/rollback подключаются отдельно.
 
-## 11. Security and safety UX
+## 13. Security and safety UX
 
 Классы действий:
 
 - `instant`: открытие экрана, refresh, safe local toggle;
 - `confirm`: действия с умеренными последствиями;
 - `hold`: restart, backup, stage deploy;
-- `double-confirm`: main deploy, firewall/allow-list, restore, HA failover, shutdown.
+- `double-confirm`: main deploy, firewall/allow-list, restore, HA migration, shutdown.
 
 Каждое действие показывает фактический результат, а не только успешную отправку запроса.
 
@@ -380,24 +489,46 @@ Security baseline:
 - separate kiosk profile/account;
 - no secrets in frontend/Git;
 - firewall and security updates;
-- scoped tokens;
-- restricted host agents;
-- audit and redaction;
-- cloud backup encryption for sensitive profiles.
+- widget/user preset network access only through protected Panel Agent adapters.
 
-Подробнее: `docs/SECURITY_MODEL.md`.
+## 14. macOS development mode
 
-## 12. Non-functional requirements
+The UI and most backend behavior must run on the owner's Mac for development.
 
-- полноценная работа интерфейса при потере Internet;
-- локальные assets без обязательных CDN;
-- восстановление kiosk после падения;
-- cold start после входа без ручных действий;
-- низкая фоновая нагрузка;
-- Windows first и Linux target;
-- отсутствие production secrets во frontend bundle;
-- capability-based configuration;
-- adapter isolation: failure одного project не роняет dashboard;
-- backup/restore verification;
-- audit управляющих действий;
-- safe mode с read-only cached UI.
+Mac supports:
+
+- React/Vite UI;
+- ordinary Chromium/Chrome window;
+- simulated kiosk viewport;
+- Panel Agent fixtures/read-only modes;
+- widget gallery;
+- coffee fixtures;
+- settings/layout testing;
+- Playwright Chromium;
+- screenshot and accessibility tests;
+- automatic service materialization tests.
+
+Mac does not prove:
+
+- Samsung touch behavior;
+- Windows kiosk/autostart;
+- BlueStacks loyalty app;
+- power/lid/thermal behavior;
+- real Windows privileged helper.
+
+After Mac tests pass, Codex supplies an exact Windows validation checklist for hardware-dependent changes.
+
+## 15. Non-functional requirements
+
+- полноценная работа UI shell при потере Internet;
+- local functions do not depend on external CDN;
+- UI assets supplied locally;
+- kiosk recovery after crash;
+- cold start without manual actions;
+- low background load;
+- automatic registry/UI reconciliation;
+- widget failure isolation;
+- support macOS development, Windows-first production and future Linux target;
+- no production secrets in frontend bundle;
+- complete audit of control actions;
+- Settings covers ordinary configuration without exposing arbitrary code.
