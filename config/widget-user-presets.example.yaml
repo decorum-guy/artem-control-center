@@ -1,0 +1,109 @@
+version: 1
+
+# Planned for post-MVP/no-code phase. These presets are declarative and disabled
+# until the safe widget builder and backend source validation are implemented.
+
+enabled: false
+planned_phase: post_mvp_late
+
+presets:
+  - id: link-tile
+    title: Ссылка
+    fields:
+      - key: title
+        type: string
+        required: true
+      - key: url
+        type: url
+        required: true
+      - key: icon
+        type: icon
+      - key: open_mode
+        type: enum
+        values: [same_window, controlled_external]
+    network_mode: none
+
+  - id: http-status
+    title: Проверка адреса
+    fields:
+      - key: title
+        type: string
+        required: true
+      - key: source_ref
+        type: registered_endpoint
+        required: true
+      - key: refresh_seconds
+        type: integer
+        min: 30
+        max: 86400
+        default: 300
+      - key: expected_status
+        type: integer
+        default: 200
+      - key: open_url
+        type: url
+    network_mode: panel_agent_only
+
+  - id: metric
+    title: Значение
+    fields:
+      - key: title
+        type: string
+        required: true
+      - key: source_ref
+        type: registered_data_source
+        required: true
+      - key: field_path
+        type: safe_json_path
+        required: true
+      - key: unit
+        type: string
+      - key: decimals
+        type: integer
+        min: 0
+        max: 4
+      - key: refresh_seconds
+        type: integer
+        min: 30
+        max: 86400
+    network_mode: panel_agent_only
+
+  - id: countdown
+    title: Таймер или дата
+    fields:
+      - key: title
+        type: string
+        required: true
+      - key: target_at
+        type: datetime
+        required: true
+      - key: completed_text
+        type: string
+      - key: repeat_rule
+        type: safe_schedule
+    network_mode: none
+
+  - id: registered-action
+    title: Быстрое действие
+    fields:
+      - key: title
+        type: string
+        required: true
+      - key: action_id
+        type: registered_action
+        required: true
+      - key: icon
+        type: icon
+    network_mode: panel_agent_only
+    restrictions:
+      arbitrary_action_id: false
+      preserve_action_policy: true
+
+security:
+  arbitrary_javascript: false
+  arbitrary_html: false
+  arbitrary_shell: false
+  direct_browser_fetch: false
+  ssrf_protection: required
+  registered_sources_only: true
+  widget_error_isolation: required
