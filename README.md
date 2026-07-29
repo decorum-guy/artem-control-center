@@ -38,8 +38,10 @@
 - [`docs/HOME_ASSISTANT_RESILIENCE.md`](docs/HOME_ASSISTANT_RESILIENCE.md) — локальная работа и резервный HA.
 - [`docs/UI_MOTION_SPEC.md`](docs/UI_MOTION_SPEC.md) — темы, анимации и touch-паттерны.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — порядок реализации.
+- [`docs/REFERENCES.md`](docs/REFERENCES.md) — официальные источники для интеграций и границы подтверждённых возможностей.
 - [`config/services.example.yaml`](config/services.example.yaml) — декларативный реестр сервисов.
 - [`config/actions.example.yaml`](config/actions.example.yaml) — декларативный allow-list действий.
+- [GitHub Issues](../../issues) — исполнимый backlog по реализации, интеграциям, health и миграции ОС.
 
 ## Базовый принцип
 
