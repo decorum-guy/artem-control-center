@@ -1,0 +1,49 @@
+diff --git a/ha-push.sh b/ha-push.sh
+--- a/ha-push.sh
++++ b/ha-push.sh
+@@
+-#!/bin/bash
++#!/usr/bin/env bash
+ 
+ set -euo pipefail
+ 
+-READ_REMOTE="ha-vps"
+-WRITE_REMOTE="ha-vps-root"
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++cd "$SCRIPT_DIR"
+ 
+-REMOTE_ROOT="/home/codex/homeassistant"
++READ_REMOTE="${HA_READ_REMOTE:-ha-vps}"
++WRITE_REMOTE="${HA_WRITE_REMOTE:-ha-vps-root}"
++REMOTE_ROOT="${HA_REMOTE_ROOT:-/home/codex/homeassistant}"
+ REMOTE_CONFIG="$REMOTE_ROOT/config"
+ REMOTE_BOT="$REMOTE_ROOT/TG_Alisa_Assistant_Bot"
++MODE="${1:-plan}"
+@@
++validate_settings() {
++  # Reject shell metacharacters in connection targets and remote root.
++  # Require ssh/scp/diff/mktemp and rsync when packages are present.
++}
+@@
++# Supported modes:
++#   plan    read-only diff and rsync dry-run (default)
++#   status  read-only SSH/docker compose status
++#   apply   explicit YES, backup, upload and check_config; no auto restart
++#   restart explicit legacy post-action menu
++#
++# Unknown modes exit 64. SSH aliases are optional; direct user@host targets
++# work through HA_READ_REMOTE and HA_WRITE_REMOTE.
+@@
++if [ "$MODE" = "plan" ]; then
++  line "Read-only plan complete"
++  echo "No files uploaded, no remote backup created and no service restarted."
++  echo "To apply later: ./ha-push.sh apply"
++  exit 0
++fi
+ 
+ line "Upload confirmation"
+
+This compact review diff documents the portability/safety behavior added to the
+existing local operator script. The complete local script remains at
+`HomeAssistant_Server_Config/ha-push.sh`; it was syntax checked but no remote
+mode was executed.

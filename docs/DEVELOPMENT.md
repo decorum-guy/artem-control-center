@@ -183,6 +183,27 @@ On macOS:
 - production tokens are not required for UI work;
 - fixtures cover healthy, degraded, stale, offline, incident and action lifecycle states.
 
+Read-only integration environment variables are inherited by `npm run
+dev:read-only`:
+
+```text
+PANEL_HA_URL
+PANEL_HA_TOKEN
+PANEL_HA_STALE_AFTER_SECONDS
+PANEL_STATE_CACHE_PATH
+PANEL_ALICE_HEALTH_URL
+PANEL_ALICE_DETAILS_TOKEN
+PANEL_AVALAR_MAIN_URL
+PANEL_AVALAR_STAGE_URL
+PANEL_AVALAR_DETAILS_TOKEN
+```
+
+Set `PANEL_STATE_CACHE_PATH` to an ignored project path or the parent workspace
+`.cache/`; the adapter stores only allow-listed HA state fields and never a
+token. `PANEL_WRITES_ENABLED` defaults to false and there is no production
+action endpoint in this branch. Fixtures are never merged into a read-only
+snapshot.
+
 The development gallery visibly identifies non-production mode. Ordinary user
 routes do not expose development mode or fixture controls.
 

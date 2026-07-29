@@ -143,13 +143,13 @@ Monitor separately:
 
 Rules:
 
-- coffee widget reads only the safe read-only timing-policy contract, never bot
-  physical state;
+- coffee widget reads canonical state and timing helpers from HA, never bot
+  physical state or bot-local timing defaults;
 - coffee commands target HA scripts/services;
 - bot outage does not block coffee state when HA is healthy;
-- fresh cached timing policy remains usable with timestamp; stale/missing policy
-  removes progress but leaves HA state visible;
-- bot policy cannot compensate for unavailable HA state.
+- bot outage does not remove current timing while HA helpers are healthy;
+- cached HA timing remains usable only with timestamp/stale state;
+- cached timing cannot compensate for unavailable HA physical state.
 
 ## 9. Local Edge Controller
 
@@ -262,8 +262,8 @@ Disable local Edge actions and show diagnostics.
 
 1. Keep remote HA authoritative.
 2. Read coffee and kettle directly from HA.
-3. Build mandatory coffee widget from HA device/activation state plus the
-   separate read-only bot timing policy.
+3. Build mandatory coffee widget from HA device/activation state plus canonical
+   HA timing helpers.
 4. Add kettle with simpler HA device presentation.
 5. Monitor AliceTG Bot separately.
 6. Build verified HA backups.

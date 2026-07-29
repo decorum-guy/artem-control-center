@@ -1,0 +1,15 @@
+# Rollback
+
+Rollback is intentionally a configuration-only maintenance operation:
+
+1. Stop any pending Control Center or bot timing-helper migration.
+2. Remove `config/packages/coffee_control_center.yaml`.
+3. Remove the `homeassistant.packages` include only when it was added solely for
+   this package and no other packages use it.
+4. Run Home Assistant Configuration Check.
+5. Restart Home Assistant only in an approved maintenance window.
+6. Restore the previous `configuration.yaml` backup if validation fails.
+
+Removing the package removes the canonical helper entities and stable scripts.
+It does not switch the coffee machine or kettle and it must not be coupled to a
+device command.

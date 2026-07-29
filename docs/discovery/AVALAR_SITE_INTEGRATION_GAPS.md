@@ -4,9 +4,21 @@ Discovery date: 2026-07-29
 Sources: `/Users/aartemida/Documents/AVALAR` and read-only SSH alias
 `avalar-reg`  
 Branch inspected: `stage` at `540b053f8ee8ce00239211279554869cd2a0bb6c`  
-Mode: read-only
+Initial mode: read-only discovery
 
-All items below are `NOT APPLIED — READ-ONLY DISCOVERY`.
+## 2026-07-29 implementation follow-up
+
+After explicit authorization, application live/ready/protected-details
+endpoints and an allow-listed machine wrapper were implemented on
+`feat/control-center-integration` and published as Draft PR
+`decorum-guy/AVALAR#1`. The wrapper delegates executable Stage deployment to
+the existing local `scripts/update.sh`; no deployment, restart, SSH write,
+backup or rollback was performed. Backup and rollback remain unavailable
+because no verified implementation exists.
+
+The gap table below is the original discovery record. Implemented rows are no
+longer unresolved source gaps, but deployment-marker, backup and rollback work
+remains open.
 
 ## Verified current model
 

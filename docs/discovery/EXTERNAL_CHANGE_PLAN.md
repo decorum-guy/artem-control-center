@@ -1,6 +1,18 @@
 # External Change Plan
 
-Every item is `NOT APPLIED — READ-ONLY DISCOVERY`.
+## Implementation status update
+
+- Home Assistant canonical package: **APPLIED LOCALLY, NOT DEPLOYED**. Review
+  bundle: `integration-patches/home-assistant/`.
+- AliceTG Bot timing migration and health: **IMPLEMENTED ON FEATURE BRANCH,
+  NOT DEPLOYED**, Draft PR `decorum-guy/AliceTG_Bot#1`.
+- AVALAR application health and safe wrapper: **IMPLEMENTED ON FEATURE BRANCH,
+  NOT DEPLOYED**, Draft PR `decorum-guy/AVALAR#1`.
+- AVALAR Exchange MCP: **NOT CHANGED** in this session.
+
+The tables below preserve the original discovery backlog. Items satisfied by
+the feature branches above are no longer current unresolved gaps; deployment
+and operational acceptance remain separate work.
 
 ## Home Assistant
 
@@ -20,16 +32,17 @@ no direct device bypass, no restore on the panel laptop.
 ## AliceTG Bot
 
 Repository/folder:
-`/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` (read-only)
+`/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot`
 
 | Phase | Required change | Why Control Center needs it | Contract | Acceptance tests |
 | --- | --- | --- | --- | --- |
 | Prototype | Authenticated read-only `GET /api/v1/coffee/timing-policy` | Users change warm-up and long-running values through Telegram; frontend constants would drift | `{warmup_duration_seconds, long_running_threshold_seconds, updated_at, revision}` only | current values, changed values, auth failure, schema bounds, no secret/config leakage |
 | Prototype | Cache/freshness semantics | Coffee state must survive bot outage without pretending timing is current | fetched time, source revision, stale threshold, last-known policy | bot down fresh cache, bot down stale cache, missing cache, restart |
 
-Security: endpoint must expose no Telegram/HA tokens, chat IDs, webhook URLs,
-arbitrary bot state, or write capability. Coffee on/off remains exclusively a
-Home Assistant action. `NOT APPLIED — READ-ONLY DISCOVERY`.
+The former read-only bot timing endpoint proposal is superseded by canonical HA
+helpers. The implemented bot health details expose only helper connectivity,
+not timing values or secrets. Coffee on/off remains exclusively a Home
+Assistant action.
 
 ## AVALAR Website
 

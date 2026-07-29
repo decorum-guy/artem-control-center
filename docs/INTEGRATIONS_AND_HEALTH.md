@@ -170,10 +170,10 @@ Verified behavior from repository:
 Required health additions:
 
 - `/health/live` — process/event loop;
-- `/health/ready` — Telegram mode, HA API, required state files;
-- protected `/health/details` — polling errors, timer scheduler, storage, PushWard error summary;
-- authenticated read-only `GET /api/v1/coffee/timing-policy`, exposing only
-  warm-up duration, long-running threshold, updated time, and revision;
+- `/health/ready` — Telegram transport, HA API and canonical timing helpers;
+- protected `/health/details` — sanitized HA/timing-helper readiness, version,
+  commit and observation time;
+- Telegram timing changes use `input_number.set_value` and confirming HA reads;
 - idempotency support for control requests.
 
 Actions:

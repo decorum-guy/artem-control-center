@@ -2,6 +2,24 @@
 
 Discovery date: 2026-07-29
 
+## Implementation follow-up
+
+This report preserves the initial state at discovery time. Since then:
+
+- the Control Center foundation was merged to `main` at `44c3e2d`;
+- canonical HA coffee helpers/scripts were added locally and packaged for
+  review, without HA reload/restart;
+- AliceTG Bot now reads/writes verified HA timing helpers on
+  `feat/control-center-ha-timing` (Draft PR #1);
+- AVALAR health and allow-listed wrapper contracts are on
+  `feat/control-center-integration` (Draft PR #1, base `stage`);
+- Panel Agent now contains REST/WebSocket HA, Alice health and separate AVALAR
+  Main/Stage read-only adapters;
+- HA timing policy, not bot-local state, is the canonical coffee timing source.
+
+The discovery statements below are historical facts from before these changes,
+not current unresolved gaps.
+
 ## Verified from writable repository
 
 - Repository root is

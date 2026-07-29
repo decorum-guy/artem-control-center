@@ -189,18 +189,17 @@ docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md
 - normalized coffee-state mapping;
 - normalized kettle mapping;
 - источник last activation;
-- отдельные источники HA activation time и bot timing policy;
+- canonical HA activation time и HA timing helpers;
 - safety logic;
 - gaps/unknowns;
 - required HA changes — только описание, без применения;
 - confidence level для каждого вывода;
 - явное подтверждение, что внешняя папка не менялась.
 
-Coffee widget должен читать physical state через HA WebSocket/REST adapter и
-timing policy через отдельный authenticated read-only bot contract. При
-недоступном боте HA state продолжает отображаться; fresh cached policy допустима
-с timestamp, stale/missing policy убирает percentage. Bot values не могут
-компенсировать недоступный HA.
+Coffee widget должен читать physical state и timing helpers через HA
+WebSocket/REST adapter. При недоступном боте HA state и timing продолжают
+отображаться; fresh cached HA policy допустима с timestamp, stale/missing HA
+policy убирает percentage. Bot state не может компенсировать недоступный HA.
 
 ## 6. AVALAR website discovery
 
