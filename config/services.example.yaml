@@ -55,12 +55,19 @@ services:
     name: Кофемашина
     category: home
     environment: production
-    source: home-assistant-and-alice-tg-bot
+    authority: home-assistant
+    priority: p0
+    discovery_source: /Users/aartemida/Documents/Homeassistant
     checks:
       state:
-        type: coffee_state_aggregator
-        ha_url_env: HA_BASE_URL
-        alice_bot_url_env: ALICE_TG_BOT_COFFEE_STATE_URL
+        type: home_assistant_coffee
+        base_url_env: HA_BASE_URL
+        token_env: HA_MONITORING_TOKEN
+        entity_env: HA_COFFEE_ENTITY_ID
+        last_turned_on_entity_env: HA_COFFEE_LAST_TURNED_ON_ENTITY_ID
+        warmup_started_entity_env: HA_COFFEE_WARMUP_STARTED_ENTITY_ID
+        warmup_duration_entity_env: HA_COFFEE_WARMUP_DURATION_ENTITY_ID
+        note: Exact entity/helper mapping must be discovered from the read-only HA folder and documented before real integration.
     actions:
       - home.coffee.turn_on
       - home.coffee.turn_off
@@ -69,11 +76,31 @@ services:
       pin_to_overview: true
       priority: 100
 
+  - id: kettle
+    name: Чайник
+    category: home
+    environment: production
+    authority: home-assistant
+    priority: p1
+    discovery_source: /Users/aartemida/Documents/Homeassistant
+    checks:
+      state:
+        type: home_assistant_device
+        base_url_env: HA_BASE_URL
+        token_env: HA_MONITORING_TOKEN
+        entity_env: HA_KETTLE_ENTITY_ID
+    actions:
+      - home.kettle.turn_on
+      - home.kettle.turn_off
+    presentation:
+      widget: core.generic-home-device
+
   - id: alice-tg-bot
     name: AliceTG Bot
     category: home
     environment: production
     repository: decorum-guy/AliceTG_Bot
+    note: Separate HA-stack service; not the authoritative coffee or kettle state source.
     checks:
       live:
         type: http
