@@ -12,6 +12,8 @@ class IntegrationSettings:
     state_cache_path: str = ""
     alice_health_url: str = ""
     alice_details_token: str = ""
+    alice_base_url: str = ""
+    alice_control_center_token: str = ""
     avalar_main_url: str = ""
     avalar_stage_url: str = ""
     http_refresh_seconds: int = 30
@@ -26,6 +28,9 @@ class IntegrationSettings:
     avalar_ssh_timeout_seconds: int = 15
     avalar_ssh_output_limit_bytes: int = 32768
     writes_enabled: bool = False
+    coffee_timing_writes_enabled: bool = False
+    coffee_notification_writes_enabled: bool = False
+    coffee_actions_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> "IntegrationSettings":
@@ -39,6 +44,11 @@ class IntegrationSettings:
             state_cache_path=os.getenv("PANEL_STATE_CACHE_PATH", ""),
             alice_health_url=os.getenv("PANEL_ALICE_HEALTH_URL", "").rstrip("/"),
             alice_details_token=os.getenv("PANEL_ALICE_DETAILS_TOKEN", ""),
+            alice_base_url=os.getenv("PANEL_ALICE_BASE_URL", "").rstrip("/"),
+            alice_control_center_token=os.getenv(
+                "PANEL_ALICE_CONTROL_CENTER_TOKEN",
+                "",
+            ),
             avalar_main_url=os.getenv("PANEL_AVALAR_MAIN_URL", "").rstrip("/"),
             avalar_stage_url=os.getenv("PANEL_AVALAR_STAGE_URL", "").rstrip("/"),
             http_refresh_seconds=max(
@@ -80,6 +90,18 @@ class IntegrationSettings:
                 int(os.getenv("PANEL_AVALAR_SSH_OUTPUT_LIMIT_BYTES", "32768")),
             ),
             writes_enabled=_bool_env("PANEL_WRITES_ENABLED", False),
+            coffee_timing_writes_enabled=_bool_env(
+                "PANEL_COFFEE_TIMING_WRITES_ENABLED",
+                False,
+            ),
+            coffee_notification_writes_enabled=_bool_env(
+                "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED",
+                False,
+            ),
+            coffee_actions_enabled=_bool_env(
+                "PANEL_COFFEE_ACTIONS_ENABLED",
+                False,
+            ),
         )
 
 

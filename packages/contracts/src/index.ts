@@ -112,6 +112,47 @@ export interface DashboardSnapshot {
   services: ServiceSnapshot[];
 }
 
+export interface CoffeeTimingSettings {
+  schemaVersion: 1;
+  source: "home-assistant";
+  transport: "alice-tg-bot";
+  revision: string;
+  observedAt: string;
+  warmupMinutes: number;
+  longRunningMinutes: number;
+  sourceMode: SourceMode;
+  writesEnabled: boolean;
+}
+
+export interface CoffeeNotificationEventSettings {
+  enabled: boolean;
+  channels: {
+    telegram: boolean;
+    iphone: boolean;
+  };
+}
+
+export interface CoffeeNotificationSettings {
+  schemaVersion: 1;
+  source: "alice-tg-bot";
+  revision: string;
+  updatedAt: string | null;
+  warmup: CoffeeNotificationEventSettings;
+  longRunning: CoffeeNotificationEventSettings;
+  sourceMode: SourceMode;
+  writesEnabled: boolean;
+}
+
+export interface CoffeeActionResponse {
+  schemaVersion: 1;
+  authority: "home-assistant";
+  action: "turn_on" | "turn_off";
+  requestId: string;
+  confirmedState: "on" | "off";
+  alreadyInState: boolean;
+  observedAt: string | null;
+}
+
 export interface WidgetManifest {
   id: string;
   kind: "specialized" | "generic";

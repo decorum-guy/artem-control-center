@@ -66,3 +66,93 @@ class DashboardSnapshot(BaseModel):
     mode: PanelMode
     fixtureScenario: Optional[str]
     services: List[ServiceSnapshot]
+
+
+class CoffeeTimingSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Literal[1] = 1
+    source: Literal["home-assistant"]
+    transport: Literal["alice-tg-bot"]
+    revision: str
+    observedAt: str
+    warmupMinutes: int = Field(ge=1)
+    longRunningMinutes: int = Field(ge=1)
+    sourceMode: SourceMode = "live"
+    writesEnabled: bool = False
+
+
+class CoffeeTimingPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expectedRevision: str = Field(min_length=1, max_length=256)
+    warmupMinutes: Optional[int] = Field(default=None, ge=1)
+    longRunningMinutes: Optional[int] = Field(default=None, ge=1)
+
+
+class NotificationChannels(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    telegram: bool
+    iphone: bool
+
+
+class CoffeeNotificationEventSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    channels: NotificationChannels
+
+
+class CoffeeNotificationSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Literal[1] = 1
+    source: Literal["alice-tg-bot"]
+    revision: str
+    updatedAt: Optional[str]
+    warmup: CoffeeNotificationEventSettings
+    longRunning: CoffeeNotificationEventSettings
+    sourceMode: SourceMode = "live"
+    writesEnabled: bool = False
+
+
+class NotificationChannelsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    telegram: Optional[bool] = None
+    iphone: Optional[bool] = None
+
+
+class CoffeeNotificationEventPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Optional[bool] = None
+    channels: Optional[NotificationChannelsPatch] = None
+
+
+class CoffeeNotificationPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expectedRevision: str = Field(min_length=1, max_length=256)
+    warmup: Optional[CoffeeNotificationEventPatch] = None
+    longRunning: Optional[CoffeeNotificationEventPatch] = None
+
+
+class CoffeeActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["turn_on", "turn_off"]
+    requestId: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
+
+
+class CoffeeActionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Literal[1] = 1
+    authority: Literal["home-assistant"]
+    action: Literal["turn_on", "turn_off"]
+    requestId: str
+    confirmedState: Literal["on", "off"]
+    alreadyInState: bool
+    observedAt: Optional[str]

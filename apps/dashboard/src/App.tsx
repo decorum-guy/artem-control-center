@@ -12,6 +12,7 @@ import { reconcileLayout, resolveManifest } from "./registry";
 import { ProductShell, type RoutePath } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { CoffeeWidget, GenericServiceWidget } from "./widgets";
+import { executeCoffeeAction } from "./coffeeApi";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -64,6 +65,7 @@ export function App() {
   const [kiosk, setKiosk] = useState(false);
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [coffeeActionPending, setCoffeeActionPending] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -122,11 +124,46 @@ export function App() {
     await load();
   }
 
-  function explainSafeAction(service: ServiceSnapshot, actionId: string) {
-    setActionNotice(
-      `${service.title}: ${actionId} не отправлена — production actions отключены в foundation.`
-    );
-    window.setTimeout(() => setActionNotice(null), 5000);
+  async function runCoffeeAction(service: ServiceSnapshot, actionId: string) {
+    if (coffeeActionPending) return;
+    const action = actionId.endsWith("turn_on") ? "turn_on" : "turn_off";
+    if (action === "turn_on" && !window.confirm("Включить кофемашину?")) return;
+    setCoffeeActionPending(true);
+    setActionNotice(`${service.title}: команда отправлена, ждём подтверждение Home Assistant…`);
+    try {
+      const result = await executeCoffeeAction(action, crypto.randomUUID());
+      setSnapshot((current) => current && {
+        ...current,
+        services: current.services.map((item) =>
+          item.id !== service.id
+            ? item
+            : {
+                ...item,
+                summary: result.confirmedState === "on" ? "Включена" : "Выключена",
+                data: {
+                  ...(item.data as Record<string, unknown>),
+                  machine: {
+                    ...((item.data as { machine: Record<string, unknown> }).machine),
+                    state: result.confirmedState,
+                    available: true,
+                    observedAt: result.observedAt ?? current.generatedAt,
+                    stale: false
+                  }
+                }
+              }
+        )
+      });
+      setActionNotice(
+        `${service.title}: Home Assistant подтвердил состояние «${result.confirmedState === "on" ? "включена" : "выключена"}».`
+      );
+    } catch {
+      setActionNotice(
+        `${service.title}: подтверждение не получено. Проверьте текущее состояние перед повтором.`
+      );
+    } finally {
+      setCoffeeActionPending(false);
+      window.setTimeout(() => setActionNotice(null), 6000);
+    }
   }
 
   const appClassName = [
@@ -239,14 +276,16 @@ export function App() {
             <OverviewPage
               snapshot={snapshot}
               onNavigate={navigate}
-              onCoffeeAction={explainSafeAction}
+              onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
+              coffeeActionPending={coffeeActionPending}
             />
           )}
           {route === "/home" && (
             <HomePage
               snapshot={snapshot}
               onNavigate={navigate}
-              onCoffeeAction={explainSafeAction}
+              onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
+              coffeeActionPending={coffeeActionPending}
             />
           )}
           {route === "/services" && <ServicesPage snapshot={snapshot} onNavigate={navigate} />}

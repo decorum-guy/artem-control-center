@@ -16,7 +16,7 @@ export default defineConfig({
     }
   ],
   webServer: {
-    command: "npm run dev:fixtures",
+    command: "PANEL_WRITES_ENABLED=true PANEL_COFFEE_TIMING_WRITES_ENABLED=true PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED=true PANEL_COFFEE_ACTIONS_ENABLED=true npm run dev:fixtures",
     url: "http://127.0.0.1:5173",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000

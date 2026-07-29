@@ -71,13 +71,15 @@ export function CoffeeWidget({
   generatedAt,
   manifest,
   variant = "featured",
-  onAction
+  onAction,
+  actionPending = false
 }: {
   service: ServiceSnapshot;
   generatedAt: string;
   manifest: WidgetManifest;
   variant?: "featured" | "home" | "gallery";
   onAction?: (service: ServiceSnapshot, actionId: string) => void;
+  actionPending?: boolean;
 }) {
   const data = service.data as unknown as CoffeeData;
   const view = coffeePresentation(data, generatedAt);
@@ -139,11 +141,14 @@ export function CoffeeWidget({
           <button
             className="primary-action"
             type="button"
-            disabled={!activeAction.enabled || !onAction}
+            disabled={!activeAction.enabled || !onAction || actionPending}
             onClick={() => onAction?.(service, activeAction.id)}
           >
-            {activeAction.title}
+            {actionPending ? "Подтверждаем…" : activeAction.title}
           </button>
+        )}
+        {activeAction && !activeAction.enabled && (
+          <span className="action-hint">Управление отключено политикой панели.</span>
         )}
       </div>
 

@@ -88,6 +88,19 @@ class HomeAssistantAdapter:
             (datetime.now(timezone.utc) - started).total_seconds() * 1000
         )
 
+    def coffee_confirmation(self) -> dict[str, Any]:
+        coffee = self._states.get(COFFEE_ENTITY) or {}
+        return {
+            "state": coffee.get("state"),
+            "warmupMinutes": _state_minutes(self._states.get(WARMUP_ENTITY)),
+            "longRunningMinutes": _state_minutes(
+                self._states.get(LONG_RUNNING_ENTITY)
+            ),
+            "observedAt": self._observed_at.isoformat()
+            if self._observed_at
+            else None,
+        }
+
     def services(self) -> List[ServiceSnapshot]:
         observed = self._observed_at or datetime.now(timezone.utc)
         stale = self._is_stale()
@@ -397,6 +410,11 @@ def _minutes_to_seconds(state: Optional[Dict[str, Any]]) -> Optional[int]:
     if minutes <= 0:
         return None
     return int(minutes * 60)
+
+
+def _state_minutes(state: Optional[Dict[str, Any]]) -> Optional[int]:
+    seconds = _minutes_to_seconds(state)
+    return seconds // 60 if seconds is not None else None
 
 
 def _valid_datetime_state(state: Optional[Dict[str, Any]]) -> Optional[str]:

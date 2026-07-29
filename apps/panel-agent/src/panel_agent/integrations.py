@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List
 
 from .contracts import ServiceSnapshot
+from .alice_control import AliceControlClient
 from .home_assistant import HomeAssistantAdapter
 from .http_integrations import HttpIntegrationAdapter
 from .settings import IntegrationSettings
@@ -13,6 +14,7 @@ class IntegrationRuntime:
     def __init__(self, settings: IntegrationSettings) -> None:
         self.settings = settings
         self.home_assistant = HomeAssistantAdapter(settings)
+        self.alice_control = AliceControlClient(settings)
         self.avalar_ssh = AvalarSshDetailsAdapter(settings)
         self.http = HttpIntegrationAdapter(
             settings,

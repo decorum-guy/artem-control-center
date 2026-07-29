@@ -127,3 +127,62 @@ def test_avalar_main_and_stage_are_registry_services_with_separate_policy(monkey
     assert main_actions == {"avalar.main.smoke"}
     assert stage_actions == {"avalar.stage.smoke", "avalar.stage.deploy"}
     assert all(not action["enabled"] for service in avalar for action in service["actions"])
+
+
+def test_coffee_settings_render_live_fixture_values_and_writes_are_narrowly_gated(
+    monkeypatch,
+):
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+    timing = client.get("/api/v1/settings/coffee/timing").json()
+    notifications = client.get("/api/v1/settings/notifications/coffee").json()
+
+    assert (timing["warmupMinutes"], timing["longRunningMinutes"]) == (15, 60)
+    assert timing["writesEnabled"] is False
+    assert notifications["warmup"]["channels"] == {
+        "telegram": False,
+        "iphone": True,
+    }
+    assert client.patch(
+        "/api/v1/settings/coffee/timing",
+        json={"expectedRevision": timing["revision"], "warmupMinutes": 13},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/actions/home/coffee",
+        json={"action": "turn_on", "requestId": "fixture-request-01"},
+    ).status_code == 403
+
+
+def test_coffee_narrow_gates_enable_only_their_contracts(monkeypatch):
+    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_COFFEE_TIMING_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_COFFEE_ACTIONS_ENABLED", "true")
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+
+    timing = client.get("/api/v1/settings/coffee/timing").json()
+    updated = client.patch(
+        "/api/v1/settings/coffee/timing",
+        json={"expectedRevision": timing["revision"], "warmupMinutes": 13},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["warmupMinutes"] == 13
+    assert updated.headers["cache-control"] == "no-store"
+
+    notifications = client.get("/api/v1/settings/notifications/coffee").json()
+    assert notifications["writesEnabled"] is False
+    assert client.patch(
+        "/api/v1/settings/notifications/coffee",
+        json={
+            "expectedRevision": notifications["revision"],
+            "warmup": {"enabled": False},
+        },
+    ).status_code == 403
+
+    action = client.post(
+        "/api/v1/actions/home/coffee",
+        json={"action": "turn_on", "requestId": "fixture-request-02"},
+    )
+    assert action.status_code == 200
+    assert action.json()["confirmedState"] == "on"
+    assert action.headers["cache-control"] == "no-store"

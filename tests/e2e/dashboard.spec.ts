@@ -113,3 +113,66 @@ test("all product routes render intentional non-development states", async ({ pa
     await expect(page.getByText("Fixture", { exact: true })).toHaveCount(0);
   }
 });
+
+test("coffee settings use API values and persist timing and notification changes", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.getByTestId("coffee-settings")).toBeVisible();
+  await expect(page.getByLabel("Время разогрева")).toHaveValue("15");
+  await expect(page.getByLabel("Предупредить о долгой работе через")).toHaveValue("60");
+  await page.getByLabel("Время разогрева").fill("13");
+  await page.getByRole("button", { name: "Сохранить" }).click();
+  await expect(page.getByRole("status")).toContainText("подтверждено Home Assistant");
+  await expect(page.getByLabel("Время разогрева")).toHaveValue("13");
+
+  const telegram = page.getByText("Разогрев завершён")
+    .locator("..")
+    .getByLabel("Telegram");
+  await expect(telegram).not.toBeChecked();
+  await telegram.click();
+  await expect(telegram).toBeChecked();
+  await expect(page.getByRole("status")).toContainText("уведомлений сохранены");
+});
+
+test("coffee settings explain revision conflicts and source outage", async ({ page }) => {
+  await page.route("**/api/v1/settings/coffee/timing", async (route) => {
+    if (route.request().method() === "PATCH") {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "revision_conflict" })
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto("/settings");
+  await expect(page.getByLabel("Время разогрева")).toHaveValue(/\d+/);
+  await page.getByLabel("Время разогрева").fill("14");
+  await page.getByRole("button", { name: "Сохранить" }).click();
+  await expect(page.getByRole("status")).toContainText("изменились в Telegram");
+
+  await page.route("**/api/v1/settings/coffee/timing", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "home_assistant_unavailable" })
+    })
+  );
+  await page.reload();
+  await expect(page.getByRole("status")).toContainText("временно недоступны");
+});
+
+test("coffee actions stay policy-disabled by default and show confirmed HA result when enabled", async ({ page }) => {
+  await page.goto("/home");
+  await expect(
+    page.getByTestId("widget-coffee-machine").getByRole("button")
+  ).toBeDisabled();
+  await expect(page.getByText("Управление отключено политикой панели.")).toBeVisible();
+
+  await page.goto("/home?scenario=coffee-off");
+  page.on("dialog", (dialog) => void dialog.accept());
+  const turnOn = page.getByRole("button", { name: "Включить" });
+  await expect(turnOn).toBeEnabled();
+  await turnOn.click();
+  await expect(page.getByRole("status")).toContainText("Home Assistant подтвердил");
+});
