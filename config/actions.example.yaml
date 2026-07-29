@@ -1,0 +1,117 @@
+version: 1
+
+actions:
+  - id: restart-panel-agent
+    title: Restart Panel Agent
+    risk: medium
+    confirmation: hold
+    hold_ms: 1400
+    cooldown_seconds: 30
+    executor:
+      type: local_service
+      service_env: PANEL_AGENT_SERVICE_NAME
+      operation: restart
+    verify:
+      type: http
+      url: http://127.0.0.1:8787/health/ready
+      timeout_seconds: 45
+
+  - id: edge-coffee-on
+    title: Turn on coffee machine locally
+    risk: medium
+    confirmation: confirm
+    cooldown_seconds: 10
+    preconditions:
+      - local_edge_ready
+      - remote_primary_not_authoritative_or_user_override
+    executor:
+      type: adapter
+      adapter: local_edge
+      operation: coffee_on
+    verify:
+      type: adapter_state
+      adapter: local_edge
+      entity: coffee_machine
+      expected: "on"
+      timeout_seconds: 15
+
+  - id: edge-coffee-off
+    title: Turn off coffee machine locally
+    risk: low
+    confirmation: instant
+    cooldown_seconds: 3
+    executor:
+      type: adapter
+      adapter: local_edge
+      operation: coffee_off
+    verify:
+      type: adapter_state
+      adapter: local_edge
+      entity: coffee_machine
+      expected: "off"
+      timeout_seconds: 15
+
+  - id: restart-avalar-exchange-app
+    title: Restart AVALAR Exchange MCP application
+    risk: high
+    confirmation: hold
+    hold_ms: 1800
+    cooldown_seconds: 90
+    executor:
+      type: restricted_remote_action
+      target: avalar-exchange-origin
+      action: restart_application
+    verify:
+      type: check_group
+      checks:
+        - avalar_exchange_public_health
+        - avalar_exchange_oauth_metadata
+        - avalar_exchange_ready
+      timeout_seconds: 120
+
+  - id: add-proxy-allowlist-entry
+    title: Add proxy allow-list entry
+    risk: critical
+    confirmation: double_confirm
+    cooldown_seconds: 60
+    parameters:
+      type: object
+      required: [cidr, description]
+      properties:
+        cidr:
+          type: string
+          format: ipv4-or-cidr
+        description:
+          type: string
+          minLength: 3
+          maxLength: 120
+    workflow:
+      - validate_parameters
+      - fetch_current_revision
+      - render_diff
+      - require_final_confirmation
+      - apply_atomic_change
+      - validate_service_configuration
+      - reload_service
+      - verify_connectivity
+      - rollback_on_failure
+    executor:
+      type: restricted_remote_action
+      target: proxy-server
+      action: add_allowlist_entry
+    audit: required
+    enabled: false
+    note: Enable only after the actual proxy deployment and transactional host agent are identified.
+
+  - id: create-ha-backup
+    title: Create Home Assistant backup
+    risk: medium
+    confirmation: confirm
+    cooldown_seconds: 300
+    executor:
+      type: home_assistant
+      operation: create_automatic_backup
+    verify:
+      type: home_assistant_backup_event
+      expected: completed
+      timeout_seconds: 1800
