@@ -40,17 +40,19 @@ Deliver:
 - multi-location weather switcher;
 - day and night themes;
 - ambient/handheld modes;
-- signature animations from the first runnable build;
 - touch navigation;
 - monitor-only, one-action and multi-action project cards;
-- backup lifecycle visual states.
+- Generic Service Widget;
+- mandatory specialized coffee-machine widget;
+- backup lifecycle visual states;
+- widget preview/gallery route.
 
 Required MVP motion:
 
 - touch feedback;
 - card-to-detail shared transitions;
 - service state morph;
-- coffee progress/ready transitions;
+- coffee warm-up/ready/long-running transitions;
 - weather ambience;
 - day/night transition without flash;
 - command and backup lifecycle;
@@ -60,59 +62,71 @@ Exit criteria:
 
 - approved visual direction;
 - smooth operation on target laptop;
+- UI and widgets run locally on macOS;
+- coffee widget fixtures cover all required states;
+- projects without actions look intentional;
 - no production UI depends on fake data;
-- projects without actions look intentional, not incomplete;
 - no fake progress.
 
-## Phase 2 — Panel Agent and security foundation
+## Phase 2 — Panel Agent, registries and security foundation
 
 Deliver:
 
 - FastAPI service;
 - project/capability/action/backup schemas;
+- Widget Registry and widget manifest schema;
 - config migrations;
 - secure secret references;
 - local storage/cache/audit;
-- WebSocket/SSE stream;
+- registry revision and snapshot/event stream;
+- WebSocket/SSE state stream;
 - `/health/live`, `/health/ready`, protected details;
 - separate kiosk profile/account;
 - localhost-only API;
 - firewall/update baseline;
-- safe mode;
-- Windows supervision and Chromium recovery.
+- safe read-only mode;
+- Windows supervision and Chromium recovery;
+- macOS development/fixture/read-only modes.
 
 Exit criteria:
 
-- automatic start after login/reboot;
+- automatic start after login/reboot on Windows;
 - frontend and agent recover independently;
+- Mac one-command dev workflow exists;
 - no secret in frontend/Git;
 - no arbitrary shell endpoint;
-- monitor-only mode works with all actions globally disabled;
+- monitor-only mode works with all actions disabled;
 - security acceptance from `docs/SECURITY_MODEL.md` passes.
 
-## Phase 3 — Capability-based project onboarding
+## Phase 3 — Automatic project onboarding and UI materialization
 
 Deliver:
 
-- `config/projects.yaml` runtime schema;
+- runtime `config/projects.yaml`;
 - adapter registry;
 - Settings onboarding wizard;
-- YAML and UI use the same validator;
+- YAML and UI use one validator;
 - add/edit/disable/remove project;
 - environments/services;
 - independent capabilities;
 - connection test and card preview;
-- adapter/version compatibility;
-- import/export config without secrets.
+- registry revision updates;
+- automatic Services catalog reconciliation;
+- specialized Widget Resolver;
+- mandatory Generic Service Widget fallback;
+- `New items` placement area;
+- import/export config without secrets;
+- end-to-end test: enable service → visible UI instance.
 
 Acceptance examples:
 
-- monitor-only external API;
-- AVALAR stage with monitor + deploy + backup;
-- AVALAR main with monitor + backup, no automatic deploy;
-- proxy server without Git repository through host agent;
+- monitor-only external API automatically appears with zero buttons;
+- AVALAR stage appears with monitor + smoke + deploy + backup;
+- AVALAR main appears without automatic deploy;
+- proxy server appears without Git repository;
 - disabled project produces no polling;
-- capability can be removed without deleting project/history.
+- capability can be removed without deleting history;
+- new service cannot exist only in backend config.
 
 ## Phase 4 — Read-only information and monitoring
 
@@ -121,6 +135,7 @@ Deliver:
 - multi-location weather/geocoding/cache;
 - Home Assistant state adapter;
 - AliceTG Bot as child service of HA stack;
+- mandatory live coffee widget data integration;
 - AVALAR main/stage checks;
 - AVALAR Exchange dependency graph;
 - proxy checks through server-managed adapter;
@@ -137,6 +152,7 @@ Exit criteria:
 - Overview remains useful from cache;
 - weather cache never mixes locations;
 - HA and AliceTG Bot failures are separate;
+- coffee duplicate `turn_on` does not reset timers;
 - no secret reaches frontend.
 
 ## Phase 5 — Backup engine
@@ -157,8 +173,8 @@ Deliver:
 
 Initial profiles:
 
-- Artem Control Center config/database;
-- Home Assistant native backup;
+- Artem Control Center config/database/layouts;
+- Home Assistant native backup downloaded only, never restored/run on panel laptop;
 - AliceTG Bot runtime state/config;
 - AVALAR Website stage/main;
 - AVALAR Exchange MCP;
@@ -171,7 +187,7 @@ Exit criteria:
 - optional cloud sync is explicit;
 - sensitive cloud copy encrypted;
 - disk cannot be silently filled;
-- restore test is recorded for at least one critical profile;
+- restore test is recorded for at least one critical profile on a separate approved host;
 - backup success is not inferred from file existence alone.
 
 ## Phase 6 — Safe home control
@@ -183,16 +199,22 @@ Deliver:
 - command verification;
 - safety/cooldown/idempotency;
 - device local/cloud inventory;
-- first verified local edge action;
+- first verified local Edge action;
 - explicit authority modes.
+
+Constraints:
+
+- Samsung laptop never hosts HA;
+- Edge Controller is not HA;
+- no duplicate automation execution;
+- safety timers preserved or missing protections disclosed.
 
 Exit criteria:
 
-- no duplicate automation execution;
 - every command has verified result;
 - HA and bot capability boundaries are explicit;
 - offline behavior is honest;
-- safety timers preserved or missing protections disclosed.
+- coffee widget shows real authority/freshness.
 
 ## Phase 7 — Service actions and deployments
 
@@ -206,7 +228,7 @@ Deliver restricted actions for:
 - n8n registered workflows;
 - approved service checks.
 
-Main deploy, restore, firewall and HA failover remain higher-risk separate capabilities.
+Main deploy, restore, firewall and HA migration remain higher-risk separate capabilities.
 
 Exit criteria:
 
@@ -271,38 +293,77 @@ After installation:
 
 Exit criteria:
 
-- all MVP functions match/exceed Windows;
+- all panel MVP functions match/exceed Windows;
 - loyalty card works;
 - suspend/wake/touch reliable;
 - backup destinations work;
-- remote recovery exists.
+- remote recovery exists;
+- HA is not installed on the laptop.
 
-## Phase 11 — HA resilience and dedicated-server decision
+## Phase 11 — Dedicated Home Assistant server project
 
 Deliver:
 
-- native HA backup monitoring;
-- off-host encrypted copies;
-- restore test;
-- local edge expansion;
-- optional stopped laptop standby;
-- failover/failback/fencing runbook;
-- requirements and budget for a dedicated compact local HA server.
+- requirements and budget for compact always-on hardware;
+- storage/power/network requirements;
+- verified native HA backup;
+- restore test on separate test/dedicated hardware;
+- migration/fencing/rollback runbook;
+- monitoring of hardware, HA, storage and backups;
+- controlled migration from remote HA when ready.
 
-Decision:
+Fixed decision:
 
-- laptop remains UI/edge/backup node;
-- do not make it sole permanent HA primary;
-- migrate HA to dedicated compact server only after hardware, backup and local-protocol readiness.
+- laptop remains UI/Edge/backup node;
+- laptop never becomes HA primary or standby;
+- dedicated compact server is the only planned local HA host.
+
+## Phase 12 — Customizable layouts
+
+Post-MVP deliver:
+
+- drag widgets;
+- resize within manifest limits;
+- move between sections/pages;
+- pin/unpin;
+- hide/show without disabling project;
+- multiple named layouts;
+- separate ambient/control/handheld layouts;
+- undo/reset;
+- keyboard-accessible reordering;
+- collision-safe new item placement;
+- layout backup/migration.
 
 Exit criteria:
 
-- no uncontrolled active-active;
-- tested restore;
-- explicit authority modes;
-- laptop can reboot/move without permanently disabling smart home after dedicated migration.
+- new widgets never overwrite existing placement;
+- hidden widget and disabled project remain distinct;
+- layout changes survive restart and backup/restore;
+- touch drag is reliable on Windows target.
 
-## Phase 12 — Polish and expansion
+## Phase 13 — No-code user widgets
+
+Late-phase deliver:
+
+- preset gallery;
+- status/link/metric/text/clock/countdown/check/service-group presets;
+- registered URL/data source selection;
+- bounded refresh interval;
+- safe field mapping;
+- thresholds/formatting/icons;
+- preview;
+- placement in layout;
+- declarative schema migrations.
+
+Security:
+
+- no arbitrary JavaScript/HTML/shell;
+- no direct browser fetch;
+- backend SSRF protection;
+- registered sources/actions only;
+- failure isolation.
+
+## Phase 14 — Polish and expansion
 
 - deeper service analytics;
 - deployment/backup history;
@@ -311,6 +372,6 @@ Exit criteria:
 - expanded local edge;
 - external-drive health;
 - phone PWA;
-- onboarding/settings polish;
+- settings/onboarding polish;
 - additional active repositories;
 - periodic security review.
