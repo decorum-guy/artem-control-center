@@ -1,0 +1,151 @@
+version: 1
+
+# Widget definitions are code/preset types. Widget instances are user/layout objects.
+# Every enabled service receives a generic fallback instance if no compatible
+# specialized widget is resolved.
+
+auto_materialization:
+  enabled: true
+  services_catalog: always
+  create_generic_fallback: true
+  new_item_policy: inbox_then_default_grid
+  catalog_only_flag: placement.catalog_only
+  acknowledge_new_items: true
+  never_overwrite_existing_layout: true
+
+widget_definitions:
+  - id: core.generic-service
+    version: 1
+    kind: generic
+    title: Generic Service
+    supported_data_contracts:
+      - service.health.v1
+    required_capabilities:
+      - monitor
+    optional_capabilities:
+      - details
+      - actions
+      - backup
+      - logs
+      - open
+    default_size: { columns: 4, rows: 2 }
+    min_size: { columns: 3, rows: 2 }
+    max_size: { columns: 8, rows: 5 }
+    supported_modes: [ambient, control, handheld]
+    performance_class: light
+    priority: 0
+
+  - id: home.coffee-machine
+    version: 1
+    kind: specialized
+    title: Кофемашина
+    supported_data_contracts:
+      - home.coffee-machine.v1
+    required_capabilities:
+      - monitor
+    optional_capabilities:
+      - actions
+    default_size: { columns: 5, rows: 3 }
+    min_size: { columns: 4, rows: 3 }
+    max_size: { columns: 8, rows: 6 }
+    supported_modes: [ambient, control, handheld]
+    performance_class: medium
+    priority: 100
+    permissions:
+      - action:home.coffee.turn_on
+      - action:home.coffee.turn_off
+    settings_schema_ref: widget-settings/home.coffee-machine.v1
+
+  - id: information.weather
+    version: 1
+    kind: specialized
+    title: Погода
+    supported_data_contracts:
+      - weather.location.v1
+    required_capabilities:
+      - monitor
+    default_size: { columns: 5, rows: 3 }
+    min_size: { columns: 4, rows: 2 }
+    max_size: { columns: 8, rows: 6 }
+    supported_modes: [ambient, control, handheld]
+    performance_class: medium
+    priority: 80
+
+  - id: core.service-group
+    version: 1
+    kind: generic
+    title: Группа сервисов
+    supported_data_contracts:
+      - project.service-group.v1
+    required_capabilities:
+      - monitor
+    default_size: { columns: 6, rows: 3 }
+    min_size: { columns: 4, rows: 2 }
+    max_size: { columns: 12, rows: 8 }
+    supported_modes: [ambient, control]
+    performance_class: light
+    priority: 20
+
+  - id: core.backup-freshness
+    version: 1
+    kind: generic
+    title: Резервные копии
+    supported_data_contracts:
+      - backup.profile-summary.v1
+    required_capabilities:
+      - backup
+    default_size: { columns: 4, rows: 2 }
+    min_size: { columns: 3, rows: 2 }
+    supported_modes: [ambient, control, handheld]
+    performance_class: light
+    priority: 30
+
+widget_instances:
+  - id: widget.coffee.primary
+    definition_id: home.coffee-machine
+    enabled: true
+    data_binding:
+      project_id: home-stack
+      environment_id: remote-primary
+      service_id: coffee-machine
+    placement:
+      profile: desk
+      section: overview
+      pinned: true
+    settings:
+      show_remaining_time: true
+      show_authority_source: true
+      show_long_running_warning: true
+
+  - id: widget.weather.default
+    definition_id: information.weather
+    enabled: true
+    data_binding:
+      source: selected_weather_location
+    placement:
+      profile: desk
+      section: overview
+      pinned: true
+    settings:
+      show_location_switcher: true
+      show_hourly_precipitation: true
+
+user_widget_presets:
+  enabled: false
+  planned_phase: post_mvp
+  allowed_presets:
+    - status
+    - link
+    - metric
+    - text
+    - clock
+    - countdown
+    - check-result
+    - service-group
+  restrictions:
+    arbitrary_javascript: false
+    arbitrary_shell: false
+    direct_browser_network: false
+    registered_backend_sources_only: true
+    registered_action_ids_only: true
+    minimum_refresh_seconds: 30
