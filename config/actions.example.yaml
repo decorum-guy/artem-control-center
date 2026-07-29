@@ -1,5 +1,8 @@
 version: 1
 
+# Actions are independent capabilities. A project may have no actions at all.
+# Frontend sends only action id and schema-valid parameters; arbitrary commands are forbidden.
+
 actions:
   - id: restart-panel-agent
     title: Restart Panel Agent
@@ -16,50 +19,134 @@ actions:
       url: http://127.0.0.1:8787/health/ready
       timeout_seconds: 45
 
-  - id: edge-coffee-on
-    title: Turn on coffee machine locally
+  - id: home.coffee.turn_on
+    title: Turn on coffee machine
+    target: home-stack/remote-primary/alice-tg-bot
     risk: medium
     confirmation: confirm
     cooldown_seconds: 10
-    preconditions:
-      - local_edge_ready
-      - remote_primary_not_authoritative_or_user_override
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
     executor:
-      type: adapter
-      adapter: local_edge
-      operation: coffee_on
+      type: registered_http_action
+      handler_ref: alice_tg_bot_coffee_on
     verify:
-      type: adapter_state
-      adapter: local_edge
-      entity: coffee_machine
+      type: home_assistant_entity
+      entity_env: HA_COFFEE_ENTITY_ID
       expected: "on"
-      timeout_seconds: 15
+      timeout_seconds: 30
 
-  - id: edge-coffee-off
-    title: Turn off coffee machine locally
+  - id: home.coffee.turn_off
+    title: Turn off coffee machine
+    target: home-stack/remote-primary/alice-tg-bot
     risk: low
     confirmation: instant
     cooldown_seconds: 3
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
     executor:
-      type: adapter
-      adapter: local_edge
-      operation: coffee_off
+      type: registered_http_action
+      handler_ref: alice_tg_bot_coffee_off
     verify:
-      type: adapter_state
-      adapter: local_edge
-      entity: coffee_machine
+      type: home_assistant_entity
+      entity_env: HA_COFFEE_ENTITY_ID
       expected: "off"
-      timeout_seconds: 15
+      timeout_seconds: 30
+
+  - id: home.create_backup
+    title: Create Home Assistant backup
+    target: home-stack/remote-primary/home-assistant
+    risk: medium
+    confirmation: hold
+    hold_ms: 1400
+    cooldown_seconds: 300
+    executor:
+      type: backup_profile
+      profile_id: home-assistant-native
+    verify:
+      type: backup_result
+      required_destination: laptop-primary
+      timeout_seconds: 1800
+
+  - id: home.alice_bot.restart
+    title: Restart AliceTG Bot
+    target: home-stack/remote-primary/alice-tg-bot
+    risk: medium
+    confirmation: hold
+    hold_ms: 1400
+    cooldown_seconds: 90
+    executor:
+      type: restricted_remote_action
+      target_ref: home_runtime_host
+      action: restart_alice_tg_bot
+    verify:
+      type: service_health
+      service_id: home-stack/remote-primary/alice-tg-bot
+      timeout_seconds: 120
+
+  - id: avalar.deploy.stage
+    title: Deploy AVALAR stage
+    target: avalar-site/stage/website
+    risk: high
+    confirmation: hold
+    hold_ms: 1800
+    cooldown_seconds: 180
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        ref:
+          type: [string, "null"]
+          pattern: '^[A-Za-z0-9._/-]{1,120}$'
+        note:
+          type: [string, "null"]
+          maxLength: 240
+    preconditions:
+      - stage_host_reachable
+      - no_deploy_in_progress
+      - deployment_script_checksum_valid
+    executor:
+      type: restricted_remote_action
+      target_ref: avalar_stage_host
+      action: deploy_stage
+      fixed_procedure: "avalar-reg ./deploy.sh stage"
+      allow_arbitrary_command: false
+    verify:
+      type: check_group
+      checks:
+        - avalar_stage_deployment_marker
+        - avalar_stage_health
+        - avalar_stage_browser_smoke
+      timeout_seconds: 600
+    audit: required
+
+  - id: avalar.smoke.stage
+    title: Check AVALAR stage
+    target: avalar-site/stage/website
+    risk: low
+    confirmation: instant
+    executor:
+      type: registered_remote_action
+      target_ref: avalar_stage_host
+      action: run_stage_smoke
+    verify:
+      type: command_result
+      timeout_seconds: 180
 
   - id: restart-avalar-exchange-app
     title: Restart AVALAR Exchange MCP application
+    target: avalar-exchange-mcp/production/application
     risk: high
     confirmation: hold
     hold_ms: 1800
     cooldown_seconds: 90
     executor:
       type: restricted_remote_action
-      target: avalar-exchange-origin
+      target_ref: avalar_exchange_origin
       action: restart_application
     verify:
       type: check_group
@@ -69,49 +156,75 @@ actions:
         - avalar_exchange_ready
       timeout_seconds: 120
 
-  - id: add-proxy-allowlist-entry
+  - id: project.backup.create
+    title: Create project backup
+    risk: medium
+    confirmation: hold
+    hold_ms: 1400
+    cooldown_seconds: 30
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [profile_id, sync_mode]
+      properties:
+        profile_id:
+          type: string
+          enum_from_config: enabled_backup_profiles
+        sync_mode:
+          type: string
+          enum: [profile_default, local_only, include_optional_destinations]
+    executor:
+      type: backup_profile
+      profile_id_from_parameter: profile_id
+    verify:
+      type: backup_result
+      require_checksum: true
+      require_archive_test: true
+      timeout_seconds: 3600
+    audit: required
+
+  - id: proxy.allow_list.add
     title: Add proxy allow-list entry
+    target: proxy-server/production/allow-list
     risk: critical
     confirmation: double_confirm
     cooldown_seconds: 60
     parameters:
       type: object
-      required: [cidr, description]
+      additionalProperties: false
+      required: [cidr, project, server_label, reason]
       properties:
         cidr:
           type: string
-          format: ipv4-or-cidr
-        description:
+          format: ipv4-or-ipv6-cidr
+        project:
+          type: string
+          minLength: 2
+          maxLength: 80
+        server_label:
+          type: string
+          minLength: 2
+          maxLength: 80
+        reason:
           type: string
           minLength: 3
-          maxLength: 120
+          maxLength: 240
     workflow:
       - validate_parameters
       - fetch_current_revision
       - render_diff
       - require_final_confirmation
+      - backup_current_config
       - apply_atomic_change
       - validate_service_configuration
       - reload_service
       - verify_connectivity
       - rollback_on_failure
     executor:
-      type: restricted_remote_action
-      target: proxy-server
+      type: restricted_host_agent
+      target_ref: proxy_host
       action: add_allowlist_entry
+      allow_arbitrary_command: false
     audit: required
     enabled: false
-    note: Enable only after the actual proxy deployment and transactional host agent are identified.
-
-  - id: create-ha-backup
-    title: Create Home Assistant backup
-    risk: medium
-    confirmation: confirm
-    cooldown_seconds: 300
-    executor:
-      type: home_assistant
-      operation: create_automatic_backup
-    verify:
-      type: home_assistant_backup_event
-      expected: completed
-      timeout_seconds: 1800
+    note: Enable after restricted host agent and rollback verification exist; no Git repository is required.
