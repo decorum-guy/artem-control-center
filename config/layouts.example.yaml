@@ -1,0 +1,117 @@
+version: 1
+
+policies:
+  auto_place_new_widgets: true
+  new_widget_destination: new-items
+  never_move_existing_items_automatically: true
+  preserve_hidden_widgets: true
+  preserve_layout_when_project_disabled: true
+  restore_widget_when_project_reenabled: true
+  drag_and_resize:
+    enabled_in_mvp: false
+    planned_phase: post_mvp
+  collision_strategy: move_new_item_below
+
+profiles:
+  - id: desk
+    title: Стол
+    mode: control
+    display: samsung-notebook-9-pro
+    orientation: landscape
+    grid:
+      columns: 12
+      row_height_px: 84
+      gap_px: 12
+    sections:
+      - id: overview
+        title: Обзор
+      - id: new-items
+        title: Новые элементы
+      - id: services
+        title: Сервисы
+    items:
+      - widget_id: widget.coffee.primary
+        section: overview
+        x: 0
+        y: 0
+        width: 5
+        height: 3
+        pinned: true
+      - widget_id: widget.weather.default
+        section: overview
+        x: 5
+        y: 0
+        width: 5
+        height: 3
+        pinned: true
+
+  - id: ambient
+    title: Информационный экран
+    mode: ambient
+    display: samsung-notebook-9-pro
+    orientation: landscape
+    grid:
+      columns: 12
+      row_height_px: 90
+      gap_px: 14
+    behavior:
+      reduce_motion: true
+      reduce_update_frequency: true
+      hide_secondary_controls: true
+      incidents_always_visible: true
+    items:
+      - widget_id: widget.coffee.primary
+        section: overview
+        x: 0
+        y: 0
+        width: 5
+        height: 3
+      - widget_id: widget.weather.default
+        section: overview
+        x: 5
+        y: 0
+        width: 5
+        height: 3
+
+  - id: handheld
+    title: В руках
+    mode: handheld
+    display: samsung-notebook-9-pro
+    orientation: responsive
+    grid:
+      columns_landscape: 8
+      columns_portrait: 4
+      row_height_px: 80
+      gap_px: 10
+    behavior:
+      avoid_grip_zone_actions: true
+      visible_navigation_required: true
+      swipe_is_optional: true
+
+layout_storage:
+  backend: panel-agent
+  include_in_config_backup: true
+  contains_secrets: false
+  save_debounce_ms: 500
+  revisioned: true
+  conflict_policy: latest_local_with_manual_restore
+
+post_mvp_editor:
+  capabilities:
+    - drag
+    - resize
+    - pin
+    - unpin
+    - hide
+    - show
+    - move_between_sections
+    - duplicate_compatible_widget
+    - reset_section
+    - reset_profile
+    - create_named_profile
+  constraints:
+    - respect_widget_min_max_size
+    - no_overlap_after_commit
+    - keyboard_accessible_reordering
+    - touch_drag_handles
+    - undo_last_layout_change
