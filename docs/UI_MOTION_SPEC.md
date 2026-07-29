@@ -10,9 +10,10 @@ Core qualities:
 - expressive while interacting;
 - dense enough to be useful, never spreadsheet-like;
 - tactile and responsive;
-- visually coherent across Home, Services, Calendar and Tasks;
+- visually coherent across Home, Services, Calendar, Tasks and Backups;
 - readable from arm’s length on a desk;
-- comfortable when held as a tablet.
+- comfortable when held as a tablet;
+- scalable through registered widgets rather than page-specific one-off components.
 
 ## 2. Design system
 
@@ -40,185 +41,219 @@ Status colors must never be the sole carrier of meaning.
 
 ## 3. Day theme
 
-Characteristics:
-
 - clean light canvas;
 - elevated cards with restrained depth;
 - high legibility in daylight;
 - richer accent moments around interactive elements;
-- weather and home ambience can influence background subtly.
+- weather/home ambience may influence background subtly.
 
 ## 4. Night theme
-
-Characteristics:
 
 - dark low-luminance canvas;
 - no large pure-white surfaces;
 - restrained glow;
-- errors remain visible without flooding the room with red;
+- errors visible without flooding the room with red;
 - lower motion amplitude in ambient mode;
-- warm, comfortable typography and contrast.
+- no white flash during startup/switch.
 
 ## 5. Theme switching
 
 Inputs:
 
+- sunrise/sunset for selected default weather location;
+- optional HA preference;
 - local time;
-- sunrise/sunset from weather/location provider;
 - manual override;
-- system preference as fallback.
+- system preference fallback.
 
 Transition:
 
-- animate semantic tokens over a short controlled duration;
-- avoid flashing the whole display;
-- weather background and charts transition coherently;
-- manual mode remains until reset or configured expiry.
+- animate semantic tokens over controlled duration;
+- avoid flashing whole display;
+- weather background/charts transition coherently;
+- manual mode remains until reset or expiry.
 
 ## 6. Motion principles
 
-### Functional before decorative
-
-Motion should show:
+Motion shows:
 
 - where an element came from;
 - what changed;
-- whether a command is pending;
+- whether a command/backup is pending;
 - whether data is live or stale;
-- whether a screen is expanding from a summary card.
+- whether a screen expands from a summary card;
+- whether a newly onboarded service was materialized in UI.
 
-### Timing ranges
-
-Recommended starting points, subject to visual tuning:
+Recommended starting ranges:
 
 - press response: 80–140 ms;
 - small state transition: 160–260 ms;
 - page/shared-layout transition: 280–450 ms;
-- ambient weather loops: slow and subtle;
+- ambient weather loops: slow/subtle;
 - hold confirmation: 1.2–1.8 s depending on risk.
 
-These are initial design values, not exact performance guarantees.
+Use spring motion for press/release, card expansion, navigation selection and drag/snap. Avoid excessive bounce for incidents and safety controls.
 
-### Spring behavior
+## 7. Mandatory Coffee Machine Widget — P0 MVP
 
-Use spring motion for:
-
-- press/release;
-- card expansion;
-- bottom navigation selection;
-- draggable/snap elements.
-
-Avoid excessive bounce for service incidents and safety controls.
-
-## 7. Required signature interactions
-
-### Overview card → detail
-
-A summary card expands into its detailed screen using shared geometry rather than disappearing and recreating unrelated content.
-
-### Coffee machine
+The coffee widget is mandatory in the first runnable build.
 
 States:
 
 - off;
-- switching on;
+- turning on;
 - warming;
 - ready;
+- running;
 - running too long;
-- switching off;
+- turning off;
 - unavailable;
-- edge fallback.
+- stale;
+- later Edge fallback where verified.
 
 Motion:
 
-- temperature/progress animated from real state;
+- temperature/progress animated only from real or known-duration state;
+- distinct stage transitions/colors, not arbitrary continuous gradient;
 - restrained steam/heat visualization;
-- ready transition feels rewarding but not game-like;
-- warning motion does not flash aggressively;
-- actions show verification, not only request completion.
+- ready transition rewarding but not game-like;
+- warning motion persistent but not aggressively flashing;
+- actions show request, execution and verification;
+- duplicate `turn_on` cannot visually restart timer unless source actually changed;
+- source freshness/authority available in detail.
 
-### Service restart
+Mac fixtures must cover every state. Windows validates touch feel/performance and real integration.
 
-- hold ring fills around button;
-- card enters maintenance state;
-- timeline shows stop/start/verify;
-- latency/status returns only after health confirmation;
+## 8. Other signature interactions
+
+### Overview card → detail
+
+Summary card expands using shared geometry rather than disappearing/recreating unrelated content.
+
+### Service onboarding
+
+After enable:
+
+- Services catalog updates without full reload;
+- new generic/specialized card enters designated `New items` area;
+- placement animation does not move existing cards unexpectedly;
+- visible result links to service detail.
+
+### Service restart/deploy
+
+- hold ring fills;
+- card enters maintenance/executing state;
+- timeline shows stages;
+- status returns only after health verification;
 - failure expands actionable diagnostics.
 
 ### Weather
 
-- subtle ambient background tied to conditions;
-- precipitation/sun/cloud motion disabled or simplified in battery saver;
-- no heavy permanent WebGL requirement;
-- forecast transitions preserve spatial continuity.
+- subtle ambient background tied to selected location conditions;
+- precipitation/sun/cloud effects simplify in battery saver/reduced motion;
+- no heavy permanent WebGL;
+- switching locations preserves spatial continuity and never mixes cached values.
 
 ### Calendar
 
-- timeline smoothly follows current time;
+- timeline follows current time;
 - event cards expand without losing position;
-- source/calendar color remains visible but secondary to readability.
+- source color remains secondary to readability.
 
 ### Tasks
 
-- completion gesture produces a short satisfying transition;
-- task remains reversible for a short undo interval;
-- no celebration animation for routine tasks unless explicitly enabled later.
+- completion has short satisfying transition;
+- undo interval where supported;
+- no excessive celebration animation.
 
-## 8. Touch requirements
+### Backup
+
+- real stages only;
+- local success + remote failure animates to `partial`, not success;
+- destination/checksum state visible;
+- no invented percentage when source cannot report one.
+
+## 9. Touch requirements
 
 - no hover-only actions;
 - primary controls at least 56 CSS px high where space permits;
-- edge gestures must not conflict with OS gestures;
-- destructive controls stay away from common grip zones;
-- scrolling and horizontal swipes must not compete ambiguously;
-- long press always has visible progress and cancellation feedback.
+- edge gestures do not conflict with OS gestures;
+- destructive controls stay away from grip zones;
+- scrolling and horizontal swipes do not compete ambiguously;
+- long press has visible progress/cancellation feedback.
 
-## 9. Ambient mode
+## 10. Widget and layout motion
+
+All widgets follow common mounting, resizing and state-transition primitives.
+
+MVP:
+
+- stable default positions;
+- automatic new-item placement;
+- optional show/hide/pin settings;
+- generic fallback widget uses normal platform motion.
+
+Post-MVP layout editor:
+
+- drag starts from explicit handle or safe long-press mode;
+- placeholder shows final grid position;
+- collision resolution is visible and predictable;
+- invalid size/position snaps back;
+- touch and keyboard reordering supported;
+- undo after layout change;
+- drag does not trigger widget primary actions;
+- existing cards never jump because a new service was added.
+
+## 11. Ambient mode
 
 After inactivity:
 
-- navigation and controls reduce prominence;
+- navigation/controls reduce prominence;
 - key information remains;
 - animation frame rate/intensity may decrease;
-- burn-in/static retention risk is reduced by subtle layout movement where appropriate;
-- touch immediately restores control mode.
+- subtle layout movement may reduce static retention;
+- touch restores control mode;
+- active incident remains visible;
+- coffee ready/long-running state remains visible.
 
-Ambient mode must not hide an active incident.
+## 12. Performance budget
 
-## 10. Performance budget
-
-Target device has 8 GB RAM and an older low-power CPU.
+Target device has 8 GB RAM and older low-power CPU.
 
 Rules:
 
-- keep Chromium tab count to one application surface;
-- lazy-load heavy detail modules;
-- avoid permanent particle systems;
-- avoid large uncompressed video backgrounds;
-- cap chart history shown at once;
+- one Chromium application surface;
+- lazy-load heavy details/widgets;
+- avoid permanent particle systems/video backgrounds;
+- cap chart history;
 - suspend hidden animations;
-- use CSS transforms/opacity where practical;
-- measure FPS, memory and long tasks on target hardware;
-- provide reduced effects mode automatically when performance drops.
+- use transforms/opacity where practical;
+- measure FPS/memory/long tasks on target hardware;
+- automatically reduce effects when performance drops;
+- one failing/heavy widget must not degrade all dashboard updates.
 
-## 11. Accessibility and degraded states
+## 13. Accessibility and degraded states
 
 - support `prefers-reduced-motion`;
-- keyboard access for all operations;
+- keyboard access;
 - readable focus rings;
-- screen-reader labels for actions where practical;
-- stale, offline and unknown are distinct states;
+- screen-reader labels;
+- stale/offline/unknown distinct;
 - skeletons never imply fresh data;
-- last-known values always carry a timestamp when disconnected.
+- last-known values carry timestamp;
+- layout editor has non-drag alternative;
+- widget errors show isolated fallback.
 
-## 12. Animation Definition of Done
+## 14. Animation Definition of Done
 
-A screen is not complete until:
+A screen/widget is not complete until:
 
-- entrance/exit transitions are coherent;
-- state changes are animated appropriately;
-- pending and verification phases are visible;
+- entrance/exit transitions coherent;
+- state changes animated appropriately;
+- pending/verification visible;
 - reduced-motion behavior exists;
-- animation remains smooth on target hardware;
-- no animation blocks an urgent action;
-- no fake progress is presented as measured progress.
+- animation remains acceptable on target hardware;
+- no animation blocks urgent action;
+- no fake progress;
+- fixtures/screenshots work on Mac;
+- hardware-specific behavior has Windows acceptance where required.
