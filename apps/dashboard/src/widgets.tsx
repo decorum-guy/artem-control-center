@@ -194,6 +194,13 @@ export function HomeDeviceWidget({
 
 export function ServiceRow({ service }: { service: ServiceSnapshot }) {
   const incidents = service.presentation?.incidents ?? (service.health === "healthy" ? 0 : 1);
+  const sourceLabels = {
+    live: "live",
+    cached: "cache",
+    fixture: "fixture",
+    stale: "stale",
+    unavailable: "нет данных"
+  } as const;
   return (
     <article className="service-row" data-testid={`widget-${service.id}`}>
       <div className="service-row__identity">
@@ -211,6 +218,10 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
         <div>
           <dt>Свежесть</dt>
           <dd>{service.presentation?.freshnessLabel ?? "нет данных"}</dd>
+        </div>
+        <div>
+          <dt>Источник</dt>
+          <dd>{sourceLabels[service.source]}</dd>
         </div>
         <div>
           <dt>Latency</dt>

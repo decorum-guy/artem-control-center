@@ -4,4 +4,4 @@ pydantic>=2.11,<3
 pytest>=8.4,<9
 PyYAML>=6,<7
 uvicorn[standard]>=0.35,<1
-
+websockets>=14,<16

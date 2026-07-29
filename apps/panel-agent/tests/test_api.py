@@ -20,11 +20,13 @@ def test_fixture_snapshot_covers_bot_independence(monkeypatch):
     assert services["home-assistant"]["health"] == "healthy"
     assert services["coffee-machine"]["health"] == "healthy"
     assert services["coffee-machine"]["data"]["machine"]["state"] == "on"
-    assert services["coffee-machine"]["data"]["timingPolicy"]["sourceAvailable"] is False
+    assert services["coffee-machine"]["data"]["timingPolicy"]["source"] == "home-assistant"
+    assert services["coffee-machine"]["data"]["timingPolicy"]["sourceAvailable"] is True
     assert services["coffee-machine"]["data"]["timingPolicy"]["stale"] is False
     assert services["coffee-machine"]["presentation"]["overview"] == "primary"
     assert services["home-assistant"]["presentation"]["role"] == "home-authority"
     assert services["alice-tg-bot"]["health"] == "offline"
+    assert services["alice-tg-bot"]["data"]["coffeeTimingAuthority"] is False
 
 
 def test_fixture_service_update_is_visible(monkeypatch):
@@ -101,4 +103,27 @@ def test_ha_offline_is_not_overridden_by_available_bot_policy(monkeypatch):
     coffee = services["coffee-machine"]
     assert coffee["data"]["machine"]["available"] is False
     assert coffee["data"]["machine"]["state"] == "unavailable"
-    assert coffee["data"]["timingPolicy"]["sourceAvailable"] is True
+    assert coffee["data"]["timingPolicy"]["sourceAvailable"] is False
+    assert coffee["data"]["timingPolicy"]["stale"] is True
+
+
+def test_avalar_main_and_stage_are_registry_services_with_separate_policy(monkeypatch):
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+    services = client.get("/api/v1/snapshot").json()["services"]
+    avalar = [
+        service
+        for service in services
+        if service.get("presentation", {}).get("group") == "AVALAR"
+    ]
+
+    assert [service["id"] for service in avalar] == [
+        "avalar-site-main",
+        "avalar-site-stage",
+    ]
+    main_actions = {action["id"] for action in avalar[0]["actions"]}
+    stage_actions = {action["id"] for action in avalar[1]["actions"]}
+    assert "avalar.main.deploy" not in main_actions
+    assert main_actions == {"avalar.main.smoke"}
+    assert stage_actions == {"avalar.stage.smoke", "avalar.stage.deploy"}
+    assert all(not action["enabled"] for service in avalar for action in service["actions"])

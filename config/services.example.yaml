@@ -65,13 +65,14 @@ services:
         token_env: HA_MONITORING_TOKEN
         entity_id: switch.kofemashina
         timing_policy:
-          adapter: alice_tg_bot_read_only
-          endpoint_ref: alice_coffee_timing_policy
+          adapter: home_assistant_helpers
+          warmup_entity_id: input_number.coffee_warmup_minutes
+          long_running_entity_id: input_number.coffee_long_running_minutes
+          activation_entity_id: input_datetime.coffee_last_turned_on
           cache_with_freshness: true
-          enabled: false
-          enablement: external_contract_not_applied
-        progress_policy: stage_without_percentage
-        note: Device state comes only from HA. Progress requires confirmed HA activation time plus sufficiently fresh bot timing policy.
+          enabled: true
+        progress_policy: confirmed_activation_plus_canonical_duration
+        note: State, activation and timing policy come from Home Assistant. Telegram is only an editor for the canonical helpers.
     actions:
       - home.coffee.turn_on
       - home.coffee.turn_off
@@ -104,7 +105,7 @@ services:
     category: home
     environment: production
     repository: decorum-guy/AliceTG_Bot
-    note: Separate HA-stack service; not the authoritative coffee or kettle state source.
+    note: Separate HA-stack service; neither device nor timing-policy authority.
     checks:
       live:
         type: http
@@ -112,10 +113,10 @@ services:
       ready:
         type: http
         url_env: ALICE_TG_BOT_READY_URL
-      coffee_timing_policy:
-        type: unavailable
-        proposed_endpoint: /api/v1/coffee/timing-policy
-        note: Read-only external contract is documented but not applied.
+      timing_helpers:
+        type: dependency_status
+        source: /health/details
+        note: Reports HA helper connectivity without exposing values or secrets.
     actions:
       - restart-alice-tg-bot
     presentation:
@@ -152,8 +153,8 @@ services:
         url: https://stage.avalar.pro/about
         note: Monitor-only until the proposed application health endpoint exists.
     actions:
-      - avalar.deploy.stage
-      - avalar.smoke.stage
+      - avalar.stage.deploy
+      - avalar.stage.smoke
     presentation:
       widget: core.generic-service
 

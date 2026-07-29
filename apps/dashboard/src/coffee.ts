@@ -68,8 +68,8 @@ export function coffeePresentation(data: CoffeeData, nowIso: string) {
         stage = "ready";
       }
       timingMessage = timingPolicy.sourceAvailable
-        ? "Timing policy получена из AliceTG Bot"
-        : "Используется свежая cached timing policy AliceTG Bot";
+        ? "Параметры разогрева подтверждены Home Assistant"
+        : "Используются последние сохранённые параметры Home Assistant";
     }
   }
 

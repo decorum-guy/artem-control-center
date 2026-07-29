@@ -8,6 +8,7 @@
       "enabled": true,
       "dataContract": "service.health.v1",
       "health": "healthy",
+      "source": "fixture",
       "summary": "Authoritative home state is available",
       "actions": [],
       "presentation": {
@@ -32,6 +33,7 @@
       "enabled": true,
       "dataContract": "home.coffee-machine.v1",
       "health": "healthy",
+      "source": "fixture",
       "summary": "Выключена",
       "actions": [
         {
@@ -68,7 +70,7 @@
           "stale": false
         },
         "timingPolicy": {
-          "source": "alice-tg-bot",
+          "source": "home-assistant",
           "warmupDurationSeconds": 780,
           "longRunningThresholdSeconds": 3600,
           "fetchedAt": "2026-07-29T11:59:30Z",
@@ -84,6 +86,7 @@
       "enabled": true,
       "dataContract": "home.kettle.v1",
       "health": "healthy",
+      "source": "fixture",
       "summary": "Выключен",
       "actions": [],
       "presentation": {
@@ -108,7 +111,8 @@
       "enabled": true,
       "dataContract": "service.health.v1",
       "health": "healthy",
-      "summary": "Telegram workflow and timing policy available",
+      "source": "fixture",
+      "summary": "Telegram workflow available; HA timing helpers reachable",
       "actions": [],
       "presentation": {
         "category": "personal-infrastructure",
@@ -119,11 +123,43 @@
         "freshnessLabel": "30 сек назад",
         "latencyMs": 46,
         "incidents": 0,
-        "role": "timing-policy"
+        "role": null
       },
       "data": {
-        "role": "telegram-workflow-and-timing-policy",
-        "coffeeDeviceAuthority": false
+        "role": "telegram-workflow",
+        "coffeeDeviceAuthority": false,
+        "coffeeTimingAuthority": false
+      }
+    },
+    {
+      "id": "avalar-site-main",
+      "title": "AVALAR Main",
+      "enabled": true,
+      "dataContract": "service.health.v1",
+      "health": "healthy",
+      "source": "fixture",
+      "summary": "Production health fixture",
+      "actions": [
+        {
+          "id": "avalar.main.smoke",
+          "title": "Smoke check",
+          "enabled": false,
+          "risk": "low"
+        }
+      ],
+      "presentation": {
+        "category": "work",
+        "group": "AVALAR",
+        "overview": "aggregate",
+        "priority": 90,
+        "environment": "production",
+        "freshnessLabel": "15 сек назад",
+        "latencyMs": 90,
+        "incidents": 0
+      },
+      "data": {
+        "capability": "monitor-and-disabled-smoke",
+        "executor": "disabled"
       }
     },
     {
@@ -132,8 +168,22 @@
       "enabled": true,
       "dataContract": "service.health.v1",
       "health": "healthy",
-      "summary": "Monitor-only fixture",
-      "actions": [],
+      "source": "fixture",
+      "summary": "Stage health fixture",
+      "actions": [
+        {
+          "id": "avalar.stage.smoke",
+          "title": "Smoke check",
+          "enabled": false,
+          "risk": "low"
+        },
+        {
+          "id": "avalar.stage.deploy",
+          "title": "Deploy Stage",
+          "enabled": false,
+          "risk": "high"
+        }
+      ],
       "presentation": {
         "category": "work",
         "group": "AVALAR",
@@ -145,7 +195,8 @@
         "incidents": 0
       },
       "data": {
-        "capability": "monitor-only"
+        "capability": "monitor-and-disabled-actions",
+        "executor": "disabled"
       }
     },
     {
@@ -154,6 +205,7 @@
       "enabled": true,
       "dataContract": "service.health.v1",
       "health": "degraded",
+      "source": "fixture",
       "summary": "Two simulated policy actions",
       "actions": [
         {
@@ -211,7 +263,7 @@
       },
       "coffee-machine": {
         "health": "offline",
-        "summary": "HA unavailable; bot policy cannot prove device state",
+        "summary": "HA unavailable; cached timing cannot prove device state",
         "data": {
           "machine": {
             "state": "unavailable",
@@ -378,10 +430,10 @@
     "alice-down-ha-healthy": {
       "alice-tg-bot": {
         "health": "offline",
-        "summary": "Bot unavailable; cached policy remains fresh"
+        "summary": "Bot unavailable; coffee state and timing remain in HA"
       },
       "coffee-machine": {
-        "summary": "HA state available; fresh cached timing policy",
+        "summary": "HA state and timing policy remain available",
         "data": {
           "machine": {
             "state": "on",
@@ -389,7 +441,7 @@
             "entityLastChangedAt": "2026-07-29T11:47:00Z"
           },
           "timingPolicy": {
-            "sourceAvailable": false,
+            "sourceAvailable": true,
             "fetchedAt": "2026-07-29T11:59:30Z",
             "stale": false
           }
@@ -399,7 +451,7 @@
     "alice-down-policy-stale": {
       "alice-tg-bot": {
         "health": "offline",
-        "summary": "Bot unavailable; cached policy is stale"
+        "summary": "Bot unavailable while HA timing observation is stale"
       },
       "coffee-machine": {
         "health": "degraded",
@@ -425,7 +477,7 @@
       },
       "coffee-machine": {
         "health": "offline",
-        "summary": "HA unavailable; fresh bot policy cannot prove device state",
+        "summary": "HA unavailable; cached timing values cannot prove device state",
         "data": {
           "machine": {
             "state": "unavailable",
@@ -434,9 +486,9 @@
             "stale": true
           },
           "timingPolicy": {
-            "sourceAvailable": true,
+            "sourceAvailable": false,
             "fetchedAt": "2026-07-29T11:59:50Z",
-            "stale": false
+            "stale": true
           }
         }
       }

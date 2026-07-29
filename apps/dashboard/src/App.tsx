@@ -108,6 +108,7 @@ export function App() {
       enabled: true,
       dataContract: "future.contract.v1",
       health: "healthy",
+      source: "fixture",
       summary: "Registry update materialized automatically",
       actions: [],
       data: {}

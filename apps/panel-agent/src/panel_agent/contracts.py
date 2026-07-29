@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 PanelMode = Literal["fixtures", "read_only", "integration_test", "production"]
 HealthState = Literal["healthy", "degraded", "offline", "stale"]
+SourceMode = Literal["live", "cached", "fixture", "stale", "unavailable"]
 
 
 class ActionDescriptor(BaseModel):
@@ -50,6 +51,7 @@ class ServiceSnapshot(BaseModel):
     enabled: bool = True
     dataContract: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]+\.v[0-9]+$")
     health: HealthState
+    source: SourceMode = "fixture"
     summary: str = Field(max_length=240)
     actions: List[ActionDescriptor] = []
     data: Dict[str, Any] = {}

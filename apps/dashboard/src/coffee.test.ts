@@ -14,7 +14,7 @@ const base: CoffeeData = {
     stale: false
   },
   timingPolicy: {
-    source: "alice-tg-bot",
+    source: "home-assistant",
     warmupDurationSeconds: null,
     longRunningThresholdSeconds: null,
     fetchedAt: null,

@@ -37,16 +37,16 @@ test("navigation opens Home and Services without exposing internal gallery", asy
 
   await page.getByRole("link", { name: "Сервисы" }).click();
   await expect(page.getByTestId("route-services")).toBeVisible();
+  await expect(page.getByText("AVALAR Main", { exact: true })).toBeVisible();
   await expect(page.getByText("AVALAR Stage", { exact: true })).toBeVisible();
   await expect(page.getByText("AliceTG Bot", { exact: true })).toBeVisible();
   await expect(page.getByText("Кофемашина", { exact: true })).toHaveCount(0);
 });
 
-test("coffee remains a healthy HA device when Alice timing policy is unavailable", async ({ page }) => {
+test("coffee state and HA timing remain healthy when Alice is unavailable", async ({ page }) => {
   await page.goto("/home?scenario=alice-down-ha-healthy");
   await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", "ready");
-  await expect(page.getByTestId("widget-coffee-machine"))
-    .toContainText("свежая cached timing policy");
+  await expect(page.getByTestId("widget-coffee-machine")).not.toContainText("устарели");
   await expect(page.getByTestId("widget-coffee-machine")).not.toContainText("Недоступна");
 });
 

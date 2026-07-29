@@ -1,10 +1,14 @@
 import os
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import FastAPI, HTTPException, Query, status
 
 from .contracts import DashboardSnapshot, PanelMode, ServiceSnapshot
-from .fixtures import load_fixture_document, safe_read_only_services, services_for_scenario
+from .fixtures import load_fixture_document, services_for_scenario
+from .integrations import IntegrationRuntime
+from .settings import IntegrationSettings
 
 
 def configured_mode() -> PanelMode:
@@ -15,7 +19,25 @@ def configured_mode() -> PanelMode:
 
 
 MODE = configured_mode()
-app = FastAPI(title="Artem Control Center Panel Agent", version="0.1.0")
+SETTINGS = IntegrationSettings.from_env()
+runtime = IntegrationRuntime(SETTINGS)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if MODE not in {"fixtures", "integration_test"}:
+        await runtime.start()
+    try:
+        yield
+    finally:
+        await runtime.close()
+
+
+app = FastAPI(
+    title="Artem Control Center Panel Agent",
+    version="0.2.0",
+    lifespan=lifespan,
+)
 fixture_services: List[ServiceSnapshot] = []
 revision = 1
 
@@ -31,7 +53,13 @@ def ready() -> dict:
         "ok": True,
         "service": "artem-panel-agent",
         "mode": MODE,
-        "writesEnabled": False,
+        "writesEnabled": SETTINGS.writes_enabled,
+        "integrationsConfigured": {
+            "homeAssistant": runtime.home_assistant.configured,
+            "alice": bool(SETTINGS.alice_health_url),
+            "avalarMain": bool(SETTINGS.avalar_main_url),
+            "avalarStage": bool(SETTINGS.avalar_stage_url),
+        },
     }
 
 
@@ -54,11 +82,16 @@ def snapshot(scenario: str = Query(default="ha-healthy")) -> DashboardSnapshot:
         services.extend(fixture_services)
         fixture_scenario = scenario
     else:
-        services = safe_read_only_services()
+        services = runtime.services()
         fixture_scenario = None
+    generated_at = (
+        document["generatedAt"]
+        if fixture_scenario
+        else datetime.now(timezone.utc).isoformat()
+    )
     return DashboardSnapshot(
         revision=revision,
-        generatedAt=document["generatedAt"],
+        generatedAt=generated_at,
         mode=MODE,
         fixtureScenario=fixture_scenario,
         services=services,
@@ -76,4 +109,3 @@ def add_fixture_service(service: ServiceSnapshot) -> ServiceSnapshot:
     fixture_services.append(service)
     revision += 1
     return service
-

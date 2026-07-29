@@ -1,5 +1,6 @@
 export type PanelMode = "fixtures" | "read_only" | "integration_test" | "production";
 export type HealthState = "healthy" | "degraded" | "offline" | "stale";
+export type SourceMode = "live" | "cached" | "fixture" | "stale" | "unavailable";
 export type CoffeeStage =
   | "off"
   | "turning_on"
@@ -57,7 +58,7 @@ export interface CoffeeMachineState {
 }
 
 export interface CoffeeTimingPolicy {
-  source: "alice-tg-bot";
+  source: "home-assistant";
   warmupDurationSeconds: number | null;
   longRunningThresholdSeconds: number | null;
   fetchedAt: string | null;
@@ -96,6 +97,7 @@ export interface ServiceSnapshot {
   enabled: boolean;
   dataContract: string;
   health: HealthState;
+  source: SourceMode;
   summary: string;
   actions: ActionDescriptor[];
   data: CoffeeData | KettleData | Record<string, unknown>;
