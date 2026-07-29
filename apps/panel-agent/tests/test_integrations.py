@@ -3,10 +3,16 @@ from __future__ import annotations
 import asyncio
 
 import httpx
+import pytest
 
 from panel_agent.home_assistant import HomeAssistantAdapter
 from panel_agent.http_integrations import HttpIntegrationAdapter
 from panel_agent.settings import IntegrationSettings
+from panel_agent.ssh_details import (
+    AvalarSshDetailsAdapter,
+    SshDetailsError,
+    _parse_command_output,
+)
 
 
 def _ha_states():
@@ -35,6 +41,12 @@ def _ha_states():
             "state": "2026-07-29 11:54:09",
             "last_updated": "2026-07-29T11:54:09Z",
             "attributes": {"timestamp": 1785326049},
+        },
+        {
+            "entity_id": "input_boolean.coffee_timing_initialized",
+            "state": "on",
+            "last_updated": "2026-07-29T11:59:31Z",
+            "attributes": {},
         },
         {
             "entity_id": "water_heater.chainik",
@@ -91,8 +103,50 @@ def test_ha_initial_snapshot_normalizes_canonical_helpers(tmp_path):
     assert "not_allowlisted" not in (tmp_path / "ha-cache.json").read_text()
 
 
+def test_uninitialized_timing_and_unknown_activation_do_not_create_fake_progress(
+    tmp_path,
+):
+    states = _ha_states()
+    for state in states:
+        if state["entity_id"] == "input_boolean.coffee_timing_initialized":
+            state["state"] = "off"
+        if state["entity_id"] == "input_datetime.coffee_last_turned_on":
+            state["state"] = "unknown"
+            state["attributes"] = {}
+
+    adapter = HomeAssistantAdapter(
+        IntegrationSettings(
+            ha_url="http://ha.test",
+            ha_token="test-token",
+            state_cache_path=str(tmp_path / "ha-cache.json"),
+        ),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=states),
+        ),
+    )
+    asyncio.run(adapter.fetch_initial_snapshot())
+    coffee = {service.id: service for service in adapter.services()}["coffee-machine"]
+
+    assert coffee.data["machine"]["turnedOnAt"] is None
+    assert coffee.data["timingPolicy"]["initialized"] is False
+    assert coffee.data["timingPolicy"]["sourceAvailable"] is False
+
+
 def test_http_adapters_keep_main_and_stage_capabilities_separate():
+    class Details:
+        def details_for(self, service_id: str):
+            return {
+                "environment": (
+                    "production" if service_id == "avalar-site-main" else "stage"
+                ),
+                "commit": "site-commit",
+                "deployment_revision": "deploy-1",
+                "details_source": "live",
+            }
+
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health/live":
+            return httpx.Response(200, json={"status": "live"})
         if request.url.path == "/health/ready":
             return httpx.Response(200, json={"status": "ready"})
         if request.url.path == "/health/details":
@@ -106,16 +160,6 @@ def test_http_adapters_keep_main_and_stage_capabilities_separate():
                         "commit": "bot-commit",
                     },
                 )
-            environment = "production" if request.url.host == "main.test" else "stage"
-            return httpx.Response(
-                200,
-                json={
-                    "environment": environment,
-                    "version": "site-version",
-                    "commit": "site-commit",
-                    "deployment_revision": "deploy-1",
-                },
-            )
         return httpx.Response(404)
 
     adapter = HttpIntegrationAdapter(
@@ -125,6 +169,7 @@ def test_http_adapters_keep_main_and_stage_capabilities_separate():
             alice_health_url="https://bot.test",
         ),
         transport=httpx.MockTransport(handler),
+        details_provider=Details(),
     )
     asyncio.run(adapter.refresh())
     services = {service.id: service for service in adapter.services()}
@@ -138,3 +183,167 @@ def test_http_adapters_keep_main_and_stage_capabilities_separate():
         "avalar-site-stage"
     ].presentation.priority
     assert services["alice-tg-bot"].data["coffeeTimingAuthority"] is False
+    assert services["avalar-site-main"].data["detailsSource"] == "live"
+
+
+def test_http_refresh_transitions_cached_stale_unavailable_and_recovers():
+    state = {"available": True}
+    clock = [0.0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not state["available"]:
+            raise httpx.ConnectError("offline", request=request)
+        if request.url.path == "/health/live":
+            return httpx.Response(200, json={"status": "live"})
+        if request.url.path == "/health/ready":
+            return httpx.Response(200, json={"status": "ready"})
+        return httpx.Response(401, json={"status": "unauthorized"})
+
+    adapter = HttpIntegrationAdapter(
+        IntegrationSettings(
+            avalar_main_url="https://main.test",
+            avalar_stage_url="https://stage.test",
+            alice_health_url="https://bot.test",
+            integration_stale_after_seconds=30,
+            integration_unavailable_after_seconds=120,
+        ),
+        transport=httpx.MockTransport(handler),
+        clock=lambda: clock[0],
+    )
+
+    asyncio.run(adapter.refresh())
+    assert all(service.source == "live" for service in adapter.services())
+
+    state["available"] = False
+    clock[0] = 10
+    asyncio.run(adapter.refresh())
+    assert all(service.source == "cached" for service in adapter.services())
+
+    clock[0] = 60
+    asyncio.run(adapter.refresh())
+    assert all(service.source == "stale" for service in adapter.services())
+
+    clock[0] = 180
+    asyncio.run(adapter.refresh())
+    assert all(service.source == "unavailable" for service in adapter.services())
+
+    state["available"] = True
+    asyncio.run(adapter.refresh())
+    assert all(service.source == "live" for service in adapter.services())
+
+
+def test_periodic_http_refresh_does_not_overlap_and_shutdown_cancels():
+    class DelayedTransport(httpx.AsyncBaseTransport):
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.01)
+            self.active -= 1
+            status = "live" if request.url.path.endswith("/live") else "ready"
+            if request.url.path.endswith("/details"):
+                return httpx.Response(401, json={"status": "unauthorized"})
+            return httpx.Response(200, json={"status": status})
+
+    async def exercise():
+        transport = DelayedTransport()
+        adapter = HttpIntegrationAdapter(
+            IntegrationSettings(
+                avalar_main_url="https://main.test",
+                avalar_stage_url="https://stage.test",
+                alice_health_url="https://bot.test",
+                http_refresh_seconds=0.01,
+            ),
+            transport=transport,
+        )
+        await asyncio.gather(adapter.refresh(), adapter.refresh())
+        assert transport.max_active <= 6
+        await adapter.start()
+        assert adapter.running
+        await asyncio.sleep(0.03)
+        await adapter.close()
+        assert not adapter.running
+
+    asyncio.run(exercise())
+
+
+def test_optional_ssh_details_disabled_and_failure_keeps_cache():
+    calls: list[str] = []
+
+    async def runner(operation: str):
+        calls.append(operation)
+        return {
+            "ok": True,
+            "environment": "production" if operation.endswith("main") else "stage",
+            "commit": "a" * 40,
+            "branch": "main" if operation.endswith("main") else "stage",
+            "deployment_revision": "a" * 40,
+            "deployed_at": "2026-07-29T10:00:00Z",
+            "working_tree": "clean",
+            "observed_at": "2026-07-29T10:00:00Z",
+        }
+
+    disabled = AvalarSshDetailsAdapter(
+        IntegrationSettings(avalar_ssh_enabled=False),
+        command_runner=runner,
+    )
+    asyncio.run(disabled.refresh())
+    assert calls == []
+
+    async def exercise():
+        enabled = AvalarSshDetailsAdapter(
+            IntegrationSettings(avalar_ssh_enabled=True),
+            command_runner=runner,
+        )
+        await enabled.refresh()
+        assert enabled.details_for("avalar-site-main")["details_source"] == "live"
+
+        async def failed(_: str):
+            raise asyncio.TimeoutError
+
+        enabled._command_runner = failed
+        await enabled.refresh()
+        assert enabled.details_for("avalar-site-main")["details_source"] == "stale"
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"ok": False, "environment": "stage", "working_tree": "clean"},
+        {"ok": True, "environment": "invalid", "working_tree": "clean"},
+        {"ok": True, "environment": "stage", "working_tree": "unknown"},
+    ],
+)
+def test_ssh_details_reject_invalid_sanitized_payload(payload):
+    async def runner(_: str):
+        return payload
+
+    adapter = AvalarSshDetailsAdapter(
+        IntegrationSettings(avalar_ssh_enabled=True),
+        command_runner=runner,
+    )
+    asyncio.run(adapter.refresh())
+    assert adapter.details_for("avalar-site-main") == {}
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr", "returncode", "limit"),
+    [
+        (b"not-json", b"", 0, 1024),
+        (b"{}", b"host failure", 255, 1024),
+        (b"x" * 33, b"", 0, 32),
+    ],
+)
+def test_ssh_command_rejects_invalid_json_host_failure_and_oversized_output(
+    stdout,
+    stderr,
+    returncode,
+    limit,
+):
+    with pytest.raises(SshDetailsError):
+        _parse_command_output(stdout, stderr, returncode, limit)

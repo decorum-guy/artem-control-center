@@ -20,4 +20,16 @@ OpenSSH setup outside this repository.
 ./ha-push.sh restart    # explicit legacy restart/action menu
 ```
 
+After an approved HA restart creates the helpers, initialize them explicitly:
+
+```bash
+python scripts/migrate_coffee_timing_to_ha.py status
+python scripts/migrate_coffee_timing_to_ha.py dry-run
+python scripts/migrate_coffee_timing_to_ha.py apply  # separately approved
+```
+
+`apply` verifies both timing values before setting
+`input_boolean.coffee_timing_initialized`. It is never part of bot/HA startup.
+Do not initialize by editing `.storage` or by adding YAML `initial` values.
+
 This change did not run any remote mode, HA reload/restart or device action.

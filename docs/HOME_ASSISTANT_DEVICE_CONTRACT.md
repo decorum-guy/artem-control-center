@@ -16,9 +16,10 @@ For the coffee machine, Home Assistant is the **only authoritative runtime sourc
 - execution of turn-on/turn-off;
 - command verification after turn-on/turn-off.
 
-`AliceTG_Bot` is the current source of the **user-configurable timing policy**:
-warm-up duration and long-running threshold. It is never the physical device
-state authority and never executes Control Center coffee commands.
+Home Assistant helpers are the canonical source of the **user-configurable
+timing policy**: warm-up duration and long-running threshold. `AliceTG_Bot`
+is a Telegram editor for those helpers, never physical state/timing authority,
+and never executes Control Center coffee commands.
 
 ## 2. Local discovery source
 
@@ -81,6 +82,7 @@ type CoffeeTimingPolicy = {
   stale: boolean
   sourceAvailable: boolean
   sourceRevision: string | null
+  initialized: boolean
 }
 ```
 
@@ -98,8 +100,10 @@ Required inputs:
    last-known cache with explicit freshness;
 3. a common calculation timestamp.
 
-The discovered 13-minute and 60-minute values are fixtures/current defaults,
-not frontend constants. Users can change them through Telegram.
+Bootstrap defaults are 13 minutes and 60 minutes, but they are written exactly
+once by an explicit verified migration. The helpers have no permanent
+`initial`; restored user values survive HA restart. Current runtime warm-up was
+observed at 15 minutes. None of these values is a frontend constant.
 
 When progress can be derived safely:
 

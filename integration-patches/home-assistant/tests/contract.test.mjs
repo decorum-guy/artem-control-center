@@ -14,8 +14,13 @@ const config = yaml.load(packageText);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 
 test("package YAML parses and canonical entities use valid domains", () => {
-  assert.equal(config.input_number.coffee_warmup_minutes.initial, 13);
-  assert.equal(config.input_number.coffee_long_running_minutes.initial, 60);
+  assert.equal("initial" in config.input_number.coffee_warmup_minutes, false);
+  assert.equal("initial" in config.input_number.coffee_long_running_minutes, false);
+  assert.equal("initial" in config.input_datetime.coffee_last_turned_on, false);
+  assert.equal(
+    config.input_boolean.coffee_timing_initialized.name,
+    "Coffee timing policy initialized",
+  );
   assert.equal(config.input_datetime.coffee_last_turned_on.has_time, true);
 
   for (const entityId of Object.values(manifest.entities)) {
@@ -51,7 +56,23 @@ test("safe scripts target the discovered HA entities", () => {
     "water_heater.chainik",
   );
   assert.equal(
-    config.script.kettle_stop.sequence[0].data.operation_mode,
+    config.script.kettle_stop.sequence[0].service,
+    "switch.turn_off",
+  );
+  assert.equal(
+    config.script.kettle_stop.sequence[0].target.entity_id,
+    "switch.chainik_podderzhanie_tepla",
+  );
+  assert.equal(
+    config.script.kettle_stop.sequence[1].service,
+    "water_heater.set_operation_mode",
+  );
+  assert.equal(
+    config.script.kettle_stop.sequence[1].target.entity_id,
+    "water_heater.chainik",
+  );
+  assert.equal(
+    config.script.kettle_stop.sequence[1].data.operation_mode,
     "off",
   );
   assert.doesNotMatch(packageText, /\boverheat(?:ed|ing)?\b/i);

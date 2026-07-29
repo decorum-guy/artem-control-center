@@ -131,10 +131,12 @@ services:
       homepage:
         type: http
         url: https://avalar.pro/
-      representative_route:
+      live:
         type: http
-        url: https://avalar.pro/about
-        note: Monitor-only until the proposed application health endpoint exists.
+        url: https://avalar.pro/health/live
+      ready:
+        type: http
+        url: https://avalar.pro/health/ready
     actions: []
     presentation:
       widget: core.generic-service
@@ -148,10 +150,12 @@ services:
       homepage:
         type: http
         url: https://stage.avalar.pro/
-      representative_route:
+      live:
         type: http
-        url: https://stage.avalar.pro/about
-        note: Monitor-only until the proposed application health endpoint exists.
+        url: https://stage.avalar.pro/health/live
+      ready:
+        type: http
+        url: https://stage.avalar.pro/health/ready
     actions:
       - avalar.stage.deploy
       - avalar.stage.smoke

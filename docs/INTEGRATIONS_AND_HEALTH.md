@@ -215,10 +215,16 @@ Monitor independently:
 
 Required health additions:
 
-- public minimal `/health/live` or `/healthz`;
-- protected `/health/ready`/`details` or equivalent host adapter;
-- environment and deployment marker;
-- sanitized recent errors.
+- public stateless `/health/live`;
+- public stateless `/health/ready`, validating required content JSON;
+- optional sanitized source/deployment details through fixed read-only SSH
+  commands on a slower cadence.
+
+REG.RU shared hosting is not expected to sustain a daemon or Control Center
+listener. PHP health does not depend on process environment variables.
+`/health/details` is intentionally absent; there is no reviewed shared-hosting
+secret-storage contract. Panel Agent curls Main and Stage independently and may
+run `details-main`/`details-stage` through the allow-listed SSH adapter.
 
 ### Stage deployment
 
@@ -231,20 +237,24 @@ ssh avalar-reg "~/avalar.sh stage"
 
 Implementation:
 
-- current live handler is not yet safe enough for Control Center: discovery
-  found no lock, backup, marker, or rollback and found a permissive TLS-disabled
-  curl smoke;
+- current live handler remains an implementation detail; the repo-side adapter
+  adds dry-run-first policy, lock/cooldown, a 120-second default timeout and
+  strict post-operation curl smoke;
 - exact fixed handler, not arbitrary shell;
 - target explicitly `stage`;
 - optional validated ref/commit parameter only if deploy script supports it;
 - precheck repository/deployment state;
 - execute restricted server-side action;
 - capture sanitized output;
-- verify deployed marker, health and browser smoke;
+- verify public live/ready/root smoke and optional SSH commit details;
 - audit correlation id;
 - rollback action separate and not inferred automatically.
 
 Main deployment is a different high-risk capability and remains disabled until separately specified.
+
+Stage deployment also remains disabled until a real run proves it reliably
+fits the shared-hosting session limit. Backup and rollback capabilities are not
+registered because no verified implementation exists.
 
 Backups:
 

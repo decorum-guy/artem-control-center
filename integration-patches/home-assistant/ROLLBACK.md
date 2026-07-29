@@ -13,3 +13,8 @@ Rollback is intentionally a configuration-only maintenance operation:
 Removing the package removes the canonical helper entities and stable scripts.
 It does not switch the coffee machine or kettle and it must not be coupled to a
 device command.
+
+If only the bot build is rolled back, keep the HA helpers and marker intact.
+Do not reset timing values: they are durable user configuration. Before
+removing the HA package, export the current non-secret timing values into the
+maintenance record so a later reinstall can bootstrap deliberately.

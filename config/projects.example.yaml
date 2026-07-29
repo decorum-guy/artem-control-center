@@ -49,9 +49,8 @@ projects:
                 adapter: web_application
                 base_url_env: AVALAR_STAGE_URL
               details:
-                adapter: protected_http
-                url_env: AVALAR_STAGE_DETAILS_URL
-                token_env: AVALAR_STAGE_MONITORING_TOKEN
+                adapter: fixed_ssh_json
+                command_id: avalar.details.stage
               open:
                 url_env: AVALAR_STAGE_URL
               actions:
@@ -68,9 +67,8 @@ projects:
                 adapter: web_application
                 base_url_env: AVALAR_MAIN_URL
               details:
-                adapter: protected_http
-                url_env: AVALAR_MAIN_DETAILS_URL
-                token_env: AVALAR_MAIN_MONITORING_TOKEN
+                adapter: fixed_ssh_json
+                command_id: avalar.details.main
               open:
                 url_env: AVALAR_MAIN_URL
               actions:

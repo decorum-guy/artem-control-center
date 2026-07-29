@@ -11,10 +11,11 @@ Home Assistant is the canonical authority for the physical device state,
 availability, confirmed activation time, timing policy and command execution.
 Telegram remains a user interface for changing the two timing helpers.
 
-The package adds:
+The package adds durable helpers without permanent `initial` values:
 
-- `input_number.coffee_warmup_minutes` (initial value: 13);
-- `input_number.coffee_long_running_minutes` (initial value: 60);
+- `input_number.coffee_warmup_minutes`;
+- `input_number.coffee_long_running_minutes`;
+- `input_boolean.coffee_timing_initialized`;
 - `input_datetime.coffee_last_turned_on`;
 - normalized running, long-running and ready-at template entities;
 - stable scripts for coffee on/off and kettle boil/stop.
@@ -22,6 +23,13 @@ The package adds:
 The activation automation has an exact `off` to `on` state trigger. An `on` to
 `on` update, reconnect, duplicate command or Home Assistant startup therefore
 does not replace the confirmed activation time.
+
+The bot migration is the explicit bootstrap operation. `dry-run` and `status`
+are read-only. `apply` selects explicit legacy values when present, otherwise
+preserves already configured non-default HA values or uses defaults 13/60,
+writes and verifies both helpers, and only then turns on the initialization
+marker. It never runs automatically at HA or bot startup. HA restarts restore
+the last helper values and activation timestamp instead of resetting them.
 
 The long-running entity means “works too long”. It is not an overheat or
 temperature signal.
@@ -34,10 +42,10 @@ temperature signal.
 3. Run `ha-push.sh apply` only in an approved maintenance task. It creates a
    remote backup, uploads the allow-listed configuration and runs HA
    `check_config`; it does not restart automatically.
-4. Review the new helper values before any restart.
-5. During an approved maintenance window, restart Home Assistant once.
-6. Confirm every ID in `entity-manifest.json` exists.
-7. Change one timing helper in a test window and verify the bot reads it.
+4. During an approved maintenance window, restart Home Assistant once.
+5. Confirm every ID in `entity-manifest.json` exists.
+6. Run bot migration `status`, then `dry-run`; use `apply` only after review.
+7. Change one timing helper in a test window and verify the bot refreshes it.
 8. Test device commands only with explicit production authorization.
 
 This session did not reload or restart Home Assistant and did not call any

@@ -5,6 +5,7 @@
     "coffee": "switch.kofemashina",
     "coffeeWarmupMinutes": "input_number.coffee_warmup_minutes",
     "coffeeLongRunningMinutes": "input_number.coffee_long_running_minutes",
+    "coffeeTimingInitialized": "input_boolean.coffee_timing_initialized",
     "coffeeLastTurnedOn": "input_datetime.coffee_last_turned_on",
     "coffeeRunning": "binary_sensor.coffee_machine_running",
     "coffeeRunningTooLong": "binary_sensor.coffee_machine_running_too_long",

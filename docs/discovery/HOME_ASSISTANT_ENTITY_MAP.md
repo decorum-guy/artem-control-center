@@ -14,8 +14,9 @@ includes `packages/coffee_control_center.yaml` and a connected
 
 Canonical entities added locally, not deployed:
 
-- `input_number.coffee_warmup_minutes` (initial 13);
-- `input_number.coffee_long_running_minutes` (initial 60);
+- `input_number.coffee_warmup_minutes` (no permanent `initial`);
+- `input_number.coffee_long_running_minutes` (no permanent `initial`);
+- `input_boolean.coffee_timing_initialized`;
 - `input_datetime.coffee_last_turned_on`;
 - `binary_sensor.coffee_machine_running`;
 - `binary_sensor.coffee_machine_running_too_long`;
@@ -40,10 +41,10 @@ The bot only edits the HA timing helpers.
 During initial discovery no external file was changed. During the authorized
 follow-up, only the local non-secret HA configuration files listed above were
 changed. No Home Assistant service, deploy, restart, migration, or production
-API write was executed. `secrets.yaml`, real `.env` files, tokens,
-passwords, private webhook values, runtime state JSON, databases, and `.storage`
-were not read. Secret references such as `!secret internal_webhook_secret` were seen
-only as symbolic references.
+API write was executed. A later authorized baseline read only target HA
+recorder rows and allow-listed coffee fields from bot state; see
+`COFFEE_RUNTIME_BASELINE.md`. `secrets.yaml`, real `.env` files, tokens,
+passwords, private webhook values and `.storage` were not read.
 
 The live host check was limited to service/container state, Git metadata,
 non-secret YAML, hashes, and targeted source references. At 2026-07-29 the
@@ -235,9 +236,9 @@ Production calculation is authorized only after both inputs are trustworthy:
 
 ```text
 elapsed = now - HA.turnedOnAt
-progress = clamp(elapsed / botPolicy.warmupDurationSeconds, 0..1)
-remainingSeconds = max(botPolicy.warmupDurationSeconds - elapsed, 0)
-worksTooLong = elapsed >= botPolicy.longRunningThresholdSeconds
+progress = clamp(elapsed / haPolicy.warmupDurationSeconds, 0..1)
+remainingSeconds = max(haPolicy.warmupDurationSeconds - elapsed, 0)
+worksTooLong = elapsed >= haPolicy.longRunningThresholdSeconds
 ```
 
 The adapter must reject nonsensical clock skew, require freshness timestamps, and
@@ -294,22 +295,18 @@ explains the degradation. Bot health is a separate Generic Service Widget.
 - No production write action is enabled by this discovery.
 - No long-running auto-shutoff was found. The UI must not claim one exists.
 
-## Gaps and required external changes
+## Remaining deployment gaps
 
-NOT APPLIED — READ-ONLY DISCOVERY.
+The durable activation helper, timing helpers/marker and stable device scripts
+are implemented locally and mirrored in the Control Center PR, but are not
+deployed. Bot timing refresh and explicit bootstrap are implemented in its
+Draft PR, also not deployed.
 
-1. Add HA-owned, durable coffee activation timestamp (helper/template trigger
-   sensor) that survives bot outage and has documented restart semantics.
-2. Add an authenticated read-only bot endpoint such as
-   `GET /api/v1/coffee/timing-policy`, returning only
-   `warmup_duration_seconds`, `long_running_threshold_seconds`, `updated_at`,
-   and `revision`.
-3. Cache timing policy with fetch time, revision, and stale state. Never expose
-   Telegram/HA tokens, chat IDs, webhook URLs, or unrelated bot configuration.
-4. Prefer dedicated HA scripts for coffee/kettle actions if safety preconditions,
-   idempotency, and verification should be centralized.
-5. Confirm the live HA entity registry and service schemas with a scoped
-   read-only development credential.
+1. Run HA `check_config` and deploy/restart only in an approved window.
+2. Run migration `status`, `dry-run`, then separately approve `apply`.
+3. Confirm restored values across a real HA restart.
+4. Validate scoped live API credentials and command verification without
+   enabling production writes in Panel Agent.
 
 ## Live host confirmation
 
@@ -327,10 +324,9 @@ Read-only SSH on 2026-07-29 confirmed:
 - no file-backed HA warm-up, ready, progress, remaining-time, or long-running
   entity was found.
 
-These observations do not authorize production service calls. They establish
-the bot as timing-policy authority, not physical-state authority.
-6. Confirm whether history retention is sufficient to recover activation after
-   reconnect.
+These historical observations do not authorize production service calls.
+Target architecture supersedes bot-local timing: HA helpers are canonical and
+bot state is migration input only.
 
 ## Conclusion confidence
 
@@ -340,11 +336,11 @@ the bot as timing-policy authority, not physical-state authority.
 | Direct coffee services are `switch.turn_on/off` | High |
 | Kettle entity is `water_heater.chainik` | High for bot-configured runtime; medium until live HA read |
 | Provided HA YAML contains no warm-up helper/duration/ready sensor | High |
-| User-configurable warm-up/long-running policy currently lives in bot state | High |
-| `last_changed` is the only discovered HA activation timestamp | High |
+| Pre-deployment runtime timing policy currently lives in bot state | High |
+| Prepared durable activation helper records exact `off → on` | High; not deployed |
 | `last_changed` is durable across HA restarts | Not verified; do not assume |
 | HA has an automatic coffee safety shutoff | Not found / unknown |
 | Coffee widget can read HA while Alice bot is down | High, by direct HA adapter design |
 
-External folder confirmation: `/Users/aartemida/Documents/Homeassistant` was not
-modified.
+Authorized non-secret local files under `/Users/aartemida/Documents/Homeassistant`
+were modified. No server configuration, service or device state was changed.

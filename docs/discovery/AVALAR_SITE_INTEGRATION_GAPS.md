@@ -1,156 +1,64 @@
 # AVALAR Website Integration Gaps
 
 Discovery date: 2026-07-29  
-Sources: `/Users/aartemida/Documents/AVALAR` and read-only SSH alias
-`avalar-reg`  
-Branch inspected: `stage` at `540b053f8ee8ce00239211279554869cd2a0bb6c`  
-Initial mode: read-only discovery
+Sources: authorized local repository and read-only `avalar-reg` SSH discovery
+Implementation: `decorum-guy/AVALAR#1`, not deployed
 
-## 2026-07-29 implementation follow-up
+## Verified hosting model
 
-After explicit authorization, application live/ready/protected-details
-endpoints and an allow-listed machine wrapper were implemented on
-`feat/control-center-integration` and published as Draft PR
-`decorum-guy/AVALAR#1`. The wrapper delegates executable Stage deployment to
-the existing `scripts/update.sh`, which is now tracked by the feature branch and
-supports a portable `AVALAR_SSH_HOST` override; no deployment, restart, SSH
-write, backup or rollback was performed. Backup and rollback remain unavailable
-because no verified implementation exists.
+AVALAR Main and Stage run as separate clean Git checkouts on REG.RU shared
+hosting. A command cannot rely on a daemon, systemd service, persistent worker,
+queue or process environment surviving in PHP. Operations must be short-lived
+and finish below the hosting session limit.
 
-The gap table below is the original discovery record. Implemented rows are no
-longer unresolved source gaps, but deployment-marker, backup and rollback work
-remains open.
+Read-only SSH verified:
 
-## Verified current model
+- Main: branch `main`, clean, commit `f438748e…`;
+- Stage: branch `stage`, clean, commit `721cae090…`;
+- no deployment marker/static metadata file;
+- `~/avalar.sh status` is human-readable and takes about 0.16 seconds;
+- the existing script can deploy/restart/promote/status, but status exposes
+  paths and there is no machine JSON, lock, cooldown, backup or rollback;
+- both roots returned HTTP 200; the not-yet-deployed health routes returned
+  HTTP 404.
 
-- Repository: `decorum-guy/AVALAR`.
-- Simple PHP site with no Composer, npm build, framework, Docker, or package
-  manifest.
-- Content is primarily PHP templates, static assets, uploads, and `data.json`.
-- `.htaccess` routes through `router.php` and blocks direct access to common
-  internal/env paths.
-- `stage` and `main` are separate branches/environments.
-- `origin/main` at discovery time was merge commit
-  `f438748e7307b48339048bc38fa4bca13e881e14`, whose tree matched inspected
-  `origin/stage`.
-- `stage.avalar.pro` and `avalar.pro` use separate private Telegram env files
-  selected by host in `mail.php`.
-- There is no `/healthz`, `/health/live`, `/health/ready`, or protected details
-  endpoint in the tracked application.
-- No application release/deployed-commit marker exists.
-- A tracked legacy/admin PHP component contains local `data.json` backup-writing
-  behavior. It is not a Control Center backup contract and was not inspected for
-  credential values.
-- 53 non-sensitive PHP files passed syntax-only `php -l`. The sensitive legacy
-  admin component was excluded from the validation output.
+## Implemented in the Draft PR
 
-## Actual operator wrapper
+| Component | Confirmed prior state | Implemented change | Contract and tests | Remaining risk |
+| --- | --- | --- | --- | --- |
+| PHP health | No application health route | Stateless public `/health/live` and `/health/ready` without env vars | Minimal schemas; readiness checks readable/valid `data.json`; PHP tests assert no path/env leakage | Must be deployed to Stage/Main before Panel polling becomes live |
+| HTTP details | No reliable shared-hosting secret storage | No `/health/details`; details are SSH-only | Deleted HTTP details route/token/env dependency | Optional SSH feature remains disabled by default |
+| SSH details | `~/avalar.sh status` is human-oriented | `control-center-status.sh` allow-lists status/details for Main/Stage and emits sanitized JSON | Git checkout fixtures; schema, branch, clean tree and no absolute path tests | Repo-side script is not installed on server |
+| Smoke | Existing server smoke uses permissive TLS behavior | Wrapper curls `/health/live`, `/health/ready` and `/` with bounded strict TLS requests | Main/Stage URL and JSON result tests | Health endpoints are not deployed |
+| Stage deploy | Existing `scripts/update.sh` delegates to `~/avalar.sh stage` | Thin wrapper is dry-run by default; execute needs explicit operator gate, lock, cooldown, timeout ≤150 seconds and post-smoke | Allow-list, dry-run, arbitrary/prod action rejection and timeout bounds | A real deploy duration was not measured; executor remains disabled |
 
-The repository contains `scripts/update.sh`.
+The integration uses SSH option A for deployment metadata. No static metadata
+file is introduced because deployed checkouts already provide commit/branch
+truth and no reliable deployment marker exists.
 
-Verified stage path:
+## Service contract
 
-```text
-./scripts/update.sh deploy stage
-  → ssh avalar-reg "~/avalar.sh stage"
-```
+- `avalar-site-main`: production, priority 90, curl monitor, optional SSH
+  details, no deploy capability.
+- `avalar-site-stage`: stage, priority 80, curl monitor, optional SSH details,
+  disabled Stage deploy capability.
 
-The user-stated older/equivalent form `avalar-reg ./deploy.sh stage` was not
-found in the current local repository. Control Center must register a named
-`avalar.deploy.stage` handler only after the server-side `~/avalar.sh stage`
-implementation, checksum, lock behavior, output, and rollback are inventoried.
-No deploy/restart command was run during discovery.
+Panel Agent public cadence is 20–30 seconds. Optional SSH details cadence is
+2–5 minutes and uses fixed subprocess arguments, host-key verification,
+timeout, output limit, JSON validation and cached/stale behavior.
 
-Read-only SSH subsequently verified that `~/avalar.sh` resolves to
-`/var/www/u3520338/data/avalar.sh`. Its current stage path performs a Git fetch
-and fast-forward-only pull, terminates user-owned `php-cgi` processes, then
-curls the site. It has no discovered exclusive deploy lock, backup step,
-release marker, or rollback step. Its smoke accepts HTTP 200/301/302/403 and
-uses TLS verification bypass, so it is not sufficient as a Control Center
-success criterion.
+## Remaining operational gaps
 
-Live server state at discovery:
+1. Review and install the status wrapper as a fixed server command.
+2. Deploy health endpoints to Stage, smoke them, then propagate through the
+   normal reviewed stage-to-main process.
+3. Measure Stage deploy duration. Until it reliably fits the hosting limit,
+   keep execution disabled.
+4. Design verified backups and a separate recorded rollback before registering
+   either capability.
+5. Review the legacy write-capable admin component.
 
-- stage checkout: clean `stage` at
-  `721cae090a5c26f87ec0544bb364858cd7432dd4`;
-- production checkout: clean `main` at
-  `f438748e7307b48339048bc38fa4bca13e881e14`;
-- stage and production homepages returned HTTP 200;
-- `/healthz` and `/health/live` returned HTTP 404 in both environments;
-- no `php-cgi` process was present at the observation instant.
-
-## Gap plan
-
-| External file/component | Confirmed state | Required change | Contract / reason | Security implications | Tests | Risk / order |
-| --- | --- | --- | --- | --- | --- | --- |
-| New public health endpoint | No application health endpoint | Add minimal `/health/live` or `/healthz` returning static service/environment identity | Health: process/router/PHP response only; no private paths | Must expose no secrets, server paths, warnings, or stack traces | curl stage/main; invalid method; content/schema test | Low; 1 |
-| New protected readiness endpoint or restricted host handler | Current homepage smoke cannot distinguish PHP/data/runtime readiness | Check readable `data.json`, required templates, PHP runtime, and optional form dependency with bounded timeouts | Health/details contract | Authenticated/private-only; redact filesystem and Telegram details | dependency failure fixtures; timeout; auth tests | Medium; 2 |
-| Deployment marker | No deployed commit/release marker | Write atomic root-owned marker during deploy outside public content, expose only safe commit/release via protected details | Data: environment, commit, deployed_at, deploy id | Never trust browser-supplied ref; do not expose checkout path | marker atomicity; mismatch; stale marker | Medium; 3 |
-| `scripts/update.sh` / server `~/avalar.sh` | Local wrapper runs fixed SSH command; live handler does fetch + FF-only pull + PHP-CGI termination + permissive curl smoke, without discovered lock/backup/marker/rollback | Version/checksum the server handler; add exclusive lock, preflight, backup, exact target, strict TLS smoke, sanitized output, post-deploy verification | Action: named `deploy_stage`, no shell text | Forced-command/restricted agent; no arbitrary target/path/ref | dry-run contract tests; concurrency; dirty tree; TLS failure; failed health | High; 4 |
-| Stage smoke | Screenshot artifacts exist but no tracked repeatable smoke runner | Add non-destructive HTTP/browser smoke for `/`, `/about`, `/service`, `/contact`, assets, and form validation without submission | Action/data: `smoke_stage` | Never send a real form or personal data | Playwright/HTTP exit codes and screenshots | Medium; 5 |
-| Rollback | No application rollback contract in tracked repo | Separate named rollback to a recorded verified deployment; restore code/data independently | Action: explicit high-risk rollback | Never infer rollback automatically from arbitrary Git ref | failed deploy → previous marker/health; audit | High; 6 |
-| Backup | No consistent project backup handler | Backup allow-listed dynamic data/uploads/private config separately from Git; add manifest/checksum/archive test | Backup: stage/main profiles | Private env encrypted; do not use web-root backup directory | archive test, checksum, restore to isolated stage | High; before deploy writes |
-| Error handling | PHP can emit warnings and legacy pages remain | Production error display off; sanitized error log accessible only through restricted details | Details/logs | No raw traces or personal form content | provoke missing data/template in test env | Medium |
-| Legacy admin/backup PHP component | Tracked opaque filename with write-capable backup behavior | Security review; remove from public routing or protect strongly; replace with registered backup handler | Security and backup boundary | Potential public write/data exposure; do not expose contents in Control Center | route denial, auth, CSRF, path/write tests | Critical; before control actions |
-| Versioned dependencies | No package manager; vendored JS/CSS/assets | Inventory PHP version/extensions and vendored asset provenance | Runtime/dependency contract | Supply-chain tracking without adding runtime CDN | clean-host smoke; dependency/SBOM review | Medium |
-
-## Proposed contracts
-
-### Public live
-
-```json
-{
-  "ok": true,
-  "service": "avalar-site",
-  "environment": "stage"
-}
-```
-
-### Protected readiness/details
-
-```json
-{
-  "ok": true,
-  "service": "avalar-site",
-  "environment": "stage",
-  "release": {
-    "commit": "<40-hex-or-null>",
-    "deployed_at": "<ISO-8601-or-null>",
-    "deployment_id": "<opaque>"
-  },
-  "components": {
-    "php": "ready",
-    "content": "ready",
-    "templates": "ready",
-    "contact_delivery": "unknown"
-  }
-}
-```
-
-### Deploy action
-
-```text
-registered id: avalar.deploy.stage
-target: stage only
-precheck: lock + clean known checkout + expected script checksum + backup
-execute: restricted server handler equivalent to ~/avalar.sh stage
-verify: marker + health + browser smoke
-success: only after verification
-rollback: separate registered action
-```
-
-## Safe current monitoring baseline
-
-Before external changes, Control Center may use monitor-only checks:
-
-- DNS/TLS and certificate expiry;
-- homepage and representative route status/latency;
-- required local asset retrieval;
-- non-submitting browser smoke;
-- distinction between stage and main.
-
-It must not configure nonexistent `/healthz` URLs as factual endpoints.
-
-External folder confirmation: `/Users/aartemida/Documents/AVALAR` was not
-modified. The `avalar-reg` host was queried read-only; no command that deploys,
-restarts, fetches, pulls, writes a marker, or changes a service was executed.
+No deploy, restart, branch merge, HA action or persistent SSH write was
+performed. One transient `/tmp/acc-avalar-status.<pid>` capture file was
+mistakenly created and removed during read-only discovery; no checkout or
+service state changed.

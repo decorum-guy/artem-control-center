@@ -195,8 +195,22 @@ PANEL_ALICE_HEALTH_URL
 PANEL_ALICE_DETAILS_TOKEN
 PANEL_AVALAR_MAIN_URL
 PANEL_AVALAR_STAGE_URL
-PANEL_AVALAR_DETAILS_TOKEN
+PANEL_HTTP_REFRESH_SECONDS
+PANEL_HTTP_REQUEST_TIMEOUT_SECONDS
+PANEL_INTEGRATION_STALE_AFTER_SECONDS
+PANEL_INTEGRATION_UNAVAILABLE_AFTER_SECONDS
+PANEL_AVALAR_SSH_ENABLED
+PANEL_AVALAR_SSH_HOST
+PANEL_AVALAR_SSH_STATUS_COMMAND
+PANEL_AVALAR_SSH_REFRESH_SECONDS
+PANEL_AVALAR_SSH_TIMEOUT_SECONDS
+PANEL_AVALAR_SSH_OUTPUT_LIMIT_BYTES
 ```
+
+AVALAR public health is polled every 20–30 seconds by short HTTP requests.
+Optional sanitized deployment details use fixed SSH operations on a slower
+default cadence of 180 seconds. No shared-hosting daemon or PHP environment
+metadata is required. OpenSSH host-key verification remains enabled.
 
 Set `PANEL_STATE_CACHE_PATH` to an ignored project path or the parent workspace
 `.cache/`; the adapter stores only allow-listed HA state fields and never a

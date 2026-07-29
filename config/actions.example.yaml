@@ -177,7 +177,7 @@ actions:
         - avalar_stage_deployment_marker
         - avalar_stage_health
         - avalar_stage_browser_smoke
-      timeout_seconds: 600
+      timeout_seconds: 150
     audit: required
 
   - id: avalar.stage.smoke

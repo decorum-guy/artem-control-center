@@ -11,7 +11,6 @@ input_number:
     step: 1
     mode: box
     unit_of_measurement: min
-    initial: 13
 
   coffee_long_running_minutes:
     name: Coffee long-running threshold
@@ -21,7 +20,11 @@ input_number:
     step: 1
     mode: box
     unit_of_measurement: min
-    initial: 60
+
+input_boolean:
+  coffee_timing_initialized:
+    name: Coffee timing policy initialized
+    icon: mdi:check-decagram-outline
 
 input_datetime:
   coffee_last_turned_on:
@@ -29,7 +32,6 @@ input_datetime:
     icon: mdi:clock-start
     has_date: true
     has_time: true
-    initial: "1970-01-01 00:00:00"
 
 automation:
   - id: coffee_capture_confirmed_turn_on
@@ -88,7 +90,8 @@ template:
             {{ none }}
           {% endif %}
         availability: >-
-          {{ states('input_datetime.coffee_last_turned_on') not in ['unknown', 'unavailable']
+          {{ is_state('input_boolean.coffee_timing_initialized', 'on')
+             and states('input_datetime.coffee_last_turned_on') not in ['unknown', 'unavailable']
              and states('input_number.coffee_warmup_minutes') not in ['unknown', 'unavailable'] }}
 
       - name: Coffee timing policy revision
@@ -102,7 +105,8 @@ template:
           warmup_minutes: "{{ states('input_number.coffee_warmup_minutes') | float(0) }}"
           long_running_minutes: "{{ states('input_number.coffee_long_running_minutes') | float(0) }}"
         availability: >-
-          {{ states('input_number.coffee_warmup_minutes') not in ['unknown', 'unavailable']
+          {{ is_state('input_boolean.coffee_timing_initialized', 'on')
+             and states('input_number.coffee_warmup_minutes') not in ['unknown', 'unavailable']
              and states('input_number.coffee_long_running_minutes') not in ['unknown', 'unavailable'] }}
 
 script:
@@ -140,6 +144,9 @@ script:
     icon: mdi:kettle-off
     mode: single
     sequence:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.chainik_podderzhanie_tepla
       - service: water_heater.set_operation_mode
         target:
           entity_id: water_heater.chainik

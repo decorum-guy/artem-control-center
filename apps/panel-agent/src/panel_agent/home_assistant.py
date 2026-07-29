@@ -17,6 +17,7 @@ COFFEE_ENTITY = "switch.kofemashina"
 WARMUP_ENTITY = "input_number.coffee_warmup_minutes"
 LONG_RUNNING_ENTITY = "input_number.coffee_long_running_minutes"
 LAST_ON_ENTITY = "input_datetime.coffee_last_turned_on"
+TIMING_INITIALIZED_ENTITY = "input_boolean.coffee_timing_initialized"
 KETTLE_ENTITY = "water_heater.chainik"
 KETTLE_SUPPORT_ENTITIES = (
     "switch.chainik_podderzhanie_tepla",
@@ -28,6 +29,7 @@ REQUIRED_ENTITIES = (
     WARMUP_ENTITY,
     LONG_RUNNING_ENTITY,
     LAST_ON_ENTITY,
+    TIMING_INITIALIZED_ENTITY,
     KETTLE_ENTITY,
     *KETTLE_SUPPORT_ENTITIES,
 )
@@ -47,7 +49,6 @@ class HomeAssistantAdapter:
         self._source = "unavailable"
         self._latency_ms: Optional[int] = None
         self._task: Optional[asyncio.Task[None]] = None
-        self._stop = asyncio.Event()
         self._load_cache()
 
     @property
@@ -64,7 +65,6 @@ class HomeAssistantAdapter:
         self._task = asyncio.create_task(self._subscribe_forever())
 
     async def close(self) -> None:
-        self._stop.set()
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
@@ -126,7 +126,12 @@ class HomeAssistantAdapter:
         turned_on_at = _valid_datetime_state(self._states.get(LAST_ON_ENTITY))
         warmup = _minutes_to_seconds(self._states.get(WARMUP_ENTITY))
         long_running = _minutes_to_seconds(self._states.get(LONG_RUNNING_ENTITY))
-        timing_available = warmup is not None and long_running is not None
+        timing_initialized = (
+            self._states.get(TIMING_INITIALIZED_ENTITY, {}).get("state") == "on"
+        )
+        timing_available = (
+            timing_initialized and warmup is not None and long_running is not None
+        )
         coffee_health = (
             "offline"
             if not available
@@ -224,6 +229,7 @@ class HomeAssistantAdapter:
                         "fetchedAt": observed.isoformat() if timing_available else None,
                         "stale": stale,
                         "sourceAvailable": timing_available and not stale,
+                        "initialized": timing_initialized,
                         "sourceRevision": _timing_revision(
                             self._states.get(WARMUP_ENTITY),
                             self._states.get(LONG_RUNNING_ENTITY),
@@ -262,7 +268,7 @@ class HomeAssistantAdapter:
 
     async def _subscribe_forever(self) -> None:
         delay = 1
-        while not self._stop.is_set():
+        while True:
             try:
                 async with websockets.connect(
                     _websocket_url(self._settings.ha_url),
