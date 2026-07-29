@@ -12,8 +12,9 @@ After explicit authorization, application live/ready/protected-details
 endpoints and an allow-listed machine wrapper were implemented on
 `feat/control-center-integration` and published as Draft PR
 `decorum-guy/AVALAR#1`. The wrapper delegates executable Stage deployment to
-the existing local `scripts/update.sh`; no deployment, restart, SSH write,
-backup or rollback was performed. Backup and rollback remain unavailable
+the existing `scripts/update.sh`, which is now tracked by the feature branch and
+supports a portable `AVALAR_SSH_HOST` override; no deployment, restart, SSH
+write, backup or rollback was performed. Backup and rollback remain unavailable
 because no verified implementation exists.
 
 The gap table below is the original discovery record. Implemented rows are no

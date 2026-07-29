@@ -9,7 +9,7 @@ Deployment status: **not deployed**
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Artem Control Center | `/Users/aartemida/Documents/artem-control-panel-proj/artem-control-center` | `decorum-guy/artem-control-center` | `main` (`44c3e2d`) | `feat/local-integrations-foundation` | `f4984891afdcdcf39d5b1cdf636a40173ef3c6dc`, `e8cae62ccceeb25dd00301fee9a7fd9e031c4c43` | [#14](https://github.com/decorum-guy/artem-control-center/pull/14) | Draft; not deployed |
 | AliceTG Bot | `/Users/aartemida/Documents/Homeassistant/TG_Alisa_Assistant_Bot` | `decorum-guy/AliceTG_Bot` | `main` (`494e534`) | `feat/control-center-ha-timing` | `f3ea866`, `5186dc1f9d133c7092db102a8255af9200bbb63d` | [#1](https://github.com/decorum-guy/AliceTG_Bot/pull/1) | Draft; not deployed |
-| AVALAR Website | `/Users/aartemida/Documents/AVALAR` | `decorum-guy/AVALAR` | `stage` (`540b053`) | `feat/control-center-integration` | `f814a60`, `f8cebd04d027f51d5994eb7aaff75488b9011b07` | [#1](https://github.com/decorum-guy/AVALAR/pull/1) | Draft; not deployed |
+| AVALAR Website | `/Users/aartemida/Documents/AVALAR` | `decorum-guy/AVALAR` | `stage` (`540b053`) | `feat/control-center-integration` | `f814a60`, `f8cebd04d027f51d5994eb7aaff75488b9011b07`, `5e666bf` | [#1](https://github.com/decorum-guy/AVALAR/pull/1) | Draft; not deployed |
 | Home Assistant config | `/Users/aartemida/Documents/Homeassistant/HomeAssistant_Server_Config` | no Git repository | n/a | n/a | review bundle in this PR | [Control Center #14](https://github.com/decorum-guy/artem-control-center/pull/14) | Applied locally; not pushed to server |
 | AVALAR Exchange MCP | no local clone | `decorum-guy/avalar_exchange_mcp` | `main` | none | none | none | Read-only; unchanged |
 
@@ -84,9 +84,11 @@ The bot can be rolled back independently of coffee physical control.
 
 ## AVALAR Website
 
-The existing local `scripts/update.sh` was found outside tracked source through
-the repository’s local Git exclude. It implements stage-to-main promotion and
-fixed stage/production deploy/restart calls through `avalar-reg`.
+The existing local `scripts/update.sh` was found under the repository’s local
+Git exclude. The feature branch now tracks it so a fresh clone receives the
+same engine. It implements stage-to-main promotion and fixed stage/production
+deploy/restart calls through `avalar-reg`, or a portable
+`AVALAR_SSH_HOST=user@host` override.
 
 The feature adds:
 
