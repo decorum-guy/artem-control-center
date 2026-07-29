@@ -7,16 +7,21 @@
 - **UI runtime:** Chromium в полноэкранном kiosk-режиме.
 - **Frontend:** React + TypeScript + Vite.
 - **Backend:** локальный Panel Agent; рекомендуемый стек — FastAPI.
-- **Первый хост:** Windows на Samsung Notebook 9 Pro 13" (NP940X3M).
-- **Целевая ОС:** Linux после проверки тачскрина, поворота, сна, Wi‑Fi и Android-приложения.
+- **Первый production host:** Windows на Samsung Notebook 9 Pro 13" (NP940X3M).
+- **Целевая ОС панели:** Linux после проверки тачскрина, поворота, сна, Wi‑Fi и Android-приложения.
+- **macOS development:** UI и большая часть Panel Agent обязаны локально запускаться и тестироваться на Mac; hardware/kiosk acceptance выполняется отдельно на Windows.
 - **Интерфейс:** touch-first, но пригодный для обычной работы мышью и клавиатурой.
 - **Погода:** обязательный элемент главного экрана с несколькими сохранёнными локациями, поиском адреса/района и быстрым переключением.
 - **Темы:** обязательные отдельные дневная и ночная темы с автоматическим переключением и ручным override.
-- **Motion design:** выразительные, плавные и функциональные анимации входят уже в первый визуальный MVP, а не откладываются на финальную полировку.
+- **Motion design:** выразительные, плавные и функциональные анимации входят уже в первый визуальный MVP.
+- **Coffee widget:** анимированный виджет разогрева, готовности и long-running warning кофемашины — обязательная P0-функция MVP.
 - **Project onboarding:** проекты подключаются декларативно по capabilities. Проект может быть monitor-only, иметь одну кнопку, несколько actions, backup или вообще не иметь управления.
+- **Automatic UI materialization:** после enable новый project/service автоматически появляется в UI. Специализированный widget используется при наличии, иначе создаётся обязательный Generic Service Widget; ручное дописывание списка сервисов в frontend запрещено.
+- **Widget platform:** coded widgets подключаются через единый manifest/data/settings contract; drag-and-drop layouts планируются после MVP, no-code preset widgets — в более поздней версии.
+- **Settings:** обычные настройки доступны внутри UI — проекты, capabilities, виджеты, weather locations, backup destinations, layout visibility и безопасные параметры. Архитектурные/code changes в пользовательские настройки не выносятся.
 - **Backups:** резервная копия создаётся зарегистрированным profile, скачивается на ноутбук и при выбранной policy дополнительно синхронизируется с cloud drive и/или будущим внешним HDD/SSD.
 - **Home Assistant:** текущий удалённый HA остаётся authoritative на первом этапе. `AliceTG_Bot` — отдельный Git-репозиторий Telegram-бота внутри HA-стека, а не репозиторий самого Home Assistant.
-- **HA hosting:** старый переносимый ноутбук не становится единственным критичным HA-host. Долгосрочный предпочтительный вариант — отдельный компактный локальный сервер; ноутбук остаётся панелью, edge-node, backup-target и возможным остановленным standby.
+- **HA hosting — fixed:** Samsung laptop не будет Home Assistant host или permanent HA primary. Долгосрочный локальный HA размещается на отдельном компактном сервере; ноутбук остаётся UI, edge-node, monitoring и backup-target.
 - **Proxy server:** отдельного Git-репозитория сейчас нет; конфигурация и сервисы находятся непосредственно на сервере и подключаются через restricted host agent.
 - **Безопасность:** браузер не получает SSH-ключи, административные токены или возможность выполнять произвольные команды. Panel Agent не публикуется напрямую в Internet.
 
@@ -24,13 +29,13 @@
 
 1. **Overview** — часы, дата, погода, ближайшие события, задачи, состояние дома, backups и общий статус сервисов.
 2. **Home** — кофемашина, чайник, свет, розетки, климат, сцены и критичные локальные действия.
-3. **Services** — health, latency, incidents, deployment state и только разрешённые конкретному проекту actions.
+3. **Services** — автоматически сформированный каталог проектов/services, health, latency, incidents, deployment state и только разрешённые actions.
 4. **Calendar & Tasks** — календарь iPhone/iCloud/Google/Exchange через адаптер источника и задачи TickTick.
 5. **Automations** — запуск n8n, checks, scheduled maintenance и других зарегистрированных workflows.
 6. **Backups** — ручные и плановые резервные копии, destinations, retention, checksums и restore-test status.
 7. **Apps** — запуск Android-карты лояльности и других полноэкранных приложений.
 8. **System** — питание, сеть, батарея, температура, диск, безопасность, журналы действий и переход на обычный рабочий стол.
-9. **Settings** — добавление/отключение проектов, capabilities, weather locations, backup destinations и policies.
+9. **Settings** — добавление/отключение проектов, capabilities, widgets, layouts, weather locations, backup destinations и policies.
 
 ## Репозиторий как source of truth
 
@@ -40,9 +45,11 @@
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — продуктовая спецификация и UX.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты и границы ответственности.
 - [`docs/PROJECT_ONBOARDING.md`](docs/PROJECT_ONBOARDING.md) — capability-based подключение, отключение и настройка проектов.
+- [`docs/WIDGET_SYSTEM.md`](docs/WIDGET_SYSTEM.md) — автоматическое появление сервисов, widget plug-ins, layout system и no-code widgets.
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — разработка на Mac и финальная проверка на Windows/Linux.
 - [`docs/INTEGRATIONS_AND_HEALTH.md`](docs/INTEGRATIONS_AND_HEALTH.md) — реестр проектов, health-контракты и control actions.
 - [`docs/BACKUP_STRATEGY.md`](docs/BACKUP_STRATEGY.md) — создание, скачивание, проверка, хранение и синхронизация резервных копий.
-- [`docs/HOME_ASSISTANT_RESILIENCE.md`](docs/HOME_ASSISTANT_RESILIENCE.md) — локальная работа, standby и решение по размещению HA.
+- [`docs/HOME_ASSISTANT_RESILIENCE.md`](docs/HOME_ASSISTANT_RESILIENCE.md) — local edge, backups и будущий отдельный HA server.
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — защита ноутбука, браузера, Panel Agent, secrets, сети и remote actions.
 - [`docs/UI_MOTION_SPEC.md`](docs/UI_MOTION_SPEC.md) — темы, анимации и touch-паттерны.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — порядок реализации.
@@ -51,7 +58,9 @@
 - [`config/services.example.yaml`](config/services.example.yaml) — декларативный реестр сервисов.
 - [`config/actions.example.yaml`](config/actions.example.yaml) — декларативный allow-list действий.
 - [`config/backups.example.yaml`](config/backups.example.yaml) — backup profiles и destinations.
-- [GitHub Issues](../../issues) — исполнимый backlog по реализации, интеграциям, health, backups, security и миграции ОС.
+- [`config/widgets.example.yaml`](config/widgets.example.yaml) — widget definitions, instances и auto-materialization policy.
+- [`config/layouts.example.yaml`](config/layouts.example.yaml) — default layouts и будущие drag/resize capabilities.
+- [GitHub Issues](../../issues) — исполнимый backlog по реализации, widgets, integrations, health, backups, security и миграции ОС.
 
 ## Базовый принцип
 
