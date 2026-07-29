@@ -1,7 +1,16 @@
 version: 1
 
-# Every capability is optional. A project may be monitor-only, backup-only,
-# action-rich or temporarily disabled without changing dashboard code.
+# Every capability is optional. Every enabled service is automatically
+# materialized in the UI through Widget Resolver. If no specialized widget is
+# available, core.generic-service is mandatory.
+
+ui_materialization:
+  enabled: true
+  services_catalog: always
+  new_items_area: true
+  generic_widget_fallback: core.generic-service
+  require_visible_instance_for_onboarding_success: true
+  never_overwrite_existing_layout: true
 
 projects:
   - id: external-api
@@ -23,6 +32,8 @@ projects:
                 url_env: EXTERNAL_API_PUBLIC_URL
               actions: []
               backups: []
+            presentation:
+              widget: core.generic-service
 
   - id: avalar-site
     name: AVALAR Website
@@ -48,6 +59,8 @@ projects:
                 - avalar.smoke.stage
               backups:
                 - avalar-site-stage
+            presentation:
+              widget: core.generic-service
       - id: main
         services:
           - id: website
@@ -65,6 +78,8 @@ projects:
                 - avalar.smoke.main
               backups:
                 - avalar-site-main
+            presentation:
+              widget: core.generic-service
 
   - id: proxy-server
     name: Proxy Server
@@ -85,6 +100,8 @@ projects:
                 - proxy.danted.reload
               backups:
                 - proxy-config
+            presentation:
+              widget: core.generic-service
           - id: telegram-proxy
             capabilities:
               monitor:
@@ -94,6 +111,8 @@ projects:
                 - proxy.telegram.restart
               backups:
                 - proxy-config
+            presentation:
+              widget: core.generic-service
           - id: allow-list
             capabilities:
               monitor:
@@ -104,6 +123,8 @@ projects:
                 - proxy.allow_list.remove
               backups:
                 - proxy-config
+            presentation:
+              widget: core.generic-service
 
   - id: home-stack
     name: Home Assistant Stack
@@ -111,6 +132,9 @@ projects:
     category: home
     repository: null
     source_kind: runtime_stack
+    constraints:
+      home_assistant_on_panel_laptop: forbidden
+      future_local_host: dedicated_compact_server
     environments:
       - id: remote-primary
         services:
@@ -125,6 +149,8 @@ projects:
                 - home.run_registered_scene
               backups:
                 - home-assistant-native
+            presentation:
+              widget: home.authority-status
           - id: alice-tg-bot
             repository: decorum-guy/AliceTG_Bot
             note: Git repository belongs to the HA Telegram bot, not to Home Assistant itself.
@@ -139,9 +165,34 @@ projects:
                 - home.coffee.turn_off
               backups:
                 - alice-tg-bot-runtime
+            presentation:
+              widget: core.generic-service
+          - id: coffee-machine
+            repository: null
+            capabilities:
+              monitor:
+                adapter: coffee_state_aggregator
+                ha_url_env: HA_BASE_URL
+                alice_bot_state_url_env: ALICE_TG_BOT_COFFEE_STATE_URL
+              actions:
+                - home.coffee.turn_on
+                - home.coffee.turn_off
+            presentation:
+              widget: home.coffee-machine
+              pin_to_overview: true
+              priority: 100
 
   - id: archived-project
     name: Temporarily Disabled Project
     enabled: false
     category: archive
     environments: []
+
+validation:
+  allow_zero_actions: true
+  require_registered_actions: true
+  require_registered_backups: true
+  require_ui_materialization: true
+  require_generic_widget_fallback: true
+  reject_unknown_capabilities: true
+  reject_secrets_in_config: true
