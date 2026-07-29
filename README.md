@@ -17,8 +17,9 @@
 - **Coffee widget:** анимированный виджет разогрева, готовности и long-running warning кофемашины — обязательная P0-функция MVP.
 - **Coffee authority:** Home Assistant является единым источником device
   state, availability, confirmed activation, timing helpers, command execution
-  и verification. `AliceTG_Bot` — только Telegram-интерфейс изменения
-  canonical HA helpers и отдельный monitored service.
+  и verification. `AliceTG_Bot` — Telegram-интерфейс изменения canonical HA
+  helpers, отдельный monitored service и владелец coffee notification policy,
+  delivery receipts и retries.
 - **Device priority:** кофемашина — первый приоритет Home-раздела; чайник подключается через тот же HA adapter, но может начинать с более простого generic device widget.
 - **Project onboarding:** проекты подключаются декларативно по capabilities. Проект может быть monitor-only, иметь одну кнопку, несколько actions, backup или вообще не иметь управления.
 - **Automatic UI materialization:** после enable новый project/service автоматически появляется в UI. Специализированный widget используется при наличии, иначе создаётся обязательный Generic Service Widget; ручное дописывание списка сервисов в frontend запрещено.
@@ -55,6 +56,9 @@
 - [`docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`](docs/HOME_ASSISTANT_DEVICE_CONTRACT.md) — HA device/timing authority, bot editor role и composite coffee model.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — разработка на Mac и финальная проверка на Windows/Linux.
 - [`docs/INTEGRATIONS_AND_HEALTH.md`](docs/INTEGRATIONS_AND_HEALTH.md) — реестр проектов, health-контракты и control actions.
+- [`docs/NOTIFICATION_ARCHITECTURE.md`](docs/NOTIFICATION_ARCHITECTURE.md) —
+  владельцы событий, подтверждённые coffee notification paths и защищённый
+  typed contract настроек бота.
 - [`docs/BACKUP_STRATEGY.md`](docs/BACKUP_STRATEGY.md) — создание, скачивание, проверка, хранение и синхронизация резервных копий.
 - [`docs/HOME_ASSISTANT_RESILIENCE.md`](docs/HOME_ASSISTANT_RESILIENCE.md) — local edge, backups и будущий отдельный HA server.
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — защита ноутбука, браузера, Panel Agent, secrets, сети и remote actions.

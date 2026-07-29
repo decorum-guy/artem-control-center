@@ -170,6 +170,14 @@ Rules:
 - cached HA timing may be shown with source and timestamp when HA is offline,
   but cannot make the physical state current.
 
+Notification ownership is separate from device/timing authority:
+`AliceTG_Bot` owns coffee notification policy, per-channel delivery receipts
+and retries, while Panel Agent owns service-health, backup and operation
+notifications. See
+[`NOTIFICATION_ARCHITECTURE.md`](NOTIFICATION_ARCHITECTURE.md). The browser is
+not a notification executor and Panel Agent must not duplicate bot-owned coffee
+events.
+
 ## 7. Coffee-machine widget
 
 The widget is mandatory P0 MVP.

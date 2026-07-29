@@ -34,6 +34,23 @@ Long-running delivery flags remained `false`. This confirms that the warm-up
 deadline fired on at least one configured channel without waiting for or
 triggering the 60-minute warning.
 
+A subsequent sanitized notification-policy read confirmed how that cycle was
+configured:
+
+- warm-up Telegram channel: disabled; delivered: no;
+- warm-up iPhone channel: enabled; delivered: yes.
+
+Sanitized scheduler-log counts for the deadline showed zero Telegram attempts,
+one mobile attempt, one mobile success, one completed all-effective-channels
+delivery and no retry. Raw logs, identifiers, target names and message content
+were not copied.
+
+The coffee machine was already off during that subsequent read, so the bot had
+reset the current-cycle receipts to `false` as designed. The delivery result
+above is the post-deadline snapshot captured while documenting this activation,
+not the later post-cycle reset. Full storage, routing and ownership findings are
+in [`../NOTIFICATION_ARCHITECTURE.md`](../NOTIFICATION_ARCHITECTURE.md).
+
 The 60-minute value is not warm-up duration and is not a physical overheat
 signal. It means only “работает слишком долго”.
 
