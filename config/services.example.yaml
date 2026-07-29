@@ -1,0 +1,129 @@
+version: 1
+
+services:
+  - id: artem-control-center-agent
+    name: Artem Control Center Agent
+    category: system
+    environment: local
+    source: local
+    checks:
+      live:
+        type: http
+        url: http://127.0.0.1:8787/health/live
+      ready:
+        type: http
+        url: http://127.0.0.1:8787/health/ready
+    actions:
+      - restart-panel-agent
+
+  - id: home-assistant-primary
+    name: Home Assistant
+    category: home
+    environment: production
+    source: remote
+    checks:
+      public:
+        type: http
+        url_env: HA_PUBLIC_URL
+      authenticated:
+        type: home_assistant
+        base_url_env: HA_BASE_URL
+        token_env: HA_MONITORING_TOKEN
+    fallback:
+      edge_service_id: local-edge-controller
+    actions:
+      - create-ha-backup
+      - recheck-home-assistant
+
+  - id: alice-tg-bot
+    name: AliceTG Bot
+    category: home
+    environment: production
+    repository: decorum-guy/AliceTG_Bot
+    checks:
+      live:
+        type: http
+        url_env: ALICE_TG_BOT_LIVE_URL
+      ready:
+        type: http
+        url_env: ALICE_TG_BOT_READY_URL
+    actions:
+      - restart-alice-tg-bot
+
+  - id: avalar-site-main
+    name: AVALAR Website
+    category: avalar
+    environment: production
+    repository: decorum-guy/AVALAR
+    checks:
+      homepage:
+        type: http
+        url: https://avalar.pro/
+      health:
+        type: http
+        url: https://avalar.pro/healthz
+    actions:
+      - deploy-avalar-main
+
+  - id: avalar-site-stage
+    name: AVALAR Website Stage
+    category: avalar
+    environment: stage
+    repository: decorum-guy/AVALAR
+    checks:
+      homepage:
+        type: http
+        url: https://stage.avalar.pro/
+      health:
+        type: http
+        url: https://stage.avalar.pro/healthz
+    actions:
+      - deploy-avalar-stage
+
+  - id: avalar-exchange-mcp
+    name: AVALAR Exchange MCP
+    category: avalar
+    environment: production
+    repository: decorum-guy/avalar_exchange_mcp
+    checks:
+      public_health:
+        type: http
+        url: https://exchange.avalar.pro/health
+      readiness:
+        type: http
+        url_env: AVALAR_EXCHANGE_READY_URL
+        auth_env: AVALAR_EXCHANGE_MONITORING_TOKEN
+    actions:
+      - restart-avalar-exchange-app
+      - recheck-avalar-exchange-chain
+      - backup-avalar-exchange
+
+  - id: proxy-server
+    name: Proxy Server
+    category: infrastructure
+    environment: production
+    repository: null
+    note: Actual repository/deployment source must be identified before write actions are enabled.
+    checks:
+      socks:
+        type: tcp
+        host_env: PROXY_HOST
+        port: 1080
+      telegram_proxy:
+        type: tcp
+        host_env: PROXY_HOST
+        port: 8080
+    actions: []
+
+  - id: local-edge-controller
+    name: Local Home Edge
+    category: home
+    environment: local
+    source: local
+    checks:
+      ready:
+        type: internal_adapter
+        adapter: local_edge
+    actions:
+      - edge-coffee-on
+      - edge-coffee-off
