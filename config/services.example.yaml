@@ -1,5 +1,16 @@
 version: 1
 
+# Legacy service-level example. New integrations should prefer config/projects.yaml.
+# Every enabled service is automatically materialized in the UI through the
+# Widget Resolver. No manual frontend service list is allowed.
+
+ui_materialization:
+  enabled: true
+  services_catalog: always
+  generic_widget_fallback: core.generic-service
+  new_items_area: true
+  require_visible_instance_for_onboarding_success: true
+
 services:
   - id: artem-control-center-agent
     name: Artem Control Center Agent
@@ -15,6 +26,8 @@ services:
         url: http://127.0.0.1:8787/health/ready
     actions:
       - restart-panel-agent
+    presentation:
+      widget: core.generic-service
 
   - id: home-assistant-primary
     name: Home Assistant
@@ -29,11 +42,32 @@ services:
         type: home_assistant
         base_url_env: HA_BASE_URL
         token_env: HA_MONITORING_TOKEN
-    fallback:
-      edge_service_id: local-edge-controller
     actions:
       - create-ha-backup
       - recheck-home-assistant
+    constraints:
+      may_run_on_panel_laptop: false
+      future_host: dedicated_compact_server
+    presentation:
+      widget: home.authority-status
+
+  - id: coffee-machine
+    name: Кофемашина
+    category: home
+    environment: production
+    source: home-assistant-and-alice-tg-bot
+    checks:
+      state:
+        type: coffee_state_aggregator
+        ha_url_env: HA_BASE_URL
+        alice_bot_url_env: ALICE_TG_BOT_COFFEE_STATE_URL
+    actions:
+      - home.coffee.turn_on
+      - home.coffee.turn_off
+    presentation:
+      widget: home.coffee-machine
+      pin_to_overview: true
+      priority: 100
 
   - id: alice-tg-bot
     name: AliceTG Bot
@@ -49,6 +83,8 @@ services:
         url_env: ALICE_TG_BOT_READY_URL
     actions:
       - restart-alice-tg-bot
+    presentation:
+      widget: core.generic-service
 
   - id: avalar-site-main
     name: AVALAR Website
@@ -62,8 +98,9 @@ services:
       health:
         type: http
         url: https://avalar.pro/healthz
-    actions:
-      - deploy-avalar-main
+    actions: []
+    presentation:
+      widget: core.generic-service
 
   - id: avalar-site-stage
     name: AVALAR Website Stage
@@ -78,7 +115,10 @@ services:
         type: http
         url: https://stage.avalar.pro/healthz
     actions:
-      - deploy-avalar-stage
+      - avalar.deploy.stage
+      - avalar.smoke.stage
+    presentation:
+      widget: core.generic-service
 
   - id: avalar-exchange-mcp
     name: AVALAR Exchange MCP
@@ -97,13 +137,15 @@ services:
       - restart-avalar-exchange-app
       - recheck-avalar-exchange-chain
       - backup-avalar-exchange
+    presentation:
+      widget: core.generic-service
 
   - id: proxy-server
     name: Proxy Server
     category: infrastructure
     environment: production
     repository: null
-    note: Actual repository/deployment source must be identified before write actions are enabled.
+    note: No repository exists; source and configuration are server-managed.
     checks:
       socks:
         type: tcp
@@ -114,16 +156,10 @@ services:
         host_env: PROXY_HOST
         port: 8080
     actions: []
+    presentation:
+      widget: core.generic-service
 
-  - id: local-edge-controller
-    name: Local Home Edge
-    category: home
-    environment: local
-    source: local
-    checks:
-      ready:
-        type: internal_adapter
-        adapter: local_edge
-    actions:
-      - edge-coffee-on
-      - edge-coffee-off
+validation:
+  require_ui_materialization: true
+  require_generic_fallback: true
+  allow_zero_actions: true
