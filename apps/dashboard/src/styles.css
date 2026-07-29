@@ -405,7 +405,7 @@ p { color: var(--text-secondary); }
 .coffee-state-marker--running_too_long { color: var(--warning); border-color: var(--warning); }
 .coffee-activity {
   position: absolute;
-  top: 21%;
+  top: 8%;
   display: flex;
   gap: 7px;
   height: 32px;
