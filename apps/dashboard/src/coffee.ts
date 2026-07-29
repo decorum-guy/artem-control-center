@@ -1,0 +1,87 @@
+import type { CoffeeData, CoffeeStage } from "@artem/contracts";
+
+const labels: Record<CoffeeStage, string> = {
+  off: "Выключена",
+  turning_on: "Включаем",
+  warming: "Разогревается",
+  ready: "Готова",
+  running: "Включена",
+  running_too_long: "Работает слишком долго",
+  turning_off: "Выключаем",
+  unavailable: "Недоступна",
+  stale: "Данные устарели"
+};
+
+function validPositive(value: number | null): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+export function coffeePresentation(data: CoffeeData, nowIso: string) {
+  const { machine, timingPolicy } = data;
+  let stage: keyof typeof labels;
+  let progress: number | null = null;
+  let remainingSeconds: number | null = null;
+  let runningSeconds: number | null = null;
+  let timingMessage: string;
+  const now = Date.parse(nowIso);
+  const turnedOnAt = machine.turnedOnAt ? Date.parse(machine.turnedOnAt) : Number.NaN;
+
+  if (Number.isFinite(now) && Number.isFinite(turnedOnAt) && turnedOnAt <= now) {
+    runningSeconds = Math.max(0, (now - turnedOnAt) / 1000);
+  }
+
+  if (!machine.available || machine.state === "unavailable") {
+    stage = "unavailable";
+    timingMessage = "Home Assistant недоступен — timing policy не подтверждает состояние";
+  } else if (machine.stale || machine.state === "stale") {
+    stage = "stale";
+    timingMessage = "Последнее состояние Home Assistant устарело";
+  } else if (machine.state === "turning_on" || machine.state === "turning_off") {
+    stage = machine.state;
+    timingMessage = "Ожидаем подтверждение нового состояния Home Assistant";
+  } else if (machine.state === "off") {
+    stage = "off";
+    timingMessage = "Параметры разогрева не требуются";
+  } else {
+    const canUseTiming =
+      runningSeconds !== null &&
+      !timingPolicy.stale &&
+      validPositive(timingPolicy.warmupDurationSeconds) &&
+      validPositive(timingPolicy.longRunningThresholdSeconds);
+
+    if (!canUseTiming) {
+      stage = "running";
+      timingMessage = timingPolicy.stale
+        ? "Параметры разогрева устарели — показываем только состояние HA"
+        : "Параметры разогрева временно недоступны";
+    } else {
+      const elapsedSeconds = runningSeconds!;
+      const warmupDuration = timingPolicy.warmupDurationSeconds!;
+      const longRunningThreshold = timingPolicy.longRunningThresholdSeconds!;
+      progress = Math.max(0, Math.min(1, elapsedSeconds / warmupDuration));
+      remainingSeconds = Math.max(0, Math.ceil(warmupDuration - elapsedSeconds));
+      if (elapsedSeconds >= longRunningThreshold) {
+        stage = "running_too_long";
+      } else if (elapsedSeconds < warmupDuration) {
+        stage = "warming";
+      } else {
+        stage = "ready";
+      }
+      timingMessage = timingPolicy.sourceAvailable
+        ? "Timing policy получена из AliceTG Bot"
+        : "Используется свежая cached timing policy AliceTG Bot";
+    }
+  }
+
+  return {
+    stage,
+    label: labels[stage],
+    progress,
+    progressText: progress === null ? null : `${Math.round(progress * 100)}%`,
+    remainingSeconds,
+    runningSeconds,
+    timingMessage,
+    warning: stage === "running_too_long" || stage === "stale",
+    animated: ["turning_on", "warming", "turning_off"].includes(stage)
+  };
+}

@@ -158,18 +158,18 @@ A widget update cannot silently acquire write permissions.
 
 ### Authority
 
-Home Assistant is the only authoritative runtime source.
+Home Assistant is the only device-state and command authority.
 
 The widget reads from HA:
 
 - current state/availability;
 - last activation timestamp;
-- warm-up start;
-- duration or target-ready time;
-- ready/running/too-long state;
 - command verification.
 
-`AliceTG_Bot` is not a coffee-state provider. Its outage must not make the widget unavailable while HA is healthy.
+`AliceTG_Bot` provides the current user-configurable warm-up duration and
+long-running threshold through a separate read-only timing-policy contract. It
+is not a coffee-state provider. Its outage must not make the widget unavailable
+while HA is healthy.
 
 Exact entity IDs and warm-up mapping must be discovered read-only from:
 
@@ -193,27 +193,21 @@ and documented in `docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md`.
 
 ### Required data
 
-- `authority: home-assistant`;
-- entity state;
-- start/last-on timestamp;
-- HA warm-up source;
-- remaining time;
-- real/derivable progress;
+- HA device-state object with `authority: home-assistant`;
+- exact entity state, availability, confirmed last-on timestamp, and freshness;
+- separate bot timing-policy object with duration, threshold, revision,
+  fetch time, and stale state;
+- derived remaining time/progress;
 - running duration;
 - freshness;
 - allowed actions and disabled reason.
 
 ### Progress rules
 
-Preferred source order:
-
-1. explicit HA progress/remaining-time entity;
-2. HA warm-up start + HA duration;
-3. HA last-on helper + HA duration;
-4. `last_changed` only if configuration inspection proves correctness;
-5. no percentage if none is trustworthy.
-
-Never hard-code a guessed duration.
+Progress requires both a confirmed HA activation time and sufficiently fresh
+bot timing policy. A cached policy is allowed with explicit timestamp/stale
+state. Missing or stale policy produces `running` without percentage. Never
+hard-code the discovered 13/60-minute values.
 
 ### Interactions
 
@@ -223,7 +217,10 @@ Never hard-code a guessed duration.
 - visible action lifecycle;
 - state verification in HA;
 - duplicate turn-on does not reset timer;
-- long-running safety warning.
+- long-running policy warning (“работает слишком долго”).
+
+Do not label the policy threshold as physical overheating without a real
+HA/device overheat signal.
 
 ### Visual behavior
 

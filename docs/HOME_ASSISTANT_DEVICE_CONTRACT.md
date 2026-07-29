@@ -11,13 +11,14 @@ For the coffee machine, Home Assistant is the **only authoritative runtime sourc
 
 - current on/off state;
 - availability;
-- time of the last activation;
-- warm-up start time;
-- warm-up duration or target-ready time;
-- ready/running/too-long state where these are represented in HA;
+- entity state, attributes, `last_changed`, and `last_updated`;
+- confirmed time of the last physical activation;
+- execution of turn-on/turn-off;
 - command verification after turn-on/turn-off.
 
-`AliceTG_Bot` is a separate monitored service inside the wider HA stack. It may call Home Assistant or expose Telegram workflows, but it is **not** the source of truth for the coffee widget and must not be required to render current coffee state while HA itself is healthy.
+`AliceTG_Bot` is the current source of the **user-configurable timing policy**:
+warm-up duration and long-running threshold. It is never the physical device
+state authority and never executes Control Center coffee commands.
 
 ## 2. Local discovery source
 
@@ -58,60 +59,62 @@ Panel Agent provides a dedicated `HomeAssistantCoffeeAdapter` or equivalent adap
 
 It subscribes to relevant entities through the HA WebSocket API and uses REST/history only where needed.
 
-Normalized contract:
+Normalized contracts deliberately separate physical state from timing policy:
 
 ```ts
 type CoffeeMachineState = {
-  deviceId: 'coffee-machine'
   authority: 'home-assistant'
-  state:
-    | 'off'
-    | 'turning_on'
-    | 'warming'
-    | 'ready'
-    | 'running'
-    | 'running_too_long'
-    | 'turning_off'
-    | 'unavailable'
-    | 'stale'
+  entityId: 'switch.kofemashina'
+  state: 'off' | 'on' | 'turning_on' | 'turning_off' | 'unavailable' | 'stale'
   available: boolean
-  entityState: string | null
   turnedOnAt: string | null
-  warmupStartedAt: string | null
-  warmupDurationSeconds: number | null
-  readyAt: string | null
-  remainingSeconds: number | null
-  progress: number | null
-  runningDurationSeconds: number | null
+  entityLastChangedAt: string | null
   observedAt: string
   stale: boolean
-  sourceEntities: string[]
+}
+
+type CoffeeTimingPolicy = {
+  source: 'alice-tg-bot'
+  warmupDurationSeconds: number | null
+  longRunningThresholdSeconds: number | null
+  fetchedAt: string | null
+  stale: boolean
+  sourceAvailable: boolean
+  sourceRevision: string | null
 }
 ```
 
-Exact mapping from HA entities/attributes/helpers is created only after local configuration inspection.
+The composite presentation model derives `warming`, `ready`,
+`running_too_long`, progress, and remaining time. The bot policy never replaces
+HA state.
 
 ## 4. Warm-up progress rules
 
-Preferred source order:
+Required inputs:
 
-1. explicit HA warm-up progress/remaining-time entity, if it exists;
-2. explicit HA warm-up start time plus configured HA duration;
-3. HA last-turn-on helper plus configured HA duration;
-4. entity `last_changed` only if inspection proves that it reliably represents physical activation;
-5. otherwise show a stage without a fabricated percentage.
+1. a confirmed HA `turnedOnAt` from a real `off → on` transition or a durable
+   HA helper/history recovery;
+2. the current read-only `CoffeeTimingPolicy` from `AliceTG_Bot`, or a cached
+   copy with explicit freshness;
+3. a common calculation timestamp.
 
-The UI must never invent progress from a hard-coded duration when HA uses different logic.
+The discovered 13-minute and 60-minute values are fixtures/current defaults,
+not frontend constants. Users can change them through Telegram.
 
 When progress can be derived safely:
 
 ```text
-elapsed = now - warmupStartedAt
-progress = clamp(elapsed / warmupDuration, 0..1)
-remaining = max(warmupDuration - elapsed, 0)
+elapsed = now - HA.turnedOnAt
+progress = clamp(elapsed / botPolicy.warmupDurationSeconds, 0..1)
+remaining = max(botPolicy.warmupDurationSeconds - elapsed, 0)
+worksTooLong = elapsed >= botPolicy.longRunningThresholdSeconds
 ```
 
-HA timestamps remain authoritative. Client clock skew must be considered and large inconsistencies surfaced as degraded data.
+Calculation is disabled when HA activation time or timing policy is missing,
+invalid, or too stale. In that case the widget shows the HA state as `running`
+without a percentage. “Works too long” is a policy warning, not physical
+overheating; `overheated` requires a real HA/device temperature or overheat
+signal.
 
 ## 5. Commands
 
@@ -148,6 +151,7 @@ Command success requires the corresponding HA state transition. HTTP success alo
 - process health;
 - Telegram availability;
 - its own schedules/timers/state;
+- current coffee timing policy;
 - bot-specific workflows;
 - restart and backup capability.
 
@@ -156,8 +160,10 @@ Rules:
 - bot outage must not mark HA or the coffee device offline;
 - coffee widget reads HA even if the bot is unavailable;
 - coffee controls target HA, not a bot-specific HTTP endpoint;
-- if the bot currently contains safety/timing behavior absent from HA, Codex must document the gap before implementation;
-- safety logic needed by the device should preferably live in HA or be explicitly represented as a dependency, not silently hidden inside the UI.
+- a fresh cached timing policy may continue to drive presentation while clearly
+  identifying its source and fetch time;
+- a stale/missing policy degrades timing only, not device availability;
+- bot timing values cannot make coffee state current when HA is unavailable.
 
 ## 7. Coffee-machine widget
 
@@ -168,13 +174,14 @@ It displays:
 - authoritative label `Home Assistant`;
 - current state and freshness;
 - last activation time;
-- warm-up start;
-- real remaining time/progress where derivable from HA;
+- HA-confirmed activation time;
+- current/cached bot timing-policy freshness;
+- real remaining time/progress only when both inputs are trustworthy;
 - ready state;
 - running duration;
 - long-running warning;
 - action lifecycle and HA verification;
-- clear degraded state when required HA helpers are missing or stale.
+- clear timing-degraded state when policy or activation time is missing/stale.
 
 The widget must continue to render HA state when `AliceTG_Bot` is down.
 

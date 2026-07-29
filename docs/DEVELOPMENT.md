@@ -91,6 +91,49 @@ Recommended behavior:
 
 Actual command names may change during bootstrap, but equivalent one-command workflows are required.
 
+### Implemented bootstrap
+
+From the repository root:
+
+```text
+npm run setup
+npm run dev:mac
+```
+
+`setup` installs repository-local Node dependencies and creates a
+repository-local `.venv`. Install the Playwright-managed Chromium cache once
+with `npm run install:browsers`. `dev:mac` starts both processes and opens a
+normal browser window. Other implemented modes:
+
+```text
+npm run dev:fixtures
+npm run dev:read-only
+npm run check
+npm run test:e2e
+```
+
+Both servers bind loopback only. The fixture mutation route exists only in
+`fixtures` and `integration_test`; it returns 404 in `read_only` and
+`production`. No real remote action executor exists in the foundation.
+
+### Cache and non-source artifact policy
+
+Source and project artifacts are writable only inside `artem-control-center`.
+Tool caches and non-source installation artifacts may use the designated parent
+workspace or standard tool cache directories. External project folders remain
+strictly read-only.
+
+Preference order:
+
+1. project-local ignored cache;
+2. parent workspace `.cache/`, `.tooling/`, `.tmp/`, or `artifacts/`;
+3. standard tool cache when redirection adds fragility, such as Playwright
+   browser binaries.
+
+Never put caches, downloaded binaries, lockfiles, or dependencies inside the
+Home Assistant or AVALAR folders. Cache contents must not contain secrets and
+must not be committed.
+
 ## 4. Browser modes
 
 ### Development window
@@ -108,13 +151,16 @@ Uses:
 
 ### Simulated kiosk
 
-Provide a development route/flag that:
+Use `/dev/widget-gallery` for the simulated kiosk flag. The route:
 
-- hides development chrome inside the app;
+- is available only in development builds;
 - uses the production viewport and layout constraints;
 - simulates ambient/control/handheld mode;
 - supports fullscreen where the browser allows it;
 - does not lock the developer out of the Mac session.
+
+Normal product routes never show fixture selection, registry mutation, contract
+labels, motion diagnostics, or kiosk controls.
 
 ### Production kiosk
 
@@ -137,7 +183,8 @@ On macOS:
 - production tokens are not required for UI work;
 - fixtures cover healthy, degraded, stale, offline, incident and action lifecycle states.
 
-The UI must visibly identify non-production mode.
+The development gallery visibly identifies non-production mode. Ordinary user
+routes do not expose development mode or fixture controls.
 
 ## 6. Widget development workflow
 
@@ -149,7 +196,7 @@ Codex workflow:
 2. implement manifest, data contract and settings schema;
 3. add deterministic fixtures;
 4. run component tests;
-5. run the widget in preview/gallery route;
+5. run the widget at `/dev/widget-gallery`;
 6. test day/night, ambient/control/handheld and reduced-motion;
 7. test loading/stale/offline/error states;
 8. run Playwright screenshot checks;
@@ -195,6 +242,15 @@ Use Playwright Chromium for:
 - screenshots at target viewport sizes.
 
 Store baseline screenshots only when the project adopts an explicit visual-regression workflow. Avoid approving broad screenshot changes without inspection.
+
+For an explicit local review pass while the fixture server is running:
+
+```bash
+npm run visual:review
+```
+
+The command writes review-only screenshots to the parent workspace
+`artifacts/ui-review/`; they are not source artifacts and must not enter Git.
 
 ## 9. Target-device handoff checklist
 

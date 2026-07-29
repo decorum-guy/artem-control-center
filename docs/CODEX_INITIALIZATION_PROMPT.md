@@ -22,7 +22,23 @@ artem-control-panel
 decorum-guy/artem-control-center
 ```
 
-**Записывать, создавать, удалять и форматировать файлы разрешено только внутри текущей папки `artem-control-panel`.**
+Source and project artifacts are writable only inside `artem-control-center`.
+Tool caches and non-source installation artifacts may use the designated parent
+workspace or standard tool cache directories. External project folders remain
+strictly read-only.
+
+Предпочтительные cache locations:
+
+```text
+/Users/aartemida/Documents/artem-control-panel-proj/.cache/
+/Users/aartemida/Documents/artem-control-panel-proj/.tooling/
+/Users/aartemida/Documents/artem-control-panel-proj/.tmp/
+/Users/aartemida/Documents/artem-control-panel-proj/artifacts/
+```
+
+Project-local ignored cache предпочтителен. Стандартные системные cache
+directories допустимы, когда инструмент не позволяет безопасно перенаправить
+cache или это неоправданно усложняет setup.
 
 Все остальные предоставленные папки и репозитории — строго **READ ONLY**.
 
@@ -33,7 +49,7 @@ decorum-guy/artem-control-center
 - редактировать или форматировать файлы;
 - запускать auto-fix/formatters, которые могут что-либо записать;
 - устанавливать зависимости;
-- создавать lock-файлы, caches или generated artifacts;
+- создавать lock-файлы, caches или generated artifacts внутри внешнего проекта;
 - запускать migrations, deploy, restart или production write-команды;
 - создавать commits, branches, tags или PR;
 - менять конфигурацию;
@@ -81,7 +97,8 @@ decorum-guy/avalar_exchange_mcp
    - определить repository root;
    - `git status --short --branch`;
    - проверить, нет ли пользовательских uncommitted changes;
-   - убедиться, что write operations направляются только в `artem-control-panel`.
+   - убедиться, что source/project writes направляются только в
+     `artem-control-center`, а tool caches — только в разрешённые cache paths.
 2. Прочитай в текущем репозитории как минимум:
    - `README.md`;
    - `AGENTS.md`;
@@ -135,7 +152,10 @@ Home Assistant управляет:
 
 **Home Assistant является единственным источником истины для состояния кофемашины и чайника.**
 
-`AliceTG_Bot` — отдельный Telegram-бот внутри HA stack. Он не является источником coffee/kettle state.
+`AliceTG_Bot` — отдельный Telegram-бот внутри HA stack. Он не является
+источником coffee/kettle physical state или исполнителем команд Control Center,
+но является текущим read-only источником изменяемой пользователем coffee timing
+policy: warm-up duration и long-running threshold.
 
 Из `/Users/aartemida/Documents/Homeassistant` найди фактическую реализацию:
 
@@ -144,8 +164,9 @@ Home Assistant управляет:
 - existing HA scripts/services для turn-on/turn-off;
 - helper/template/automation, где хранится время последнего включения кофемашины;
 - warm-up start;
-- warm-up duration или ready-at;
-- ready/running/running-too-long logic;
+- подтверждённый HA activation timestamp;
+- текущие bot warm-up duration и long-running threshold;
+- composite ready/running/running-too-long logic;
 - long-running safety/timers;
 - все YAML includes/packages/templates, влияющие на эти устройства;
 - является ли `last_changed` надёжным источником или используется отдельный helper;
@@ -168,14 +189,18 @@ docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md
 - normalized coffee-state mapping;
 - normalized kettle mapping;
 - источник last activation;
-- источник warm-up duration/progress;
+- отдельные источники HA activation time и bot timing policy;
 - safety logic;
 - gaps/unknowns;
 - required HA changes — только описание, без применения;
 - confidence level для каждого вывода;
 - явное подтверждение, что внешняя папка не менялась.
 
-Coffee widget должен в дальнейшем читать HA через WebSocket/REST adapter и продолжать работать, когда AliceTG Bot недоступен, если HA здоров.
+Coffee widget должен читать physical state через HA WebSocket/REST adapter и
+timing policy через отдельный authenticated read-only bot contract. При
+недоступном боте HA state продолжает отображаться; fresh cached policy допустима
+с timestamp, stale/missing policy убирает percentage. Bot values не могут
+компенсировать недоступный HA.
 
 ## 6. AVALAR website discovery
 

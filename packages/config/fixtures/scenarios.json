@@ -1,0 +1,465 @@
+{
+  "generatedAt": "2026-07-29T12:00:00Z",
+  "defaultScenario": "ha-healthy",
+  "baseServices": [
+    {
+      "id": "home-assistant",
+      "title": "Home Assistant",
+      "enabled": true,
+      "dataContract": "service.health.v1",
+      "health": "healthy",
+      "summary": "Authoritative home state is available",
+      "actions": [],
+      "presentation": {
+        "category": "home-infrastructure",
+        "group": "Home infrastructure",
+        "overview": "aggregate",
+        "priority": 80,
+        "environment": "local",
+        "freshnessLabel": "только что",
+        "latencyMs": 18,
+        "incidents": 0,
+        "role": "home-authority"
+      },
+      "data": {
+        "adapter": "fixture",
+        "authority": "home-assistant"
+      }
+    },
+    {
+      "id": "coffee-machine",
+      "title": "Кофемашина",
+      "enabled": true,
+      "dataContract": "home.coffee-machine.v1",
+      "health": "healthy",
+      "summary": "Выключена",
+      "actions": [
+        {
+          "id": "home.coffee.turn_on",
+          "title": "Включить",
+          "enabled": true,
+          "risk": "medium"
+        },
+        {
+          "id": "home.coffee.turn_off",
+          "title": "Выключить",
+          "enabled": true,
+          "risk": "low"
+        }
+      ],
+      "presentation": {
+        "category": "home-device",
+        "group": "Home infrastructure",
+        "overview": "primary",
+        "priority": 100,
+        "environment": "home",
+        "freshnessLabel": "только что",
+        "incidents": 0
+      },
+      "data": {
+        "machine": {
+          "entityId": "switch.kofemashina",
+          "authority": "home-assistant",
+          "state": "off",
+          "available": true,
+          "turnedOnAt": null,
+          "entityLastChangedAt": "2026-07-29T11:50:00Z",
+          "observedAt": "2026-07-29T12:00:00Z",
+          "stale": false
+        },
+        "timingPolicy": {
+          "source": "alice-tg-bot",
+          "warmupDurationSeconds": 780,
+          "longRunningThresholdSeconds": 3600,
+          "fetchedAt": "2026-07-29T11:59:30Z",
+          "stale": false,
+          "sourceAvailable": true,
+          "sourceRevision": "fixture-policy-13m-60m"
+        }
+      }
+    },
+    {
+      "id": "kettle",
+      "title": "Чайник",
+      "enabled": true,
+      "dataContract": "home.kettle.v1",
+      "health": "healthy",
+      "summary": "Выключен",
+      "actions": [],
+      "presentation": {
+        "category": "home-device",
+        "group": "Home infrastructure",
+        "overview": "quick-control",
+        "priority": 70,
+        "environment": "home",
+        "freshnessLabel": "только что",
+        "incidents": 0
+      },
+      "data": {
+        "stage": "off",
+        "entityId": "water_heater.chainik",
+        "authority": "home-assistant",
+        "observedAt": "2026-07-29T12:00:00Z"
+      }
+    },
+    {
+      "id": "alice-tg-bot",
+      "title": "AliceTG Bot",
+      "enabled": true,
+      "dataContract": "service.health.v1",
+      "health": "healthy",
+      "summary": "Telegram workflow and timing policy available",
+      "actions": [],
+      "presentation": {
+        "category": "personal-infrastructure",
+        "group": "Personal infrastructure",
+        "overview": "incident-only",
+        "priority": 40,
+        "environment": "production",
+        "freshnessLabel": "30 сек назад",
+        "latencyMs": 46,
+        "incidents": 0,
+        "role": "timing-policy"
+      },
+      "data": {
+        "role": "telegram-workflow-and-timing-policy",
+        "coffeeDeviceAuthority": false
+      }
+    },
+    {
+      "id": "avalar-site-stage",
+      "title": "AVALAR Stage",
+      "enabled": true,
+      "dataContract": "service.health.v1",
+      "health": "healthy",
+      "summary": "Monitor-only fixture",
+      "actions": [],
+      "presentation": {
+        "category": "work",
+        "group": "AVALAR",
+        "overview": "aggregate",
+        "priority": 60,
+        "environment": "stage",
+        "freshnessLabel": "20 сек назад",
+        "latencyMs": 112,
+        "incidents": 0
+      },
+      "data": {
+        "capability": "monitor-only"
+      }
+    },
+    {
+      "id": "fixture-multi-action",
+      "title": "Multi-action Service",
+      "enabled": true,
+      "dataContract": "service.health.v1",
+      "health": "degraded",
+      "summary": "Two simulated policy actions",
+      "actions": [
+        {
+          "id": "fixture.validate",
+          "title": "Validate",
+          "enabled": true,
+          "risk": "low"
+        },
+        {
+          "id": "fixture.restart",
+          "title": "Restart simulation",
+          "enabled": true,
+          "risk": "medium"
+        }
+      ],
+      "presentation": {
+        "category": "system",
+        "group": "System",
+        "overview": "incident-only",
+        "priority": 20,
+        "environment": "fixture",
+        "freshnessLabel": "только что",
+        "latencyMs": null,
+        "incidents": 1
+      },
+      "data": {
+        "capability": "multi-action-fixture",
+        "executor": "none"
+      }
+    }
+  ],
+  "scenarios": {
+    "ha-healthy": {},
+    "ha-degraded": {
+      "home-assistant": {
+        "health": "degraded",
+        "summary": "Connected with stale dependency data"
+      },
+      "coffee-machine": {
+        "health": "degraded",
+        "summary": "Last HA observation is stale",
+        "data": {
+          "machine": {
+            "state": "stale",
+            "stale": true,
+            "observedAt": "2026-07-29T11:20:00Z"
+          }
+        }
+      }
+    },
+    "ha-offline": {
+      "home-assistant": {
+        "health": "offline",
+        "summary": "Connection unavailable"
+      },
+      "coffee-machine": {
+        "health": "offline",
+        "summary": "HA unavailable; bot policy cannot prove device state",
+        "data": {
+          "machine": {
+            "state": "unavailable",
+            "available": false,
+            "turnedOnAt": null,
+            "stale": true
+          }
+        }
+      },
+      "kettle": {
+        "health": "offline",
+        "summary": "HA unavailable",
+        "data": {
+          "stage": "unavailable"
+        }
+      }
+    },
+    "coffee-off": {},
+    "coffee-turning-on": {
+      "coffee-machine": {
+        "summary": "Проверяем включение через HA",
+        "data": {
+          "machine": {
+            "state": "turning_on",
+            "turnedOnAt": null
+          }
+        }
+      }
+    },
+    "coffee-warming": {
+      "coffee-machine": {
+        "summary": "Разогрев по текущей 13-минутной policy",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T11:54:09Z",
+            "entityLastChangedAt": "2026-07-29T11:54:09Z"
+          }
+        }
+      }
+    },
+    "coffee-policy-changed": {
+      "coffee-machine": {
+        "summary": "Разогрев по изменённой 20-минутной policy",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T11:54:09Z",
+            "entityLastChangedAt": "2026-07-29T11:54:09Z"
+          },
+          "timingPolicy": {
+            "warmupDurationSeconds": 1200,
+            "fetchedAt": "2026-07-29T11:59:50Z",
+            "sourceRevision": "fixture-policy-20m-60m"
+          }
+        }
+      }
+    },
+    "coffee-ready": {
+      "coffee-machine": {
+        "summary": "Готова по текущей timing policy",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T11:47:00Z",
+            "entityLastChangedAt": "2026-07-29T11:47:00Z"
+          }
+        }
+      }
+    },
+    "coffee-running": {
+      "coffee-machine": {
+        "summary": "Включена; timing policy недоступна",
+        "health": "degraded",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T11:54:09Z"
+          },
+          "timingPolicy": {
+            "warmupDurationSeconds": null,
+            "longRunningThresholdSeconds": null,
+            "fetchedAt": null,
+            "stale": false,
+            "sourceAvailable": false,
+            "sourceRevision": null
+          }
+        }
+      }
+    },
+    "coffee-running-too-long": {
+      "coffee-machine": {
+        "summary": "Работает дольше текущего policy threshold",
+        "health": "degraded",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T10:45:00Z",
+            "entityLastChangedAt": "2026-07-29T10:45:00Z"
+          }
+        }
+      }
+    },
+    "coffee-long-running-threshold-changed": {
+      "coffee-machine": {
+        "summary": "Работает дольше изменённого 5-минутного threshold",
+        "health": "degraded",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T11:50:00Z",
+            "entityLastChangedAt": "2026-07-29T11:50:00Z"
+          },
+          "timingPolicy": {
+            "warmupDurationSeconds": 180,
+            "longRunningThresholdSeconds": 300,
+            "fetchedAt": "2026-07-29T11:59:50Z",
+            "sourceRevision": "fixture-policy-3m-5m"
+          }
+        }
+      }
+    },
+    "coffee-turning-off": {
+      "coffee-machine": {
+        "summary": "Проверяем выключение через HA",
+        "data": {
+          "machine": {
+            "state": "turning_off"
+          }
+        }
+      }
+    },
+    "coffee-stale": {
+      "coffee-machine": {
+        "summary": "Последнее состояние HA устарело",
+        "health": "stale",
+        "data": {
+          "machine": {
+            "state": "stale",
+            "observedAt": "2026-07-29T11:20:00Z",
+            "stale": true
+          }
+        }
+      }
+    },
+    "kettle-on": {
+      "kettle": {
+        "summary": "Включен",
+        "data": {
+          "stage": "on"
+        }
+      }
+    },
+    "kettle-off": {},
+    "kettle-unavailable": {
+      "kettle": {
+        "health": "offline",
+        "summary": "Entity unavailable",
+        "data": {
+          "stage": "unavailable"
+        }
+      }
+    },
+    "alice-down-ha-healthy": {
+      "alice-tg-bot": {
+        "health": "offline",
+        "summary": "Bot unavailable; cached policy remains fresh"
+      },
+      "coffee-machine": {
+        "summary": "HA state available; fresh cached timing policy",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T11:47:00Z",
+            "entityLastChangedAt": "2026-07-29T11:47:00Z"
+          },
+          "timingPolicy": {
+            "sourceAvailable": false,
+            "fetchedAt": "2026-07-29T11:59:30Z",
+            "stale": false
+          }
+        }
+      }
+    },
+    "alice-down-policy-stale": {
+      "alice-tg-bot": {
+        "health": "offline",
+        "summary": "Bot unavailable; cached policy is stale"
+      },
+      "coffee-machine": {
+        "health": "degraded",
+        "summary": "HA state available; timing parameters are stale",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T11:47:00Z",
+            "entityLastChangedAt": "2026-07-29T11:47:00Z"
+          },
+          "timingPolicy": {
+            "sourceAvailable": false,
+            "fetchedAt": "2026-07-29T10:00:00Z",
+            "stale": true
+          }
+        }
+      }
+    },
+    "ha-offline-policy-available": {
+      "home-assistant": {
+        "health": "offline",
+        "summary": "Connection unavailable"
+      },
+      "coffee-machine": {
+        "health": "offline",
+        "summary": "HA unavailable; fresh bot policy cannot prove device state",
+        "data": {
+          "machine": {
+            "state": "unavailable",
+            "available": false,
+            "turnedOnAt": null,
+            "stale": true
+          },
+          "timingPolicy": {
+            "sourceAvailable": true,
+            "fetchedAt": "2026-07-29T11:59:50Z",
+            "stale": false
+          }
+        }
+      }
+    },
+    "coffee-no-timing-policy": {
+      "coffee-machine": {
+        "health": "degraded",
+        "summary": "Работает; timing policy отсутствует",
+        "data": {
+          "machine": {
+            "state": "on",
+            "turnedOnAt": "2026-07-29T11:54:09Z"
+          },
+          "timingPolicy": {
+            "warmupDurationSeconds": null,
+            "longRunningThresholdSeconds": null,
+            "fetchedAt": null,
+            "stale": false,
+            "sourceAvailable": false,
+            "sourceRevision": null
+          }
+        }
+      }
+    }
+  }
+}

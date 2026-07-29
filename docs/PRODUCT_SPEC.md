@@ -306,6 +306,10 @@ No arbitrary JavaScript, HTML, shell or direct browser fetch is allowed.
 
 ## 6. Coffee Machine Widget — mandatory P0 MVP
 
+Вся визуальная реализация следует `docs/DESIGN_DIRECTION.md`: operational
+hierarchy важнее декоративности, а specialized coffee widget не превращается в
+hero-banner или игрушку.
+
 The coffee-machine widget is not optional and is not postponed after MVP.
 
 States:
@@ -463,13 +467,16 @@ select profile
 
 ## 12. AVALAR deployment
 
-Для AVALAR Website stage должна быть отдельная registered deploy action, эквивалентная:
+Для AVALAR Website stage должна быть отдельная registered deploy action —
+безопасный эквивалент текущего operator path:
 
 ```text
-avalar-reg ./deploy.sh stage
+ssh avalar-reg "~/avalar.sh stage"
 ```
 
 Control Center не передаёт произвольный shell. Action запускает зарегистрированный handler, показывает target/ref, выполняет prechecks, deploy, health/browser verification и audit. Main deployment/rollback подключаются отдельно.
+Текущий live handler не включается напрямую: до этого ему требуются lock,
+backup, deployment marker, strict TLS smoke и отдельный rollback contract.
 
 ## 13. Security and safety UX
 

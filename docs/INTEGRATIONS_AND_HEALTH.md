@@ -172,16 +172,18 @@ Required health additions:
 - `/health/live` — process/event loop;
 - `/health/ready` — Telegram mode, HA API, required state files;
 - protected `/health/details` — polling errors, timer scheduler, storage, PushWard error summary;
-- safe coffee workflow status endpoint;
+- authenticated read-only `GET /api/v1/coffee/timing-policy`, exposing only
+  warm-up duration, long-running threshold, updated time, and revision;
 - idempotency support for control requests.
 
 Actions:
 
-- coffee on/off through existing safe flow;
-- kettle action if existing flow supports it;
 - reset only documented flags/modes;
 - restart bot container;
 - recheck HA dependency.
+
+Coffee/kettle device commands are intentionally absent here: Control Center
+executes and verifies them through Home Assistant.
 
 Backups:
 
@@ -220,14 +222,18 @@ Required health additions:
 
 ### Stage deployment
 
-Required registered action is equivalent to the existing operator procedure:
+Required registered action is a hardened equivalent of the current operator
+procedure:
 
 ```text
-avalar-reg ./deploy.sh stage
+ssh avalar-reg "~/avalar.sh stage"
 ```
 
 Implementation:
 
+- current live handler is not yet safe enough for Control Center: discovery
+  found no lock, backup, marker, or rollback and found a permissive TLS-disabled
+  curl smoke;
 - exact fixed handler, not arbitrary shell;
 - target explicitly `stage`;
 - optional validated ref/commit parameter only if deploy script supports it;

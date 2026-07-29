@@ -63,11 +63,15 @@ services:
         type: home_assistant_coffee
         base_url_env: HA_BASE_URL
         token_env: HA_MONITORING_TOKEN
-        entity_env: HA_COFFEE_ENTITY_ID
-        last_turned_on_entity_env: HA_COFFEE_LAST_TURNED_ON_ENTITY_ID
-        warmup_started_entity_env: HA_COFFEE_WARMUP_STARTED_ENTITY_ID
-        warmup_duration_entity_env: HA_COFFEE_WARMUP_DURATION_ENTITY_ID
-        note: Exact entity/helper mapping must be discovered from the read-only HA folder and documented before real integration.
+        entity_id: switch.kofemashina
+        timing_policy:
+          adapter: alice_tg_bot_read_only
+          endpoint_ref: alice_coffee_timing_policy
+          cache_with_freshness: true
+          enabled: false
+          enablement: external_contract_not_applied
+        progress_policy: stage_without_percentage
+        note: Device state comes only from HA. Progress requires confirmed HA activation time plus sufficiently fresh bot timing policy.
     actions:
       - home.coffee.turn_on
       - home.coffee.turn_off
@@ -88,7 +92,7 @@ services:
         type: home_assistant_device
         base_url_env: HA_BASE_URL
         token_env: HA_MONITORING_TOKEN
-        entity_env: HA_KETTLE_ENTITY_ID
+        entity_id: water_heater.chainik
     actions:
       - home.kettle.turn_on
       - home.kettle.turn_off
@@ -108,6 +112,10 @@ services:
       ready:
         type: http
         url_env: ALICE_TG_BOT_READY_URL
+      coffee_timing_policy:
+        type: unavailable
+        proposed_endpoint: /api/v1/coffee/timing-policy
+        note: Read-only external contract is documented but not applied.
     actions:
       - restart-alice-tg-bot
     presentation:
@@ -122,9 +130,10 @@ services:
       homepage:
         type: http
         url: https://avalar.pro/
-      health:
+      representative_route:
         type: http
-        url: https://avalar.pro/healthz
+        url: https://avalar.pro/about
+        note: Monitor-only until the proposed application health endpoint exists.
     actions: []
     presentation:
       widget: core.generic-service
@@ -138,9 +147,10 @@ services:
       homepage:
         type: http
         url: https://stage.avalar.pro/
-      health:
+      representative_route:
         type: http
-        url: https://stage.avalar.pro/healthz
+        url: https://stage.avalar.pro/about
+        note: Monitor-only until the proposed application health endpoint exists.
     actions:
       - avalar.deploy.stage
       - avalar.smoke.stage
@@ -157,9 +167,8 @@ services:
         type: http
         url: https://exchange.avalar.pro/health
       readiness:
-        type: http
-        url_env: AVALAR_EXCHANGE_READY_URL
-        auth_env: AVALAR_EXCHANGE_MONITORING_TOKEN
+        type: unavailable
+        note: No readiness endpoint exists; current /health is process/import liveness only.
     actions:
       - restart-avalar-exchange-app
       - recheck-avalar-exchange-chain

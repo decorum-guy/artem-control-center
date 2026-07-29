@@ -6,7 +6,7 @@
 
 - **UI runtime:** Chromium в полноэкранном kiosk-режиме.
 - **Frontend:** React + TypeScript + Vite.
-- **Backend:** локальный Panel Agent; рекомендуемый стек — FastAPI.
+- **Backend:** локальный Panel Agent на FastAPI.
 - **Первый production host:** Windows на Samsung Notebook 9 Pro 13" (NP940X3M).
 - **Целевая ОС панели:** Linux после проверки тачскрина, поворота, сна, Wi‑Fi и Android-приложения.
 - **macOS development:** UI и большая часть Panel Agent обязаны локально запускаться и тестироваться на Mac; hardware/kiosk acceptance выполняется отдельно на Windows.
@@ -15,7 +15,10 @@
 - **Темы:** обязательные отдельные дневная и ночная темы с автоматическим переключением и ручным override.
 - **Motion design:** выразительные, плавные и функциональные анимации входят уже в первый визуальный MVP.
 - **Coffee widget:** анимированный виджет разогрева, готовности и long-running warning кофемашины — обязательная P0-функция MVP.
-- **Home Assistant device ownership:** кофемашиной и чайником управляет Home Assistant. Состояние кофемашины, время последнего включения и логика разогрева берутся из HA; `AliceTG_Bot` не является источником истины для coffee widget.
+- **Coffee authority split:** Home Assistant управляет кофемашиной и остаётся
+  единственным источником device state/availability/command verification.
+  `AliceTG_Bot` предоставляет только изменяемую пользователем timing policy
+  разогрева и long-running threshold через отдельный read-only contract.
 - **Device priority:** кофемашина — первый приоритет Home-раздела; чайник подключается через тот же HA adapter, но может начинать с более простого generic device widget.
 - **Project onboarding:** проекты подключаются декларативно по capabilities. Проект может быть monitor-only, иметь одну кнопку, несколько actions, backup или вообще не иметь управления.
 - **Automatic UI materialization:** после enable новый project/service автоматически появляется в UI. Специализированный widget используется при наличии, иначе создаётся обязательный Generic Service Widget; ручное дописывание списка сервисов в frontend запрещено.
@@ -49,13 +52,15 @@
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты и границы ответственности.
 - [`docs/PROJECT_ONBOARDING.md`](docs/PROJECT_ONBOARDING.md) — capability-based подключение, отключение и настройка проектов.
 - [`docs/WIDGET_SYSTEM.md`](docs/WIDGET_SYSTEM.md) — автоматическое появление сервисов, widget plug-ins, layout system и no-code widgets.
-- [`docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`](docs/HOME_ASSISTANT_DEVICE_CONTRACT.md) — HA как единственный источник состояния кофемашины/чайника и правила поиска warm-up данных.
+- [`docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`](docs/HOME_ASSISTANT_DEVICE_CONTRACT.md) — HA device authority, bot timing-policy authority и composite coffee model.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — разработка на Mac и финальная проверка на Windows/Linux.
 - [`docs/INTEGRATIONS_AND_HEALTH.md`](docs/INTEGRATIONS_AND_HEALTH.md) — реестр проектов, health-контракты и control actions.
 - [`docs/BACKUP_STRATEGY.md`](docs/BACKUP_STRATEGY.md) — создание, скачивание, проверка, хранение и синхронизация резервных копий.
 - [`docs/HOME_ASSISTANT_RESILIENCE.md`](docs/HOME_ASSISTANT_RESILIENCE.md) — local edge, backups и будущий отдельный HA server.
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md) — защита ноутбука, браузера, Panel Agent, secrets, сети и remote actions.
 - [`docs/UI_MOTION_SPEC.md`](docs/UI_MOTION_SPEC.md) — темы, анимации и touch-паттерны.
+- [`docs/DESIGN_DIRECTION.md`](docs/DESIGN_DIRECTION.md) — продуктовая визуальная
+  иерархия, touch/motion principles и anti-AI-slop review checklist.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — порядок реализации.
 - [`docs/REFERENCES.md`](docs/REFERENCES.md) — официальные источники и границы подтверждённых возможностей.
 - [`config/projects.example.yaml`](config/projects.example.yaml) — capability-based registry проектов и environments.
@@ -70,3 +75,27 @@
 ## Базовый принцип
 
 Ноутбук является красивым интерфейсом, локальным edge-контроллером, backup-node и пунктом наблюдения, но не единственной точкой, от которой зависят дом, серверы или доступ к данным.
+
+## Первый локальный запуск на Mac
+
+```text
+npm run setup
+npm run dev:mac
+```
+
+`dev:mac` одной командой запускает FastAPI Panel Agent на
+`127.0.0.1:8787`, Vite на `127.0.0.1:5173` и открывает обычное окно браузера.
+Режим `fixtures` визуально отмечен и не содержит production write executor.
+Для безопасного пустого read-only режима используйте `npm run dev:read-only`.
+
+Основной UI открывается на `/overview`; пользовательские разделы находятся на
+`/home`, `/services`, `/calendar`, `/tasks`, `/backups`, `/apps`, `/settings` и
+`/system`. Fixture controls и contract/debug metadata доступны отдельно на
+`/dev/widget-gallery`; production build явно отключает этот маршрут.
+
+Проверки:
+
+```text
+npm run check
+npm run test:e2e
+```

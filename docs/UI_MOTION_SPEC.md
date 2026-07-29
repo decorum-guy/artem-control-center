@@ -4,6 +4,9 @@
 
 Artem Control Center should feel like a premium personal operating surface, not a generic admin template.
 
+The normative visual hierarchy and anti-AI-slop checklist live in
+`docs/DESIGN_DIRECTION.md` and apply to every visual review.
+
 Core qualities:
 
 - calm while idle;

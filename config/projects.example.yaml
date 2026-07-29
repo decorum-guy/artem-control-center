@@ -160,16 +160,21 @@ projects:
             discovery:
               read_only_source: /Users/aartemida/Documents/Homeassistant
               required_output: docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md
-              exact_entity_ids_must_be_discovered: true
+              exact_entity_ids_must_be_discovered: false
+              verified_entity_id: switch.kofemashina
             capabilities:
               monitor:
                 adapter: home_assistant_coffee
                 base_url_env: HA_BASE_URL
                 token_env: HA_MONITORING_TOKEN
-                entity_env: HA_COFFEE_ENTITY_ID
-                warmup_started_entity_env: HA_COFFEE_WARMUP_STARTED_ENTITY_ID
-                warmup_duration_entity_env: HA_COFFEE_WARMUP_DURATION_ENTITY_ID
-                last_turned_on_entity_env: HA_COFFEE_LAST_TURNED_ON_ENTITY_ID
+                entity_id: switch.kofemashina
+                timing_policy:
+                  adapter: alice_tg_bot_read_only
+                  endpoint_ref: alice_coffee_timing_policy
+                  cache_with_freshness: true
+                  enabled: false
+                  enablement: external_contract_not_applied
+                progress_policy: stage_without_percentage
               actions:
                 - home.coffee.turn_on
                 - home.coffee.turn_off
@@ -184,13 +189,14 @@ projects:
             priority: p1
             discovery:
               read_only_source: /Users/aartemida/Documents/Homeassistant
-              exact_entity_ids_must_be_discovered: true
+              exact_entity_ids_must_be_discovered: false
+              verified_entity_id: water_heater.chainik
             capabilities:
               monitor:
                 adapter: home_assistant_device
                 base_url_env: HA_BASE_URL
                 token_env: HA_MONITORING_TOKEN
-                entity_env: HA_KETTLE_ENTITY_ID
+                entity_id: water_heater.chainik
               actions:
                 - home.kettle.turn_on
                 - home.kettle.turn_off

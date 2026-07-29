@@ -1,0 +1,14 @@
+[project]
+name = "artem-panel-agent"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "pydantic>=2.11,<3",
+  "uvicorn[standard]>=0.35,<1"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+

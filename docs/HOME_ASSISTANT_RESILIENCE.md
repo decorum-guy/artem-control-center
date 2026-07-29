@@ -32,9 +32,12 @@ HA owns the current smart-home devices in scope:
 - coffee machine — P0;
 - kettle — P1.
 
-For coffee machine, HA is the only source of state, last activation time, warm-up timing and command verification.
+For coffee machine, HA is the only source of physical state, availability,
+activation timestamp, command execution, and command verification.
 
-`decorum-guy/AliceTG_Bot` is a separate Telegram assistant within the wider HA stack. It is not the repository of HA itself and is not the coffee/kettle state authority.
+`decorum-guy/AliceTG_Bot` is a separate Telegram assistant and the current
+source of user-configurable coffee warm-up duration and long-running threshold.
+It is not the coffee/kettle device-state authority.
 
 ## 3. Failure states must remain separate
 
@@ -90,7 +93,6 @@ Remote HA owns:
 
 - canonical entity state;
 - coffee/kettle control;
-- warm-up and safety logic;
 - complete automations;
 - history;
 - notifications;
@@ -141,10 +143,13 @@ Monitor separately:
 
 Rules:
 
-- coffee widget does not read bot state;
+- coffee widget reads only the safe read-only timing-policy contract, never bot
+  physical state;
 - coffee commands target HA scripts/services;
 - bot outage does not block coffee state when HA is healthy;
-- if safety/timing logic exists only in bot, document the gap before implementation and do not bypass it silently.
+- fresh cached timing policy remains usable with timestamp; stale/missing policy
+  removes progress but leaves HA state visible;
+- bot policy cannot compensate for unavailable HA state.
 
 ## 9. Local Edge Controller
 
@@ -257,7 +262,8 @@ Disable local Edge actions and show diagnostics.
 
 1. Keep remote HA authoritative.
 2. Read coffee and kettle directly from HA.
-3. Build mandatory coffee widget from actual HA timing data.
+3. Build mandatory coffee widget from HA device/activation state plus the
+   separate read-only bot timing policy.
 4. Add kettle with simpler HA device presentation.
 5. Monitor AliceTG Bot separately.
 6. Build verified HA backups.

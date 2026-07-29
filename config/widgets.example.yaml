@@ -51,6 +51,13 @@ widget_definitions:
     supported_modes: [ambient, control, handheld]
     performance_class: medium
     priority: 100
+    default_section: overview
+    visual_asset:
+      type: image
+      source_path: ./assets/widgets/coffee-machine.png
+      fit: contain
+      alt: Кофемашина
+      fallback: Иллюстрация кофемашины
     permissions:
       - action:home.coffee.turn_on
       - action:home.coffee.turn_off

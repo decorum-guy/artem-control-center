@@ -19,9 +19,29 @@
 9. Разработка основной логики на macOS и hardware acceptance на Windows.
 10. Низкая нагрузка на ноутбук с 8 ГБ RAM.
 
+Визуальные решения обязаны проходить
+`docs/DESIGN_DIRECTION.md`: interface не должен выглядеть как AI-generated SaaS
+template, использовать декоративные gradient blobs, повсеместный glassmorphism,
+fake metrics или marketing hero copy.
+
 ## 2. Writable repository boundary
 
-Изменять разрешено только текущий репозиторий Artem Control Center — локальная папка может называться `artem-control-panel`, а GitHub repository — `decorum-guy/artem-control-center`.
+Source and project artifacts are writable only inside `artem-control-center`.
+Tool caches and non-source installation artifacts may use the designated parent
+workspace or standard tool cache directories. External project folders remain
+strictly read-only.
+
+Предпочтительно использовать project-local ignored cache. Если это
+нецелесообразно, разрешены:
+
+- `/Users/aartemida/Documents/artem-control-panel-proj/.cache/`;
+- `/Users/aartemida/Documents/artem-control-panel-proj/.tooling/`;
+- `/Users/aartemida/Documents/artem-control-panel-proj/.tmp/`;
+- `/Users/aartemida/Documents/artem-control-panel-proj/artifacts/`;
+- стандартный системный cache инструмента, например Playwright browser cache.
+
+Downloaded binaries, caches и temporary installation files не добавляются в
+Git и не могут содержать secrets или пользовательские данные.
 
 Любые внешние источники используются только для чтения и анализа, если пользователь отдельно не дал новое явное разрешение на запись.
 
@@ -70,12 +90,14 @@ Home Assistant управляет текущими устройствами:
 
 - on/off/availability;
 - время последнего включения;
-- warm-up start;
-- duration/ready time;
-- ready/running/too-long state;
+- entity state/attributes и timestamps;
+- выполнение turn-on/turn-off;
 - verification после команды.
 
-`AliceTG_Bot` — отдельный child service HA stack. Он не является source of truth кофемашины/чайника и не должен быть нужен для чтения coffee state, если HA здоров.
+`AliceTG_Bot` — отдельный child service HA stack. Он не является source of
+truth физического состояния кофемашины/чайника и не исполняет команды Control
+Center. Он является текущим read-only источником изменяемой пользователем
+coffee timing policy; его outage не должен скрывать HA state.
 
 Перед реальной интеграцией Codex обязан read-only изучить:
 
@@ -112,7 +134,8 @@ docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md
 Требования:
 
 - state и timestamps только из HA;
-- real progress либо безопасный расчёт из HA warm-up start + HA duration;
+- real progress только из подтверждённого HA activation time + актуальной/cached
+  bot timing policy;
 - при отсутствии достоверного duration показывать stage без fake percentage;
 - no timer reset на duplicate `turn_on`;
 - remaining time и last activation;

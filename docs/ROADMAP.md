@@ -194,7 +194,8 @@ Exit criteria:
 
 Deliver:
 
-- coffee controls through existing `AliceTG_Bot` flow;
+- coffee controls through registered Home Assistant services targeting the
+  discovered coffee entity; `AliceTG_Bot` is not in the command path;
 - kettle and selected HA controls;
 - command verification;
 - safety/cooldown/idempotency;
@@ -220,7 +221,8 @@ Exit criteria:
 
 Deliver restricted actions for:
 
-- AVALAR stage deploy through fixed equivalent of `avalar-reg ./deploy.sh stage`;
+- AVALAR stage deploy through a hardened registered equivalent of the current
+  `ssh avalar-reg "~/avalar.sh stage"` path;
 - AVALAR stage browser/health verification;
 - AVALAR Exchange MCP app/validator/maintenance;
 - AliceTG Bot restart;

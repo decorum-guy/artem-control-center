@@ -1,0 +1,104 @@
+import importlib
+
+from fastapi.testclient import TestClient
+
+
+def load_app(monkeypatch, mode: str):
+    monkeypatch.setenv("PANEL_AGENT_MODE", mode)
+    import panel_agent.main
+
+    return importlib.reload(panel_agent.main)
+
+
+def test_fixture_snapshot_covers_bot_independence(monkeypatch):
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+
+    response = client.get("/api/v1/snapshot?scenario=alice-down-ha-healthy")
+    assert response.status_code == 200
+    services = {service["id"]: service for service in response.json()["services"]}
+    assert services["home-assistant"]["health"] == "healthy"
+    assert services["coffee-machine"]["health"] == "healthy"
+    assert services["coffee-machine"]["data"]["machine"]["state"] == "on"
+    assert services["coffee-machine"]["data"]["timingPolicy"]["sourceAvailable"] is False
+    assert services["coffee-machine"]["data"]["timingPolicy"]["stale"] is False
+    assert services["coffee-machine"]["presentation"]["overview"] == "primary"
+    assert services["home-assistant"]["presentation"]["role"] == "home-authority"
+    assert services["alice-tg-bot"]["health"] == "offline"
+
+
+def test_fixture_service_update_is_visible(monkeypatch):
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+    payload = {
+        "id": "new-monitor",
+        "title": "New Monitor",
+        "enabled": True,
+        "dataContract": "service.health.v1",
+        "health": "healthy",
+        "summary": "Created by deterministic test",
+        "actions": [],
+        "data": {},
+    }
+
+    assert client.post("/api/v1/fixtures/services", json=payload).status_code == 201
+    services = client.get("/api/v1/snapshot").json()["services"]
+    assert any(service["id"] == "new-monitor" for service in services)
+
+
+def test_fixture_mutation_is_not_available_in_read_only(monkeypatch):
+    module = load_app(monkeypatch, "read_only")
+    client = TestClient(module.app)
+    response = client.post(
+        "/api/v1/fixtures/services",
+        json={
+            "id": "blocked-monitor",
+            "title": "Blocked",
+            "dataContract": "service.health.v1",
+            "health": "healthy",
+            "summary": "Must not be accepted",
+            "actions": [],
+            "data": {},
+        },
+    )
+    assert response.status_code == 404
+    assert client.get("/health/ready").json()["writesEnabled"] is False
+
+
+def test_required_fixture_catalog_is_complete(monkeypatch):
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+    scenarios = set(client.get("/api/v1/fixtures").json()["scenarios"])
+    assert {
+        "ha-healthy",
+        "ha-degraded",
+        "ha-offline",
+        "coffee-off",
+        "coffee-turning-on",
+        "coffee-warming",
+        "coffee-ready",
+        "coffee-running-too-long",
+        "coffee-stale",
+        "kettle-on",
+        "kettle-off",
+        "kettle-unavailable",
+        "alice-down-ha-healthy",
+        "alice-down-policy-stale",
+        "ha-offline-policy-available",
+        "coffee-no-timing-policy",
+        "coffee-policy-changed",
+        "coffee-long-running-threshold-changed",
+    }.issubset(scenarios)
+
+
+def test_ha_offline_is_not_overridden_by_available_bot_policy(monkeypatch):
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+    services = {
+        service["id"]: service
+        for service in client.get("/api/v1/snapshot?scenario=ha-offline-policy-available").json()["services"]
+    }
+    coffee = services["coffee-machine"]
+    assert coffee["data"]["machine"]["available"] is False
+    assert coffee["data"]["machine"]["state"] == "unavailable"
+    assert coffee["data"]["timingPolicy"]["sourceAvailable"] is True
