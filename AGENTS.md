@@ -1,162 +1,171 @@
 # AGENTS.md
 
-Инструкции для Codex и любых разработчиков, работающих с Artem Control Center.
+Инструкции для Codex и любых разработчиков Artem Control Center.
 
 ## 1. Product intent
 
-Это не обычный административный dashboard. Интерфейс должен ощущаться как персональная премиальная операционная панель, рассчитанная на постоянное присутствие на столе и управление пальцами.
+Это персональная премиальная touch-first панель, а не типовой admin dashboard.
 
 Приоритеты:
 
 1. Надёжность и понятная обратная связь.
 2. Безопасность управляющих действий.
 3. Высокое визуальное качество уже с первого MVP.
-4. Touch-first UX.
-5. Автоматическое появление подключённых проектов/services в UI.
+4. Обязательный кофейный HA-виджет с красивым разогревом.
+5. Автоматическое появление подключённых services в UI.
 6. Масштабируемая widget platform.
-7. Простое capability-based подключение новых проектов.
-8. Проверяемые резервные копии и восстановление.
-9. Разработка и тестирование основной логики на macOS.
-10. Низкое потребление ресурсов на ноутбуке с 8 ГБ RAM.
-11. Переносимость Windows → Linux без переписывания frontend.
+7. Capability-based onboarding проектов.
+8. Проверяемые backups.
+9. Разработка основной логики на macOS и hardware acceptance на Windows.
+10. Низкая нагрузка на ноутбук с 8 ГБ RAM.
 
-## 2. Fixed decisions
+## 2. Writable repository boundary
+
+Изменять разрешено только текущий репозиторий Artem Control Center — локальная папка может называться `artem-control-panel`, а GitHub repository — `decorum-guy/artem-control-center`.
+
+Любые внешние источники используются только для чтения и анализа, если пользователь отдельно не дал новое явное разрешение на запись.
+
+В частности, read-only:
+
+- `/Users/aartemida/Documents/Homeassistant`;
+- локальная папка сайта AVALAR;
+- `decorum-guy/avalar_exchange_mcp` через GitHub connector;
+- любые другие внешние проекты, предоставленные для discovery.
+
+Во внешних проектах запрещено:
+
+- редактировать/форматировать файлы;
+- устанавливать зависимости;
+- запускать миграции или write-команды;
+- создавать commits/branches/PRs;
+- менять конфигурацию;
+- перезапускать production services;
+- отправлять production write requests.
+
+Предлагаемые изменения для внешних проектов оформляются только как документация, contracts, patch-plan или backlog внутри Artem Control Center repository.
+
+## 3. Fixed technology and hosting decisions
 
 Не менять без отдельного архитектурного решения:
 
-- Chromium kiosk как основной production runtime интерфейса.
-- React + TypeScript + Vite для frontend.
-- Локальный Panel Agent как единственная точка выполнения системных и удалённых команд.
-- Panel Agent localhost-only по умолчанию и не публикуется напрямую в Internet.
-- Проекты подключаются декларативно по capabilities; restart/deploy/backup не обязательны.
-- Monitor-only project является полноценным supported scenario.
-- Enabled project/service автоматически материализуется в UI после registry update.
-- Если специализированного widget нет, обязателен Generic Service Widget.
-- Hard-coded frontend lists проектов/services запрещены.
-- Widget definitions используют единый manifest/data/settings contract.
-- Backup является отдельной capability и не подразумевает restore/restart/deploy.
-- Погода, несколько weather locations, дневная/ночная темы, календарь и задачи входят в обязательный MVP.
-- Coffee-machine warm-up widget является обязательным P0 MVP widget.
-- Motion design и signature animations входят в первый visual MVP и Definition of Done.
-- macOS является поддерживаемым development host для UI, fixtures, Panel Agent dev mode и Playwright.
-- Windows остаётся первым production/hardware acceptance host.
-- Home Assistant никогда не запускается на Samsung laptop: ни primary, ни standby, ни test host.
-- Текущий удалённый HA authoritative до миграции на отдельный compact server.
-- `AliceTG_Bot` — child service HA stack, а не repository Home Assistant.
-- Proxy server считается server-managed системой без Git repository до появления отдельного source repository.
+- Chromium kiosk — production UI runtime.
+- React + TypeScript + Vite — frontend.
+- FastAPI Panel Agent — backend/control plane.
+- Panel Agent localhost-only и не публикуется напрямую в Internet.
+- Windows — первый production/hardware host.
+- macOS — обязательный development host.
+- Linux — возможный будущий host панели после hardware validation.
+- Samsung laptop никогда не запускает Home Assistant: ни primary, ни standby, ни test instance.
+- Будущий локальный HA host — отдельный компактный сервер.
+- Текущий удалённый HA authoritative до отдельной миграции.
 
-## 3. Frontend requirements
+## 4. Home Assistant device ownership
 
-- Проектировать сначала для 13.3" touch display.
-- Минимальная активная область обычной кнопки: 48×48 CSS px; primary actions больше.
-- Навигация не зависит от hover.
-- Статус читается по тексту, иконке и форме, не только по цвету.
-- Keyboard navigation и visible focus обязательны.
-- Не использовать тяжёлые постоянные WebGL-сцены.
-- Анимации упрощаются при `prefers-reduced-motion`, низком FPS, high load или battery saver.
-- UI переживает потерю backend/Internet: last-known state, timestamp и stale/offline status.
-- Никаких fake production data, fake progress или скрытого optimistic success.
-- Project card строится из capabilities; отсутствие actions не должно выглядеть ошибкой.
-- Backup `partial` не отображается как полный success.
-- One failing widget не роняет dashboard: error boundary обязателен.
-- Registry reconnect начинается с полного snapshot; events не являются единственным source of truth.
+Home Assistant управляет текущими устройствами:
 
-## 4. Automatic UI materialization
+- **кофемашина** — P0 и главный Home-widget MVP;
+- **чайник** — P1, также HA-controlled.
 
-После enable project/service:
+Для кофемашины Home Assistant является единственным источником истины:
 
-1. Panel Agent валидирует config.
-2. Registry revision увеличивается.
-3. Frontend получает snapshot/event.
-4. Widget Resolver выбирает specialized widget либо Generic Service Widget.
-5. Layout Reconciler создаёт visible instance.
-6. Service появляется в Services catalog и `New items`.
-7. Automated UI test подтверждает появление.
+- on/off/availability;
+- время последнего включения;
+- warm-up start;
+- duration/ready time;
+- ready/running/too-long state;
+- verification после команды.
 
-Service не считается onboarded, пока он не виден в UI.
+`AliceTG_Bot` — отдельный child service HA stack. Он не является source of truth кофемашины/чайника и не должен быть нужен для чтения coffee state, если HA здоров.
 
-Запрещено:
+Перед реальной интеграцией Codex обязан read-only изучить:
 
-- вручную добавлять каждый service в страницу;
-- использовать `if project.id === ...` для обычного rendering;
-- требовать frontend release только ради отображения monitor-only service;
-- скрывать неизвестный service вместо generic fallback;
-- считать backend config success достаточным без UI reconciliation.
+```text
+/Users/aartemida/Documents/Homeassistant
+```
 
-Перед изменением registries/widgets читать `docs/PROJECT_ONBOARDING.md`, `docs/WIDGET_SYSTEM.md`, `config/projects.example.yaml` и `config/widgets.example.yaml`.
+Нужно найти точные entity IDs, scripts/services, helpers/templates/automations, источник времени последнего включения и расчёт разогрева. Нельзя придумывать entity IDs или жёстко задавать duration до inspection.
 
-## 5. Widget development rules
+Результат discovery сохранять только здесь:
 
-Каждый coded widget включает:
+```text
+docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md
+```
 
-- manifest;
-- typed data contract;
-- settings schema;
-- component;
-- deterministic fixtures;
-- loading/stale/offline/error states;
-- tests;
-- accessibility labels;
-- reduced-motion behavior where animated;
-- performance classification;
-- README/usage description.
+Не читать/публиковать secret values. Не коммитить `secrets.yaml`, `.env`, tokens, passwords или private webhooks.
 
-Custom widget подключается через Widget Registry, а не напрямую импортируется в конкретную страницу.
+Полный контракт: `docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`.
 
-New widget cannot silently acquire write permissions. Actions приходят только из Panel Agent policy.
+## 5. Coffee widget — mandatory P0 MVP
 
-Post-MVP layout editor должен разделять:
-
-- project enabled/disabled;
-- widget visible/hidden;
-- widget position/size;
-- layout profile.
-
-No-code widgets в поздней версии остаются declarative: no arbitrary JavaScript, HTML, shell или direct browser fetch.
-
-## 6. Coffee widget rules
-
-Coffee widget обязателен в первом runnable MVP.
-
-Fixtures/states:
+Состояния:
 
 - off;
 - turning_on;
-- warming early/middle/late;
+- warming;
 - ready;
 - running;
 - running_too_long;
 - turning_off;
 - unavailable;
-- stale;
-- action lifecycle success/failure;
-- reduced-motion;
-- handheld.
+- stale.
 
-Rules:
+Требования:
 
-- real progress only;
-- distinct stage transitions, not arbitrary fake gradient;
-- no timer reset on duplicate `turn_on`;
-- long-running warning persistent but not aggressively flashing;
-- action success only after state verification;
-- source authority shown or available in details;
-- current HA/`AliceTG_Bot` safety behavior must not be bypassed silently.
+- state и timestamps только из HA;
+- real progress либо безопасный расчёт из HA warm-up start + HA duration;
+- при отсутствии достоверного duration показывать stage без fake percentage;
+- no timer reset на duplicate `turn_on`;
+- remaining time и last activation;
+- calm steam/heat animation;
+- persistent long-running warning без агрессивного мигания;
+- action lifecycle `requested → accepted → executing → verifying → success/failed`;
+- success только после HA state verification;
+- reduced-motion и low-performance варианты;
+- deterministic fixtures на Mac;
+- real touch/performance acceptance на Windows;
+- widget продолжает работать при падении `AliceTG_Bot`, если HA доступен.
 
-## 7. Motion rules
+Coffee actions выполняются через существующий HA script/service и не обходят safety logic.
 
-- 60 FPS — target for ordinary transitions, not guarantee under any workload.
-- Animations explain state changes.
-- First runnable MVP contains touch feedback, card expansion, theme transition, weather ambience, coffee states, command/backup lifecycle and reduced-motion behavior.
-- Dangerous actions use hold/double-confirm by policy.
-- Action lifecycle: `requested → accepted → executing → verifying → success/failed`.
-- Backup lifecycle: `preparing → exporting → downloading → verifying → encrypting → syncing → retention → success/partial/failed`.
-- Success only after real verification.
-- Calm ambient mode mandatory.
+## 6. Kettle
 
-## 8. Capability-based onboarding
+Чайник присутствует в HA device registry с начала проекта.
 
-Each integration declares independent capabilities:
+Первый уровень:
+
+- availability/on/off;
+- freshness;
+- существующие HA turn-on/turn-off script/service;
+- verification;
+- Generic Home Device Widget.
+
+Не переносить coffee warm-up assumptions на чайник без inspection.
+
+## 7. Automatic UI materialization
+
+После enable project/service:
+
+1. Panel Agent валидирует config.
+2. Registry revision увеличивается.
+3. Frontend получает полный snapshot/event.
+4. Widget Resolver выбирает specialized widget либо Generic Service Widget.
+5. Layout Reconciler создаёт visible instance.
+6. Service появляется в Services catalog и `New items`.
+7. Playwright подтверждает появление.
+
+Service не считается onboarded, пока он не виден в UI.
+
+Запрещено:
+
+- hard-coded frontend lists проектов/services;
+- `if project.id === ...` для обычного rendering;
+- frontend release только ради monitor-only service;
+- скрывать неизвестный service вместо generic fallback;
+- считать backend config success достаточным без UI reconciliation.
+
+## 8. Capability model
+
+Независимые capabilities:
 
 - monitor;
 - details;
@@ -169,65 +178,91 @@ Each integration declares independent capabilities:
 - heartbeat;
 - notifications.
 
-Rules:
+Все optional. Проект может иметь 0, 1 или несколько actions. Action не выводится из типа проекта и требует explicit opt-in.
 
-- all capabilities optional;
-- action is never inferred from project type;
-- new write capability requires explicit opt-in;
-- frontend does not know button count in advance;
-- disabling capability does not delete project/history;
-- disabled project stops polling and schedules;
-- UI and YAML use one schema/validator;
-- adapter failure is isolated;
-- repository existence does not imply active deployment;
-- absent repository does not block server-managed integration through restricted agent.
+## 9. Widget development
 
-## 9. Backend and security
+Каждый coded widget включает:
 
-- Frontend stores no administrative tokens, SSH keys, cloud credentials or encryption keys.
-- Each action has stable id, target, schema, risk, confirmation, timeout, cooldown/lock, verification and audit.
-- Endpoint `execute arbitrary command` is forbidden.
+- manifest;
+- typed data contract;
+- settings schema;
+- component;
+- fixtures;
+- loading/stale/offline/error states;
+- tests;
+- accessibility labels;
+- performance class;
+- reduced-motion behavior;
+- README.
+
+Custom widget регистрируется через Widget Registry, а не импортируется вручную в страницу.
+
+Widget не получает права самостоятельно. Allowed actions приходят от Panel Agent policy.
+
+Post-MVP layout editor разделяет:
+
+- project enabled/disabled;
+- widget visible/hidden;
+- position/size;
+- layout profile.
+
+No-code widgets later remain declarative: no arbitrary JavaScript, HTML, shell or direct browser fetch.
+
+## 10. Frontend and motion
+
+- Проектировать сначала для 13.3" touch display.
+- Touch targets минимум 48×48 CSS px; primary controls больше.
+- Не зависеть от hover.
+- Status не кодируется только цветом.
+- Keyboard navigation и visible focus обязательны.
+- One failing widget не роняет dashboard.
+- Last-known data всегда имеют timestamp/stale status.
+- No fake production data, fake progress или hidden optimistic success.
+- Day/night themes, weather ambience, coffee states и command/backup motion входят в первый MVP.
+- Effects упрощаются при reduced-motion, low FPS, high load или battery saver.
+
+## 11. Backend and security
+
+- Frontend не хранит tokens, SSH keys, cloud credentials или encryption keys.
+- Arbitrary-command endpoint запрещён.
 - No shell interpolation with user input.
-- Restart succeeds only after health verification.
-- AVALAR stage deploy uses a fixed registered handler equivalent to `avalar-reg ./deploy.sh stage`; browser never sends the shell string.
-- Firewall/proxy allow-list: validate → diff → confirm → backup → atomic apply → syntax check → reload → verify → rollback.
-- Secrets use OS secret store/protected service config.
-- Separate kiosk/browser profile; no public administrative port.
+- Каждая action имеет stable id, target, schema, risk, confirmation, timeout, lock/cooldown, verification и audit.
+- Restart/deploy success только после health verification.
+- AVALAR stage deploy использует fixed registered handler, эквивалентный `avalar-reg ./deploy.sh stage`; браузер не передаёт shell string.
+- Proxy allow-list flow: validate → diff → confirm → backup → atomic apply → syntax check → reload → verify → rollback.
+- Separate kiosk profile/account.
+- No public administrative port.
 - Sensitive cloud backups encrypted before upload.
 - Audit/logs redacted.
 
-Before security-sensitive code read `docs/SECURITY_MODEL.md`.
+## 12. Backup rules
 
-## 10. Backup rules
+Backup profile определяет:
 
-Backup profile defines source, scope/consistency, local destination, optional destinations, encryption, retention/quota, verification and restore-test policy.
+- source/scope;
+- consistency mechanism;
+- local destination;
+- optional cloud/external destinations;
+- encryption;
+- retention/quota;
+- verification;
+- restore-test policy.
 
 Rules:
 
-- HTTP 200 or file existence does not prove successful backup;
-- laptop copy is baseline but not the only reliable copy;
-- cloud/external sync can be optional per run;
-- `partial` is mandatory when optional destination fails;
-- no universal `backup whole server` action;
+- HTTP 200/file existence не доказывает backup success;
+- `partial` обязателен при ошибке optional destination;
+- no universal `backup whole server`;
 - allow-listed paths/handlers only;
-- no copying live database without consistency contract;
+- no copying live DB без consistency contract;
 - never delete the only verified copy;
-- restore test tracked separately;
-- HA native backup and AliceTG Bot runtime/source backups are different artifacts.
+- HA native backup и AliceTG Bot runtime/source backup — разные artifacts;
+- HA restore test не выполняется на panel laptop.
 
-## 11. Home Assistant rules
+## 13. Health contract
 
-- Remote HA authoritative until dedicated-server migration.
-- Samsung laptop never runs HA in any form.
-- Local laptop functions are only explicitly approved LAN-capable Edge actions.
-- No duplicate automations on two active HA instances.
-- UI distinguishes HA host, HA app, Internet, LAN, device and AliceTG Bot failures.
-- Future dedicated compact HA host is a separate infrastructure project.
-- HA restore tests do not run on the panel laptop.
-
-## 12. Health contract
-
-For owned services:
+Для owned services:
 
 ```http
 GET /health/live
@@ -235,55 +270,56 @@ GET /health/ready
 GET /health/details
 ```
 
-- `live`: process responds.
-- `ready`: primary function is available.
-- `details`: protected dependencies/version/storage/backup/deployment state.
+Public health не раскрывает secrets, internal IPs, private content или raw traces.
 
-Public health exposes no secrets, internal IPs, private content or raw traces.
-
-## 13. Weather rules
+## 14. Weather
 
 - Multiple saved locations mandatory.
-- Search supports city/district/address through geocoder adapter.
-- User confirms normalized address and coordinates.
-- Cache is isolated per location.
-- District/address forecast may represent nearest provider grid point; UI shows location and freshness.
-- Default location drives ambient weather and optional solar theme schedule.
-- Provider/geocoder replaceable; secrets remain in Panel Agent.
+- Search city/district/address through geocoder adapter.
+- User confirms normalized address/coordinates.
+- Cache isolated per location.
+- Default location drives ambient weather and optional solar theme.
+- Provider/geocoder replaceable; secrets stay in Panel Agent.
 
-## 14. macOS development workflow
+## 15. macOS development workflow
 
-Before target Windows validation, Codex must be able to:
+До Windows validation Codex должен уметь на Mac:
 
-- run frontend and Panel Agent dev mode on Mac;
-- use fixtures/read-only mode with writes disabled by default;
-- run lint/type/unit tests;
-- run Playwright Chromium tests;
-- inspect widget gallery and screenshots;
-- test automatic service appearance;
-- test day/night/reduced-motion;
-- test coffee widget fixtures;
-- test Settings and layout reconciliation.
+- запустить frontend + Panel Agent dev mode;
+- использовать fixtures/read-only mode с writes disabled;
+- запускать lint/type/unit tests;
+- запускать Playwright Chromium;
+- проверять automatic service appearance;
+- просматривать Widget Gallery;
+- тестировать coffee fixtures;
+- тестировать Settings/layout reconciliation;
+- создавать screenshots и accessibility smoke.
 
-Mac success is not Windows hardware acceptance. Hardware-dependent work must produce an exact Windows test checklist with commit, commands, expected behavior and logs.
+Mac success не является Windows hardware acceptance. Hardware-dependent work сопровождается точным Windows checklist: commit, commands, expected behavior, metrics, logs и rollback.
 
-Before development tooling changes read `docs/DEVELOPMENT.md`.
+## 16. Development workflow
 
-## 15. Development workflow
+Перед кодом:
 
-Each new integration includes:
+1. Прочитать README, AGENTS и профильные docs.
+2. Проверить рабочее дерево и не затирать user changes.
+3. Разделить verified facts, user statements, assumptions и proposals.
+4. Провести read-only discovery внешних проектов.
+5. Зафиксировать findings внутри writable repo.
+6. Реализовывать вертикально: schema → backend → UI → tests → docs.
 
-- adapter interface and capabilities;
+Каждая integration включает:
+
+- adapter interface/capabilities;
 - config schema/migration;
 - timeout/retry/cache/stale policy;
 - degraded/offline behavior;
 - health mapping;
-- actions independently, if any;
-- backup support independently, if any;
+- independent actions/backups;
 - secret boundary;
-- tests/fixtures without production secrets;
+- fixtures/tests;
 - automatic UI materialization test;
 - documentation;
 - performance impact.
 
-Do not add a large dependency without justifying RAM, CPU, startup time, security and maintenance cost.
+Не добавлять крупную dependency без обоснования RAM, CPU, startup time, security и maintenance cost.
