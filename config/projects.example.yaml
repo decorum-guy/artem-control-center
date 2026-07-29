@@ -135,6 +135,7 @@ projects:
     constraints:
       home_assistant_on_panel_laptop: forbidden
       future_local_host: dedicated_compact_server
+      smart_device_authority: home-assistant
     environments:
       - id: remote-primary
         services:
@@ -151,29 +152,24 @@ projects:
                 - home-assistant-native
             presentation:
               widget: home.authority-status
-          - id: alice-tg-bot
-            repository: decorum-guy/AliceTG_Bot
-            note: Git repository belongs to the HA Telegram bot, not to Home Assistant itself.
-            capabilities:
-              monitor:
-                adapter: structured_http
-                live_url_env: ALICE_TG_BOT_LIVE_URL
-                ready_url_env: ALICE_TG_BOT_READY_URL
-              actions:
-                - home.alice_bot.restart
-                - home.coffee.turn_on
-                - home.coffee.turn_off
-              backups:
-                - alice-tg-bot-runtime
-            presentation:
-              widget: core.generic-service
+
           - id: coffee-machine
             repository: null
+            authority: home-assistant
+            priority: p0
+            discovery:
+              read_only_source: /Users/aartemida/Documents/Homeassistant
+              required_output: docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md
+              exact_entity_ids_must_be_discovered: true
             capabilities:
               monitor:
-                adapter: coffee_state_aggregator
-                ha_url_env: HA_BASE_URL
-                alice_bot_state_url_env: ALICE_TG_BOT_COFFEE_STATE_URL
+                adapter: home_assistant_coffee
+                base_url_env: HA_BASE_URL
+                token_env: HA_MONITORING_TOKEN
+                entity_env: HA_COFFEE_ENTITY_ID
+                warmup_started_entity_env: HA_COFFEE_WARMUP_STARTED_ENTITY_ID
+                warmup_duration_entity_env: HA_COFFEE_WARMUP_DURATION_ENTITY_ID
+                last_turned_on_entity_env: HA_COFFEE_LAST_TURNED_ON_ENTITY_ID
               actions:
                 - home.coffee.turn_on
                 - home.coffee.turn_off
@@ -181,6 +177,40 @@ projects:
               widget: home.coffee-machine
               pin_to_overview: true
               priority: 100
+
+          - id: kettle
+            repository: null
+            authority: home-assistant
+            priority: p1
+            discovery:
+              read_only_source: /Users/aartemida/Documents/Homeassistant
+              exact_entity_ids_must_be_discovered: true
+            capabilities:
+              monitor:
+                adapter: home_assistant_device
+                base_url_env: HA_BASE_URL
+                token_env: HA_MONITORING_TOKEN
+                entity_env: HA_KETTLE_ENTITY_ID
+              actions:
+                - home.kettle.turn_on
+                - home.kettle.turn_off
+            presentation:
+              widget: core.generic-home-device
+
+          - id: alice-tg-bot
+            repository: decorum-guy/AliceTG_Bot
+            note: Git repository belongs to the HA Telegram bot, not to Home Assistant itself. It is monitored separately and is not the coffee/kettle state authority.
+            capabilities:
+              monitor:
+                adapter: structured_http
+                live_url_env: ALICE_TG_BOT_LIVE_URL
+                ready_url_env: ALICE_TG_BOT_READY_URL
+              actions:
+                - home.alice_bot.restart
+              backups:
+                - alice-tg-bot-runtime
+            presentation:
+              widget: core.generic-service
 
   - id: archived-project
     name: Temporarily Disabled Project
