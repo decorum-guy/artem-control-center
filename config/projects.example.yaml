@@ -1,0 +1,147 @@
+version: 1
+
+# Every capability is optional. A project may be monitor-only, backup-only,
+# action-rich or temporarily disabled without changing dashboard code.
+
+projects:
+  - id: external-api
+    name: External API
+    enabled: true
+    category: external
+    environments:
+      - id: production
+        services:
+          - id: api
+            capabilities:
+              monitor:
+                adapter: http
+                url_env: EXTERNAL_API_HEALTH_URL
+                interval_seconds: 60
+                stale_after_seconds: 180
+              details: null
+              open:
+                url_env: EXTERNAL_API_PUBLIC_URL
+              actions: []
+              backups: []
+
+  - id: avalar-site
+    name: AVALAR Website
+    enabled: true
+    category: avalar
+    repository: decorum-guy/AVALAR
+    environments:
+      - id: stage
+        services:
+          - id: website
+            capabilities:
+              monitor:
+                adapter: web_application
+                base_url_env: AVALAR_STAGE_URL
+              details:
+                adapter: protected_http
+                url_env: AVALAR_STAGE_DETAILS_URL
+                token_env: AVALAR_STAGE_MONITORING_TOKEN
+              open:
+                url_env: AVALAR_STAGE_URL
+              actions:
+                - avalar.deploy.stage
+                - avalar.smoke.stage
+              backups:
+                - avalar-site-stage
+      - id: main
+        services:
+          - id: website
+            capabilities:
+              monitor:
+                adapter: web_application
+                base_url_env: AVALAR_MAIN_URL
+              details:
+                adapter: protected_http
+                url_env: AVALAR_MAIN_DETAILS_URL
+                token_env: AVALAR_MAIN_MONITORING_TOKEN
+              open:
+                url_env: AVALAR_MAIN_URL
+              actions:
+                - avalar.smoke.main
+              backups:
+                - avalar-site-main
+
+  - id: proxy-server
+    name: Proxy Server
+    enabled: true
+    category: infrastructure
+    repository: null
+    source_kind: server_managed
+    note: No Git repository currently exists; integrate through a restricted host agent.
+    environments:
+      - id: production
+        services:
+          - id: danted
+            capabilities:
+              monitor:
+                adapter: host_agent_service
+                handler_ref: proxy_danted_health
+              actions:
+                - proxy.danted.reload
+              backups:
+                - proxy-config
+          - id: telegram-proxy
+            capabilities:
+              monitor:
+                adapter: host_agent_service
+                handler_ref: proxy_telegram_health
+              actions:
+                - proxy.telegram.restart
+              backups:
+                - proxy-config
+          - id: allow-list
+            capabilities:
+              monitor:
+                adapter: proxy_allow_list
+                handler_ref: proxy_allow_list_status
+              actions:
+                - proxy.allow_list.add
+                - proxy.allow_list.remove
+              backups:
+                - proxy-config
+
+  - id: home-stack
+    name: Home Assistant Stack
+    enabled: true
+    category: home
+    repository: null
+    source_kind: runtime_stack
+    environments:
+      - id: remote-primary
+        services:
+          - id: home-assistant
+            capabilities:
+              monitor:
+                adapter: home_assistant
+                base_url_env: HA_BASE_URL
+                token_env: HA_MONITORING_TOKEN
+              actions:
+                - home.create_backup
+                - home.run_registered_scene
+              backups:
+                - home-assistant-native
+          - id: alice-tg-bot
+            repository: decorum-guy/AliceTG_Bot
+            note: Git repository belongs to the HA Telegram bot, not to Home Assistant itself.
+            capabilities:
+              monitor:
+                adapter: structured_http
+                live_url_env: ALICE_TG_BOT_LIVE_URL
+                ready_url_env: ALICE_TG_BOT_READY_URL
+              actions:
+                - home.alice_bot.restart
+                - home.coffee.turn_on
+                - home.coffee.turn_off
+              backups:
+                - alice-tg-bot-runtime
+
+  - id: archived-project
+    name: Temporarily Disabled Project
+    enabled: false
+    category: archive
+    environments: []
