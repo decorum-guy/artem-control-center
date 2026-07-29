@@ -1,123 +1,254 @@
 # Integrations and Health Registry
 
-Этот документ фиксирует системы, которые Artem Control Center должен отображать или контролировать, и изменения, которые потребуются в их backend.
+Этот документ фиксирует системы, которые Artem Control Center отображает, резервирует или контролирует, и изменения, необходимые в их backend/runtime.
 
-Статусы происхождения:
+## 1. Source statuses
 
-- **confirmed repository** — репозиторий найден в подключённом GitHub;
-- **confirmed runtime/context** — система подтверждена рабочей историей проекта;
-- **referenced, repository not located** — система упомянута, но отдельный GitHub-репозиторий не найден; нельзя угадывать его расположение.
+- **confirmed repository** — repository найден в подключённом GitHub;
+- **confirmed runtime/context** — runtime подтверждён рабочей историей проекта или прямым вводом владельца;
+- **server-managed, no repository** — source/config существует непосредственно на сервере;
+- **referenced, deployment not identified** — система известна, но её текущий host/runtime ещё не подтверждён;
+- **proposed** — capability/contract запланированы, но не реализованы.
 
-## 1. Priority 0 — MVP integrations
+Repository existence не доказывает active deployment. Отсутствие repository не мешает мониторингу, backup или safe control через restricted host agent.
 
-### Artem Control Center
+## 2. Capability-based registry
+
+Каждый project/environment/service подключает независимые capabilities:
+
+- `monitor`;
+- `details`;
+- `actions`;
+- `deploy`;
+- `backup`;
+- `restore`;
+- `logs`;
+- `open`;
+- `heartbeat`;
+- `notifications`.
+
+Monitor-only проект является нормальным сценарием. У проекта может быть 0, 1 или несколько actions. Наличие restart не требуется. Наличие backup не означает наличие restore, deploy или restart.
+
+Детальный onboarding contract: `docs/PROJECT_ONBOARDING.md`.
+
+## 3. Standard health contract
+
+Для собственных backend/runtime adapters:
+
+```http
+GET /health/live
+GET /health/ready
+GET /health/details
+```
+
+### Liveness
+
+Проверяет только процесс/event loop.
+
+### Readiness
+
+Проверяет способность выполнять primary function с bounded dependency timeouts.
+
+### Protected details
+
+Может включать:
+
+- version/commit;
+- uptime;
+- dependency states;
+- queue/backlog;
+- storage status;
+- last successful operation;
+- deployment state;
+- backup freshness.
+
+Не включает:
+
+- secrets;
+- access tokens;
+- email/calendar/task contents;
+- raw private logs;
+- full stack traces;
+- unnecessary internal topology.
+
+Legacy health endpoints сохраняются backward-compatible, пока consumers не переведены.
+
+## 4. Artem Control Center
 
 Repository: `decorum-guy/artem-control-center` — **confirmed repository**.
 
-Required health:
+Health:
 
-- `GET /health/live` — Panel Agent process;
-- `GET /health/ready` — config loaded, local database/cache writable, adapters initialized;
+- Panel Agent live/ready/details;
 - frontend heartbeat;
-- kiosk process status;
-- WebSocket/SSE stream status.
+- Chromium kiosk process;
+- WebSocket/SSE stream;
+- config schema/migrations;
+- SQLite integrity/writability;
+- disk free space and backup quota;
+- adapter scheduler;
+- stale/error adapter counts;
+- OS update/firewall status where available.
 
-Allowed actions:
+Capabilities:
 
-- restart dashboard;
+- monitor;
+- details;
+- local system actions;
+- backup own config/database;
+- open Desktop mode.
+
+Actions:
+
+- restart Chromium;
 - restart Panel Agent;
-- reload configuration;
-- refresh all states;
-- switch theme/ambient mode;
-- open desktop;
-- reboot/shutdown with hold + confirmation.
+- reload validated config;
+- refresh states;
+- reboot/shutdown with protected confirmation.
 
-### Home Assistant + AliceTG Bot
+## 5. Home Assistant runtime stack
 
-Repository: `decorum-guy/AliceTG_Bot` — **confirmed repository**.
+Status: **confirmed runtime/context; Home Assistant itself has no dedicated Git repository in this project**.
 
-Runtime stack known from project history:
+Home Assistant is a runtime/infrastructure integration. Его config, database, native backups и deployment state мониторятся через HA API, host checks и backup adapters, а не через repository assumption.
 
-- Home Assistant;
-- `telegram-bot` container;
-- Caddy;
-- bot aiohttp server on port `8088`;
-- existing bot `GET /health`;
-- existing coffee control endpoint and Home Assistant REST integration.
+Known stack:
 
-Monitoring targets:
+- remote Home Assistant authoritative instance;
+- Caddy/reverse proxy in runtime context;
+- Home Assistant API/WebSocket;
+- automations/scripts/entities;
+- native backups;
+- PushWard integration where enabled;
+- related `AliceTG_Bot` container/repository.
 
-- public HA reachability;
-- authenticated HA API readiness;
+Monitoring:
+
+- public/TLS reachability;
+- authenticated API readiness;
+- WebSocket subscription;
 - selected entity freshness;
-- Caddy/TLS;
-- Telegram bot liveness;
-- bot readiness against Home Assistant;
-- coffee timer/state persistence;
-- PushWard error count where available;
-- backup freshness.
+- critical integration state;
+- config validation;
+- database/storage health signal;
+- native backup freshness;
+- current authority mode: remote-primary/local-primary/edge-fallback/standby;
+- host disk/RAM/restart count.
 
-Backend changes:
+Actions:
 
-1. Keep current `/health` backward compatible.
-2. Add `/health/live` without external dependency checks.
-3. Add `/health/ready` that checks configuration and HA API with strict timeout.
-4. Add protected `/health/details` with sanitized dependency states.
-5. Add a safe status endpoint for coffee workflow state.
-6. Reuse existing authenticated coffee action instead of bypassing bot/HA logic.
-7. Add idempotency keys for control requests where practical.
+- run selected scripts/scenes;
+- create native backup;
+- validate config;
+- restart Core only through restricted action;
+- full failover/restore separate from normal actions.
 
-Control Center actions:
+Backup profile:
 
-- coffee on/off;
-- kettle on/off if existing workflow supports it;
-- clear approved workflow flags;
-- repeat HA check;
-- restart bot container through restricted host action;
-- restart Caddy only through restricted action;
-- create HA backup;
-- activate emergency local edge mode.
+- native HA backup downloaded to laptop;
+- optional encrypted cloud/external-drive sync;
+- restore-test status;
+- separate from `AliceTG_Bot` repository/runtime backup.
 
-### AVALAR public site — production and stage
+## 6. `decorum-guy/AliceTG_Bot`
+
+Status: **confirmed repository**.
+
+Clarification: this repository is the Telegram assistant integrated with Home Assistant. It is not the Home Assistant repository and should appear as a child service in the HA stack.
+
+Verified behavior from repository:
+
+- aiohttp server on port `8088`;
+- existing `/health`;
+- internal HA endpoints;
+- coffee/kettle workflows;
+- coffee warm-up/long-running timers;
+- authenticated coffee shortcut endpoint;
+- persistent bot states/reminders;
+- Docker restart policy documented.
+
+Required health additions:
+
+- `/health/live` — process/event loop;
+- `/health/ready` — Telegram mode, HA API, required state files;
+- protected `/health/details` — polling errors, timer scheduler, storage, PushWard error summary;
+- safe coffee workflow status endpoint;
+- idempotency support for control requests.
+
+Actions:
+
+- coffee on/off through existing safe flow;
+- kettle action if existing flow supports it;
+- reset only documented flags/modes;
+- restart bot container;
+- recheck HA dependency.
+
+Backups:
+
+- Git repository protects source code;
+- runtime state/config backup is a separate artifact;
+- do not assume HA native backup necessarily replaces a tested bot-specific restore profile.
+
+## 7. AVALAR Website — stage and main
 
 Repository: `decorum-guy/AVALAR` — **confirmed repository**.
 
-Known deployment mapping:
+Environments:
 
 - `main` → `avalar.pro`;
 - `stage` → `stage.avalar.pro`.
 
-Monitor both environments independently:
+Monitor independently:
 
-- homepage HTTP/TLS;
-- representative pages `/contact`, `/conf`, `/politico`, `/service`, `/about`;
+- DNS/TLS/certificate expiry;
+- homepage and representative pages;
 - response time;
-- certificate expiry;
-- content/data loading;
-- lead submission path in a non-destructive synthetic mode;
-- deployed commit/version marker.
+- critical assets/data loading;
+- PHP/runtime checks;
+- readable required data files;
+- writable application directories where relevant;
+- non-destructive form validation;
+- deployed branch/commit/release marker;
+- browser smoke.
 
-Backend changes:
+Required health additions:
 
-- add minimal `GET /health/live` or `/healthz` returning no secrets;
-- add protected readiness/details endpoint or host-side check for:
-  - PHP execution;
-  - readable `data.json`;
-  - writable lead log directory;
-  - expected environment;
-  - deployed commit/release id;
-- add non-destructive synthetic form validation endpoint rather than creating fake leads;
-- expose stage/main as distinct service ids.
+- public minimal `/health/live` or `/healthz`;
+- protected `/health/ready`/`details` or equivalent host adapter;
+- environment and deployment marker;
+- sanitized recent errors.
 
-Allowed actions:
+### Stage deployment
 
-- recheck;
-- open site/admin/log view;
-- trigger approved deployment workflow;
-- rollback only through a separately confirmed workflow;
-- tail sanitized recent application errors through protected diagnostics.
+Required registered action is equivalent to the existing operator procedure:
 
-### AVALAR Exchange MCP
+```text
+avalar-reg ./deploy.sh stage
+```
+
+Implementation:
+
+- exact fixed handler, not arbitrary shell;
+- target explicitly `stage`;
+- optional validated ref/commit parameter only if deploy script supports it;
+- precheck repository/deployment state;
+- execute restricted server-side action;
+- capture sanitized output;
+- verify deployed marker, health and browser smoke;
+- audit correlation id;
+- rollback action separate and not inferred automatically.
+
+Main deployment is a different high-risk capability and remains disabled until separately specified.
+
+Backups:
+
+- stage/main profiles separate;
+- server data/config/deployment metadata;
+- local laptop destination always;
+- optional encrypted cloud/external-drive sync;
+- restore test on stage before considering a main restore process trusted.
+
+## 8. AVALAR Exchange MCP
 
 Repository: `decorum-guy/avalar_exchange_mcp` — **confirmed repository**.
 
@@ -126,206 +257,217 @@ Known architecture:
 - `exchange.avalar.pro`;
 - foreign HAProxy TCP relay;
 - Russian Nginx/application host;
-- `avalar-mail-mcp.service`;
-- existing public `/health`;
-- OAuth/UI/MCP and mail dependencies.
+- MCP/OAuth/portal/status services;
+- LanCloud IMAP/EWS dependencies;
+- existing public `/health`.
 
-Monitor as multiple components, not one green/red dot:
+Monitor as dependency graph:
 
-1. public DNS/TLS/HTTP;
-2. relay HAProxy process and backend availability;
+1. DNS/TLS/public HTTP;
+2. relay HAProxy;
 3. origin Nginx;
-4. application liveness;
-5. application readiness;
+4. MCP application liveness/readiness;
+5. portal/status services;
 6. OAuth metadata;
-7. selected MCP smoke check without accessing real mail content;
-8. certificate expiry;
-9. updater/service state;
-10. disk and backup freshness through protected host diagnostics.
+7. safe MCP smoke without real mail content;
+8. databases/storage;
+9. LanCloud IMAP/EWS;
+10. deployment version/commit;
+11. updater/service state;
+12. backup freshness.
 
-Backend changes:
+Required additions:
 
-- preserve existing `/health` response;
-- add `/health/live`;
-- add `/health/ready` with bounded checks of required dependencies;
-- add authenticated `/health/details` containing version, commit and feature readiness but no credentials/mail data;
-- provide a safe smoke operation that does not mutate mailbox state;
-- expose deployment/update status.
+- keep existing `/health` backward compatible;
+- add live/ready/protected details;
+- expose redacted component states;
+- safe non-mutating smoke;
+- deployment/maintenance state.
 
-Allowed actions:
+Actions are independent:
 
-- repeat full chain check;
-- restart application service;
-- restart Nginx or HAProxy only as distinct restricted actions;
-- run config validation before restart;
-- trigger approved update/deployment;
-- fetch sanitized recent errors;
+- recheck full chain;
+- restart MCP app;
+- restart Nginx/HAProxy only as separate actions;
+- run validator;
+- set maintenance state;
+- deploy/update only through approved workflow;
 - create backup.
 
-### Proxy server / proxy control
+## 9. Proxy server
 
-Status: **confirmed runtime/context; referenced, repository not located**.
+Status: **confirmed runtime/context; server-managed, no repository**.
 
-Known or likely components from current infrastructure context:
+Clarification: отдельного repository сейчас нет. Config/scripts/service units находятся непосредственно на server. Интеграция не должна ждать появления Git repository, но перед write actions необходимо создать inventory и restricted host agent.
+
+Known components:
 
 - Danted/SOCKS on `1080`;
 - Python/Telegram proxy on `8080`;
-- HAProxy relay on `80/443` shares a host but remains a separate service;
-- source-IP allow-list is important.
+- HAProxy relay on `80/443` on the same host as a separate component;
+- source-IP allow-list/firewall rules.
 
-Do not implement repository-specific changes until the actual repository/deployment source is identified.
+Monitoring:
 
-Required monitoring:
-
-- process/service status;
-- listening ports;
-- external connectivity through each proxy type;
+- process/service state;
+- listener ports;
+- authenticated egress test;
 - latency;
-- current allow-list revision/hash;
-- failed authentication/connection counters where safely available;
-- disk/memory;
-- config syntax.
+- config syntax;
+- allow-list revision/hash;
+- failed connection/auth counters where safe;
+- host disk/RAM;
+- backup freshness.
 
-Required control API/host agent:
+Required host agent operations:
 
-- list sanitized allow-list entries;
-- propose new entry;
-- validate IP/CIDR and duplicate/conflict;
-- generate config diff;
-- explicit confirmation;
-- apply atomically;
-- validate service config;
-- reload rather than restart where supported;
-- verify new rule;
-- rollback automatically on failed verification;
-- audit every change.
+- sanitized status/details;
+- export config/service units/firewall/allow-list backup;
+- reload/restart named service;
+- transactional allow-list add/remove;
+- validate → diff → confirm → backup current config → atomic apply → syntax check → reload → verify → rollback.
 
-The frontend must never accept arbitrary firewall commands or arbitrary config text.
+Frontend never sends raw config or shell text.
 
-### Weather
+## 10. n8n
 
-Provider is intentionally abstracted.
+Status: **referenced, deployment not identified**.
 
-Required data:
+Monitor after host identification:
 
-- current conditions;
-- feels-like;
-- hourly precipitation;
-- daily high/low;
-- freshness timestamp;
-- location;
-- cached fallback.
+- liveness/readiness;
+- database/Redis/queue mode where applicable;
+- failed executions;
+- workflow-specific push heartbeats;
+- credentials/storage health;
+- backup freshness.
+
+Actions:
+
+- run only registered workflows;
+- schema-validated parameters;
+- show execution id/final state;
+- restart instance separately;
+- arbitrary workflow id prohibited.
+
+Backup:
+
+- workflows;
+- database and credential material through an encrypted dedicated export;
+- binary storage if used;
+- restore contract required.
+
+## 11. Weather
+
+Status: **proposed MVP integration**.
+
+Capabilities:
+
+- multiple saved locations;
+- geocoding for city/district/address;
+- normalized address and coordinates before save;
+- current/hourly/daily forecast;
+- favourite/default location;
+- quick switcher;
+- per-location cache/freshness;
+- sunrise/sunset for theme automation.
+
+A district/address forecast may proxy nearest provider grid point and is not an exact measurement at the building. UI shows selected point and data time.
 
 No provider token in frontend.
 
-### Calendar
+## 12. Calendar
 
-Sources supported through adapters:
+Adapters:
 
-- iCloud/CalDAV or read-only calendar feed;
+- iCloud/CalDAV;
 - Google Calendar;
 - Exchange/Outlook;
-- local read-only `.ics` source where appropriate.
+- local/read-only ICS.
 
 Baseline:
 
+- identify authoritative account displayed on iPhone;
 - read-only aggregation first;
-- write actions only for adapters proven to support write safely;
-- source and sync freshness shown for every event;
-- no assumption that “iPhone Calendar” means only iCloud: iPhone can display several account types.
+- source/freshness per event;
+- writes only for verified provider capability;
+- no assumption that iPhone Calendar means iCloud only.
 
-### TickTick tasks
+AVALAR work calendar can be read through `avalar_exchange_mcp` while preserving its security boundaries.
 
-TickTick has an official Open API and an official Linux client, but API coverage must be tested against required operations before treating it as complete.
+## 13. TickTick
 
-Integration priority:
+Status: official API/client exist, exact coverage requires validation.
 
-1. official API adapter for projects/tasks supported by the API;
-2. official calendar feed for read-only display where useful;
-3. launch official TickTick Linux/web app for unsupported advanced operations;
-4. never scrape local application data as the primary architecture.
+Priority:
 
-Required functions:
+1. official API for supported operations;
+2. official calendar feed for read-only fallback;
+3. launch official app/web for unsupported operations;
+4. never scrape private local application storage.
+
+Required capabilities:
 
 - today/overdue/upcoming;
-- complete task;
+- complete;
 - quick create;
-- project/list filtering;
+- lists/projects;
 - due dates;
 - sync freshness;
 - graceful read-only fallback.
 
-## 2. Priority 1 — active project monitoring
-
-### CleaManager
+## 14. CleaManager
 
 Repositories:
 
 - `decorum-guy/CleaManager` — **confirmed repository**;
 - `decorum-guy/clemanager-design` — **confirmed repository**.
 
-Until a production deployment is confirmed, monitor CI/build and optional preview only.
+Until active deployment is confirmed, monitor CI/build/preview only.
 
-Future health contract:
+Future runtime health:
 
-- frontend availability;
-- backend liveness/readiness;
-- database/migrations;
-- document processing queue;
-- AI/provider dependency status;
-- storage;
+- frontend;
+- backend live/ready;
+- database/migrations/storage;
+- document queue;
+- AI/provider dependency as optional/degraded where appropriate;
 - version/commit.
 
-Potential actions:
+Possible independent actions:
 
 - open preview;
-- trigger build/deploy;
-- restart worker/API;
-- replay a failed non-destructive job after confirmation.
+- run health check;
+- restart API/worker;
+- deploy approved environment;
+- replay non-destructive failed job;
+- backup real data store.
 
-### Infopulse Showcase Telegram bot
+## 15. ИнфоПульс
 
 Repository: `decorum-guy/AI_final_project_HSE_ivanchenko_sokolov` — **confirmed repository**.
 
-Monitor only when an active deployment is identified:
+Monitor only when active deployment is identified:
 
-- bot process;
-- Telegram API connectivity;
-- generation/provider dependency;
-- queue/backlog;
-- last successful user request;
-- storage limits.
+- process/watchdog;
+- Telegram API;
+- storage;
+- scheduler;
+- RSS/provider dependencies;
+- delivery heartbeats;
+- last safe synthetic self-test.
 
-Required backend additions if absent:
+Required additions:
 
-- live/ready/details endpoints;
+- live/ready/details HTTP endpoints;
 - version/commit;
-- safe synthetic request that does not message real users;
-- restricted restart.
+- non-user-messaging synthetic test;
+- restricted restart;
+- backup profile for DB/config/runtime data.
 
-### n8n
+## 16. Optional repositories
 
-Deployment/repository must be identified during implementation.
-
-Monitor:
-
-- instance liveness/readiness;
-- worker/queue mode if used;
-- failed executions;
-- workflow-specific push monitors;
-- credential/database/storage health;
-- backup freshness.
-
-Control actions:
-
-- run only allow-listed workflows;
-- pass schema-validated parameters;
-- show execution id and final result;
-- do not expose arbitrary workflow IDs or credentials to frontend.
-
-## 3. Priority 2 — opt-in projects
-
-Repositories found but not automatically treated as production services:
+Repositories found but not automatically treated as running services include:
 
 - `decorum-guy/tgbot`;
 - `decorum-guy/gin_tg_app`;
@@ -337,80 +479,29 @@ Repositories found but not automatically treated as production services:
 - `decorum-guy/MusicMuseum`;
 - `decorum-guy/BreakGateWorkout`.
 
-They enter the service registry only after confirming that an active deployment exists and monitoring provides value. Repository existence alone is not evidence of a running service.
+Onboarding для каждого определяется capabilities. Можно подключить monitor-only, open-only или backup-only без создания restart button.
 
-## 4. Standard health contract
+## 17. Uptime Kuma role
 
-### Public liveness
+Uptime Kuma — external checker и incident source, но не единственная source of truth.
 
-```http
-GET /health/live
-```
-
-Example:
-
-```json
-{
-  "ok": true,
-  "service": "example-service"
-}
-```
-
-### Readiness
-
-```http
-GET /health/ready
-```
-
-Returns success only when the service can perform its primary function. Dependency checks must have strict timeouts.
-
-### Protected details
-
-```http
-GET /health/details
-Authorization: Bearer <scoped-monitoring-token>
-```
-
-May include:
-
-- version/commit;
-- uptime;
-- dependency states;
-- queue depth;
-- storage status;
-- last successful operation;
-- backup age.
-
-Must not include:
-
-- secrets;
-- access tokens;
-- message/email content;
-- full personal data;
-- raw stack traces;
-- unnecessary internal topology.
-
-## 5. Uptime Kuma role
-
-Uptime Kuma is an external checker and incident source, not the only source of truth.
-
-Use it for:
+Использование:
 
 - HTTP/TCP/ping;
 - TLS expiry;
 - latency;
-- push monitors from jobs;
-- incident history and notifications.
+- push monitors;
+- incident history/notifications.
 
-Panel Agent combines Kuma results with protected application/host diagnostics.
+Panel Agent дополняет Kuma protected diagnostics, capability registry, backup state и action verification.
 
-## 6. Open identification tasks
+## 18. Open identification tasks
 
-Before implementing control actions, identify and record:
-
-- actual proxy-server repository or deployment source;
 - actual n8n host/deployment;
-- current Home Assistant installation method and backup destination;
-- which calendar account is authoritative on iPhone;
-- TickTick API scopes and exact required operations;
-- which optional repositories currently have live deployments.
+- current HA installation method and backup destination;
+- inventory local/cloud protocols for home devices;
+- authoritative calendar account on iPhone;
+- TickTick scopes/exact operation coverage;
+- server inventory/versioning approach for proxy configs/scripts;
+- active deployments among optional repositories;
+- selected cloud backup provider and external-drive filesystem/encryption policy.
