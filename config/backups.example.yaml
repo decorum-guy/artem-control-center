@@ -1,0 +1,160 @@
+version: 1
+
+storage_destinations:
+  - id: laptop-primary
+    type: local_directory
+    path_env: BACKUP_LOCAL_ROOT
+    required: true
+    minimum_free_bytes: 21474836480
+    encryption_supported: true
+
+  - id: cloud-drive
+    type: rclone_remote
+    remote_env: BACKUP_CLOUD_REMOTE
+    required: false
+    encryption_required: true
+    availability: optional
+
+  - id: external-drive
+    type: removable_volume
+    volume_id_env: BACKUP_EXTERNAL_VOLUME_ID
+    relative_path: artem-control-center-backups
+    required: false
+    encryption_required: true
+    availability: optional
+
+backup_profiles:
+  - id: home-assistant-native
+    project_id: home-stack
+    environment_id: remote-primary
+    service_id: home-assistant
+    enabled: true
+    source:
+      adapter: home_assistant_backup
+      base_url_env: HA_BASE_URL
+      token_env: HA_BACKUP_TOKEN
+    destinations:
+      - id: laptop-primary
+        mode: always
+      - id: cloud-drive
+        mode: ask_each_time
+      - id: external-drive
+        mode: when_available
+    encryption:
+      required_before_remote_sync: true
+      key_ref_env: HA_BACKUP_ENCRYPTION_KEY_REF
+    retention:
+      keep_last: 10
+      keep_daily_days: 14
+      keep_weekly_weeks: 8
+    verification:
+      checksum: sha256
+      archive_test: true
+      restore_test_interval_days: 90
+
+  - id: avalar-site-stage
+    project_id: avalar-site
+    environment_id: stage
+    service_id: website
+    enabled: true
+    source:
+      adapter: restricted_ssh_bundle
+      handler_ref: avalar_site_stage_backup
+    destinations:
+      - id: laptop-primary
+        mode: always
+      - id: cloud-drive
+        mode: ask_each_time
+    encryption:
+      required_before_remote_sync: true
+      key_ref_env: AVALAR_BACKUP_ENCRYPTION_KEY_REF
+    retention:
+      keep_last: 10
+      keep_daily_days: 14
+    verification:
+      checksum: sha256
+      archive_test: true
+      manifest_required: true
+
+  - id: avalar-site-main
+    project_id: avalar-site
+    environment_id: main
+    service_id: website
+    enabled: true
+    source:
+      adapter: restricted_ssh_bundle
+      handler_ref: avalar_site_main_backup
+    destinations:
+      - id: laptop-primary
+        mode: always
+      - id: cloud-drive
+        mode: ask_each_time
+      - id: external-drive
+        mode: when_available
+    encryption:
+      required_before_remote_sync: true
+      key_ref_env: AVALAR_BACKUP_ENCRYPTION_KEY_REF
+    retention:
+      keep_last: 14
+      keep_daily_days: 30
+      keep_weekly_weeks: 12
+    verification:
+      checksum: sha256
+      archive_test: true
+      manifest_required: true
+      restore_test_interval_days: 90
+
+  - id: proxy-config
+    project_id: proxy-server
+    environment_id: production
+    service_id: allow-list
+    enabled: true
+    source:
+      adapter: restricted_host_export
+      handler_ref: proxy_config_export
+      scope:
+        - danted_config
+        - telegram_proxy_config
+        - haproxy_config
+        - firewall_rules
+        - allow_list
+        - service_units
+    destinations:
+      - id: laptop-primary
+        mode: always
+      - id: cloud-drive
+        mode: ask_each_time
+    encryption:
+      required: true
+      key_ref_env: PROXY_BACKUP_ENCRYPTION_KEY_REF
+    retention:
+      keep_last: 20
+      keep_daily_days: 30
+    verification:
+      checksum: sha256
+      archive_test: true
+      manifest_required: true
+
+  - id: alice-tg-bot-runtime
+    project_id: home-stack
+    environment_id: remote-primary
+    service_id: alice-tg-bot
+    enabled: true
+    source:
+      adapter: restricted_ssh_bundle
+      handler_ref: alice_tg_bot_runtime_backup
+      note: Separate artifact from the native Home Assistant backup and from the Git repository.
+    destinations:
+      - id: laptop-primary
+        mode: always
+      - id: cloud-drive
+        mode: scheduled_only
+    encryption:
+      required_before_remote_sync: true
+      key_ref_env: HOME_STACK_BACKUP_ENCRYPTION_KEY_REF
+    retention:
+      keep_last: 10
+      keep_daily_days: 14
+    verification:
+      checksum: sha256
+      archive_test: true
