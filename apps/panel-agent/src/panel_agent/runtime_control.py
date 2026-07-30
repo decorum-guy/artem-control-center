@@ -50,11 +50,26 @@ def _request_action(action: RuntimeAction, intent: str) -> dict:
     if not _enabled() or path is None:
         raise HTTPException(status_code=409, detail="runtime_controls_disabled")
 
+    requested_at = datetime.now(timezone.utc).isoformat()
     payload = {
         "schemaVersion": 1,
         "action": action,
-        "requestedAt": datetime.now(timezone.utc).isoformat(),
+        "requestedAt": requested_at,
     }
+
+    # Edge can move the visible kiosk window to a process whose command line no
+    # longer carries the transient --kiosk flag. The independent Windows watcher
+    # closes every process that uses only the dedicated panel profile. Write its
+    # request first so it survives even when shutdown immediately stops the Agent.
+    _write_command(
+        path.parent / "kiosk-close-request.json",
+        {
+            "schemaVersion": 1,
+            "action": action,
+            "requestedAt": requested_at,
+        },
+    )
+
     # The supervisor command must exist before the HTTP handler returns. A previous
     # BackgroundTasks implementation could acknowledge the request without ever
     # materialising the command on the Windows host.
