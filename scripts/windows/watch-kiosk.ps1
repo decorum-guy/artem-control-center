@@ -2,6 +2,7 @@ $ErrorActionPreference = "SilentlyContinue"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
 
 $paths = Get-ArtemRuntimePaths
+$closeRequest = Join-Path $paths.RuntimeRoot "kiosk-close-request.json"
 $startupDeadline = (Get-Date).AddSeconds(20)
 $seenKiosk = $false
 
@@ -18,7 +19,8 @@ if (-not $seenKiosk) {
 }
 
 while ($true) {
-    if (Test-Path -LiteralPath $paths.ManualStop) {
+    if ((Test-Path -LiteralPath $closeRequest) -or (Test-Path -LiteralPath $paths.ManualStop)) {
+        Remove-Item -LiteralPath $closeRequest -Force -ErrorAction SilentlyContinue
         Stop-ArtemKiosk -Paths $paths
         exit 0
     }
