@@ -19,4 +19,52 @@ foreach ($file in $files) {
     }
 }
 
-Write-Host "Validated $($files.Count) Windows PowerShell scripts."
+$temporary = Join-Path `
+    ([IO.Path]::GetTempPath()) `
+    ("artem-runtime-acl-{0}.env" -f [guid]::NewGuid())
+
+try {
+    Set-Content -LiteralPath $temporary -Value "PANEL_AGENT_MODE=fixtures" -Encoding ASCII
+    $currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $aclArguments = @(
+        $temporary,
+        "/inheritance:r",
+        "/grant:r",
+        "*${currentUserSid}:(F)",
+        "*S-1-5-18:(F)"
+    )
+    & icacls.exe @aclArguments | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "icacls rejected the production runtime ACL arguments"
+    }
+
+    $acl = Get-Acl -LiteralPath $temporary
+    if (-not $acl.AreAccessRulesProtected) {
+        throw "runtime.env ACL inheritance was not disabled"
+    }
+
+    $rules = $acl.GetAccessRules(
+        $true,
+        $true,
+        [System.Security.Principal.SecurityIdentifier]
+    )
+    $allowedFullControlSids = @(
+        $rules |
+            Where-Object {
+                $_.AccessControlType -eq "Allow" -and
+                ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl)
+            } |
+            ForEach-Object { $_.IdentityReference.Value }
+    )
+
+    foreach ($requiredSid in @($currentUserSid, "S-1-5-18")) {
+        if ($requiredSid -notin $allowedFullControlSids) {
+            throw "Required SID is missing FullControl on runtime.env: $requiredSid"
+        }
+    }
+}
+finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "Validated $($files.Count) Windows PowerShell scripts and runtime.env ACL."
