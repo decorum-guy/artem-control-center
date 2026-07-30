@@ -83,9 +83,29 @@ try {
     if ($installerText -notmatch '\$userId\s*=\s*\$currentUserSid') {
         throw "Production installer must register the Scheduled Task with the resolved user SID"
     }
+
+    $runtimeCommonText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "runtime-common.ps1") `
+        -Raw
+    if ($runtimeCommonText -notmatch 'function Get-ArtemKioskProcesses') {
+        throw "Kiosk process matching must be centralized"
+    }
+    if ($runtimeCommonText -notmatch '\$\(\$Paths\.EdgeProfile\)') {
+        throw "Kiosk process matching must require the dedicated Edge profile"
+    }
+    if ($runtimeCommonText -match 'CommandLine\s+-like\s+"\*--kiosk\*"') {
+        throw "Kiosk shutdown must not depend on the transient --kiosk flag"
+    }
+
+    $watcherText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "watch-kiosk.ps1") `
+        -Raw
+    if ($watcherText -notmatch 'ManualStop' -or $watcherText -notmatch 'Stop-ArtemKiosk') {
+        throw "Kiosk watcher must close the dedicated profile after manual shutdown"
+    }
 }
 finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime.env ACL and Scheduled Task SID handling."
+Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime.env ACL, Scheduled Task SID and profile-scoped kiosk shutdown."
