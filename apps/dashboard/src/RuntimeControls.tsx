@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import {
+  clearRuntimeShutdownPending,
+  markRuntimeShutdownPending
+} from "./runtimeLifecycle";
 import "./RuntimeControls.css";
 
 type RuntimeAction = "hide" | "shutdown";
@@ -7,6 +11,16 @@ type Availability = "loading" | "available" | "unavailable";
 interface RuntimeStatus {
   enabled: boolean;
   platform: string;
+}
+
+async function runtimeIsStillReachable() {
+  await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+  try {
+    const response = await fetch("/health/live", { cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 export function RuntimeControls() {
@@ -49,13 +63,26 @@ export function RuntimeControls() {
     setPending(action);
     setNotice(action === "hide" ? "Скрываем панель…" : "Завершаем работу платформы…");
 
+    if (action === "shutdown") {
+      markRuntimeShutdownPending();
+    }
+
+    let responseReceived = false;
     try {
       const response = await fetch(`/api/v1/system/runtime/${action}`, {
         method: "POST",
-        headers: { "x-panel-intent": "kiosk-control" }
+        headers: { "x-panel-intent": "kiosk-control" },
+        keepalive: action === "shutdown"
       });
+      responseReceived = true;
       if (!response.ok) throw new Error(`Runtime action failed: ${response.status}`);
     } catch {
+      if (action === "shutdown" && !responseReceived && !(await runtimeIsStillReachable())) {
+        return;
+      }
+      if (action === "shutdown") {
+        clearRuntimeShutdownPending();
+      }
       setPending(null);
       setNotice("Действие не выполнено. Проверьте локальный runtime и повторите попытку.");
     }

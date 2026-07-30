@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSnapshot } from "@artem/contracts";
+import { markRuntimeShutdownPending } from "./runtimeLifecycle";
 import { SnapshotCoordinator } from "./snapshotStream";
 
 class FakeEventSource extends EventTarget {
@@ -35,8 +36,25 @@ function installBrowserGlobals() {
     value: false,
     writable: true
   });
+  const storage = new Map<string, string>();
   vi.stubGlobal("document", documentTarget as unknown as Document);
   vi.stubGlobal("window", globalThis);
+  vi.stubGlobal("sessionStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      storage.set(key, value);
+    },
+    removeItem: (key: string) => {
+      storage.delete(key);
+    },
+    clear: () => {
+      storage.clear();
+    },
+    key: (index: number) => [...storage.keys()][index] ?? null,
+    get length() {
+      return storage.size;
+    }
+  } satisfies Storage);
   return documentTarget;
 }
 
@@ -156,6 +174,27 @@ describe("SnapshotCoordinator", () => {
     resolvers[1](new Response(JSON.stringify(snapshot(3)), { status: 200 }));
     await vi.waitFor(() => expect(active).toBe(0));
     expect(maxActive).toBe(1);
+    coordinator.stop();
+  });
+
+  it("does not surface expected fetch loss during an intentional runtime shutdown", async () => {
+    installBrowserGlobals();
+    const source = new FakeEventSource();
+    const errors: string[] = [];
+    markRuntimeShutdownPending();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }));
+    const coordinator = new SnapshotCoordinator({
+      scenario: "ha-healthy",
+      onSnapshot: () => undefined,
+      onError: (message) => errors.push(message),
+      eventSourceFactory: () => source as unknown as EventSource
+    });
+
+    coordinator.start();
+    await coordinator.refresh();
+    expect(errors).toEqual([]);
     coordinator.stop();
   });
 });

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Response, status
 
 RuntimeAction = Literal["hide", "shutdown"]
 
@@ -34,24 +34,32 @@ def _require_intent(intent: str) -> None:
         raise HTTPException(status_code=403, detail="runtime_control_intent_required")
 
 
-def _request_action(action: RuntimeAction, intent: str) -> dict:
-    _require_intent(intent)
-    path = _command_path()
-    if not _enabled() or path is None:
-        raise HTTPException(status_code=409, detail="runtime_controls_disabled")
-
+def _write_command(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "schemaVersion": 1,
-        "action": action,
-        "requestedAt": datetime.now(timezone.utc).isoformat(),
-    }
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
     os.replace(temporary, path)
+
+
+def _request_action(
+    action: RuntimeAction,
+    intent: str,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    _require_intent(intent)
+    path = _command_path()
+    if not _enabled() or path is None:
+        raise HTTPException(status_code=409, detail="runtime_controls_disabled")
+
+    payload = {
+        "schemaVersion": 1,
+        "action": action,
+        "requestedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    background_tasks.add_task(_write_command, path, payload)
     return {"accepted": True, "action": action}
 
 
@@ -66,13 +74,15 @@ def runtime_status(response: Response) -> dict:
 
 @router.post("/hide", status_code=status.HTTP_202_ACCEPTED)
 def hide_runtime(
+    background_tasks: BackgroundTasks,
     x_panel_intent: str = Header(default=""),
 ) -> dict:
-    return _request_action("hide", x_panel_intent)
+    return _request_action("hide", x_panel_intent, background_tasks)
 
 
 @router.post("/shutdown", status_code=status.HTTP_202_ACCEPTED)
 def shutdown_runtime(
+    background_tasks: BackgroundTasks,
     x_panel_intent: str = Header(default=""),
 ) -> dict:
-    return _request_action("shutdown", x_panel_intent)
+    return _request_action("shutdown", x_panel_intent, background_tasks)
