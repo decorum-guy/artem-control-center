@@ -23,6 +23,7 @@ function Get-ArtemRuntimePaths {
         RuntimeScript = Join-Path $repoRoot "scripts\production-runtime.mjs"
         StartScript = Join-Path $repoRoot "scripts\windows\start-production.ps1"
         OpenKioskScript = Join-Path $repoRoot "scripts\windows\open-kiosk.ps1"
+        KioskWatchScript = Join-Path $repoRoot "scripts\windows\watch-kiosk.ps1"
         StopScript = Join-Path $repoRoot "scripts\windows\stop-production.ps1"
         UpdateScript = Join-Path $repoRoot "scripts\windows\update-production.ps1"
         DashboardIndex = Join-Path $repoRoot "apps\dashboard\dist\index.html"
@@ -107,28 +108,31 @@ function Get-ArtemEdgeExecutable {
     throw "Microsoft Edge executable was not found"
 }
 
-function Test-ArtemKioskRunning {
+function Get-ArtemKioskProcesses {
     param([Parameter(Mandatory)]$Paths)
     try {
-        $processes = Get-CimInstance Win32_Process -Filter "Name='msedge.exe'"
-        return $null -ne ($processes | Where-Object {
-            $_.CommandLine -like "*--kiosk*" -and
-            $_.CommandLine -like "*$($Paths.EdgeProfile)*"
-        } | Select-Object -First 1)
+        return @(
+            Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
+                Where-Object {
+                    $null -ne $_.CommandLine -and
+                    $_.CommandLine -like "*$($Paths.EdgeProfile)*"
+                }
+        )
     }
     catch {
-        return $false
+        return @()
     }
+}
+
+function Test-ArtemKioskRunning {
+    param([Parameter(Mandatory)]$Paths)
+    return (Get-ArtemKioskProcesses -Paths $Paths).Count -gt 0
 }
 
 function Stop-ArtemKiosk {
     param([Parameter(Mandatory)]$Paths)
     try {
-        Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
-            Where-Object {
-                $_.CommandLine -like "*--kiosk*" -and
-                $_.CommandLine -like "*$($Paths.EdgeProfile)*"
-            } |
+        Get-ArtemKioskProcesses -Paths $Paths |
             ForEach-Object {
                 Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
             }
