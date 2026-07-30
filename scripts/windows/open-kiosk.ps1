@@ -7,6 +7,16 @@ $ErrorActionPreference = "Stop"
 
 $paths = Get-ArtemRuntimePaths
 Initialize-ArtemRuntimeDirectories -Paths $paths
+$closeRequest = Join-Path $paths.RuntimeRoot "kiosk-close-request.json"
+Remove-Item -LiteralPath $closeRequest -Force -ErrorAction SilentlyContinue
+
+function Start-ArtemKioskWatcher {
+    $watchArguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($paths.KioskWatchScript)`""
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList $watchArguments `
+        -WindowStyle Hidden | Out-Null
+}
 
 if (-not $AssumeRuntimeReady -and -not (Test-ArtemPanelReady -Paths $paths)) {
     & $paths.StartScript -NoKiosk
@@ -17,7 +27,8 @@ if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 30)) {
 }
 
 if (Test-ArtemKioskRunning -Paths $paths) {
-    Write-Host "Control Center kiosk is already open."
+    Start-ArtemKioskWatcher
+    Write-Host "Control Center kiosk is already open. Watcher attached."
     exit 0
 }
 
@@ -37,4 +48,5 @@ Start-Process `
     -ArgumentList $arguments `
     -WindowStyle Maximized | Out-Null
 
+Start-ArtemKioskWatcher
 Write-Host "Control Center kiosk opened."
