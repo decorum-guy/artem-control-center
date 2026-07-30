@@ -52,5 +52,13 @@ jobs:
       - name: Bootstrap project
         run: npm run setup
 
+      - name: Validate Windows production scripts
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/windows/test-production-scripts.ps1
+
       - name: Run full validation
         run: npm run check
+
+      - name: Smoke-test production runtime
+        run: npm run test:production-smoke

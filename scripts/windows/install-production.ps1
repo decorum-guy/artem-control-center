@@ -1,0 +1,166 @@
+param(
+    [ValidateSet("fixtures", "read_only", "integration_test", "production")]
+    [string]$PanelMode = "fixtures",
+    [switch]$SkipStart
+)
+
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "runtime-common.ps1")
+
+function Invoke-CheckedCommand {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$Description
+    )
+    & $FilePath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Description failed with exit code $LASTEXITCODE"
+    }
+}
+
+$paths = Get-ArtemRuntimePaths
+Initialize-ArtemRuntimeDirectories -Paths $paths
+Update-ArtemProcessPath
+
+$legacyStop = Join-Path $paths.RuntimeRoot "Stop-Fixture-Kiosk.ps1"
+if (Test-Path -LiteralPath $legacyStop) {
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $legacyStop
+    Start-Sleep -Seconds 1
+}
+
+Stop-ArtemRuntime -Paths $paths -Manual $false
+Set-Location -LiteralPath $paths.RepoRoot
+
+Invoke-CheckedCommand `
+    -FilePath "npm.cmd" `
+    -Arguments @("run", "setup") `
+    -Description "project setup"
+Invoke-CheckedCommand `
+    -FilePath "npm.cmd" `
+    -Arguments @("run", "build") `
+    -Description "dashboard build"
+
+if (-not (Test-Path -LiteralPath $paths.RuntimeEnv)) {
+    $configuration = @"
+# Artem Control Center runtime configuration.
+# This file is local to the Samsung and is never committed to Git.
+PANEL_AGENT_MODE=$PanelMode
+PANEL_WRITES_ENABLED=false
+PANEL_COFFEE_TIMING_WRITES_ENABLED=false
+PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED=false
+PANEL_COFFEE_ACTIONS_ENABLED=false
+"@
+    Set-Content -LiteralPath $paths.RuntimeEnv -Value $configuration -Encoding UTF8
+    Write-Host "Created safe runtime configuration: $($paths.RuntimeEnv)"
+}
+else {
+    Write-Host "Existing runtime configuration preserved: $($paths.RuntimeEnv)"
+}
+
+$currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$aclArguments = @(
+    $paths.RuntimeEnv,
+    "/inheritance:r",
+    "/grant:r",
+    "*${currentUserSid}:(F)",
+    "*S-1-5-18:(F)"
+)
+& icacls.exe @aclArguments | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to restrict runtime.env ACL"
+}
+Write-Host "Protected runtime configuration for the panel account and SYSTEM."
+
+& (Join-Path $PSScriptRoot "configure-edge-kiosk.ps1")
+
+$taskName = "Artem Control Center Runtime"
+$userId = "$env:USERDOMAIN\$env:USERNAME"
+$taskArguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($paths.StartScript)`" -AutoStart"
+$action = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument $taskArguments `
+    -WorkingDirectory $paths.RepoRoot
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit ([TimeSpan]::Zero)
+$principal = New-ScheduledTaskPrincipal `
+    -UserId $userId `
+    -LogonType Interactive `
+    -RunLevel Limited
+
+Register-ScheduledTask `
+    -TaskName $taskName `
+    -Action $action `
+    -Trigger $trigger `
+    -Settings $settings `
+    -Principal $principal `
+    -Force | Out-Null
+
+$desktop = [Environment]::GetFolderPath("Desktop")
+$startShortcut = Join-Path $desktop "Start Control Center.cmd"
+$openShortcut = Join-Path $desktop "Open Control Center.cmd"
+$stopShortcut = Join-Path $desktop "Stop Control Center.cmd"
+$updateShortcut = Join-Path $desktop "Update Control Center.cmd"
+$statusShortcut = Join-Path $desktop "Control Center Status.cmd"
+$statusScript = Join-Path $PSScriptRoot "status-production.ps1"
+
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.StartScript)"
+"@ | Set-Content -LiteralPath $startShortcut -Encoding ASCII
+
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.OpenKioskScript)"
+"@ | Set-Content -LiteralPath $openShortcut -Encoding ASCII
+
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.StopScript)"
+"@ | Set-Content -LiteralPath $stopShortcut -Encoding ASCII
+
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.UpdateScript)"
+if errorlevel 1 pause
+"@ | Set-Content -LiteralPath $updateShortcut -Encoding ASCII
+
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$statusScript"
+pause
+"@ | Set-Content -LiteralPath $statusShortcut -Encoding ASCII
+
+Remove-Item -LiteralPath (Join-Path $desktop "Start Control Center Test.cmd") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $desktop "Stop Control Center Test.cmd") -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $paths.ManualStop -Force -ErrorAction SilentlyContinue
+
+$currentHead = (& git.exe rev-parse HEAD).Trim()
+if ($currentHead) {
+    Set-Content -LiteralPath $paths.LastKnownGood -Value $currentHead -Encoding ASCII
+}
+
+if (-not $SkipStart) {
+    & $paths.StartScript
+    if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 60)) {
+        throw "Installed production runtime did not become ready"
+    }
+}
+
+Write-Host ""
+Write-Host "Artem Control Center production runtime installed."
+Write-Host "Scheduled task: $taskName"
+Write-Host "Runtime config: $($paths.RuntimeEnv)"
+Write-Host "Logs: $($paths.Logs)"
+Write-Host "Desktop shortcuts:"
+Write-Host "  Start Control Center.cmd"
+Write-Host "  Open Control Center.cmd"
+Write-Host "  Stop Control Center.cmd"
+Write-Host "  Update Control Center.cmd"
+Write-Host "  Control Center Status.cmd"

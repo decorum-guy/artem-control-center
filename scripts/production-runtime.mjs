@@ -1,0 +1,420 @@
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+export function parseEnvText(text) {
+  const result = {};
+  for (const rawLine of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    let line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (line.startsWith("export ")) line = line.slice(7).trim();
+    const separator = line.indexOf("=");
+    if (separator < 1) throw new Error(`Invalid runtime.env line: ${rawLine}`);
+    const key = line.slice(0, separator).trim();
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) {
+      throw new Error(`Invalid runtime.env key: ${key}`);
+    }
+    let value = line.slice(separator + 1).trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+export class RestartBudget {
+  constructor({ maximum = 5, windowMs = 10 * 60_000 } = {}) {
+    this.maximum = maximum;
+    this.windowMs = windowMs;
+    this.events = [];
+  }
+
+  prune(now = Date.now()) {
+    const cutoff = now - this.windowMs;
+    this.events = this.events.filter((timestamp) => timestamp >= cutoff);
+  }
+
+  record(now = Date.now()) {
+    this.prune(now);
+    if (this.events.length >= this.maximum) return false;
+    this.events.push(now);
+    return true;
+  }
+
+  count(now = Date.now()) {
+    this.prune(now);
+    return this.events.length;
+  }
+}
+
+export function shouldCreateManualStop(command) {
+  return command?.action === "shutdown" && command.manual !== false;
+}
+
+function atomicWriteJson(path, payload) {
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  try {
+    renameSync(temporary, path);
+  } catch (error) {
+    if (error?.code !== "EEXIST" && error?.code !== "EPERM") throw error;
+    rmSync(path, { force: true });
+    renameSync(temporary, path);
+  }
+}
+
+function pruneLogs(logDir, retentionDays = 14) {
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60_000;
+  for (const name of readdirSync(logDir)) {
+    if (!name.startsWith("runtime-") || !name.endsWith(".log")) continue;
+    const path = join(logDir, name);
+    try {
+      if (statSync(path).mtimeMs < cutoff) rmSync(path, { force: true });
+    } catch {
+      // A log being rotated or removed concurrently is harmless.
+    }
+  }
+}
+
+function createLogger(logDir) {
+  mkdirSync(logDir, { recursive: true });
+  pruneLogs(logDir);
+  return (level, message) => {
+    const now = new Date();
+    const day = now.toISOString().slice(0, 10);
+    const line = `${now.toISOString()} [${level}] ${String(message).replace(/\r?\n/g, "\\n")}\n`;
+    appendFileSync(join(logDir, `runtime-${day}.log`), line, "utf8");
+  };
+}
+
+function attachStream(stream, prefix, log) {
+  let buffer = "";
+  stream.setEncoding("utf8");
+  stream.on("data", (chunk) => {
+    buffer += chunk;
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line) log("INFO", `${prefix} ${line}`);
+    }
+  });
+  stream.on("end", () => {
+    if (buffer) log("INFO", `${prefix} ${buffer}`);
+  });
+}
+
+function currentRevision(root) {
+  const result = spawnSync("git", ["rev-parse", "--short=12", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true
+  });
+  return result.status === 0 ? result.stdout.trim() : "unknown";
+}
+
+function stopProcessTree(child, log) {
+  if (!child?.pid || child.killed) return;
+  if (process.platform === "win32") {
+    const result = spawnSync(
+      "taskkill.exe",
+      ["/PID", String(child.pid), "/T", "/F"],
+      { encoding: "utf8", windowsHide: true }
+    );
+    if (result.status !== 0) {
+      log("WARN", `taskkill for agent ${child.pid} returned ${result.status}`);
+    }
+  } else {
+    child.kill("SIGTERM");
+  }
+}
+
+function closeKioskWindow(edgeProfileDir, log) {
+  if (process.platform !== "win32") return;
+  const escaped = edgeProfileDir.replace(/'/g, "''");
+  const script = [
+    `$profile = '${escaped}'`,
+    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\"",
+    "| Where-Object { $_.CommandLine -like '*--kiosk*' -and $_.CommandLine -like ('*' + $profile + '*') }",
+    "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+  ].join(" ");
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    { encoding: "utf8", windowsHide: true }
+  );
+  if (result.status !== 0) log("WARN", "Unable to close the panel-owned Edge kiosk window");
+}
+
+async function probeHealth(url, timeoutMs = 3_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function runProductionRuntime() {
+  const root = resolve(import.meta.dirname, "..");
+  const isWindows = process.platform === "win32";
+  const runtimeDir = process.env.LOCALAPPDATA
+    ? resolve(process.env.LOCALAPPDATA, "ArtemControlCenter")
+    : resolve(root, ".runtime", "production");
+  const logDir = join(runtimeDir, "logs");
+  const configPath = join(runtimeDir, "runtime.env");
+  const commandPath = join(runtimeDir, "runtime-command.json");
+  const statePath = join(runtimeDir, "runtime-state.json");
+  const manualStopPath = join(runtimeDir, "manual-stop.json");
+  const edgeProfileDir = join(runtimeDir, "edge-profile");
+  const dashboardDist = resolve(root, "apps", "dashboard", "dist");
+  const venvPython = resolve(root, ".venv", isWindows ? "Scripts/python.exe" : "bin/python");
+  const log = createLogger(logDir);
+
+  mkdirSync(runtimeDir, { recursive: true });
+  mkdirSync(edgeProfileDir, { recursive: true });
+
+  if (existsSync(manualStopPath)) {
+    log("INFO", "Manual-stop marker present; production runtime will not start");
+    return 0;
+  }
+  if (!existsSync(venvPython)) throw new Error("Python environment missing; run npm run setup");
+  if (!existsSync(join(dashboardDist, "index.html"))) {
+    throw new Error("Dashboard build missing; run npm run build");
+  }
+
+  const fileEnv = existsSync(configPath)
+    ? parseEnvText(readFileSync(configPath, "utf8"))
+    : {};
+  const mode = fileEnv.PANEL_AGENT_MODE || process.env.PANEL_AGENT_MODE || "fixtures";
+  if (!new Set(["fixtures", "read_only", "integration_test", "production"]).has(mode)) {
+    throw new Error(`Unsupported PANEL_AGENT_MODE in runtime.env: ${mode}`);
+  }
+
+  const agentEnv = {
+    ...process.env,
+    ...fileEnv,
+    PANEL_AGENT_MODE: mode,
+    PANEL_KIOSK_CONTROLS_ENABLED: "true",
+    PANEL_RUNTIME_COMMAND_PATH: commandPath,
+    PANEL_DASHBOARD_DIST: dashboardDist,
+    PANEL_STATE_CACHE_PATH:
+      fileEnv.PANEL_STATE_CACHE_PATH || join(runtimeDir, "panel-state-cache.json")
+  };
+
+  process.title = "artem-control-center-runtime";
+  rmSync(commandPath, { force: true });
+
+  const revision = currentRevision(root);
+  const restartBudget = new RestartBudget();
+  const expectedExitPids = new Set();
+  let agent = null;
+  let restartPending = false;
+  let shuttingDown = false;
+  let healthFailures = 0;
+  let healthCheckRunning = false;
+  let commandTimer = null;
+  let healthTimer = null;
+  let restartTimer = null;
+
+  function writeState(status, extra = {}) {
+    atomicWriteJson(statePath, {
+      schemaVersion: 1,
+      status,
+      supervisorPid: status === "stopped" ? null : process.pid,
+      agentPid: agent?.pid ?? null,
+      mode,
+      revision,
+      observedAt: new Date().toISOString(),
+      restartCountInWindow: restartBudget.count(),
+      ...extra
+    });
+  }
+
+  function spawnAgent() {
+    if (shuttingDown) return;
+    const child = spawn(
+      venvPython,
+      [
+        "-m",
+        "uvicorn",
+        "panel_agent.production:app",
+        "--app-dir",
+        "apps/panel-agent/src",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8787"
+      ],
+      {
+        cwd: root,
+        env: agentEnv,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+    agent = child;
+    healthFailures = 0;
+    attachStream(child.stdout, "[agent]", log);
+    attachStream(child.stderr, "[agent:error]", log);
+    log("INFO", `Panel Agent started with pid=${child.pid}, mode=${mode}, revision=${revision}`);
+    writeState("starting");
+
+    child.once("exit", (code, signal) => {
+      if (agent === child) agent = null;
+      const expected = expectedExitPids.delete(child.pid);
+      log(
+        expected ? "INFO" : "ERROR",
+        `Panel Agent exited pid=${child.pid} code=${code ?? "null"} signal=${signal ?? "none"}`
+      );
+      if (!shuttingDown && !expected) requestRestart("agent process exited unexpectedly");
+    });
+  }
+
+  function requestRestart(reason) {
+    if (shuttingDown || restartPending) return;
+    if (!restartBudget.record()) {
+      log("ERROR", `Restart budget exhausted after: ${reason}`);
+      writeState("failed", { lastError: "restart_budget_exhausted" });
+      void shutdown(1);
+      return;
+    }
+    restartPending = true;
+    log("WARN", `Restarting Panel Agent: ${reason}`);
+    const previous = agent;
+    if (previous?.pid) expectedExitPids.add(previous.pid);
+    stopProcessTree(previous, log);
+    agent = null;
+    const delay = Math.min(1_000 * 2 ** Math.max(0, restartBudget.count() - 1), 15_000);
+    restartTimer = setTimeout(() => {
+      restartPending = false;
+      spawnAgent();
+    }, delay);
+  }
+
+  async function shutdown(exitCode) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (commandTimer) clearInterval(commandTimer);
+    if (healthTimer) clearInterval(healthTimer);
+    if (restartTimer) clearTimeout(restartTimer);
+    rmSync(commandPath, { force: true });
+    closeKioskWindow(edgeProfileDir, log);
+    if (agent?.pid) expectedExitPids.add(agent.pid);
+    stopProcessTree(agent, log);
+    agent = null;
+    writeState("stopped", { exitCode });
+    log("INFO", `Production runtime stopped with exitCode=${exitCode}`);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
+    process.exit(exitCode);
+  }
+
+  function consumeRuntimeCommand() {
+    if (shuttingDown || !existsSync(commandPath)) return;
+    let command;
+    try {
+      command = JSON.parse(readFileSync(commandPath, "utf8"));
+    } catch (error) {
+      log("ERROR", `Invalid runtime command JSON: ${error}`);
+      rmSync(commandPath, { force: true });
+      return;
+    }
+    rmSync(commandPath, { force: true });
+    if (command?.schemaVersion !== 1) {
+      log("WARN", "Rejected runtime command with unsupported schemaVersion");
+      return;
+    }
+    if (command.action === "hide") {
+      log("INFO", "Runtime command accepted: hide kiosk");
+      closeKioskWindow(edgeProfileDir, log);
+      return;
+    }
+    if (command.action === "shutdown") {
+      const manual = shouldCreateManualStop(command);
+      log("INFO", `Runtime command accepted: shutdown manual=${manual}`);
+      if (manual) {
+        atomicWriteJson(manualStopPath, {
+          schemaVersion: 1,
+          reason: "manual_shutdown",
+          createdAt: new Date().toISOString()
+        });
+      }
+      void shutdown(0);
+      return;
+    }
+    log("WARN", `Rejected unsupported runtime action: ${String(command?.action)}`);
+  }
+
+  process.on("SIGINT", () => void shutdown(0));
+  process.on("SIGTERM", () => void shutdown(0));
+  process.on("uncaughtException", (error) => {
+    log("ERROR", `Uncaught exception: ${error?.stack || error}`);
+    void shutdown(1);
+  });
+  process.on("unhandledRejection", (error) => {
+    log("ERROR", `Unhandled rejection: ${error?.stack || error}`);
+    void shutdown(1);
+  });
+
+  log("INFO", `Production runtime starting root=${root}`);
+  spawnAgent();
+  commandTimer = setInterval(consumeRuntimeCommand, 250);
+  healthTimer = setInterval(async () => {
+    if (shuttingDown || restartPending || healthCheckRunning || !agent) return;
+    healthCheckRunning = true;
+    try {
+      const healthy = await probeHealth("http://127.0.0.1:8787/health/live");
+      if (healthy) {
+        if (healthFailures > 0) log("INFO", "Panel Agent health recovered");
+        healthFailures = 0;
+        writeState("running");
+      } else {
+        healthFailures += 1;
+        log("WARN", `Panel Agent health failure ${healthFailures}/3`);
+        if (healthFailures >= 3) requestRestart("three consecutive health failures");
+      }
+    } finally {
+      healthCheckRunning = false;
+    }
+  }, 10_000);
+
+  return await new Promise(() => {});
+}
+
+const invokedDirectly =
+  process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+
+if (invokedDirectly) {
+  runProductionRuntime()
+    .then((code) => process.exit(code))
+    .catch((error) => {
+      const runtimeDir = process.env.LOCALAPPDATA
+        ? resolve(process.env.LOCALAPPDATA, "ArtemControlCenter")
+        : resolve(import.meta.dirname, "..", ".runtime", "production");
+      const log = createLogger(join(runtimeDir, "logs"));
+      log("ERROR", error?.stack || error);
+      process.exit(1);
+    });
+}
