@@ -1,19 +1,16 @@
 import { useEffect, useState } from "react";
+import {
+  clearRuntimeShutdownPending,
+  markRuntimeShutdownPending
+} from "./runtimeLifecycle";
 import "./RuntimeControls.css";
 
 type RuntimeAction = "hide" | "shutdown";
 type Availability = "loading" | "available" | "unavailable";
 
-export const RUNTIME_SHUTDOWN_START_EVENT = "artem:runtime-shutdown-start";
-export const RUNTIME_SHUTDOWN_FAILED_EVENT = "artem:runtime-shutdown-failed";
-
 interface RuntimeStatus {
   enabled: boolean;
   platform: string;
-}
-
-function announceRuntimeEvent(name: string) {
-  window.dispatchEvent(new Event(name));
 }
 
 async function runtimeIsStillReachable() {
@@ -67,7 +64,7 @@ export function RuntimeControls() {
     setNotice(action === "hide" ? "Скрываем панель…" : "Завершаем работу платформы…");
 
     if (action === "shutdown") {
-      announceRuntimeEvent(RUNTIME_SHUTDOWN_START_EVENT);
+      markRuntimeShutdownPending();
     }
 
     let responseReceived = false;
@@ -84,7 +81,7 @@ export function RuntimeControls() {
         return;
       }
       if (action === "shutdown") {
-        announceRuntimeEvent(RUNTIME_SHUTDOWN_FAILED_EVENT);
+        clearRuntimeShutdownPending();
       }
       setPending(null);
       setNotice("Действие не выполнено. Проверьте локальный runtime и повторите попытку.");
