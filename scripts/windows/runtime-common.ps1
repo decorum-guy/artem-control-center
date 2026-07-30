@@ -95,13 +95,14 @@ function Wait-ArtemPanelReady {
 }
 
 function Get-ArtemEdgeExecutable {
-    $candidates = @(
-        (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
-        (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe"),
-        (Join-Path $env:LOCALAPPDATA "Microsoft\Edge\Application\msedge.exe")
-    )
+    $candidates = @()
+    foreach ($root in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, $env:LOCALAPPDATA)) {
+        if ($root) {
+            $candidates += Join-Path $root "Microsoft\Edge\Application\msedge.exe"
+        }
+    }
     foreach ($candidate in $candidates) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
     }
     throw "Microsoft Edge executable was not found"
 }
@@ -153,7 +154,7 @@ function Write-ArtemRuntimeCommand {
         requestedBy = "windows-helper"
     }
     $temporary = "$($Paths.Command).tmp"
-    $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporary -Encoding UTF8
+    $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporary -Encoding ASCII
     Move-Item -LiteralPath $temporary -Destination $Paths.Command -Force
 }
 
@@ -165,7 +166,7 @@ function Write-ArtemManualStopMarker {
         reason = "manual_shutdown"
         createdAt = [DateTime]::UtcNow.ToString("o")
     }
-    $payload | ConvertTo-Json | Set-Content -LiteralPath $Paths.ManualStop -Encoding UTF8
+    $payload | ConvertTo-Json | Set-Content -LiteralPath $Paths.ManualStop -Encoding ASCII
 }
 
 function Stop-ArtemRuntime {
