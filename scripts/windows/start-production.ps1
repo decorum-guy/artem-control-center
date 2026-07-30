@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
 
 $paths = Get-ArtemRuntimePaths
+$taskName = "Artem Control Center Runtime"
 Initialize-ArtemRuntimeDirectories -Paths $paths
 Update-ArtemProcessPath
 
@@ -31,6 +32,28 @@ if (Test-ArtemRuntimeProcess -Paths $paths) {
     }
     Write-Host "Artem Control Center is already running."
     exit 0
+}
+
+if (-not $AutoStart) {
+    $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($scheduledTask) {
+        if ($scheduledTask.State -eq "Running") {
+            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 500
+        }
+        Remove-Item -LiteralPath $paths.State -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $paths.Command -Force -ErrorAction SilentlyContinue
+        Start-ScheduledTask -TaskName $taskName
+        if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 60)) {
+            throw "Scheduled production runtime did not become ready within 60 seconds"
+        }
+        if (-not $NoKiosk) {
+            & $paths.OpenKioskScript -AssumeRuntimeReady
+        }
+        Write-Host "Artem Control Center production runtime started through Task Scheduler."
+        Write-Host "URL: $($paths.PanelUrl)"
+        exit 0
+    }
 }
 
 Remove-Item -LiteralPath $paths.State -Force -ErrorAction SilentlyContinue
