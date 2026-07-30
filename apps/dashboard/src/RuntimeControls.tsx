@@ -4,9 +4,26 @@ import "./RuntimeControls.css";
 type RuntimeAction = "hide" | "shutdown";
 type Availability = "loading" | "available" | "unavailable";
 
+export const RUNTIME_SHUTDOWN_START_EVENT = "artem:runtime-shutdown-start";
+export const RUNTIME_SHUTDOWN_FAILED_EVENT = "artem:runtime-shutdown-failed";
+
 interface RuntimeStatus {
   enabled: boolean;
   platform: string;
+}
+
+function announceRuntimeEvent(name: string) {
+  window.dispatchEvent(new Event(name));
+}
+
+async function runtimeIsStillReachable() {
+  await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+  try {
+    const response = await fetch("/health/live", { cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 export function RuntimeControls() {
@@ -49,13 +66,26 @@ export function RuntimeControls() {
     setPending(action);
     setNotice(action === "hide" ? "Скрываем панель…" : "Завершаем работу платформы…");
 
+    if (action === "shutdown") {
+      announceRuntimeEvent(RUNTIME_SHUTDOWN_START_EVENT);
+    }
+
+    let responseReceived = false;
     try {
       const response = await fetch(`/api/v1/system/runtime/${action}`, {
         method: "POST",
-        headers: { "x-panel-intent": "kiosk-control" }
+        headers: { "x-panel-intent": "kiosk-control" },
+        keepalive: action === "shutdown"
       });
+      responseReceived = true;
       if (!response.ok) throw new Error(`Runtime action failed: ${response.status}`);
     } catch {
+      if (action === "shutdown" && !responseReceived && !(await runtimeIsStillReachable())) {
+        return;
+      }
+      if (action === "shutdown") {
+        announceRuntimeEvent(RUNTIME_SHUTDOWN_FAILED_EVENT);
+      }
       setPending(null);
       setNotice("Действие не выполнено. Проверьте локальный runtime и повторите попытку.");
     }
