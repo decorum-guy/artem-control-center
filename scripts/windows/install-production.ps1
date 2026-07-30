@@ -75,7 +75,9 @@ Write-Host "Protected runtime configuration for the panel account and SYSTEM."
 & (Join-Path $PSScriptRoot "configure-edge-kiosk.ps1")
 
 $taskName = "Artem Control Center Runtime"
-$userId = "$env:USERDOMAIN\$env:USERNAME"
+# Use the already-resolved SID instead of USERDOMAIN\USERNAME. In SSH sessions
+# Windows may expose USERDOMAIN as WORKGROUP, which is not a resolvable account.
+$userId = $currentUserSid
 $taskArguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($paths.StartScript)`" -AutoStart"
 $action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
