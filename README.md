@@ -55,6 +55,7 @@
 - [`docs/WIDGET_SYSTEM.md`](docs/WIDGET_SYSTEM.md) — автоматическое появление сервисов, widget plug-ins, layout system и no-code widgets.
 - [`docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`](docs/HOME_ASSISTANT_DEVICE_CONTRACT.md) — HA device/timing authority, bot editor role и composite coffee model.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — разработка на Mac и финальная проверка на Windows/Linux.
+- [`docs/WINDOWS_PRODUCTION_RUNTIME.md`](docs/WINDOWS_PRODUCTION_RUNTIME.md) — production runtime, автозапуск, обновление, rollback и Samsung acceptance.
 - [`docs/INTEGRATIONS_AND_HEALTH.md`](docs/INTEGRATIONS_AND_HEALTH.md) — реестр проектов, health-контракты и control actions.
 - [`docs/NOTIFICATION_ARCHITECTURE.md`](docs/NOTIFICATION_ARCHITECTURE.md) —
   владельцы событий, подтверждённые coffee notification paths и защищённый
@@ -103,3 +104,17 @@ npm run dev:mac
 npm run check
 npm run test:e2e
 ```
+
+## Production runtime на Samsung
+
+После merge и обновления чистого `main` checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\install-production.ps1
+```
+
+Production runtime раздаёт собранный dashboard через Panel Agent на
+`127.0.0.1:8787`, не использует Vite dev server и Uvicorn reload, запускается
+через Task Scheduler и хранит конфигурацию/логи в
+`%LOCALAPPDATA%\ArtemControlCenter`. Полные инструкции и rollback находятся в
+[`docs/WINDOWS_PRODUCTION_RUNTIME.md`](docs/WINDOWS_PRODUCTION_RUNTIME.md).
