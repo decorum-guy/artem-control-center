@@ -14,6 +14,7 @@ import {
   ServiceRow
 } from "./widgets";
 import { CoffeeSettingsPanel } from "./CoffeeSettings";
+import { RuntimeControls } from "./RuntimeControls";
 
 interface PageProps {
   snapshot: DashboardSnapshot;
@@ -409,6 +410,7 @@ export function SettingsPage({
           <option value="battery-saving">Battery saving</option>
         </select>
       </section>
+      <RuntimeControls />
     </div>
   );
 }
