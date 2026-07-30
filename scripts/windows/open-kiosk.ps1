@@ -37,4 +37,10 @@ Start-Process `
     -ArgumentList $arguments `
     -WindowStyle Maximized | Out-Null
 
+$watchArguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($paths.KioskWatchScript)`""
+Start-Process `
+    -FilePath "powershell.exe" `
+    -ArgumentList $watchArguments `
+    -WindowStyle Hidden | Out-Null
+
 Write-Host "Control Center kiosk opened."
