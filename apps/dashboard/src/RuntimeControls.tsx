@@ -13,8 +13,12 @@ interface RuntimeStatus {
   platform: string;
 }
 
-async function runtimeIsStillReachable() {
-  await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function runtimeIsStillReachable(delayMs = 1_000) {
+  await wait(delayMs);
   try {
     const response = await fetch("/health/live", { cache: "no-store" });
     return response.ok;
@@ -76,6 +80,28 @@ export function RuntimeControls() {
       });
       responseReceived = true;
       if (!response.ok) throw new Error(`Runtime action failed: ${response.status}`);
+
+      if (action === "shutdown") {
+        const stillReachable = await runtimeIsStillReachable(7_000);
+        if (!stillReachable) {
+          setNotice("Платформа остановлена. Закрываем окно…");
+          window.close();
+          return;
+        }
+
+        clearRuntimeShutdownPending();
+        setPending(null);
+        setNotice(
+          "Команда принята, но runtime не остановился. Повторите попытку или используйте ярлык Stop Control Center."
+        );
+        return;
+      }
+
+      await wait(3_000);
+      if (!document.hidden) {
+        setPending(null);
+        setNotice("Команда принята, но окно не закрылось. Повторите попытку.");
+      }
     } catch {
       if (action === "shutdown" && !responseReceived && !(await runtimeIsStillReachable())) {
         return;
