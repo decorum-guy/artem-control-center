@@ -22,6 +22,7 @@ from .contracts import (
 )
 from .fixtures import load_fixture_document, services_for_scenario
 from .integrations import IntegrationRuntime
+from .runtime_control import router as runtime_control_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
 
@@ -61,6 +62,7 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+app.include_router(runtime_control_router)
 fixture_services: List[ServiceSnapshot] = []
 revision = 1
 fixture_coffee_state_override: str | None = None
