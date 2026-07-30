@@ -1,4 +1,5 @@
 import type { DashboardSnapshot } from "@artem/contracts";
+import { isRuntimeShutdownPending } from "./runtimeLifecycle";
 
 type SnapshotHandler = (snapshot: DashboardSnapshot) => void;
 type ErrorHandler = (message: string) => void;
@@ -95,7 +96,7 @@ export class SnapshotCoordinator {
       this.onError("");
       return true;
     } catch (reason) {
-      if (signal.aborted) return false;
+      if (signal.aborted || isRuntimeShutdownPending()) return false;
       this.onError(reason instanceof Error ? reason.message : "Snapshot unavailable");
       return false;
     }
