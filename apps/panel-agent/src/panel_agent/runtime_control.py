@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Response, status
+from fastapi import APIRouter, Header, HTTPException, Response, status
 
 RuntimeAction = Literal["hide", "shutdown"]
 
@@ -44,11 +44,7 @@ def _write_command(path: Path, payload: dict) -> None:
     os.replace(temporary, path)
 
 
-def _request_action(
-    action: RuntimeAction,
-    intent: str,
-    background_tasks: BackgroundTasks,
-) -> dict:
+def _request_action(action: RuntimeAction, intent: str) -> dict:
     _require_intent(intent)
     path = _command_path()
     if not _enabled() or path is None:
@@ -59,7 +55,10 @@ def _request_action(
         "action": action,
         "requestedAt": datetime.now(timezone.utc).isoformat(),
     }
-    background_tasks.add_task(_write_command, path, payload)
+    # The supervisor command must exist before the HTTP handler returns. A previous
+    # BackgroundTasks implementation could acknowledge the request without ever
+    # materialising the command on the Windows host.
+    _write_command(path, payload)
     return {"accepted": True, "action": action}
 
 
@@ -74,15 +73,13 @@ def runtime_status(response: Response) -> dict:
 
 @router.post("/hide", status_code=status.HTTP_202_ACCEPTED)
 def hide_runtime(
-    background_tasks: BackgroundTasks,
     x_panel_intent: str = Header(default=""),
 ) -> dict:
-    return _request_action("hide", x_panel_intent, background_tasks)
+    return _request_action("hide", x_panel_intent)
 
 
 @router.post("/shutdown", status_code=status.HTTP_202_ACCEPTED)
 def shutdown_runtime(
-    background_tasks: BackgroundTasks,
     x_panel_intent: str = Header(default=""),
 ) -> dict:
-    return _request_action("shutdown", x_panel_intent, background_tasks)
+    return _request_action("shutdown", x_panel_intent)
