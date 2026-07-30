@@ -58,6 +58,20 @@ else {
     Write-Host "Existing runtime configuration preserved: $($paths.RuntimeEnv)"
 }
 
+$currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$aclArguments = @(
+    $paths.RuntimeEnv,
+    "/inheritance:r",
+    "/grant:r",
+    "*${currentUserSid}:(F)",
+    "*S-1-5-18:(F)"
+)
+& icacls.exe @aclArguments | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to restrict runtime.env ACL"
+}
+Write-Host "Protected runtime configuration for the panel account and SYSTEM."
+
 & (Join-Path $PSScriptRoot "configure-edge-kiosk.ps1")
 
 $taskName = "Artem Control Center Runtime"
