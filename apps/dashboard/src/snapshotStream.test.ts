@@ -41,9 +41,15 @@ function installBrowserGlobals() {
   vi.stubGlobal("window", globalThis);
   vi.stubGlobal("sessionStorage", {
     getItem: (key: string) => storage.get(key) ?? null,
-    setItem: (key: string, value: string) => storage.set(key, value),
-    removeItem: (key: string) => storage.delete(key),
-    clear: () => storage.clear(),
+    setItem: (key: string, value: string) => {
+      storage.set(key, value);
+    },
+    removeItem: (key: string) => {
+      storage.delete(key);
+    },
+    clear: () => {
+      storage.clear();
+    },
     key: (index: number) => [...storage.keys()][index] ?? null,
     get length() {
       return storage.size;
