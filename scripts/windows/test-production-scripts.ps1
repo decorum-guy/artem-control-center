@@ -62,9 +62,30 @@ try {
             throw "Required SID is missing FullControl on runtime.env: $requiredSid"
         }
     }
+
+    # Build the same Task Scheduler objects as the installer. This catches local
+    # account resolution regressions such as USERDOMAIN being exposed as WORKGROUP.
+    $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUserSid
+    $taskPrincipal = New-ScheduledTaskPrincipal `
+        -UserId $currentUserSid `
+        -LogonType Interactive `
+        -RunLevel Limited
+    if ($null -eq $taskTrigger -or $null -eq $taskPrincipal) {
+        throw "Unable to construct Scheduled Task objects for the current user SID"
+    }
+
+    $installerText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "install-production.ps1") `
+        -Raw
+    if ($installerText -match '\$env:USERDOMAIN') {
+        throw "Production installer must not derive the Scheduled Task account from USERDOMAIN"
+    }
+    if ($installerText -notmatch '\$userId\s*=\s*\$currentUserSid') {
+        throw "Production installer must register the Scheduled Task with the resolved user SID"
+    }
 }
 finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated $($files.Count) Windows PowerShell scripts and runtime.env ACL."
+Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime.env ACL and Scheduled Task SID handling."
