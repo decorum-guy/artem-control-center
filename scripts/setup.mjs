@@ -16,8 +16,21 @@ function run(command, args, env = {}) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+function runNpm(args) {
+  const npmCli = process.env.npm_execpath;
+  if (npmCli) {
+    run(process.execPath, [npmCli, ...args]);
+    return;
+  }
+  if (isWindows) {
+    console.error("npm CLI path is unavailable. Run `npm run setup`.");
+    process.exit(2);
+  }
+  run("npm", args);
+}
+
 if (!existsSync(resolve(root, "node_modules"))) {
-  run("npm", ["install"]);
+  runNpm(["install"]);
 }
 
 if (!existsSync(venvPython)) {

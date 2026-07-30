@@ -50,8 +50,22 @@ start(
   { PANEL_AGENT_MODE: requestedMode }
 );
 
-const npmCommand = isWindows ? "npm.cmd" : "npm";
-const viteArgs = ["run", "dev", "--workspace", "@artem/dashboard", "--", "--host", "127.0.0.1"];
-if (process.argv.includes("--open")) viteArgs.push("--open");
-start(npmCommand, viteArgs, { VITE_PANEL_MODE: requestedMode });
+const npmCli = process.env.npm_execpath;
+if (!npmCli) {
+  console.error("npm CLI path is unavailable. Start through an npm script.");
+  shutdown(2);
+} else {
+  const viteArgs = [
+    npmCli,
+    "run",
+    "dev",
+    "--workspace",
+    "@artem/dashboard",
+    "--",
+    "--host",
+    "127.0.0.1"
+  ];
+  if (process.argv.includes("--open")) viteArgs.push("--open");
+  start(process.execPath, viteArgs, { VITE_PANEL_MODE: requestedMode });
+}
 
