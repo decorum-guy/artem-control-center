@@ -17,7 +17,7 @@ function run(command, args, env = {}) {
 }
 
 if (!existsSync(resolve(root, "node_modules"))) {
-  run("npm", ["install"]);
+  run(isWindows ? "npm.cmd" : "npm", ["install"]);
 }
 
 if (!existsSync(venvPython)) {

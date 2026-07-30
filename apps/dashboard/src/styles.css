@@ -960,3 +960,17 @@ p { color: var(--text-secondary); }
   .dev-header { align-items: flex-start; }
   .dev-widget, .dev-widget-grid .coffee-panel { grid-column: 1 / -1; }
 }
+
+/* Kiosk: preserve touch/wheel scrolling without a browser scrollbar. */
+html,
+body {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}

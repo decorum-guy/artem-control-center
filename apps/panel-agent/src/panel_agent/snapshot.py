@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator, Awaitable, Callable, Iterable
 
 from .contracts import DashboardSnapshot, PanelMode, ServiceSnapshot
@@ -58,9 +58,12 @@ class SnapshotPublisher:
                 return self._snapshot.model_copy(deep=True)
             self._revision += 1
             self._fingerprint = fingerprint
+            previous_generated_at = (
+                self._snapshot.generatedAt if self._snapshot is not None else None
+            )
             self._snapshot = DashboardSnapshot(
                 revision=self._revision,
-                generatedAt=_now(),
+                generatedAt=_next_generated_at(previous_generated_at),
                 mode=self._mode,
                 fixtureScenario=None,
                 services=services,
@@ -175,6 +178,15 @@ def _without_technical_fields(value):
     if isinstance(value, list):
         return [_without_technical_fields(item) for item in value]
     return value
+
+
+def _next_generated_at(previous: str | None) -> str:
+    current = datetime.now(timezone.utc)
+    if previous is not None:
+        previous_datetime = datetime.fromisoformat(previous)
+        if current <= previous_datetime:
+            current = previous_datetime + timedelta(microseconds=1)
+    return current.isoformat()
 
 
 def _now() -> str:
