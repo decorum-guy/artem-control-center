@@ -7,6 +7,8 @@ $ErrorActionPreference = "Stop"
 
 $paths = Get-ArtemRuntimePaths
 Initialize-ArtemRuntimeDirectories -Paths $paths
+$closeRequest = Join-Path $paths.RuntimeRoot "kiosk-close-request.json"
+Remove-Item -LiteralPath $closeRequest -Force -ErrorAction SilentlyContinue
 
 if (-not $AssumeRuntimeReady -and -not (Test-ArtemPanelReady -Paths $paths)) {
     & $paths.StartScript -NoKiosk
