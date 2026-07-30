@@ -52,7 +52,7 @@ def install_dashboard_routes(app: FastAPI, root: Path | None = None) -> bool:
             return FileResponse(candidate, headers=headers)
 
         first_segment = asset_path.split("/", 1)[0]
-        if first_segment in {"api", "health"} or Path(asset_path).suffix:
+        if first_segment in {"api", "health", "assets"} or Path(asset_path).suffix:
             raise HTTPException(status_code=404)
 
         return FileResponse(index_path, headers=NO_STORE_HEADERS)
