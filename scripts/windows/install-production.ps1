@@ -93,6 +93,8 @@ $startShortcut = Join-Path $desktop "Start Control Center.cmd"
 $openShortcut = Join-Path $desktop "Open Control Center.cmd"
 $stopShortcut = Join-Path $desktop "Stop Control Center.cmd"
 $updateShortcut = Join-Path $desktop "Update Control Center.cmd"
+$statusShortcut = Join-Path $desktop "Control Center Status.cmd"
+$statusScript = Join-Path $PSScriptRoot "status-production.ps1"
 
 @"
 @echo off
@@ -114,6 +116,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.StopScript)"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.UpdateScript)"
 if errorlevel 1 pause
 "@ | Set-Content -LiteralPath $updateShortcut -Encoding ASCII
+
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$statusScript"
+pause
+"@ | Set-Content -LiteralPath $statusShortcut -Encoding ASCII
 
 Remove-Item -LiteralPath (Join-Path $desktop "Start Control Center Test.cmd") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $desktop "Stop Control Center Test.cmd") -Force -ErrorAction SilentlyContinue
@@ -141,3 +149,4 @@ Write-Host "  Start Control Center.cmd"
 Write-Host "  Open Control Center.cmd"
 Write-Host "  Stop Control Center.cmd"
 Write-Host "  Update Control Center.cmd"
+Write-Host "  Control Center Status.cmd"
