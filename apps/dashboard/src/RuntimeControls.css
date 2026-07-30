@@ -1,0 +1,64 @@
+.runtime-controls {
+  align-items: flex-start;
+}
+
+.runtime-controls-copy {
+  max-width: 680px;
+}
+
+.runtime-controls-status {
+  display: block;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.runtime-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.runtime-control-actions button {
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  font-weight: 700;
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+.runtime-hide-button {
+  color: var(--text);
+  background: var(--surface-inline);
+}
+
+.runtime-hide-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.runtime-shutdown-button {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
+  background: var(--danger-soft);
+}
+
+.runtime-shutdown-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger-soft) 72%, var(--danger));
+}
+
+@media (max-width: 760px) {
+  .runtime-control-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .runtime-control-actions button {
+    flex: 1 1 190px;
+  }
+}
