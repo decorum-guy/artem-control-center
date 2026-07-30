@@ -21,6 +21,7 @@
     "test:unit": "npm run test --workspace @artem/dashboard",
     "test:python": "node scripts/python.mjs -m pytest apps/panel-agent/tests",
     "test:runtime": "node --test scripts/tests/production-runtime.test.mjs",
+    "test:production-smoke": "node scripts/production-smoke.mjs",
     "test": "npm run lint && npm run typecheck && npm run test:unit && npm run test:python && npm run test:runtime",
     "test:e2e": "node scripts/playwright.mjs test",
     "test:visual": "node scripts/playwright.mjs test --grep @visual",
