@@ -25,7 +25,6 @@ Start-Transcript -Path $transcriptPath -Force | Out-Null
 
 $currentHead = $null
 $targetHead = $null
-$updateApplied = $false
 
 try {
     Set-Location -LiteralPath $paths.RepoRoot
@@ -56,7 +55,7 @@ try {
             Remove-Item -LiteralPath $paths.ManualStop -Force -ErrorAction SilentlyContinue
             & $paths.StartScript
         }
-        exit 0
+        return
     }
 
     Write-Host "Updating Artem Control Center"
@@ -70,7 +69,6 @@ try {
         -FilePath "git.exe" `
         -Arguments @("merge", "--ff-only", "origin/main") `
         -Description "fast-forward update"
-    $updateApplied = $true
 
     Invoke-CheckedCommand `
         -FilePath "npm.cmd" `
@@ -104,7 +102,7 @@ try {
 }
 catch {
     $failure = $_
-    Write-Error "Update failed: $($failure.Exception.Message)"
+    Write-Warning "Update failed: $($failure.Exception.Message)"
 
     if ($currentHead) {
         try {
@@ -135,7 +133,7 @@ catch {
             Write-Host "Rollback successful: $currentHead"
         }
         catch {
-            Write-Error "Automatic rollback also failed: $($_.Exception.Message)"
+            Write-Warning "Automatic rollback also failed: $($_.Exception.Message)"
         }
     }
 
