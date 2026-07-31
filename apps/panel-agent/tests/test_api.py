@@ -176,6 +176,7 @@ def test_coffee_settings_render_live_fixture_values_and_writes_are_narrowly_gate
 
 def test_coffee_narrow_gates_enable_only_their_contracts(monkeypatch):
     monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_FIXTURE_WRITES_ENABLED", "true")
     monkeypatch.setenv("PANEL_COFFEE_TIMING_WRITES_ENABLED", "true")
     monkeypatch.setenv("PANEL_COFFEE_ACTIONS_ENABLED", "true")
     module = load_app(monkeypatch, "fixtures")
