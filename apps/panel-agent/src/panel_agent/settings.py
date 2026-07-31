@@ -27,10 +27,21 @@ class IntegrationSettings:
     avalar_ssh_refresh_seconds: int = 180
     avalar_ssh_timeout_seconds: int = 15
     avalar_ssh_output_limit_bytes: int = 32768
+    avalar_actions_enabled: bool = False
+    avalar_action_ssh_host: str = "avalar-control"
+    avalar_action_remote_script: str = "~/control-center-avalar-action.sh"
+    avalar_action_timeout_seconds: int = 150
+    avalar_action_output_limit_bytes: int = 32768
+    avalar_smoke_enabled: bool = False
+    avalar_stage_restart_enabled: bool = False
+    avalar_main_restart_enabled: bool = False
+    avalar_stage_deploy_enabled: bool = False
+    avalar_main_deploy_enabled: bool = False
     writes_enabled: bool = False
     coffee_timing_writes_enabled: bool = False
     coffee_notification_writes_enabled: bool = False
     coffee_actions_enabled: bool = False
+    access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
 
     @classmethod
@@ -90,6 +101,40 @@ class IntegrationSettings:
                 1024,
                 int(os.getenv("PANEL_AVALAR_SSH_OUTPUT_LIMIT_BYTES", "32768")),
             ),
+            avalar_actions_enabled=_bool_env("PANEL_AVALAR_ACTIONS_ENABLED", False),
+            avalar_action_ssh_host=os.getenv(
+                "PANEL_AVALAR_ACTION_SSH_HOST",
+                "avalar-control",
+            ).strip(),
+            avalar_action_remote_script=os.getenv(
+                "PANEL_AVALAR_ACTION_COMMAND",
+                "~/control-center-avalar-action.sh",
+            ).strip(),
+            avalar_action_timeout_seconds=min(
+                180,
+                max(10, int(os.getenv("PANEL_AVALAR_ACTION_TIMEOUT_SECONDS", "150"))),
+            ),
+            avalar_action_output_limit_bytes=max(
+                1024,
+                int(os.getenv("PANEL_AVALAR_ACTION_OUTPUT_LIMIT_BYTES", "32768")),
+            ),
+            avalar_smoke_enabled=_bool_env("PANEL_AVALAR_SMOKE_ENABLED", False),
+            avalar_stage_restart_enabled=_bool_env(
+                "PANEL_AVALAR_STAGE_RESTART_ENABLED",
+                False,
+            ),
+            avalar_main_restart_enabled=_bool_env(
+                "PANEL_AVALAR_MAIN_RESTART_ENABLED",
+                False,
+            ),
+            avalar_stage_deploy_enabled=_bool_env(
+                "PANEL_AVALAR_STAGE_DEPLOY_ENABLED",
+                False,
+            ),
+            avalar_main_deploy_enabled=_bool_env(
+                "PANEL_AVALAR_MAIN_DEPLOY_ENABLED",
+                False,
+            ),
             writes_enabled=_bool_env("PANEL_WRITES_ENABLED", False),
             coffee_timing_writes_enabled=_bool_env(
                 "PANEL_COFFEE_TIMING_WRITES_ENABLED",
@@ -102,6 +147,10 @@ class IntegrationSettings:
             coffee_actions_enabled=_bool_env(
                 "PANEL_COFFEE_ACTIONS_ENABLED",
                 False,
+            ),
+            access_temporary_minutes=max(
+                1,
+                int(os.getenv("PANEL_ACCESS_TEMPORARY_MINUTES", "30")),
             ),
             sse_heartbeat_seconds=max(
                 5,
