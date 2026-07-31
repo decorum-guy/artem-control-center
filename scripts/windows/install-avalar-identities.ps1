@@ -32,6 +32,71 @@ function Protect-ArtemIdentityFile {
     }
 }
 
+function ConvertTo-NativeProcessArgument {
+    param([AllowEmptyString()][Parameter(Mandatory)][string]$Value)
+
+    if ($Value.Contains('"') -or $Value.Contains("`r") -or $Value.Contains("`n")) {
+        throw "Native process arguments must not contain quotes or line breaks"
+    }
+    if ($Value.Length -eq 0) {
+        return '""'
+    }
+    if ($Value -match '\s') {
+        if ($Value.EndsWith('\')) {
+            throw "Quoted native process arguments must not end with a backslash"
+        }
+        return '"' + $Value + '"'
+    }
+    return $Value
+}
+
+function Invoke-SshKeygen {
+    param(
+        [Parameter(Mandatory)][string[]]$Arguments
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $script:SshKeygen
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    # Windows PowerShell 5.1 drops an empty native argument in a direct
+    # invocation such as: ssh-keygen -N "". Build the command line explicitly
+    # on .NET Framework, while using ArgumentList when the runtime provides it.
+    if ($startInfo.PSObject.Properties.Name -contains "ArgumentList") {
+        foreach ($argument in $Arguments) {
+            [void]$startInfo.ArgumentList.Add($argument)
+        }
+    }
+    else {
+        $startInfo.Arguments = (
+            $Arguments |
+                ForEach-Object { ConvertTo-NativeProcessArgument -Value $_ }
+        ) -join " "
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw "ssh-keygen process did not start"
+        }
+        $standardOutput = $process.StandardOutput.ReadToEnd()
+        $standardError = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StandardOutput = $standardOutput
+            StandardError = $standardError
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
 function Ensure-Ed25519Identity {
     param(
         [Parameter(Mandatory)][string]$KeyPath,
@@ -39,14 +104,19 @@ function Ensure-Ed25519Identity {
     )
     $publicKeyPath = "$KeyPath.pub"
     if (-not (Test-Path -LiteralPath $KeyPath)) {
-        & $script:SshKeygen `
-            -q `
-            -t ed25519 `
-            -f $KeyPath `
-            -N "" `
-            -C $Comment
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $publicKeyPath)) {
-            throw "Unable to generate AVALAR SSH identity: $KeyPath"
+        $result = Invoke-SshKeygen -Arguments @(
+            "-q",
+            "-t", "ed25519",
+            "-f", $KeyPath,
+            "-N", "",
+            "-C", $Comment
+        )
+        if ($result.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $publicKeyPath)) {
+            $diagnostic = $result.StandardError.Trim()
+            if (-not $diagnostic) {
+                $diagnostic = "ssh-keygen exited with code $($result.ExitCode)"
+            }
+            throw "Unable to generate AVALAR SSH identity: $KeyPath. $diagnostic"
         }
     }
     elseif (-not (Test-Path -LiteralPath $publicKeyPath)) {
