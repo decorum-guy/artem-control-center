@@ -9,14 +9,31 @@ $paths = Get-ArtemConnectivityPaths
 Initialize-ArtemRuntimeDirectories -Paths $paths.Runtime
 Update-ArtemProcessPath
 
-if ($AutoStart -and (Test-Path -LiteralPath $paths.StopMarker)) {
+if (-not $AutoStart) {
+    $task = Get-ScheduledTask -TaskName $paths.TaskName -ErrorAction SilentlyContinue
+    if ($null -eq $task) {
+        throw "Connectivity scheduled task is missing. Run install-connectivity-tunnel.ps1."
+    }
+    Remove-Item -LiteralPath $paths.StopMarker -Force -ErrorAction SilentlyContinue
+    if (-not (Test-ArtemConnectivitySupervisor -Paths $paths)) {
+        Start-ScheduledTask -TaskName $paths.TaskName
+    }
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-ArtemConnectivityReady -Paths $paths) {
+            Write-Host "Control Center private connectivity is ready."
+            exit 0
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    throw "Connectivity task started, but both private forwards did not become ready"
+}
+
+if (Test-Path -LiteralPath $paths.StopMarker) {
     exit 0
 }
 if (Test-ArtemConnectivitySupervisor -Paths $paths) {
     exit 0
-}
-if (-not $AutoStart) {
-    Remove-Item -LiteralPath $paths.StopMarker -Force -ErrorAction SilentlyContinue
 }
 
 $config = Get-ArtemConnectivityConfig -Paths $paths
