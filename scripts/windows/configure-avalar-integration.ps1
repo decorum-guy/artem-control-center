@@ -12,6 +12,8 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
 
+$script:RuntimeEnvLines = [System.Collections.Generic.List[string]]::new()
+
 function ConvertTo-EnvBool {
     param([bool]$Value)
     if ($Value) { return "true" }
@@ -20,7 +22,6 @@ function ConvertTo-EnvBool {
 
 function Set-EnvEntry {
     param(
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Lines,
         [Parameter(Mandatory)][string]$Key,
         [Parameter(Mandatory)][string]$Value
     )
@@ -33,19 +34,19 @@ function Set-EnvEntry {
 
     $pattern = "^\s*" + [regex]::Escape($Key) + "\s*="
     $found = $false
-    for ($index = $Lines.Count - 1; $index -ge 0; $index--) {
-        if ($Lines[$index] -match $pattern) {
+    for ($index = $script:RuntimeEnvLines.Count - 1; $index -ge 0; $index--) {
+        if ($script:RuntimeEnvLines[$index] -match $pattern) {
             if (-not $found) {
-                $Lines[$index] = "$Key=$Value"
+                $script:RuntimeEnvLines[$index] = "$Key=$Value"
                 $found = $true
             }
             else {
-                $Lines.RemoveAt($index)
+                $script:RuntimeEnvLines.RemoveAt($index)
             }
         }
     }
     if (-not $found) {
-        $Lines.Add("$Key=$Value")
+        [void]$script:RuntimeEnvLines.Add("$Key=$Value")
     }
 }
 
@@ -83,12 +84,14 @@ if (-not (Test-Path -LiteralPath $paths.RuntimeEnv)) {
     throw "runtime.env is missing. Install the production runtime first."
 }
 
-$lines = [System.Collections.Generic.List[string]]::new()
 foreach ($line in (Get-Content -LiteralPath $paths.RuntimeEnv)) {
-    $lines.Add([string]$line)
+    [void]$script:RuntimeEnvLines.Add([string]$line)
 }
-if ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -ne "") {
-    $lines.Add("")
+if (
+    $script:RuntimeEnvLines.Count -gt 0 -and
+    $script:RuntimeEnvLines[$script:RuntimeEnvLines.Count - 1] -ne ""
+) {
+    [void]$script:RuntimeEnvLines.Add("")
 }
 
 $entries = [ordered]@{
@@ -110,12 +113,12 @@ $entries = [ordered]@{
 }
 
 foreach ($entry in $entries.GetEnumerator()) {
-    Set-EnvEntry -Lines $lines -Key $entry.Key -Value ([string]$entry.Value)
+    Set-EnvEntry -Key $entry.Key -Value ([string]$entry.Value)
 }
 
 $temporary = "$($paths.RuntimeEnv).$PID.tmp"
 try {
-    Set-Content -LiteralPath $temporary -Value $lines -Encoding UTF8
+    Set-Content -LiteralPath $temporary -Value $script:RuntimeEnvLines -Encoding UTF8
     Move-Item -LiteralPath $temporary -Destination $paths.RuntimeEnv -Force
 }
 finally {
