@@ -22,6 +22,10 @@ foreach ($file in $files) {
 $temporary = Join-Path `
     ([IO.Path]::GetTempPath()) `
     ("artem-runtime-acl-{0}.env" -f [guid]::NewGuid())
+$rolloutRoot = Join-Path `
+    ([IO.Path]::GetTempPath()) `
+    ("artem-avalar-rollout-{0}" -f [guid]::NewGuid())
+$previousLocalAppData = $env:LOCALAPPDATA
 
 try {
     Set-Content -LiteralPath $temporary -Value "PANEL_AGENT_MODE=fixtures" -Encoding ASCII
@@ -103,9 +107,63 @@ try {
     if ($watcherText -notmatch 'ManualStop' -or $watcherText -notmatch 'Stop-ArtemKiosk') {
         throw "Kiosk watcher must close the dedicated profile after manual shutdown"
     }
+
+    # Exercise the real AVALAR runtime.env updater against an isolated LOCALAPPDATA.
+    $env:LOCALAPPDATA = $rolloutRoot
+    $runtimeRoot = Join-Path $rolloutRoot "ArtemControlCenter"
+    New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
+    $runtimeEnv = Join-Path $runtimeRoot "runtime.env"
+    @(
+        "PANEL_AGENT_MODE=fixtures",
+        "PANEL_AVALAR_MAIN_DEPLOY_ENABLED=true",
+        "PANEL_AVALAR_MAIN_DEPLOY_ENABLED=true",
+        "PANEL_COFFEE_ACTIONS_ENABLED=false"
+    ) | Set-Content -LiteralPath $runtimeEnv -Encoding ASCII
+
+    $configureAvalar = Join-Path $PSScriptRoot "configure-avalar-integration.ps1"
+    & $configureAvalar
+    $first = Get-Content -LiteralPath $runtimeEnv
+    if (($first | Where-Object { $_ -eq "PANEL_AGENT_MODE=production" }).Count -ne 1) {
+        throw "AVALAR rollout did not switch the production runtime mode"
+    }
+    if (($first | Where-Object { $_ -like "PANEL_AVALAR_MAIN_DEPLOY_ENABLED=*" }).Count -ne 1) {
+        throw "AVALAR rollout did not remove duplicate gates"
+    }
+    foreach ($expected in @(
+        "PANEL_AVALAR_SMOKE_ENABLED=true",
+        "PANEL_AVALAR_STAGE_RESTART_ENABLED=false",
+        "PANEL_AVALAR_STAGE_DEPLOY_ENABLED=false",
+        "PANEL_AVALAR_MAIN_RESTART_ENABLED=false",
+        "PANEL_AVALAR_MAIN_DEPLOY_ENABLED=false",
+        "PANEL_COFFEE_ACTIONS_ENABLED=false"
+    )) {
+        if ($expected -notin $first) {
+            throw "Safe AVALAR rollout value missing: $expected"
+        }
+    }
+
+    & $configureAvalar -EnableStageMutations -EnableMainRestart
+    $second = Get-Content -LiteralPath $runtimeEnv
+    foreach ($expected in @(
+        "PANEL_AVALAR_STAGE_RESTART_ENABLED=true",
+        "PANEL_AVALAR_STAGE_DEPLOY_ENABLED=true",
+        "PANEL_AVALAR_MAIN_RESTART_ENABLED=true",
+        "PANEL_AVALAR_MAIN_DEPLOY_ENABLED=false"
+    )) {
+        if ($expected -notin $second) {
+            throw "Explicit AVALAR rollout value missing: $expected"
+        }
+    }
+
+    $rolloutAcl = Get-Acl -LiteralPath $runtimeEnv
+    if (-not $rolloutAcl.AreAccessRulesProtected) {
+        throw "AVALAR rollout must reapply protected runtime.env ACL"
+    }
 }
 finally {
+    $env:LOCALAPPDATA = $previousLocalAppData
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $rolloutRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime.env ACL, Scheduled Task SID and profile-scoped kiosk shutdown."
+Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime ACLs, Scheduled Task SID, profile-scoped kiosk shutdown and AVALAR rollout configuration."
