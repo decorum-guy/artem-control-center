@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AccessSettingsPanel } from "./AccessControls";
 import {
   clearRuntimeShutdownPending,
   markRuntimeShutdownPending
@@ -117,38 +118,41 @@ export function RuntimeControls() {
   const disabled = availability !== "available" || pending !== null;
 
   return (
-    <section className="settings-section runtime-controls" aria-labelledby="runtime-controls-title">
-      <div className="runtime-controls-copy">
-        <h2 id="runtime-controls-title">Управление панелью</h2>
-        <p>
-          Скрытие закрывает только полноэкранное окно: локальные сервисы продолжают работать,
-          а панель можно вернуть обычным ярлыком запуска.
-        </p>
-        {availability === "unavailable" && (
-          <span className="runtime-controls-status">
-            Системные действия доступны только в настроенном Windows kiosk-runtime.
-          </span>
-        )}
-        {notice && <span className="runtime-controls-status" role="status">{notice}</span>}
-      </div>
-      <div className="runtime-control-actions">
-        <button
-          className="runtime-hide-button"
-          type="button"
-          disabled={disabled}
-          onClick={() => void runAction("hide")}
-        >
-          {pending === "hide" ? "Скрываем…" : "Скрыть панель"}
-        </button>
-        <button
-          className="runtime-shutdown-button"
-          type="button"
-          disabled={disabled}
-          onClick={() => void runAction("shutdown")}
-        >
-          {pending === "shutdown" ? "Закрываем…" : "Полностью закрыть"}
-        </button>
-      </div>
-    </section>
+    <>
+      <AccessSettingsPanel />
+      <section className="settings-section runtime-controls" aria-labelledby="runtime-controls-title">
+        <div className="runtime-controls-copy">
+          <h2 id="runtime-controls-title">Управление панелью</h2>
+          <p>
+            Скрытие закрывает только полноэкранное окно: локальные сервисы продолжают работать,
+            а панель можно вернуть обычным ярлыком запуска.
+          </p>
+          {availability === "unavailable" && (
+            <span className="runtime-controls-status">
+              Системные действия доступны только в настроенном Windows kiosk-runtime.
+            </span>
+          )}
+          {notice && <span className="runtime-controls-status" role="status">{notice}</span>}
+        </div>
+        <div className="runtime-control-actions">
+          <button
+            className="runtime-hide-button"
+            type="button"
+            disabled={disabled}
+            onClick={() => void runAction("hide")}
+          >
+            {pending === "hide" ? "Скрываем…" : "Скрыть панель"}
+          </button>
+          <button
+            className="runtime-shutdown-button"
+            type="button"
+            disabled={disabled}
+            onClick={() => void runAction("shutdown")}
+          >
+            {pending === "shutdown" ? "Закрываем…" : "Полностью закрыть"}
+          </button>
+        </div>
+      </section>
+    </>
   );
 }

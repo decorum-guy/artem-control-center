@@ -50,6 +50,23 @@ PANEL_WRITES_ENABLED=false
 PANEL_COFFEE_TIMING_WRITES_ENABLED=false
 PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED=false
 PANEL_COFFEE_ACTIONS_ENABLED=false
+
+# AVALAR public monitoring can be enabled without credentials.
+PANEL_AVALAR_MAIN_URL=https://avalar.pro
+PANEL_AVALAR_STAGE_URL=https://stage.avalar.pro
+PANEL_AVALAR_SSH_ENABLED=false
+PANEL_AVALAR_SSH_HOST=avalar-status
+PANEL_AVALAR_SSH_STATUS_COMMAND=control-center
+
+# Every mutation remains disabled until the restricted host executor is installed.
+PANEL_AVALAR_ACTIONS_ENABLED=false
+PANEL_AVALAR_ACTION_SSH_HOST=avalar-control
+PANEL_AVALAR_ACTION_COMMAND=control-center
+PANEL_AVALAR_SMOKE_ENABLED=false
+PANEL_AVALAR_STAGE_RESTART_ENABLED=false
+PANEL_AVALAR_MAIN_RESTART_ENABLED=false
+PANEL_AVALAR_STAGE_DEPLOY_ENABLED=false
+PANEL_AVALAR_MAIN_DEPLOY_ENABLED=false
 "@
     Set-Content -LiteralPath $paths.RuntimeEnv -Value $configuration -Encoding UTF8
     Write-Host "Created safe runtime configuration: $($paths.RuntimeEnv)"
@@ -110,7 +127,9 @@ $openShortcut = Join-Path $desktop "Open Control Center.cmd"
 $stopShortcut = Join-Path $desktop "Stop Control Center.cmd"
 $updateShortcut = Join-Path $desktop "Update Control Center.cmd"
 $statusShortcut = Join-Path $desktop "Control Center Status.cmd"
+$pinShortcut = Join-Path $desktop "Set Control Center PIN.cmd"
 $statusScript = Join-Path $PSScriptRoot "status-production.ps1"
+$pinScript = Join-Path $PSScriptRoot "set-access-pin.ps1"
 
 @"
 @echo off
@@ -139,6 +158,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$statusScript"
 pause
 "@ | Set-Content -LiteralPath $statusShortcut -Encoding ASCII
 
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$pinScript" -Profile standard
+pause
+"@ | Set-Content -LiteralPath $pinShortcut -Encoding ASCII
+
 Remove-Item -LiteralPath (Join-Path $desktop "Start Control Center Test.cmd") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $desktop "Stop Control Center Test.cmd") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $paths.ManualStop -Force -ErrorAction SilentlyContinue
@@ -166,3 +191,4 @@ Write-Host "  Open Control Center.cmd"
 Write-Host "  Stop Control Center.cmd"
 Write-Host "  Update Control Center.cmd"
 Write-Host "  Control Center Status.cmd"
+Write-Host "  Set Control Center PIN.cmd"
