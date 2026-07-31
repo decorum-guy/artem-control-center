@@ -5,6 +5,9 @@ import type {
   ServiceSnapshot,
   WidgetManifest
 } from "@artem/contracts";
+import { useAccess } from "./AccessControls";
+import { useAvalarActions } from "./AvalarActions";
+import { avalarActionTitles } from "./avalarApi";
 import { coffeePresentation } from "./coffee";
 import { resolveWidgetAsset } from "./widgetAssets";
 
@@ -243,13 +246,26 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
     stale: "stale",
     unavailable: "нет данных"
   } as const;
+  const avalar = useAvalarActions();
+  const { explainAvailability } = useAccess();
+  const avalarActions = avalar.actionsFor(service);
+  const serviceData = service.data as Record<string, unknown>;
+  const commit = typeof serviceData.commit === "string" ? serviceData.commit : null;
+  const deployedAt = typeof serviceData.deployedAt === "string" ? serviceData.deployedAt : null;
+
   return (
-    <article className="service-row" data-testid={`widget-${service.id}`}>
+    <article className={`service-row ${service.id === "avalar-site-main" ? "service-row--production" : ""}`} data-testid={`widget-${service.id}`}>
       <div className="service-row__identity">
         <HealthMark health={service.health} compact />
         <div>
           <h3>{service.title}</h3>
           <p>{service.summary}</p>
+          {commit && (
+            <p className="service-row__revision">
+              {commit.slice(0, 10)}
+              {deployedAt ? ` · ${new Date(deployedAt).toLocaleString("ru-RU")}` : ""}
+            </p>
+          )}
         </div>
       </div>
       <dl className="service-row__facts">
@@ -279,10 +295,31 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
         </div>
       </dl>
       <div className="service-row__actions">
-        {service.actions
+        {avalarActions.map((actionId) => {
+          const decision = avalar.availabilityFor(actionId);
+          const canPress = Boolean(
+            decision &&
+            !avalar.pendingAction &&
+            ["allowed", "elevation_required"].includes(decision.availability)
+          );
+          const locked = decision?.availability === "elevation_required";
+          return (
+            <button
+              key={actionId}
+              type="button"
+              className={`service-action service-action--${decision?.availability ?? "unavailable"}`}
+              disabled={!canPress}
+              title={decision ? explainAvailability(decision.availability) : "Action API недоступен"}
+              onClick={() => void avalar.run(service, actionId)}
+            >
+              {locked ? "🔒 " : ""}{avalarActionTitles[actionId]}
+            </button>
+          );
+        })}
+        {!avalarActions.length && service.actions
           .filter((action) => action.enabled)
           .map((action) => (
-            <button key={action.id} type="button" disabled title="Foundation: action execution disabled">
+            <button key={action.id} type="button" disabled title="Action executor is unavailable">
               {action.title}
             </button>
           ))}
