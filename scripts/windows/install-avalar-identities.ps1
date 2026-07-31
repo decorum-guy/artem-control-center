@@ -52,7 +52,10 @@ function ConvertTo-NativeProcessArgument {
 
 function Invoke-SshKeygen {
     param(
-        [Parameter(Mandatory)][string[]]$Arguments
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
