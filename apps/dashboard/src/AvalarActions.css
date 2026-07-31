@@ -1,0 +1,35 @@
+.service-row--production {
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border-subtle));
+}
+
+.service-row__revision {
+  margin-top: 5px !important;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+}
+
+.service-row__actions .service-action {
+  min-height: 38px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 11px;
+  padding: 7px 10px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.service-row__actions .service-action--elevation_required {
+  border-color: color-mix(in srgb, var(--warning) 46%, var(--border-subtle));
+}
+
+.service-row__actions .service-action--allowed {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border-subtle));
+}
+
+.service-row__actions .service-action:disabled {
+  opacity: 0.54;
+}
+
+.service-row--production .service-action--allowed:not(:first-child) {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border-subtle));
+}
