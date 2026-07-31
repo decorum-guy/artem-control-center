@@ -126,6 +126,7 @@ Register-ScheduledTask `
     -Force | Out-Null
 
 $desktop = [Environment]::GetFolderPath("Desktop")
+$configureProductionScript = Join-Path $PSScriptRoot "configure-home-production.ps1"
 @"
 @echo off
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.StartScript)"
@@ -139,6 +140,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.StopScript)"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.StatusScript)"
 pause
 "@ | Set-Content -LiteralPath (Join-Path $desktop "Control Center Connectivity Status.cmd") -Encoding ASCII
+@"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$configureProductionScript"
+if errorlevel 1 pause
+"@ | Set-Content -LiteralPath (Join-Path $desktop "Configure Home Production.cmd") -Encoding ASCII
 
 $publicKeyCopy = Join-Path $paths.Runtime.RuntimeRoot "connectivity-public-key.txt"
 Copy-Item -LiteralPath $publicKeyPath -Destination $publicKeyCopy -Force
@@ -159,6 +165,7 @@ Write-Host "SSH alias: $SshAlias"
 Write-Host "Home Assistant local forward: 127.0.0.1:$LocalHaPort"
 Write-Host "AliceTG Bot local forward: 127.0.0.1:$LocalBotPort"
 Write-Host "Public key for the VPS: $publicKeyCopy"
+Write-Host "Desktop helper: Configure Home Production.cmd"
 if (-not $StartNow) {
     Write-Host "Autostart is paused until the public key is installed on the VPS and the tunnel is started manually."
 }
