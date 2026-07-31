@@ -12,6 +12,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "connectivity-common.ps1")
+. (Join-Path $PSScriptRoot "ssh-keygen-common.ps1")
 
 foreach ($value in @($HostName, $UserName, $SshAlias)) {
     if ($value -notmatch '^[A-Za-z0-9._@:-]+$') {
@@ -23,34 +24,25 @@ if ($LocalHaPort -eq $LocalBotPort) {
 }
 
 Update-ArtemProcessPath
-$ssh = Get-Command ssh.exe -ErrorAction Stop
-$sshKeygen = Get-Command ssh-keygen.exe -ErrorAction Stop
+$null = Get-Command ssh.exe -ErrorAction Stop
+$sshKeygen = (Get-Command ssh-keygen.exe -ErrorAction Stop).Source
 $paths = Get-ArtemConnectivityPaths
 Initialize-ArtemRuntimeDirectories -Paths $paths.Runtime
 
 $sshDirectory = Join-Path $env:USERPROFILE ".ssh"
 New-Item -ItemType Directory -Force -Path $sshDirectory | Out-Null
 $keyPath = Join-Path $sshDirectory "artem_control_center_tunnel"
-$publicKeyPath = "$keyPath.pub"
 $configPath = Join-Path $sshDirectory "config"
-
-if (-not (Test-Path -LiteralPath $keyPath)) {
-    & $sshKeygen.Source `
-        -q `
-        -t ed25519 `
-        -f $keyPath `
-        -N "" `
-        -C "artem-control-center-tunnel@$env:COMPUTERNAME"
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $publicKeyPath)) {
-        throw "Unable to generate the dedicated connectivity SSH key"
-    }
-    Write-Host "Generated dedicated connectivity key: $keyPath"
+$identity = Ensure-ArtemEd25519Identity `
+    -Executable $sshKeygen `
+    -KeyPath $keyPath `
+    -Comment "artem-control-center-tunnel@$env:COMPUTERNAME"
+$publicKeyPath = $identity.PublicKeyPath
+if ($identity.Created) {
+    Write-Host "Generated dedicated connectivity identity."
 }
 else {
-    if (-not (Test-Path -LiteralPath $publicKeyPath)) {
-        throw "Connectivity private key exists but its public key is missing"
-    }
-    Write-Host "Existing dedicated connectivity key preserved: $keyPath"
+    Write-Host "Existing dedicated connectivity identity preserved."
 }
 
 $keyForConfig = $keyPath.Replace("\", "/")
