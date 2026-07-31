@@ -107,6 +107,7 @@ start(
   ["-m", "uvicorn", "panel_agent.main:app", "--app-dir", "apps/panel-agent/src", "--host", "127.0.0.1", "--port", "8787", "--reload"],
   {
     PANEL_AGENT_MODE: requestedMode,
+    PANEL_FIXTURE_WRITES_ENABLED: requestedMode === "fixtures" ? "true" : "false",
     PANEL_KIOSK_CONTROLS_ENABLED: kioskControlsEnabled,
     PANEL_RUNTIME_COMMAND_PATH: runtimeCommandPath
   }
