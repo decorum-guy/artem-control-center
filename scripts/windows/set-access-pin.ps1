@@ -7,28 +7,29 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
 
+$script:RuntimeEnvLines = [System.Collections.Generic.List[string]]::new()
+
 function Set-RuntimeEnvEntry {
     param(
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Lines,
         [Parameter(Mandatory)][string]$Key,
         [Parameter(Mandatory)][string]$Value
     )
 
     $pattern = "^\s*" + [regex]::Escape($Key) + "\s*="
     $found = $false
-    for ($index = $Lines.Count - 1; $index -ge 0; $index--) {
-        if ($Lines[$index] -match $pattern) {
+    for ($index = $script:RuntimeEnvLines.Count - 1; $index -ge 0; $index--) {
+        if ($script:RuntimeEnvLines[$index] -match $pattern) {
             if (-not $found) {
-                $Lines[$index] = "$Key=$Value"
+                $script:RuntimeEnvLines[$index] = "$Key=$Value"
                 $found = $true
             }
             else {
-                $Lines.RemoveAt($index)
+                $script:RuntimeEnvLines.RemoveAt($index)
             }
         }
     }
     if (-not $found) {
-        $Lines.Add("$Key=$Value")
+        [void]$script:RuntimeEnvLines.Add("$Key=$Value")
     }
 }
 
@@ -81,9 +82,8 @@ if (-not (Test-Path -LiteralPath $paths.RuntimeEnv)) {
     throw "runtime.env is missing. Install the production runtime first."
 }
 
-$lines = [System.Collections.Generic.List[string]]::new()
 foreach ($line in (Get-Content -LiteralPath $paths.RuntimeEnv)) {
-    $lines.Add([string]$line)
+    [void]$script:RuntimeEnvLines.Add([string]$line)
 }
 
 # Standard capabilities are protected by AccessPolicyMiddleware. These transport
@@ -96,12 +96,12 @@ $standardGates = [ordered]@{
     PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED = "true"
 }
 foreach ($entry in $standardGates.GetEnumerator()) {
-    Set-RuntimeEnvEntry -Lines $lines -Key ([string]$entry.Key) -Value ([string]$entry.Value)
+    Set-RuntimeEnvEntry -Key ([string]$entry.Key) -Value ([string]$entry.Value)
 }
 
 $temporary = "$($paths.RuntimeEnv).$PID.tmp"
 try {
-    Set-Content -LiteralPath $temporary -Value $lines -Encoding UTF8
+    Set-Content -LiteralPath $temporary -Value $script:RuntimeEnvLines -Encoding UTF8
     Move-Item -LiteralPath $temporary -Destination $paths.RuntimeEnv -Force
 }
 finally {
