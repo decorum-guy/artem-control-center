@@ -21,7 +21,7 @@ import "./AccessControls.css";
 interface PinPrompt {
   title: string;
   description: string;
-  resolve: (pin: string | null) => void;
+  validate: (pin: string) => Promise<boolean>;
 }
 
 interface AccessContextValue {
@@ -48,14 +48,22 @@ const availabilityCopy: Record<string, string> = {
   precondition_failed: "Предварительная проверка не пройдена"
 };
 
+function pinErrorCopy(error: unknown): string {
+  const code = error instanceof Error ? error.message : "invalid_pin";
+  if (code === "pin_rate_limited") return "Слишком много попыток. Повторите через несколько минут.";
+  if (code === "pin_not_configured") return "PIN ещё не настроен на Samsung.";
+  return "Неверный PIN.";
+}
+
 export function AccessProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AccessStatus | null>(null);
   const [available, setAvailable] = useState(true);
   const [prompt, setPrompt] = useState<PinPrompt | null>(null);
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
   const [clock, setClock] = useState(Date.now());
-  const resolverRef = useRef<((pin: string | null) => void) | null>(null);
+  const resolverRef = useRef<((accepted: boolean) => void) | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -80,64 +88,77 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  function requestPin(title: string, description: string): Promise<string | null> {
-    if (resolverRef.current) resolverRef.current(null);
+  function requestPin(
+    title: string,
+    description: string,
+    validate: (pin: string) => Promise<boolean>
+  ): Promise<boolean> {
+    resolverRef.current?.(false);
     setPin("");
     setPinError(null);
+    setPinBusy(false);
     return new Promise((resolve) => {
       resolverRef.current = resolve;
-      setPrompt({ title, description, resolve });
+      setPrompt({ title, description, validate });
     });
   }
 
-  function closePrompt(value: string | null) {
+  function closePrompt(accepted: boolean) {
     const resolve = resolverRef.current;
     resolverRef.current = null;
     setPrompt(null);
     setPin("");
     setPinError(null);
-    resolve?.(value);
+    setPinBusy(false);
+    resolve?.(accepted);
   }
 
   const ensureCapability = useCallback(async (capability: string, title: string) => {
-    let current = status ?? await refresh();
+    const current = status ?? await refresh();
     if (!current) return true; // Fixture/dev runtime has no production access API.
     const decision = current.capabilities[capability];
     if (!decision || decision.allowed) return true;
     if (decision.availability !== "elevation_required") return false;
 
-    const entered = await requestPin(
+    return requestPin(
       title,
-      "Полный доступ включится на 30 минут и будет действовать для следующих защищённых операций."
+      "Полный доступ включится на 30 минут и будет действовать для следующих защищённых операций.",
+      async (entered) => {
+        try {
+          const next = await unlockTemporaryFull(entered);
+          setStatus(next);
+          return Boolean(next.capabilities[capability]?.allowed);
+        } catch (error) {
+          setPinError(pinErrorCopy(error));
+          return false;
+        }
+      }
     );
-    if (!entered) return false;
-    try {
-      current = await unlockTemporaryFull(entered);
-      setStatus(current);
-      return Boolean(current.capabilities[capability]?.allowed);
-    } catch (error) {
-      setPinError(error instanceof Error ? error.message : "invalid_pin");
-      return false;
-    }
   }, [refresh, status]);
 
   const changeProfile = useCallback(async (profile: AccessProfile) => {
-    try {
-      if (profile === "full") {
-        const entered = await requestPin(
-          "Включить полный доступ",
-          "Ручной полный доступ не имеет таймера и сохранится после перезапуска, пока вы не смените профиль."
-        );
-        if (!entered) return false;
-        setStatus(await setAccessProfile(profile, entered));
-      } else {
+    if (profile !== "full") {
+      try {
         setStatus(await setAccessProfile(profile));
+        return true;
+      } catch {
+        return false;
       }
-      return true;
-    } catch (error) {
-      setPinError(error instanceof Error ? error.message : "profile_change_failed");
-      return false;
     }
+
+    return requestPin(
+      "Включить полный доступ",
+      "Ручной полный доступ не имеет таймера и сохранится после перезапуска, пока вы не смените профиль.",
+      async (entered) => {
+        try {
+          setStatus(await setAccessProfile(profile, entered));
+          return true;
+        } catch (error) {
+          setPinError(pinErrorCopy(error));
+          return false;
+        }
+      }
+    );
   }, []);
 
   const clearTemporary = useCallback(async () => {
@@ -184,7 +205,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
         </aside>
       )}
       {prompt && (
-        <div className="pin-modal-backdrop" role="presentation" onMouseDown={() => closePrompt(null)}>
+        <div className="pin-modal-backdrop" role="presentation" onMouseDown={() => !pinBusy && closePrompt(false)}>
           <section
             className="pin-modal"
             role="dialog"
@@ -198,8 +219,16 @@ export function AccessProvider({ children }: { children: ReactNode }) {
             <form
               onSubmit={(event) => {
                 event.preventDefault();
-                if (/^[0-9]{4,12}$/.test(pin)) closePrompt(pin);
-                else setPinError("PIN должен содержать от 4 до 12 цифр.");
+                if (!/^[0-9]{4,12}$/.test(pin)) {
+                  setPinError("PIN должен содержать от 4 до 12 цифр.");
+                  return;
+                }
+                setPinBusy(true);
+                setPinError(null);
+                void prompt.validate(pin).then((accepted) => {
+                  if (accepted) closePrompt(true);
+                  else setPinBusy(false);
+                });
               }}
             >
               <label>
@@ -210,16 +239,19 @@ export function AccessProvider({ children }: { children: ReactNode }) {
                   autoComplete="off"
                   type="password"
                   value={pin}
+                  disabled={pinBusy}
                   onChange={(event) => {
                     setPin(event.target.value.replace(/\D/g, "").slice(0, 12));
                     setPinError(null);
                   }}
                 />
               </label>
-              {pinError && <span className="pin-error">Неверный PIN или временная блокировка.</span>}
+              {pinError && <span className="pin-error">{pinError}</span>}
               <div className="pin-modal-actions">
-                <button type="button" onClick={() => closePrompt(null)}>Отмена</button>
-                <button type="submit" className="primary-action">Подтвердить</button>
+                <button type="button" disabled={pinBusy} onClick={() => closePrompt(false)}>Отмена</button>
+                <button type="submit" className="primary-action" disabled={pinBusy}>
+                  {pinBusy ? "Проверяем…" : "Подтвердить"}
+                </button>
               </div>
             </form>
           </section>
