@@ -55,7 +55,9 @@ jobs:
       - name: Validate Windows production scripts
         if: runner.os == 'Windows'
         shell: powershell
-        run: ./scripts/windows/test-production-scripts.ps1
+        run: |
+          ./scripts/windows/test-production-scripts.ps1
+          ./scripts/windows/test-connectivity-contract.ps1
 
       - name: Run full validation
         run: npm run check
