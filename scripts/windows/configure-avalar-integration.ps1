@@ -102,10 +102,10 @@ $entries = [ordered]@{
     PANEL_AVALAR_ACTION_SSH_HOST = $ActionSshHost
     PANEL_AVALAR_ACTION_COMMAND = "control-center"
     PANEL_AVALAR_SMOKE_ENABLED = "true"
-    PANEL_AVALAR_STAGE_RESTART_ENABLED = ConvertTo-EnvBool $EnableStageMutations.IsPresent
-    PANEL_AVALAR_STAGE_DEPLOY_ENABLED = ConvertTo-EnvBool $EnableStageMutations.IsPresent
-    PANEL_AVALAR_MAIN_RESTART_ENABLED = ConvertTo-EnvBool $EnableMainRestart.IsPresent
-    PANEL_AVALAR_MAIN_DEPLOY_ENABLED = ConvertTo-EnvBool $EnableMainDeploy.IsPresent
+    PANEL_AVALAR_STAGE_RESTART_ENABLED = (ConvertTo-EnvBool -Value $EnableStageMutations.IsPresent)
+    PANEL_AVALAR_STAGE_DEPLOY_ENABLED = (ConvertTo-EnvBool -Value $EnableStageMutations.IsPresent)
+    PANEL_AVALAR_MAIN_RESTART_ENABLED = (ConvertTo-EnvBool -Value $EnableMainRestart.IsPresent)
+    PANEL_AVALAR_MAIN_DEPLOY_ENABLED = (ConvertTo-EnvBool -Value $EnableMainDeploy.IsPresent)
     PANEL_WRITES_ENABLED = "true"
 }
 
