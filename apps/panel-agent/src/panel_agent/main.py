@@ -380,9 +380,15 @@ async def coffee_action(
     return CoffeeActionResponse(**result)
 
 
+def _fixture_writes_enabled() -> bool:
+    raw = os.getenv("PANEL_FIXTURE_WRITES_ENABLED", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _write_allowed(narrow_gate: bool) -> bool:
     return (
         MODE in {"fixtures", "integration_test", "production"}
+        and (MODE != "fixtures" or _fixture_writes_enabled())
         and SETTINGS.writes_enabled
         and narrow_gate
     )
