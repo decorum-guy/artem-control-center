@@ -59,6 +59,7 @@ jobs:
           ./scripts/windows/test-production-scripts.ps1
           ./scripts/windows/test-connectivity-contract.ps1
           ./scripts/windows/test-avalar-identities-contract.ps1
+          ./scripts/windows/test-avalar-identities.ps1
 
       - name: Run full validation
         run: npm run check
