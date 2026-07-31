@@ -1,10 +1,51 @@
 param(
     [ValidateSet("read_only", "standard", "full")]
-    [string]$Profile = "standard"
+    [string]$Profile = "standard",
+    [switch]$SkipRuntimeRestart
 )
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
+
+$script:RuntimeEnvLines = [System.Collections.Generic.List[string]]::new()
+
+function Set-RuntimeEnvEntry {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][string]$Value
+    )
+
+    $pattern = "^\s*" + [regex]::Escape($Key) + "\s*="
+    $found = $false
+    for ($index = $script:RuntimeEnvLines.Count - 1; $index -ge 0; $index--) {
+        if ($script:RuntimeEnvLines[$index] -match $pattern) {
+            if (-not $found) {
+                $script:RuntimeEnvLines[$index] = "$Key=$Value"
+                $found = $true
+            }
+            else {
+                $script:RuntimeEnvLines.RemoveAt($index)
+            }
+        }
+    }
+    if (-not $found) {
+        [void]$script:RuntimeEnvLines.Add("$Key=$Value")
+    }
+}
+
+function Protect-ArtemFile {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    & icacls.exe $Path `
+        /inheritance:r `
+        /grant:r `
+        "*${currentUserSid}:(F)" `
+        "*S-1-5-18:(F)" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to restrict ACL for $Path"
+    }
+}
 
 $paths = Get-ArtemRuntimePaths
 Initialize-ArtemRuntimeDirectories -Paths $paths
@@ -25,17 +66,9 @@ finally {
 $policyPath = Join-Path $paths.RuntimeRoot "access-policy.json"
 $auditPath = Join-Path $paths.RuntimeRoot "audit"
 New-Item -ItemType Directory -Force -Path $auditPath | Out-Null
+Protect-ArtemFile -Path $policyPath
+
 $currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-
-& icacls.exe $policyPath `
-    /inheritance:r `
-    /grant:r `
-    "*${currentUserSid}:(F)" `
-    "*S-1-5-18:(F)" | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to restrict access-policy.json ACL"
-}
-
 & icacls.exe $auditPath `
     /inheritance:r `
     /grant:r `
@@ -45,4 +78,46 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to restrict access audit directory ACL"
 }
 
-Write-Host "Access policy protected for the panel account and SYSTEM."
+if (-not (Test-Path -LiteralPath $paths.RuntimeEnv)) {
+    throw "runtime.env is missing. Install the production runtime first."
+}
+
+foreach ($line in (Get-Content -LiteralPath $paths.RuntimeEnv)) {
+    [void]$script:RuntimeEnvLines.Add([string]$line)
+}
+
+# Standard capabilities are protected by AccessPolicyMiddleware. These transport
+# gates must be enabled as well, otherwise a valid standard/full profile still
+# produces permanently disabled controls and can never reach the access layer.
+$standardGates = [ordered]@{
+    PANEL_WRITES_ENABLED = "true"
+    PANEL_COFFEE_ACTIONS_ENABLED = "true"
+    PANEL_COFFEE_TIMING_WRITES_ENABLED = "true"
+    PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED = "true"
+}
+foreach ($entry in $standardGates.GetEnumerator()) {
+    Set-RuntimeEnvEntry -Key ([string]$entry.Key) -Value ([string]$entry.Value)
+}
+
+$temporary = "$($paths.RuntimeEnv).$PID.tmp"
+try {
+    Set-Content -LiteralPath $temporary -Value $script:RuntimeEnvLines -Encoding UTF8
+    Move-Item -LiteralPath $temporary -Destination $paths.RuntimeEnv -Force
+}
+finally {
+    Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+}
+Protect-ArtemFile -Path $paths.RuntimeEnv
+
+Write-Host "Access policy and standard action gates configured."
+Write-Host "Coffee control, timing and notification writes are now governed by the selected access profile."
+
+if (-not $SkipRuntimeRestart) {
+    Stop-ArtemRuntime -Paths $paths -Manual $false
+    Remove-Item -LiteralPath $paths.ManualStop -Force -ErrorAction SilentlyContinue
+    & $paths.StartScript
+    if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 60)) {
+        throw "Control Center did not become ready after access configuration"
+    }
+    Write-Host "Control Center restarted with the updated action gates."
+}
