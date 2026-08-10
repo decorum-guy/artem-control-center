@@ -5,6 +5,10 @@ import logging
 from .access_middleware import AccessPolicyMiddleware
 from .access_policy import AccessPolicyStore, build_access_router
 from .avalar_actions import AvalarActionExecutor, build_avalar_action_router
+from .connectivity_actions import (
+    ConnectivityActionExecutor,
+    build_connectivity_action_router,
+)
 from .main import SETTINGS, app, runtime
 from .static_dashboard import install_dashboard_routes
 
@@ -19,8 +23,14 @@ avalar_actions = AvalarActionExecutor(
     details_provider=runtime.avalar_ssh,
     refresh_callback=runtime.http.refresh,
 )
+connectivity_actions = ConnectivityActionExecutor(
+    SETTINGS,
+    access_policy,
+    runtime=runtime,
+)
 
 app.add_middleware(AccessPolicyMiddleware, store=access_policy)
 app.include_router(build_access_router(access_policy))
 app.include_router(build_avalar_action_router(avalar_actions))
+app.include_router(build_connectivity_action_router(connectivity_actions))
 install_dashboard_routes(app)
