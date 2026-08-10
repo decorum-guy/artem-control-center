@@ -51,6 +51,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
   const [phrase, setPhrase] = useState("");
   const [settling, setSettling] = useState(false);
   const dialogRef = useRef<HTMLElement | null>(null);
+  const pendingRef = useRef<PendingConfirmation | null>(null);
   const activeRef = useRef(false);
   const settlingRef = useRef(false);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
@@ -72,7 +73,9 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
       : null;
 
     return new Promise<ActionConfirmationResult>((resolve) => {
-      setPending({ spec, revision: options.revision, resolve });
+      const next = { spec, revision: options.revision, resolve };
+      pendingRef.current = next;
+      setPending(next);
     });
   }, []);
 
@@ -82,6 +85,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
     setSettling(true);
     const resolve = pending.resolve;
     activeRef.current = false;
+    pendingRef.current = null;
     setPending(null);
     setPhrase("");
     setSettling(false);
@@ -101,8 +105,10 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
   }, [pending]);
 
   useEffect(() => () => {
-    if (pending) pending.resolve({ confirmed: false });
-  }, [pending]);
+    pendingRef.current?.resolve({ confirmed: false });
+    pendingRef.current = null;
+    activeRef.current = false;
+  }, []);
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (!pending || settling) return;
@@ -122,10 +128,11 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
     const active = document.activeElement;
-    if (event.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+    const atDialogBoundary = active === dialogRef.current || !dialogRef.current.contains(active);
+    if (event.shiftKey && (active === first || atDialogBoundary)) {
       event.preventDefault();
       last.focus();
-    } else if (!event.shiftKey && (active === last || !dialogRef.current.contains(active))) {
+    } else if (!event.shiftKey && (active === last || atDialogBoundary)) {
       event.preventDefault();
       first.focus();
     }
