@@ -171,16 +171,23 @@ function Stop-ArtemConnectivityProcesses {
         [int]$TimeoutSeconds = 15
     )
     if ($Manual) { Write-ArtemConnectivityStopMarker -Paths $Paths }
+
+    # Stop the validated supervisor first so it cannot spawn a replacement SSH
+    # child between process inspection and cleanup. Never stop by image name.
     $state = Get-ArtemConnectivityState -Paths $Paths
-    if ($state -and $state.sshPid -and (Test-ArtemConnectivitySshProcess -Paths $Paths)) {
-        Stop-Process -Id ([int]$state.sshPid) -Force -ErrorAction SilentlyContinue
+    if ($state -and $state.supervisorPid -and (Test-ArtemConnectivitySupervisor -Paths $Paths)) {
+        Stop-Process -Id ([int]$state.supervisorPid) -Force -ErrorAction SilentlyContinue
     }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         if (-not (Test-ArtemConnectivitySupervisor -Paths $Paths)) { break }
         Start-Sleep -Milliseconds 250
     }
-    if ($state -and $state.supervisorPid -and (Test-ArtemConnectivitySupervisor -Paths $Paths)) {
-        Stop-Process -Id ([int]$state.supervisorPid) -Force -ErrorAction SilentlyContinue
+
+    # Re-read state after the supervisor is gone. If it managed to rotate the
+    # SSH child just before shutdown, only the newly recorded owned PID is used.
+    $state = Get-ArtemConnectivityState -Paths $Paths
+    if ($state -and $state.sshPid -and (Test-ArtemConnectivitySshProcess -Paths $Paths)) {
+        Stop-Process -Id ([int]$state.sshPid) -Force -ErrorAction SilentlyContinue
     }
 }
