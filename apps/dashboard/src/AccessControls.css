@@ -87,13 +87,15 @@
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 20px;
   background: rgb(0 0 0 / 58%);
   backdrop-filter: blur(10px);
 }
 
 .pin-modal {
-  width: min(100%, 430px);
+  width: min(100%, 460px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
   display: grid;
   gap: 12px;
   padding: 24px;
@@ -101,6 +103,7 @@
   border-radius: 22px;
   background: var(--surface-raised);
   box-shadow: 0 28px 80px rgb(0 0 0 / 40%);
+  outline: none;
 }
 
 .pin-modal h2,
@@ -109,32 +112,113 @@
 }
 
 .pin-modal form,
-.pin-modal label {
+.pin-entry {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
-.pin-modal input {
-  width: 100%;
-  min-height: 52px;
-  padding: 10px 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+.pin-entry-label {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pin-display {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 58px;
+  padding: 10px 52px 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border-subtle));
+  border-radius: 15px;
   background: var(--surface-base);
   color: var(--text-primary);
-  font-size: 1.35rem;
-  letter-spacing: 0.35em;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.pin-display--empty {
+  color: var(--text-secondary);
+  border-color: var(--border-subtle);
+  box-shadow: none;
+}
+
+.pin-dots {
+  min-height: 1.5rem;
+  font-size: 1.12rem;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.pin-length {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.pin-key {
+  min-width: 0;
+  min-height: 64px;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, var(--accent));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-base) 88%, var(--accent) 12%);
+  color: var(--text-primary);
+  font-size: 1.42rem;
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  touch-action: manipulation;
+  transition: transform 100ms ease, border-color 100ms ease, background 100ms ease;
+}
+
+.pin-key--utility {
+  background: color-mix(in srgb, var(--surface-base) 94%, var(--text-secondary) 6%);
+  color: var(--text-secondary);
+  font-size: 1.18rem;
+}
+
+.pin-key:not(:disabled):active {
+  transform: scale(0.96);
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border-subtle));
+  background: color-mix(in srgb, var(--surface-base) 76%, var(--accent) 24%);
+}
+
+.pin-key:disabled {
+  opacity: 0.36;
 }
 
 .pin-error {
+  min-height: 1.15em;
   color: var(--danger);
   font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .pin-modal-actions {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   gap: 10px;
+  padding-top: 2px;
+}
+
+.pin-modal-actions > button {
+  min-height: 50px;
+  touch-action: manipulation;
 }
 
 @media (max-width: 820px) {
@@ -144,5 +228,43 @@
 
   .access-profile-grid > button {
     min-height: 88px;
+  }
+}
+
+@media (max-height: 700px) {
+  .pin-modal {
+    gap: 9px;
+    padding: 18px;
+  }
+
+  .pin-modal form,
+  .pin-entry {
+    gap: 9px;
+  }
+
+  .pin-display {
+    min-height: 50px;
+  }
+
+  .pin-keypad {
+    gap: 8px;
+  }
+
+  .pin-key {
+    min-height: 52px;
+  }
+
+  .pin-modal-actions > button {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pin-key {
+    transition: none;
+  }
+
+  .pin-key:not(:disabled):active {
+    transform: none;
   }
 }
