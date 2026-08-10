@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode
 } from "react";
@@ -25,6 +26,15 @@ interface AvalarActionsContextValue {
   availabilityFor: (actionId: AvalarActionId) => AvalarActionAvailability | null;
   run: (service: ServiceSnapshot, actionId: AvalarActionId) => Promise<void>;
   pendingAction: AvalarActionId | null;
+}
+
+type ActionNoticeTone = "progress" | "success" | "warning" | "error";
+
+interface ActionNotice {
+  title: string;
+  message: string;
+  tone: ActionNoticeTone;
+  meta?: string;
 }
 
 const AvalarActionsContext = createContext<AvalarActionsContextValue | null>(null);
@@ -78,7 +88,26 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   const [availability, setAvailability] = useState<Record<AvalarActionId, AvalarActionAvailability> | null>(null);
   const [available, setAvailable] = useState(false);
   const [pendingAction, setPendingAction] = useState<AvalarActionId | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ActionNotice | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
+
+  const showNotice = useCallback((next: ActionNotice, timeoutMs?: number) => {
+    if (noticeTimerRef.current !== null) {
+      window.clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = null;
+    }
+    setNotice(next);
+    if (timeoutMs) {
+      noticeTimerRef.current = window.setTimeout(() => {
+        setNotice(null);
+        noticeTimerRef.current = null;
+      }, timeoutMs);
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -113,16 +142,25 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
 
   const run = useCallback(async (service: ServiceSnapshot, actionId: AvalarActionId) => {
     if (pendingAction) return;
+    const actionTitle = avalarActionTitles[actionId];
     let decision = availability?.[actionId];
     if (!decision) {
-      setNotice("AVALAR action API пока недоступен.");
+      showNotice({
+        title: actionTitle,
+        message: "AVALAR action API пока недоступен.",
+        tone: "warning"
+      }, 6_000);
       return;
     }
     if (!decision.allowed) {
       if (decision.availability === "elevation_required") {
-        const elevated = await ensureCapability(actionId, avalarActionTitles[actionId]);
+        const elevated = await ensureCapability(actionId, actionTitle);
         if (!elevated) {
-          setNotice(explainAvailability(decision.availability));
+          showNotice({
+            title: actionTitle,
+            message: explainAvailability(decision.availability),
+            tone: "warning"
+          }, 6_000);
           return;
         }
         await refresh();
@@ -130,8 +168,11 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
         setAvailability((current) => current ? { ...current, [actionId]: decision } : current);
       }
       if (!decision.allowed) {
-        setNotice(explainAvailability(decision.availability));
-        window.setTimeout(() => setNotice(null), 6_000);
+        showNotice({
+          title: actionTitle,
+          message: explainAvailability(decision.availability),
+          tone: "warning"
+        }, 6_000);
         return;
       }
     }
@@ -139,35 +180,56 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
     const confirmation = confirmationFor(actionId);
     if (confirmation === false) return;
     setPendingAction(actionId);
-    setNotice(`${avalarActionTitles[actionId]}: отправляем защищённую команду…`);
+    showNotice({
+      title: actionTitle,
+      message: "Отправляем защищённую команду…",
+      tone: "progress"
+    });
     try {
       const started = await startAvalarAction(actionId, {
         expectedRevision: expectedRevision(service),
         ...(typeof confirmation === "string" ? { confirmation } : {})
       });
       const finished = await waitForAvalarExecution(started.correlationId, (execution) => {
-        setNotice(
-          `${avalarActionTitles[actionId]} · ${progressCopy[execution.status]} · ${execution.correlationId.slice(0, 8)}`
-        );
+        showNotice({
+          title: actionTitle,
+          message: progressCopy[execution.status],
+          tone: execution.status === "failed" ? "error" : "progress",
+          meta: `Операция ${execution.correlationId.slice(0, 8)}`
+        });
       });
       if (finished.status === "success") {
-        setNotice(`${avalarActionTitles[actionId]}: успешно проверено.`);
+        showNotice({
+          title: actionTitle,
+          message: "Успешно проверено.",
+          tone: "success",
+          meta: `Операция ${finished.correlationId.slice(0, 8)}`
+        }, 8_000);
       } else {
-        setNotice(`${avalarActionTitles[actionId]}: ${finished.error ?? "action_failed"}.`);
+        showNotice({
+          title: actionTitle,
+          message: finished.error ?? "action_failed",
+          tone: "error",
+          meta: `Операция ${finished.correlationId.slice(0, 8)}`
+        }, 10_000);
       }
       await refresh();
     } catch (error) {
-      setNotice(`${avalarActionTitles[actionId]}: ${error instanceof Error ? error.message : "action_failed"}.`);
+      showNotice({
+        title: actionTitle,
+        message: error instanceof Error ? error.message : "action_failed",
+        tone: "error"
+      }, 10_000);
     } finally {
       setPendingAction(null);
-      window.setTimeout(() => setNotice(null), 8_000);
     }
   }, [
     availability,
     pendingAction,
     ensureCapability,
     explainAvailability,
-    refresh
+    refresh,
+    showNotice
   ]);
 
   const value = useMemo<AvalarActionsContextValue>(() => ({
@@ -181,7 +243,22 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   return (
     <AvalarActionsContext.Provider value={value}>
       {children}
-      {notice && <div className="action-notice" role="status">{notice}</div>}
+      {notice && (
+        <aside
+          className={`action-notice action-notice--${notice.tone}`}
+          role={notice.tone === "error" ? "alert" : "status"}
+          aria-live={notice.tone === "error" ? "assertive" : "polite"}
+          aria-atomic="true"
+          data-testid="avalar-action-notice"
+        >
+          <span className="action-notice__indicator" aria-hidden="true" />
+          <span className="action-notice__copy">
+            <strong>{notice.title}</strong>
+            <span>{notice.message}</span>
+            {notice.meta && <small>{notice.meta}</small>}
+          </span>
+        </aside>
+      )}
     </AvalarActionsContext.Provider>
   );
 }
