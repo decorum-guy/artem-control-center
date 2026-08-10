@@ -10,6 +10,8 @@ import {
 } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
+import { useActionConfirmation } from "./ActionConfirmations";
+import type { ActionConfirmationId } from "./actionConfirmationCatalog";
 import {
   avalarActionTitles,
   fetchAvalarAvailability,
@@ -61,30 +63,21 @@ function expectedRevision(service: ServiceSnapshot): string | undefined {
   return typeof value === "string" && /^[0-9a-f]{40}$/.test(value) ? value : undefined;
 }
 
-function confirmationFor(actionId: AvalarActionId): string | null | false {
-  if (actionId === "avalar.main.restart") {
-    return window.prompt(
-      "Это production. Для перезапуска Main введите RESTART MAIN"
-    ) === "RESTART MAIN" ? "RESTART MAIN" : false;
+function confirmationIdFor(actionId: AvalarActionId): ActionConfirmationId | null {
+  switch (actionId) {
+    case "avalar.main.restart":
+    case "avalar.main.deploy":
+    case "avalar.stage.restart":
+    case "avalar.stage.deploy":
+      return actionId;
+    default:
+      return null;
   }
-  if (actionId === "avalar.main.deploy") {
-    return window.prompt(
-      "Это production deploy. Для продолжения введите DEPLOY MAIN"
-    ) === "DEPLOY MAIN" ? "DEPLOY MAIN" : false;
-  }
-  if (actionId === "avalar.stage.restart") {
-    return window.confirm("Перезапустить Stage без git pull?") ? null : false;
-  }
-  if (actionId === "avalar.stage.deploy") {
-    return window.confirm(
-      "Обновить Stage из GitHub и проверить health после deploy?"
-    ) ? null : false;
-  }
-  return null;
 }
 
 export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   const { ensureCapability, explainAvailability } = useAccess();
+  const { confirmAction, confirmationOpen } = useActionConfirmation();
   const [availability, setAvailability] = useState<Record<AvalarActionId, AvalarActionAvailability> | null>(null);
   const [available, setAvailable] = useState(false);
   const [pendingAction, setPendingAction] = useState<AvalarActionId | null>(null);
@@ -141,7 +134,7 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   );
 
   const run = useCallback(async (service: ServiceSnapshot, actionId: AvalarActionId) => {
-    if (pendingAction) return;
+    if (pendingAction || confirmationOpen) return;
     const actionTitle = avalarActionTitles[actionId];
     let decision = availability?.[actionId];
     if (!decision) {
@@ -177,8 +170,16 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const confirmation = confirmationFor(actionId);
-    if (confirmation === false) return;
+    const confirmationId = confirmationIdFor(actionId);
+    let confirmationValue: string | undefined;
+    if (confirmationId) {
+      const result = await confirmAction(confirmationId, {
+        revision: expectedRevision(service)
+      });
+      if (!result.confirmed) return;
+      confirmationValue = result.confirmation;
+    }
+
     setPendingAction(actionId);
     showNotice({
       title: actionTitle,
@@ -188,7 +189,7 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
     try {
       const started = await startAvalarAction(actionId, {
         expectedRevision: expectedRevision(service),
-        ...(typeof confirmation === "string" ? { confirmation } : {})
+        ...(confirmationValue ? { confirmation: confirmationValue } : {})
       });
       const finished = await waitForAvalarExecution(started.correlationId, (execution) => {
         showNotice({
@@ -226,6 +227,8 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   }, [
     availability,
     pendingAction,
+    confirmationOpen,
+    confirmAction,
     ensureCapability,
     explainAvailability,
     refresh,

@@ -209,10 +209,13 @@ test("coffee actions stay policy-disabled by default and show confirmed HA resul
   await expect(page.getByText("Управление отключено политикой панели.")).toBeVisible();
 
   await page.goto("/home?scenario=coffee-off");
-  page.on("dialog", (dialog) => void dialog.accept());
   const turnOn = page.getByRole("button", { name: "Включить" });
   await expect(turnOn).toBeEnabled();
   await turnOn.click();
+  const confirmation = page.getByTestId("action-confirmation");
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText("Включить кофемашину?");
+  await confirmation.getByRole("button", { name: "Включить кофемашину" }).click();
   await expect(page.getByRole("status")).toContainText("Home Assistant подтвердил");
   await expect(page.getByTestId("widget-coffee-machine"))
     .not.toHaveAttribute("data-stage", "off");
