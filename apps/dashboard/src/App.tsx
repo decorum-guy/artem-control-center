@@ -15,6 +15,7 @@ import { CoffeeWidget, GenericServiceWidget } from "./widgets";
 import { executeCoffeeAction } from "./coffeeApi";
 import { SnapshotCoordinator } from "./snapshotStream";
 import { useActionConfirmation } from "./ActionConfirmations";
+import { ConnectivityRecoverySurface } from "./ConnectivityActions";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -266,6 +267,12 @@ export function App() {
       {!snapshot && !error && <p className="loading">Собираем локальный snapshot…</p>}
       {snapshot && (
         <ProductShell route={route} services={snapshot.services} onNavigate={navigate}>
+          {(route === "/home" || route === "/services") && (
+            <ConnectivityRecoverySurface
+              services={snapshot.services}
+              showWhenHealthy={route === "/services"}
+            />
+          )}
           {route === "/overview" && (
             <OverviewPage
               snapshot={snapshot}
