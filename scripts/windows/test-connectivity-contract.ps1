@@ -63,8 +63,8 @@ foreach ($required in @(
         throw "Panel-native connectivity restart helper is missing: $required"
     }
 }
-if ($restarter -match 'param\([\s\S]*\$(?!Json\b)') {
-    throw "Connectivity restart helper must not accept arbitrary process/task/command parameters"
+if ($restarter -notmatch '(?s)^param\(\s*\[switch\]\$Json\s*\)') {
+    throw "Connectivity restart helper may expose only the fixed Json output switch"
 }
 
 $combinedProcessControl = "$common`n$starter`n$stopper`n$restarter"
