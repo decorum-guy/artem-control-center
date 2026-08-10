@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode
 } from "react";
+import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import {
   fetchConnectivityAvailability,
@@ -209,5 +210,44 @@ export function ConnectivityRecoveryButton({
     >
       {connectivity.pending ? "Восстанавливаем…" : label}
     </button>
+  );
+}
+
+export function ConnectivityRecoverySurface({
+  services,
+  showWhenHealthy = false
+}: {
+  services: ServiceSnapshot[];
+  showWhenHealthy?: boolean;
+}) {
+  const connectivity = useConnectivityActions();
+  const homeAssistant = services.find((service) => service.id === "home-assistant");
+  const alice = services.find((service) => service.id === "alice-tg-bot");
+  const homeAssistantLive = Boolean(
+    homeAssistant && homeAssistant.health === "healthy" && homeAssistant.source === "live"
+  );
+  const aliceLive = Boolean(alice && alice.health === "healthy" && alice.source === "live");
+  const degraded = !homeAssistantLive || !aliceLive;
+
+  if (!connectivity.available || !connectivity.availability) return null;
+  if (!degraded && !showWhenHealthy) return null;
+
+  return (
+    <section
+      className={`connectivity-recovery-surface ${degraded ? "connectivity-recovery-surface--attention" : ""}`}
+      aria-label="Приватное подключение Home Assistant и AliceTG"
+      data-testid="connectivity-recovery-surface"
+    >
+      <div className="connectivity-recovery-surface__copy">
+        <p className="section-kicker">Домашняя инфраструктура</p>
+        <strong>{degraded ? "Приватное подключение требует внимания" : "Приватное подключение работает"}</strong>
+        <span>
+          Home Assistant: {homeAssistantLive ? "на связи" : "нет свежего соединения"}
+          {" · "}
+          AliceTG: {aliceLive ? "на связи" : "нет свежего соединения"}
+        </span>
+      </div>
+      <ConnectivityRecoveryButton degraded={degraded} />
+    </section>
   );
 }
