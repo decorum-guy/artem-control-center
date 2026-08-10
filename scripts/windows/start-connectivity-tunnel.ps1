@@ -46,13 +46,21 @@ if ([string]$config.sshAlias -notmatch '^[A-Za-z0-9._@-]+$') {
 
 $ssh = Get-Command ssh.exe -ErrorAction Stop
 $supervisorPid = $PID
-$attempts = [System.Collections.Generic.List[datetime]]::new()
+$consecutiveFailures = 0
 $logPath = Join-Path $paths.Runtime.Logs ("connectivity-{0}.log" -f (Get-Date -Format "yyyy-MM-dd"))
 
 function Write-ConnectivityLog {
     param([Parameter(Mandatory)][string]$Message)
     $line = "{0} {1}" -f ([DateTime]::UtcNow.ToString("o")), $Message
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
+}
+
+function Get-RetryDelaySeconds {
+    param([Parameter(Mandatory)][int]$FailureCount)
+    $exponent = [Math]::Min(5, [Math]::Max(0, $FailureCount - 1))
+    $baseDelay = [int][Math]::Min(60, 2 * [Math]::Pow(2, $exponent))
+    $jitter = Get-Random -Minimum 0 -Maximum 4
+    return [int][Math]::Min(60, $baseDelay + $jitter)
 }
 
 function Set-ConnectivityState {
@@ -70,6 +78,7 @@ function Set-ConnectivityState {
         localBotPort = [int]$config.localBotPort
         haPortReady = Test-ArtemTcpPort -Port ([int]$config.localHaPort)
         botPortReady = Test-ArtemTcpPort -Port ([int]$config.localBotPort)
+        retryCount = $consecutiveFailures
         error = if ($ErrorCode) { $ErrorCode } else { $null }
     }
     Write-ArtemConnectivityState -Paths $paths -State $payload
@@ -84,19 +93,6 @@ while ($true) {
         Write-ConnectivityLog "manual stop marker observed"
         exit 0
     }
-
-    $now = Get-Date
-    for ($index = $attempts.Count - 1; $index -ge 0; $index--) {
-        if (($now - $attempts[$index]).TotalMinutes -gt 10) {
-            $attempts.RemoveAt($index)
-        }
-    }
-    if ($attempts.Count -ge 10) {
-        Set-ConnectivityState -Status "failed" -ErrorCode "restart_budget_exhausted"
-        Write-ConnectivityLog "restart budget exhausted"
-        exit 1
-    }
-    [void]$attempts.Add($now)
 
     $attemptId = [guid]::NewGuid().ToString("N").Substring(0, 10)
     $stdoutPath = Join-Path $paths.Runtime.Logs "connectivity-ssh-$attemptId.stdout.log"
@@ -121,9 +117,11 @@ while ($true) {
             -RedirectStandardError $stderrPath
     }
     catch {
-        Set-ConnectivityState -Status "degraded" -ErrorCode "ssh_start_failed"
-        Write-ConnectivityLog "ssh process could not start"
-        Start-Sleep -Seconds 5
+        $consecutiveFailures++
+        $delay = Get-RetryDelaySeconds -FailureCount $consecutiveFailures
+        Set-ConnectivityState -Status "retrying" -ErrorCode "ssh_start_failed"
+        Write-ConnectivityLog "ssh process could not start; retrying in ${delay}s"
+        Start-Sleep -Seconds $delay
         continue
     }
 
@@ -138,9 +136,10 @@ while ($true) {
     }
 
     if (-not $process.HasExited -and (Test-ArtemConnectivityReady -Paths $paths)) {
+        $consecutiveFailures = 0
         Set-ConnectivityState -Status "running" -SshPid $process.Id
         Write-ConnectivityLog "both local forwards are ready"
-        $consecutiveFailures = 0
+        $consecutiveProbeFailures = 0
         while (-not $process.HasExited) {
             if (Test-Path -LiteralPath $paths.StopMarker) {
                 Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
@@ -149,12 +148,12 @@ while ($true) {
                 exit 0
             }
             if (Test-ArtemConnectivityReady -Paths $paths) {
-                $consecutiveFailures = 0
+                $consecutiveProbeFailures = 0
             }
             else {
-                $consecutiveFailures++
+                $consecutiveProbeFailures++
                 Set-ConnectivityState -Status "degraded" -SshPid $process.Id -ErrorCode "forward_probe_failed"
-                if ($consecutiveFailures -ge 3) {
+                if ($consecutiveProbeFailures -ge 3) {
                     Write-ConnectivityLog "forward probes failed three times; restarting ssh"
                     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
                     break
@@ -171,6 +170,9 @@ while ($true) {
         }
     }
 
-    Set-ConnectivityState -Status "degraded" -ErrorCode "ssh_disconnected"
-    Start-Sleep -Seconds ([Math]::Min(30, [Math]::Max(2, $attempts.Count * 2)))
+    $consecutiveFailures++
+    $retryDelay = Get-RetryDelaySeconds -FailureCount $consecutiveFailures
+    Set-ConnectivityState -Status "retrying" -ErrorCode "ssh_disconnected"
+    Write-ConnectivityLog "private connectivity unavailable; retrying in ${retryDelay}s"
+    Start-Sleep -Seconds $retryDelay
 }
