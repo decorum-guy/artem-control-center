@@ -10,6 +10,7 @@ function Get-ArtemConnectivityPaths {
         StopMarker = Join-Path $runtime.RuntimeRoot "connectivity-stop.json"
         StartScript = Join-Path $runtime.RepoRoot "scripts\windows\start-connectivity-tunnel.ps1"
         StopScript = Join-Path $runtime.RepoRoot "scripts\windows\stop-connectivity-tunnel.ps1"
+        RestartScript = Join-Path $runtime.RepoRoot "scripts\windows\restart-connectivity-tunnel.ps1"
         StatusScript = Join-Path $runtime.RepoRoot "scripts\windows\status-connectivity.ps1"
         TaskName = "Artem Control Center Connectivity"
     }
@@ -116,7 +117,7 @@ function Test-ArtemConnectivitySupervisor {
         return (
             $null -ne $process -and
             $process.Name -ieq "powershell.exe" -and
-            $process.CommandLine -like "*start-connectivity-tunnel.ps1*"
+            [string]$process.CommandLine -like "*start-connectivity-tunnel.ps1*"
         )
     }
     catch {
@@ -127,12 +128,24 @@ function Test-ArtemConnectivitySupervisor {
 function Test-ArtemConnectivitySshProcess {
     param([Parameter(Mandatory)]$Paths)
     $state = Get-ArtemConnectivityState -Paths $Paths
-    if ($null -eq $state -or $null -eq $state.sshPid) { return $false }
+    $config = Get-ArtemConnectivityConfig -Paths $Paths
+    if (
+        $null -eq $state -or
+        $null -eq $state.sshPid -or
+        $null -eq $config -or
+        [string]::IsNullOrWhiteSpace([string]$config.sshAlias)
+    ) {
+        return $false
+    }
     try {
         $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($state.sshPid)"
+        $commandLine = [string]$process.CommandLine
         return (
             $null -ne $process -and
-            $process.Name -ieq "ssh.exe"
+            $process.Name -ieq "ssh.exe" -and
+            $commandLine -like "*-N*" -and
+            $commandLine -like "*-T*" -and
+            $commandLine -like ("*" + [string]$config.sshAlias + "*")
         )
     }
     catch {
@@ -159,7 +172,7 @@ function Stop-ArtemConnectivityProcesses {
     )
     if ($Manual) { Write-ArtemConnectivityStopMarker -Paths $Paths }
     $state = Get-ArtemConnectivityState -Paths $Paths
-    if ($state -and $state.sshPid) {
+    if ($state -and $state.sshPid -and (Test-ArtemConnectivitySshProcess -Paths $Paths)) {
         Stop-Process -Id ([int]$state.sshPid) -Force -ErrorAction SilentlyContinue
     }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
