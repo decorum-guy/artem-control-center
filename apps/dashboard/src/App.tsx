@@ -14,6 +14,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { CoffeeWidget, GenericServiceWidget } from "./widgets";
 import { executeCoffeeAction } from "./coffeeApi";
 import { SnapshotCoordinator } from "./snapshotStream";
+import { useActionConfirmation } from "./ActionConfirmations";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -45,6 +46,7 @@ function querySetting<T extends string>(name: string, allowed: readonly T[], fal
 }
 
 export function App() {
+  const { confirmAction, confirmationOpen } = useActionConfirmation();
   const [route, setRoute] = useState<RoutePath>(routeFromLocation);
   const [scenario, setScenario] = useState<string>(() =>
     import.meta.env.DEV
@@ -133,9 +135,12 @@ export function App() {
   }
 
   async function runCoffeeAction(service: ServiceSnapshot, actionId: string) {
-    if (coffeeActionPending) return;
+    if (coffeeActionPending || confirmationOpen) return;
     const action = actionId.endsWith("turn_on") ? "turn_on" : "turn_off";
-    if (action === "turn_on" && !window.confirm("Включить кофемашину?")) return;
+    if (action === "turn_on") {
+      const confirmation = await confirmAction("home.coffee.turn_on");
+      if (!confirmation.confirmed) return;
+    }
     setCoffeeActionPending(true);
     setActionNotice(`${service.title}: команда отправлена, ждём подтверждение Home Assistant…`);
     try {
