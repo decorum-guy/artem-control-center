@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict
 
-from .access_policy import AccessPolicyStore
+from .access_policy import CAPABILITIES, AccessPolicyStore
 from .settings import IntegrationSettings
 
 ActionId = Literal["system.connectivity.restart"]
@@ -26,6 +26,10 @@ ActionStatus = Literal[
 ]
 
 _TERMINAL_STATUSES = {"connected", "degraded", "failed"}
+
+# Connectivity recovery is a routine Standard-level operation. Register it before
+# the access router materialises its capability snapshot in production.py.
+CAPABILITIES.setdefault("system.connectivity.restart", "standard")
 
 
 class HomeAssistantRuntime(Protocol):
@@ -101,6 +105,7 @@ class ConnectivityActionExecutor:
         self.access = access
         self.runtime = runtime
         self.script_path = Path(script_path) if script_path else _default_restart_script()
+        self._custom_restart_runner = restart_runner is not None
         self.restart_runner = restart_runner or self._run_fixed_restart
         self.port_probe = port_probe or self._probe_port
         self.forwards_timeout_seconds = max(1.0, forwards_timeout_seconds)
@@ -120,7 +125,7 @@ class ConnectivityActionExecutor:
         return bool(
             self._targets()
             and (
-                self.restart_runner is not self._run_fixed_restart
+                self._custom_restart_runner
                 or (os.name == "nt" and self.script_path.is_file())
             )
         )
