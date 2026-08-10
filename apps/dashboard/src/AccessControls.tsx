@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode
 } from "react";
 import {
@@ -16,6 +17,13 @@ import {
   type AccessProfile,
   type AccessStatus
 } from "./accessApi";
+import {
+  PIN_MAX_LENGTH,
+  PIN_MIN_LENGTH,
+  applyPinKey,
+  isValidPin,
+  type PinKey
+} from "./pinKeypad";
 import "./AccessControls.css";
 
 interface PinPrompt {
@@ -34,6 +42,13 @@ interface AccessContextValue {
   explainAvailability: (availability: string) => string;
 }
 
+interface PinKeyDefinition {
+  key: PinKey;
+  label: string;
+  ariaLabel: string;
+  utility?: boolean;
+}
+
 const AccessContext = createContext<AccessContextValue | null>(null);
 
 const availabilityCopy: Record<string, string> = {
@@ -47,6 +62,21 @@ const availabilityCopy: Record<string, string> = {
   cooldown: "Повторный запуск временно ограничен",
   precondition_failed: "Предварительная проверка не пройдена"
 };
+
+const pinKeys: PinKeyDefinition[] = [
+  { key: "1", label: "1", ariaLabel: "1" },
+  { key: "2", label: "2", ariaLabel: "2" },
+  { key: "3", label: "3", ariaLabel: "3" },
+  { key: "4", label: "4", ariaLabel: "4" },
+  { key: "5", label: "5", ariaLabel: "5" },
+  { key: "6", label: "6", ariaLabel: "6" },
+  { key: "7", label: "7", ariaLabel: "7" },
+  { key: "8", label: "8", ariaLabel: "8" },
+  { key: "9", label: "9", ariaLabel: "9" },
+  { key: "backspace", label: "←", ariaLabel: "Удалить последнюю цифру", utility: true },
+  { key: "0", label: "0", ariaLabel: "0" },
+  { key: "clear", label: "C", ariaLabel: "Очистить PIN", utility: true }
+];
 
 function pinErrorCopy(error: unknown): string {
   const code = error instanceof Error ? error.message : "invalid_pin";
@@ -64,6 +94,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   const [pinBusy, setPinBusy] = useState(false);
   const [clock, setClock] = useState(Date.now());
   const resolverRef = useRef<((accepted: boolean) => void) | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -88,6 +119,12 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!prompt) return;
+    const frame = window.requestAnimationFrame(() => dialogRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [prompt]);
+
   function requestPin(
     title: string,
     description: string,
@@ -111,6 +148,67 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     setPinError(null);
     setPinBusy(false);
     resolve?.(accepted);
+  }
+
+  function updatePin(key: PinKey) {
+    if (pinBusy) return;
+    setPin((current) => applyPinKey(current, key));
+    setPinError(null);
+  }
+
+  async function submitPin() {
+    if (!prompt || pinBusy) return;
+    if (!isValidPin(pin)) {
+      setPinError(`PIN должен содержать от ${PIN_MIN_LENGTH} до ${PIN_MAX_LENGTH} цифр.`);
+      return;
+    }
+
+    setPinBusy(true);
+    setPinError(null);
+    try {
+      const accepted = await prompt.validate(pin);
+      if (accepted) {
+        closePrompt(true);
+        return;
+      }
+      setPin("");
+      setPinBusy(false);
+      window.requestAnimationFrame(() => dialogRef.current?.focus());
+    } catch (error) {
+      setPinError(pinErrorCopy(error));
+      setPin("");
+      setPinBusy(false);
+      window.requestAnimationFrame(() => dialogRef.current?.focus());
+    }
+  }
+
+  function handlePinKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (!prompt || pinBusy) return;
+
+    if (/^[0-9]$/.test(event.key)) {
+      event.preventDefault();
+      updatePin(event.key as PinKey);
+      return;
+    }
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      updatePin("backspace");
+      return;
+    }
+    if (event.key === "Delete") {
+      event.preventDefault();
+      updatePin("clear");
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePrompt(false);
+      return;
+    }
+    if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement)) {
+      event.preventDefault();
+      void submitPin();
+    }
   }
 
   const ensureCapability = useCallback(async (capability: string, title: string) => {
@@ -193,6 +291,8 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     : 0;
   const remainingMinutes = Math.floor(remainingSeconds / 60);
   const remainingRemainder = remainingSeconds % 60;
+  const pinValid = isValidPin(pin);
+  const maskedPin = pin.length > 0 ? Array.from({ length: pin.length }, () => "●").join(" ") : "○ ○ ○ ○";
 
   return (
     <AccessContext.Provider value={value}>
@@ -205,52 +305,64 @@ export function AccessProvider({ children }: { children: ReactNode }) {
         </aside>
       )}
       {prompt && (
-        <div className="pin-modal-backdrop" role="presentation" onMouseDown={() => !pinBusy && closePrompt(false)}>
+        <div
+          className="pin-modal-backdrop"
+          role="presentation"
+          onPointerDown={() => !pinBusy && closePrompt(false)}
+        >
           <section
+            ref={dialogRef}
             className="pin-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="pin-modal-title"
-            onMouseDown={(event) => event.stopPropagation()}
+            aria-describedby="pin-modal-description"
+            tabIndex={-1}
+            onKeyDown={handlePinKeyDown}
+            onPointerDown={(event) => event.stopPropagation()}
           >
             <p className="section-kicker">Защищённая операция</p>
             <h2 id="pin-modal-title">{prompt.title}</h2>
-            <p>{prompt.description}</p>
+            <p id="pin-modal-description">{prompt.description}</p>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
-                if (!/^[0-9]{4,12}$/.test(pin)) {
-                  setPinError("PIN должен содержать от 4 до 12 цифр.");
-                  return;
-                }
-                setPinBusy(true);
-                setPinError(null);
-                void prompt.validate(pin).then((accepted) => {
-                  if (accepted) closePrompt(true);
-                  else setPinBusy(false);
-                });
+                void submitPin();
               }}
             >
-              <label>
-                PIN
-                <input
-                  autoFocus
-                  inputMode="numeric"
-                  autoComplete="off"
-                  type="password"
-                  value={pin}
-                  disabled={pinBusy}
-                  onChange={(event) => {
-                    setPin(event.target.value.replace(/\D/g, "").slice(0, 12));
-                    setPinError(null);
-                  }}
-                />
-              </label>
-              {pinError && <span className="pin-error">{pinError}</span>}
+              <div className="pin-entry" aria-labelledby="pin-entry-label">
+                <span id="pin-entry-label" className="pin-entry-label">PIN</span>
+                <div
+                  className={`pin-display${pin.length === 0 ? " pin-display--empty" : ""}`}
+                  role="status"
+                  aria-live="polite"
+                  aria-label={pin.length > 0 ? `Введено цифр: ${pin.length}` : "PIN не введён"}
+                >
+                  <span className="pin-dots" aria-hidden="true">{maskedPin}</span>
+                  <span className="pin-length" aria-hidden="true">{pin.length}/{PIN_MAX_LENGTH}</span>
+                </div>
+              </div>
+
+              <div className="pin-keypad" aria-label="Цифровая клавиатура PIN">
+                {pinKeys.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={item.utility ? "pin-key pin-key--utility" : "pin-key"}
+                    aria-label={item.ariaLabel}
+                    disabled={pinBusy || (item.key === "backspace" && pin.length === 0) || (item.key === "clear" && pin.length === 0)}
+                    onClick={() => updatePin(item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {pinError && <span className="pin-error" role="alert">{pinError}</span>}
               <div className="pin-modal-actions">
                 <button type="button" disabled={pinBusy} onClick={() => closePrompt(false)}>Отмена</button>
-                <button type="submit" className="primary-action" disabled={pinBusy}>
-                  {pinBusy ? "Проверяем…" : "Подтвердить"}
+                <button type="submit" className="primary-action" disabled={pinBusy || !pinValid}>
+                  {pinBusy ? "Проверяем…" : "Разблокировать"}
                 </button>
               </div>
             </form>
