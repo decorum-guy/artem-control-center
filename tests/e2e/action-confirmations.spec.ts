@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const actionIds = [
   "avalar.main.smoke",
@@ -43,12 +43,12 @@ function execution(actionId: AvalarActionId, status: "requested" | "success") {
   };
 }
 
-async function mockAvalar(page: Parameters<typeof test>[0] extends never ? never : any) {
+async function mockAvalar(page: Page) {
   let postCount = 0;
   let lastBody: Record<string, unknown> | null = null;
   let activeAction: AvalarActionId = "avalar.stage.restart";
 
-  await page.route("**/api/v1/actions/avalar**", async (route: any) => {
+  await page.route("**/api/v1/actions/avalar**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
@@ -122,7 +122,6 @@ test("Stage restart uses touch confirmation and cancel never calls the action AP
 
 test("Main deploy requires the exact production phrase and forwards it to backend", async ({ page }) => {
   const api = await mockAvalar(page);
-  let nativeCalls = 0;
   await page.addInitScript(() => {
     const mark = () => {
       (window as typeof window & { __nativeConfirmationCalls?: number }).__nativeConfirmationCalls =
@@ -162,7 +161,7 @@ test("Main deploy requires the exact production phrase and forwards it to backen
 
   await expect.poll(api.getPostCount).toBe(1);
   expect(api.getLastBody()?.confirmation).toBe("DEPLOY MAIN");
-  nativeCalls = await page.evaluate(() =>
+  const nativeCalls = await page.evaluate(() =>
     (window as typeof window & { __nativeConfirmationCalls?: number }).__nativeConfirmationCalls ?? 0
   );
   expect(nativeCalls).toBe(0);
