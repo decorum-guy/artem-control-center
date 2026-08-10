@@ -8,6 +8,7 @@ function Read-ScriptText {
 $installer = Read-ScriptText "install-connectivity-tunnel.ps1"
 $starter = Read-ScriptText "start-connectivity-tunnel.ps1"
 $stopper = Read-ScriptText "stop-connectivity-tunnel.ps1"
+$restarter = Read-ScriptText "restart-connectivity-tunnel.ps1"
 $common = Read-ScriptText "connectivity-common.ps1"
 $configurator = Read-ScriptText "configure-home-production.ps1"
 $status = Read-ScriptText "status-production.ps1"
@@ -39,19 +40,46 @@ foreach ($required in @(
     'ServerAliveInterval=30',
     'ServerAliveCountMax=3',
     'Test-ArtemConnectivityReady',
-    'restart_budget_exhausted'
+    'Get-RetryDelaySeconds',
+    'Get-Random',
+    'Status "retrying"',
+    'consecutiveFailures'
 )) {
     if ($starter -notlike "*$required*") {
         throw "Connectivity supervisor contract is missing: $required"
     }
 }
+if ($starter -like '*restart_budget_exhausted*' -or $starter -match 'attempts\.Count\s+-ge') {
+    throw "Connectivity supervisor must not permanently exit after a finite network retry budget"
+}
 
-$combinedProcessControl = "$common`n$starter`n$stopper"
+foreach ($required in @(
+    'Stop-ScheduledTask -TaskName $paths.TaskName',
+    'Stop-ArtemConnectivityProcesses -Paths $paths -Manual $false',
+    'Start-ScheduledTask -TaskName $paths.TaskName',
+    'system.connectivity.restart'
+)) {
+    if ($restarter -notlike "*$required*") {
+        throw "Panel-native connectivity restart helper is missing: $required"
+    }
+}
+if ($restarter -match 'param\([\s\S]*\$(?!Json\b)') {
+    throw "Connectivity restart helper must not accept arbitrary process/task/command parameters"
+}
+
+$combinedProcessControl = "$common`n$starter`n$stopper`n$restarter"
 if ($combinedProcessControl -match 'Get-Process\s+(ssh|powershell)' -or
     $combinedProcessControl -match 'taskkill\.exe\s+/IM') {
     throw "Connectivity controls must never kill SSH or PowerShell by image name"
 }
-foreach ($required in @("sshPid", "supervisorPid", "Stop-Process -Id")) {
+foreach ($required in @(
+    "sshPid",
+    "supervisorPid",
+    "Stop-Process -Id",
+    "Test-ArtemConnectivitySshProcess",
+    "CommandLine",
+    "sshAlias"
+)) {
     if ($combinedProcessControl -notlike "*$required*") {
         throw "Connectivity process ownership contract is missing: $required"
     }
@@ -98,4 +126,4 @@ foreach ($required in @(
     }
 }
 
-Write-Host "Validated private tunnel ownership, task identity, fail-closed production rollout and unified status contracts."
+Write-Host "Validated resilient private connectivity, scoped restart ownership, fail-closed production rollout and unified status contracts."
