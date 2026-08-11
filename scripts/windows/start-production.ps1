@@ -7,10 +7,51 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
 
+function Start-ArtemConnectivityIfConfigured {
+    $common = Join-Path $PSScriptRoot "connectivity-common.ps1"
+    if (-not (Test-Path -LiteralPath $common)) { return }
+
+    try {
+        . $common
+        $connectivity = Get-ArtemConnectivityPaths
+        $config = Get-ArtemConnectivityConfig -Paths $connectivity
+        if ($null -eq $config) { return }
+        if (Test-Path -LiteralPath $connectivity.StopMarker) {
+            Write-Host "Private connectivity remains stopped by explicit manual request."
+            return
+        }
+
+        $task = Get-ScheduledTask -TaskName $connectivity.TaskName -ErrorAction SilentlyContinue
+        if ($null -eq $task) {
+            Write-Warning "Private connectivity is configured but its scheduled task is missing."
+            return
+        }
+        if (-not (Test-ArtemConnectivitySupervisor -Paths $connectivity)) {
+            Start-ScheduledTask -TaskName $connectivity.TaskName
+            Write-Host "Private connectivity recovery task started."
+        }
+    }
+    catch {
+        Write-Warning "Unable to ensure private connectivity: $($_.Exception.Message)"
+    }
+}
+
+function Sync-ArtemDesktopHelpers {
+    $syncScript = Join-Path $PSScriptRoot "sync-desktop-helpers.ps1"
+    if (-not (Test-Path -LiteralPath $syncScript)) { return }
+    try {
+        & $syncScript | Out-Null
+    }
+    catch {
+        Write-Warning "Unable to synchronize desktop helpers: $($_.Exception.Message)"
+    }
+}
+
 $paths = Get-ArtemRuntimePaths
 $taskName = "Artem Control Center Runtime"
 Initialize-ArtemRuntimeDirectories -Paths $paths
 Update-ArtemProcessPath
+Sync-ArtemDesktopHelpers
 
 if ($AutoStart -and (Test-Path -LiteralPath $paths.ManualStop)) {
     Write-Host "Artem Control Center remains stopped by manual request."
@@ -27,6 +68,7 @@ if (Test-ArtemRuntimeProcess -Paths $paths) {
     if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 20)) {
         throw "Production runtime process exists but is not ready"
     }
+    Start-ArtemConnectivityIfConfigured
     if (-not $NoKiosk) {
         & $paths.OpenKioskScript -AssumeRuntimeReady
     }
@@ -47,6 +89,7 @@ if (-not $AutoStart) {
         if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 60)) {
             throw "Scheduled production runtime did not become ready within 60 seconds"
         }
+        Start-ArtemConnectivityIfConfigured
         if (-not $NoKiosk) {
             & $paths.OpenKioskScript -AssumeRuntimeReady
         }
@@ -75,6 +118,7 @@ if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 60)) {
     throw "Production runtime did not become ready within 60 seconds"
 }
 
+Start-ArtemConnectivityIfConfigured
 if (-not $NoKiosk) {
     & $paths.OpenKioskScript -AssumeRuntimeReady
 }
