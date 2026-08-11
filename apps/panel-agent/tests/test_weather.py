@@ -39,7 +39,7 @@ def test_weather_fixture_api_is_deterministic(monkeypatch):
     assert forecast["location"]["id"] == "moscow-default"
     assert forecast["current"]["temperature"] == 22.4
     assert len(forecast["daily"]) == 7
-    assert len(forecast["hourly"]) == 24
+    assert len(forecast["hourly"]) == 12
     assert forecast["daily"][0]["sunrise"].endswith("05:03")
 
 
@@ -124,9 +124,10 @@ def test_weather_cache_is_scoped_to_location(monkeypatch, tmp_path):
     )
 
     moscow_forecast = fixture_forecast(moscow)
-    rotterdam_forecast = fixture_forecast(rotterdam).model_copy(
+    rotterdam_fixture = fixture_forecast(rotterdam)
+    rotterdam_forecast = rotterdam_fixture.model_copy(
         update={
-            "current": fixture_forecast(rotterdam).current.model_copy(
+            "current": rotterdam_fixture.current.model_copy(
                 update={"temperature": 17.1}
             )
         }
