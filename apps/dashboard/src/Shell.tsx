@@ -1,8 +1,10 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
+import { WeatherHeaderSummary } from "./Weather";
 
 export type RoutePath =
   | "/overview"
+  | "/weather"
   | "/home"
   | "/services"
   | "/calendar"
@@ -15,6 +17,7 @@ export type RoutePath =
 
 const primaryNavigation: Array<{ path: RoutePath; label: string; short: string }> = [
   { path: "/overview", label: "Обзор", short: "О" },
+  { path: "/weather", label: "Погода", short: "П" },
   { path: "/home", label: "Дом", short: "Д" },
   { path: "/services", label: "Сервисы", short: "С" },
   { path: "/calendar", label: "Календарь", short: "К" },
@@ -124,10 +127,7 @@ export function ProductShell({
             </span>
           </div>
           <div className="header-context">
-            <div className="weather-summary">
-              <span>Москва</span>
-              <strong>Погода не подключена</strong>
-            </div>
+            <WeatherHeaderSummary onOpen={() => onNavigate("/weather")} />
             <button
               className={`system-summary ${attentionCount ? "system-summary--attention" : ""}`}
               type="button"
