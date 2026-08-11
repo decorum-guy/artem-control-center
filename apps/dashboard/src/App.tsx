@@ -16,12 +16,14 @@ import { executeCoffeeAction } from "./coffeeApi";
 import { SnapshotCoordinator } from "./snapshotStream";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { ConnectivityRecoverySurface } from "./ConnectivityActions";
+import { WeatherPage } from "./Weather";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
 
 const userRoutes: RoutePath[] = [
   "/overview",
+  "/weather",
   "/home",
   "/services",
   "/calendar",
@@ -281,6 +283,7 @@ export function App() {
               coffeeActionPending={coffeeActionPending}
             />
           )}
+          {route === "/weather" && <WeatherPage />}
           {route === "/home" && (
             <HomePage
               snapshot={snapshot}
@@ -298,7 +301,7 @@ export function App() {
               onMotionChange={setMotion}
             />
           )}
-          {!["/overview", "/home", "/services", "/settings"].includes(route) && (
+          {!["/overview", "/weather", "/home", "/services", "/settings"].includes(route) && (
             <PlaceholderPage route={route as "/calendar" | "/tasks" | "/backups" | "/apps" | "/system"} />
           )}
         </ProductShell>
