@@ -9,7 +9,7 @@ import {
   SettingsPage
 } from "./pages";
 import { reconcileLayout, resolveManifest } from "./registry";
-import { ProductShell, type RoutePath } from "./Shell";
+import { ProductShell, type ShellRoutePath } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { CoffeeWidget, GenericServiceWidget } from "./widgets";
 import { executeCoffeeAction } from "./coffeeApi";
@@ -21,7 +21,7 @@ import { WeatherPage } from "./Weather";
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
 
-const userRoutes: RoutePath[] = [
+const userRoutes: ShellRoutePath[] = [
   "/overview",
   "/weather",
   "/home",
@@ -34,12 +34,12 @@ const userRoutes: RoutePath[] = [
   "/system"
 ];
 
-function routeFromLocation(): RoutePath {
+function routeFromLocation(): ShellRoutePath {
   if (window.location.pathname === "/") {
     window.history.replaceState({}, "", `/overview${window.location.search}`);
     return "/overview";
   }
-  const requested = window.location.pathname as RoutePath;
+  const requested = window.location.pathname as ShellRoutePath;
   return [...userRoutes, "/dev/widget-gallery"].includes(requested) ? requested : "/overview";
 }
 
@@ -50,7 +50,7 @@ function querySetting<T extends string>(name: string, allowed: readonly T[], fal
 
 export function App() {
   const { confirmAction, confirmationOpen } = useActionConfirmation();
-  const [route, setRoute] = useState<RoutePath>(routeFromLocation);
+  const [route, setRoute] = useState<ShellRoutePath>(routeFromLocation);
   const [scenario, setScenario] = useState<string>(() =>
     import.meta.env.DEV
       ? querySetting("scenario", fixtureScenarios, "ha-healthy")
@@ -110,7 +110,7 @@ export function App() {
     [snapshot]
   );
 
-  function navigate(nextRoute: RoutePath) {
+  function navigate(nextRoute: ShellRoutePath) {
     const query = import.meta.env.DEV ? window.location.search : "";
     window.history.pushState({}, "", `${nextRoute}${query}`);
     setRoute(nextRoute);
@@ -241,7 +241,7 @@ export function App() {
         <section className="dev-widget-grid" aria-label="Automatically reconciled widgets">
           {snapshot &&
             widgets.map((widget) => {
-              const service = snapshot.services.find((item) => item.id === widget.serviceId)!;
+              const service = snapshot.services.find((item) => item.serviceId === widget.serviceId)!;
               const manifest = resolveManifest(service);
               return (
                 <ErrorBoundary key={widget.id} title={service.title}>
