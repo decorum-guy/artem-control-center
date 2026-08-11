@@ -1,5 +1,6 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
+import { WeatherHeaderSummary } from "./Weather";
 
 export type RoutePath =
   | "/overview"
@@ -13,8 +14,11 @@ export type RoutePath =
   | "/system"
   | "/dev/widget-gallery";
 
-const primaryNavigation: Array<{ path: RoutePath; label: string; short: string }> = [
+export type ShellRoutePath = RoutePath | "/weather";
+
+const primaryNavigation: Array<{ path: ShellRoutePath; label: string; short: string }> = [
   { path: "/overview", label: "Обзор", short: "О" },
+  { path: "/weather", label: "Погода", short: "П" },
   { path: "/home", label: "Дом", short: "Д" },
   { path: "/services", label: "Сервисы", short: "С" },
   { path: "/calendar", label: "Календарь", short: "К" },
@@ -22,7 +26,7 @@ const primaryNavigation: Array<{ path: RoutePath; label: string; short: string }
   { path: "/backups", label: "Backups", short: "Б" }
 ];
 
-const secondaryNavigation: Array<{ path: RoutePath; label: string }> = [
+const secondaryNavigation: Array<{ path: ShellRoutePath; label: string }> = [
   { path: "/apps", label: "Приложения" },
   { path: "/system", label: "Система" },
   { path: "/settings", label: "Настройки" }
@@ -35,11 +39,11 @@ function NavigationLink({
   current,
   onNavigate
 }: {
-  path: RoutePath;
+  path: ShellRoutePath;
   label: string;
   short?: string;
-  current: RoutePath;
-  onNavigate: (path: RoutePath) => void;
+  current: ShellRoutePath;
+  onNavigate: (path: ShellRoutePath) => void;
 }) {
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
@@ -65,9 +69,9 @@ export function ProductShell({
   onNavigate,
   children
 }: {
-  route: RoutePath;
+  route: ShellRoutePath;
   services: ServiceSnapshot[];
-  onNavigate: (path: RoutePath) => void;
+  onNavigate: (path: ShellRoutePath) => void;
   children: ReactNode;
 }) {
   const [now, setNow] = useState(() => new Date());
@@ -124,10 +128,7 @@ export function ProductShell({
             </span>
           </div>
           <div className="header-context">
-            <div className="weather-summary">
-              <span>Москва</span>
-              <strong>Погода не подключена</strong>
-            </div>
+            <WeatherHeaderSummary onOpen={() => onNavigate("/weather")} />
             <button
               className={`system-summary ${attentionCount ? "system-summary--attention" : ""}`}
               type="button"
