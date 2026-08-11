@@ -25,6 +25,7 @@ from .integrations import IntegrationRuntime
 from .runtime_control import router as runtime_control_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
+from .weather import WeatherService, build_weather_router
 
 
 def configured_mode() -> PanelMode:
@@ -37,6 +38,7 @@ def configured_mode() -> PanelMode:
 MODE = configured_mode()
 SETTINGS = IntegrationSettings.from_env()
 runtime = IntegrationRuntime(SETTINGS, mode=MODE)
+weather_service = WeatherService(mode=MODE)
 snapshot_publisher = SnapshotPublisher(
     mode=MODE,
     services_builder=runtime.services,
@@ -63,6 +65,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(runtime_control_router)
+app.include_router(build_weather_router(weather_service))
 fixture_services: List[ServiceSnapshot] = []
 revision = 1
 fixture_coffee_state_override: str | None = None
@@ -109,6 +112,7 @@ def ready() -> dict:
             "avalarMain": bool(SETTINGS.avalar_main_url),
             "avalarStage": bool(SETTINGS.avalar_stage_url),
             "avalarSshDetails": runtime.avalar_ssh.enabled,
+            "weather": True,
         },
     }
 
