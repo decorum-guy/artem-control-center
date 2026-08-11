@@ -1,0 +1,124 @@
+{
+  "pin": {
+    "dialog": {
+      "x": 410,
+      "y": 47.5,
+      "width": 460,
+      "height": 625
+    },
+    "keys": [
+      {
+        "label": "1",
+        "width": 130.65625,
+        "height": 64
+      },
+      {
+        "label": "2",
+        "width": 130.671875,
+        "height": 64
+      },
+      {
+        "label": "3",
+        "width": 130.671875,
+        "height": 64
+      },
+      {
+        "label": "4",
+        "width": 130.65625,
+        "height": 64
+      },
+      {
+        "label": "5",
+        "width": 130.671875,
+        "height": 64
+      },
+      {
+        "label": "6",
+        "width": 130.671875,
+        "height": 64
+      },
+      {
+        "label": "7",
+        "width": 130.65625,
+        "height": 64
+      },
+      {
+        "label": "8",
+        "width": 130.671875,
+        "height": 64
+      },
+      {
+        "label": "9",
+        "width": 130.671875,
+        "height": 64
+      },
+      {
+        "label": "Удалить последнюю цифру",
+        "width": 130.65625,
+        "height": 64
+      },
+      {
+        "label": "0",
+        "width": 130.671875,
+        "height": 64
+      },
+      {
+        "label": "Очистить PIN",
+        "width": 130.671875,
+        "height": 64
+      }
+    ],
+    "hasInput": 0
+  },
+  "coffeeConfirmation": {
+    "dialog": {
+      "x": 380,
+      "y": 187.4,
+      "width": 520,
+      "height": 345.2
+    },
+    "cancel": {
+      "x": 405,
+      "y": 453.6,
+      "width": 184,
+      "height": 54
+    },
+    "confirm": {
+      "x": 599,
+      "y": 453.6,
+      "width": 276,
+      "height": 54
+    },
+    "hasInput": 0
+  },
+  "avalarButtons": [
+    "Подробнее"
+  ],
+  "weatherSearch": {
+    "searchPanel": {
+      "x": 226.4,
+      "y": 178.4,
+      "width": 1015.2,
+      "height": 169
+    },
+    "input": {
+      "x": 243.4,
+      "y": 249.4,
+      "width": 863.2,
+      "height": 48
+    },
+    "close": {
+      "x": 1176.6,
+      "y": 195.4,
+      "width": 48,
+      "height": 27
+    },
+    "find": {
+      "x": 1114.6,
+      "y": 249.4,
+      "width": 110,
+      "height": 48
+    },
+    "activeTag": "BUTTON"
+  }
+}
