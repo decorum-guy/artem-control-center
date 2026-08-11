@@ -15,6 +15,43 @@ function Invoke-CheckedCommand {
     }
 }
 
+function Invoke-IsolatedValidation {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string]$Timestamp
+    )
+
+    $validationRoot = Join-Path $Paths.RuntimeRoot ("validation-temp\{0}" -f $Timestamp)
+    $pytestTemp = Join-Path $validationRoot "pytest"
+    New-Item -ItemType Directory -Force -Path $pytestTemp | Out-Null
+
+    $previousTemp = $env:TEMP
+    $previousTmp = $env:TMP
+    $previousPytestAddopts = $env:PYTEST_ADDOPTS
+    try {
+        $env:TEMP = $validationRoot
+        $env:TMP = $validationRoot
+        $isolatedArgs = "--basetemp=$pytestTemp -p no:cacheprovider"
+        $env:PYTEST_ADDOPTS = if ([string]::IsNullOrWhiteSpace($previousPytestAddopts)) {
+            $isolatedArgs
+        }
+        else {
+            "$previousPytestAddopts $isolatedArgs"
+        }
+
+        Invoke-CheckedCommand `
+            -FilePath "npm.cmd" `
+            -Arguments @("run", "check") `
+            -Description "full validation"
+    }
+    finally {
+        $env:TEMP = $previousTemp
+        $env:TMP = $previousTmp
+        $env:PYTEST_ADDOPTS = $previousPytestAddopts
+        Remove-Item -LiteralPath $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $paths = Get-ArtemRuntimePaths
 Initialize-ArtemRuntimeDirectories -Paths $paths
 Update-ArtemProcessPath
@@ -86,10 +123,7 @@ try {
     $env:PANEL_COFFEE_ACTIONS_ENABLED = "false"
     $env:PANEL_KIOSK_CONTROLS_ENABLED = "false"
 
-    Invoke-CheckedCommand `
-        -FilePath "npm.cmd" `
-        -Arguments @("run", "check") `
-        -Description "full validation"
+    Invoke-IsolatedValidation -Paths $paths -Timestamp $timestamp
 
     Remove-Item -LiteralPath $paths.ManualStop -Force -ErrorAction SilentlyContinue
     & $paths.StartScript

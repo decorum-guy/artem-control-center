@@ -42,7 +42,7 @@ function execution(status: string) {
   };
 }
 
-test("degraded Home connectivity can be recovered from the panel without PIN", async ({ page }) => {
+test("degraded Home connectivity can be recovered directly from Overview without PIN", async ({ page }) => {
   let postCount = 0;
   let executionReads = 0;
 
@@ -85,7 +85,7 @@ test("degraded Home connectivity can be recovered from the panel without PIN", a
     await route.continue();
   });
 
-  await page.goto("/home?scenario=ha-offline-policy-available");
+  await page.goto("/overview?scenario=ha-offline-policy-available");
   const surface = page.getByTestId("connectivity-recovery-surface");
   await expect(surface).toBeVisible();
   await expect(surface).toContainText("Приватное подключение требует внимания");
@@ -126,4 +126,16 @@ test("read-only profile exposes recovery state but cannot restart connectivity",
   await expect(surface).toBeVisible();
   await expect(surface.getByRole("button", { name: "Подключиться снова" })).toBeDisabled();
   expect(postCount).toBe(0);
+});
+
+test("degraded connectivity remains visible when the local recovery API is unavailable", async ({ page }) => {
+  await page.route("**/api/v1/actions/system/connectivity**", async (route) => {
+    await route.fulfill({ status: 404, contentType: "application/json", body: '{"detail":"not_found"}' });
+  });
+
+  await page.goto("/overview?scenario=ha-offline-policy-available");
+  const surface = page.getByTestId("connectivity-recovery-surface");
+  await expect(surface).toBeVisible();
+  await expect(surface).toContainText("recovery API ещё не готов");
+  await expect(surface.getByRole("button", { name: "Подключиться снова" })).toBeDisabled();
 });

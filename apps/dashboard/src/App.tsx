@@ -267,7 +267,7 @@ export function App() {
       {!snapshot && !error && <p className="loading">Собираем локальный snapshot…</p>}
       {snapshot && (
         <ProductShell route={route} services={snapshot.services} onNavigate={navigate}>
-          {(route === "/home" || route === "/services") && (
+          {(route === "/overview" || route === "/home" || route === "/services") && (
             <ConnectivityRecoverySurface
               services={snapshot.services}
               showWhenHealthy={route === "/services"}
