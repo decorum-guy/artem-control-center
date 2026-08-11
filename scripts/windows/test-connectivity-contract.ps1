@@ -12,6 +12,9 @@ $restarter = Read-ScriptText "restart-connectivity-tunnel.ps1"
 $common = Read-ScriptText "connectivity-common.ps1"
 $configurator = Read-ScriptText "configure-home-production.ps1"
 $status = Read-ScriptText "status-production.ps1"
+$panelStarter = Read-ScriptText "start-production.ps1"
+$updater = Read-ScriptText "update-production.ps1"
+$desktopHelpers = Read-ScriptText "sync-desktop-helpers.ps1"
 
 foreach ($required in @(
     "artem_control_center_tunnel",
@@ -65,6 +68,54 @@ foreach ($required in @(
 }
 if ($restarter -notmatch '(?s)^param\(\s*\[switch\]\$Json\s*\)') {
     throw "Connectivity restart helper may expose only the fixed Json output switch"
+}
+
+foreach ($required in @(
+    "Start-ArtemConnectivityIfConfigured",
+    "Get-ArtemConnectivityConfig",
+    "Test-ArtemConnectivitySupervisor",
+    "Start-ScheduledTask -TaskName `$connectivity.TaskName",
+    "connectivity.StopMarker",
+    "Sync-ArtemDesktopHelpers"
+)) {
+    if ($panelStarter -notlike "*$required*") {
+        throw "Panel startup must recover configured private connectivity without overriding manual stop: $required"
+    }
+}
+
+foreach ($required in @(
+    "validation-temp",
+    "--basetemp=",
+    "-p no:cacheprovider",
+    "PYTEST_ADDOPTS",
+    "Invoke-IsolatedValidation"
+)) {
+    if ($updater -notlike "*$required*") {
+        throw "Production updater must isolate pytest temp/cache state: $required"
+    }
+}
+
+foreach ($required in @(
+    "Open Control Center.cmd",
+    "Update Control Center.cmd",
+    "Stop Control Center.cmd",
+    "Repair Home Connection.cmd",
+    "restart-connectivity-tunnel.ps1"
+)) {
+    if ($desktopHelpers -notlike "*$required*") {
+        throw "Consolidated desktop helper contract is missing: $required"
+    }
+}
+foreach ($obsolete in @(
+    "Start Control Center.cmd",
+    "Start Control Center Connectivity.cmd",
+    "Stop Control Center Connectivity.cmd",
+    "Control Center Connectivity Status.cmd",
+    "Configure Home Production.cmd"
+)) {
+    if ($desktopHelpers -notlike "*$obsolete*") {
+        throw "Desktop helper cleanup must remove obsolete shortcut: $obsolete"
+    }
 }
 
 $combinedProcessControl = "$common`n$starter`n$stopper`n$restarter"
@@ -126,4 +177,4 @@ foreach ($required in @(
     }
 }
 
-Write-Host "Validated resilient private connectivity, scoped restart ownership, fail-closed production rollout and unified status contracts."
+Write-Host "Validated resilient private connectivity, startup recovery, clean desktop helpers and isolated update validation."
