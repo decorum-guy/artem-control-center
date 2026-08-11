@@ -9,8 +9,8 @@ import { App } from "./App";
 import "./ActionConfirmations.css";
 import "./AvalarActions.css";
 import "./ConnectivityActions.css";
-import "./Weather.css";
 import "./styles.css";
+import "./Weather.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
