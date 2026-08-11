@@ -241,7 +241,7 @@ export function App() {
         <section className="dev-widget-grid" aria-label="Automatically reconciled widgets">
           {snapshot &&
             widgets.map((widget) => {
-              const service = snapshot.services.find((item) => item.serviceId === widget.serviceId)!;
+              const service = snapshot.services.find((item) => item.id === widget.serviceId)!;
               const manifest = resolveManifest(service);
               return (
                 <ErrorBoundary key={widget.id} title={service.title}>
