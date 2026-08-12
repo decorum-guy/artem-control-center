@@ -117,12 +117,15 @@ test("all product routes render intentional non-development states", async ({ pa
 test("coffee settings use API values and persist timing and notification changes", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.getByTestId("coffee-settings")).toBeVisible();
-  await expect(page.getByLabel("Время разогрева")).toHaveValue("15");
-  await expect(page.getByLabel("Предупредить о долгой работе через")).toHaveValue("60");
-  await page.getByLabel("Время разогрева").fill("13");
+  const warmup = page.locator('output[aria-label="Время разогрева"]');
+  await expect(warmup).toHaveText("15 мин");
+  await expect(page.locator('output[aria-label="Предупредить о долгой работе через"]')).toHaveText("60 мин");
+  const warmupMinus = page.getByTestId("coffee-timing-warmup").getByRole("button", { name: /уменьшить/ });
+  await warmupMinus.click();
+  await warmupMinus.click();
   await page.getByRole("button", { name: "Сохранить" }).click();
-  await expect(page.getByRole("status")).toContainText("подтверждено Home Assistant");
-  await expect(page.getByLabel("Время разогрева")).toHaveValue("13");
+  await expect(page.locator(".settings-notice")).toContainText("подтверждено Home Assistant");
+  await expect(warmup).toHaveText("13 мин");
 
   const telegram = page.getByText("Разогрев завершён")
     .locator("..")
@@ -130,7 +133,7 @@ test("coffee settings use API values and persist timing and notification changes
   await expect(telegram).not.toBeChecked();
   await telegram.click();
   await expect(telegram).toBeChecked();
-  await expect(page.getByRole("status")).toContainText("уведомлений сохранены");
+  await expect(page.locator(".settings-notice")).toContainText("уведомлений сохранены");
 });
 
 test("coffee settings explain revision conflicts and source outage", async ({ page }) => {
@@ -146,10 +149,11 @@ test("coffee settings explain revision conflicts and source outage", async ({ pa
     await route.continue();
   });
   await page.goto("/settings");
-  await expect(page.getByLabel("Время разогрева")).toHaveValue(/\d+/);
-  await page.getByLabel("Время разогрева").fill("14");
+  const warmup = page.locator('output[aria-label="Время разогрева"]');
+  await expect(warmup).toHaveText(/\d+ мин/);
+  await page.getByTestId("coffee-timing-warmup").getByRole("button", { name: /уменьшить/ }).click();
   await page.getByRole("button", { name: "Сохранить" }).click();
-  await expect(page.getByRole("status")).toContainText("изменились в Telegram");
+  await expect(page.locator(".settings-notice")).toContainText("изменились в Telegram");
 
   await page.route("**/api/v1/settings/coffee/timing", (route) =>
     route.fulfill({
@@ -159,7 +163,7 @@ test("coffee settings explain revision conflicts and source outage", async ({ pa
     })
   );
   await page.reload();
-  await expect(page.getByRole("status")).toContainText("временно недоступны");
+  await expect(page.locator(".settings-notice")).toContainText("временно недоступны");
 });
 
 test("dirty timing draft survives background refresh and exposes Telegram conflict", async ({ page }) => {
@@ -187,18 +191,18 @@ test("dirty timing draft survives background refresh and exposes Telegram confli
   });
 
   await page.goto("/settings");
-  const warmup = page.getByLabel("Время разогрева");
-  await expect(warmup).toHaveValue("15");
-  await warmup.fill("14");
+  const warmup = page.locator('output[aria-label="Время разогрева"]');
+  await expect(warmup).toHaveText("15 мин");
+  await page.getByTestId("coffee-timing-warmup").getByRole("button", { name: /уменьшить/ }).click();
   telegramChanged = true;
   await page.evaluate(() =>
     document.dispatchEvent(new Event("visibilitychange"))
   );
   await expect(page.getByTestId("timing-conflict"))
     .toContainText("изменились в Telegram");
-  await expect(warmup).toHaveValue("14");
+  await expect(warmup).toHaveText("14 мин");
   await page.getByRole("button", { name: "Загрузить актуальные" }).click();
-  await expect(warmup).toHaveValue("17");
+  await expect(warmup).toHaveText("17 мин");
 });
 
 test("coffee actions stay policy-disabled by default and show confirmed HA result when enabled", async ({ page }) => {

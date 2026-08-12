@@ -376,7 +376,11 @@ class WeatherService:
         self.forecast_url = os.getenv("PANEL_WEATHER_FORECAST_URL", OPEN_METEO_URL).strip()
         self.geocode_url = os.getenv("PANEL_WEATHER_GEOCODE_URL", NOMINATIM_URL).strip()
         self._memory_cache: dict[str, WeatherForecast] = {}
-        self._geocode_lock = asyncio.Lock()
+        # Python 3.9 binds asyncio primitives to the current event loop at
+        # construction time.  The Panel Agent module is imported before the
+        # fixture test loop exists, so create this lock on first use instead.
+        self._geocode_lock: asyncio.Lock | None = None
+        self._geocode_lock_loop: asyncio.AbstractEventLoop | None = None
         self._last_geocode_at = 0.0
 
     def locations(self) -> list[WeatherLocation]:
@@ -495,6 +499,10 @@ class WeatherService:
             lowered = normalized.lower()
             return [item for item in fixture if lowered in item.title.lower() or lowered in item.normalizedAddress.lower()]
 
+        loop = asyncio.get_running_loop()
+        if self._geocode_lock is None or self._geocode_lock_loop is not loop:
+            self._geocode_lock = asyncio.Lock()
+            self._geocode_lock_loop = loop
         async with self._geocode_lock:
             wait = 1.05 - (time.monotonic() - self._last_geocode_at)
             if wait > 0:

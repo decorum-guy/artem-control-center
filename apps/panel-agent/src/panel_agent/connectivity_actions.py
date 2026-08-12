@@ -112,7 +112,10 @@ class ConnectivityActionExecutor:
         self.verification_timeout_seconds = max(1.0, verification_timeout_seconds)
         self.executions: OrderedDict[str, ConnectivityActionExecution] = OrderedDict()
         self.active_correlation_id: str | None = None
-        self._lock = asyncio.Lock()
+        # Bind the lock to the loop that runs the action.  Fixture tests reload
+        # the module between event loops on Python 3.9.
+        self._lock: asyncio.Lock | None = None
+        self._lock_loop: asyncio.AbstractEventLoop | None = None
 
     def _targets(self) -> tuple[tuple[str, int], tuple[str, int]] | None:
         ha = _loopback_target(self.settings.ha_url)
@@ -194,6 +197,10 @@ class ConnectivityActionExecutor:
 
     async def _execute(self, correlation_id: str) -> None:
         try:
+            loop = asyncio.get_running_loop()
+            if self._lock is None or self._lock_loop is not loop:
+                self._lock = asyncio.Lock()
+                self._lock_loop = loop
             async with self._lock:
                 self._update(correlation_id, "restarting")
                 await self.restart_runner()

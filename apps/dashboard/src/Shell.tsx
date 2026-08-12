@@ -1,6 +1,8 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
 import { WeatherHeaderSummary } from "./Weather";
+import { TemporaryAccessIndicator } from "./AccessControls";
+import { B0NoticeFixture, GlobalNoticeRegion } from "./NoticeCenter";
 
 export type RoutePath =
   | "/overview"
@@ -23,7 +25,7 @@ const primaryNavigation: Array<{ path: ShellRoutePath; label: string; short: str
   { path: "/services", label: "Сервисы", short: "С" },
   { path: "/calendar", label: "Календарь", short: "К" },
   { path: "/tasks", label: "Задачи", short: "З" },
-  { path: "/backups", label: "Backups", short: "Б" }
+  { path: "/backups", label: "Резервные копии", short: "Б" }
 ];
 
 const secondaryNavigation: Array<{ path: ShellRoutePath; label: string }> = [
@@ -145,8 +147,11 @@ export function ProductShell({
             >
               А
             </button>
+            <TemporaryAccessIndicator />
           </div>
         </header>
+        <GlobalNoticeRegion />
+        <B0NoticeFixture />
         <div className="route-content">{children}</div>
       </main>
     </div>

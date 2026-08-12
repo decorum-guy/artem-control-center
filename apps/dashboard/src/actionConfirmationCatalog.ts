@@ -4,7 +4,8 @@ export type ActionConfirmationId =
   | "avalar.main.restart"
   | "avalar.main.deploy"
   | "home.coffee.turn_on"
-  | "home.kettle.boil";
+  | "home.kettle.boil"
+  | "system.runtime.shutdown";
 
 export type ActionConfirmationLevel = "simple" | "strong";
 export type ActionConfirmationTone = "standard" | "production";
@@ -83,5 +84,15 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "Home Assistant",
     description: "Запустим зарегистрированную команду кипячения и дождёмся подтверждения состояния Home Assistant.",
     confirmLabel: "Вскипятить"
+  },
+  "system.runtime.shutdown": {
+    id: "system.runtime.shutdown",
+    level: "simple",
+    tone: "standard",
+    title: "Полностью закрыть панель?",
+    target: "Локальный Windows kiosk-runtime",
+    environment: "система",
+    description: "Остановим окно панели и локальные процессы runtime. Скрытие панели остаётся отдельной командой.",
+    confirmLabel: "Полностью закрыть"
   }
 };

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AccessSettingsPanel } from "./AccessControls";
+import { useActionConfirmation } from "./ActionConfirmations";
 import {
   clearRuntimeShutdownPending,
   markRuntimeShutdownPending
@@ -12,6 +13,7 @@ type Availability = "loading" | "available" | "unavailable";
 interface RuntimeStatus {
   enabled: boolean;
   platform: string;
+  revision?: string;
 }
 
 function wait(milliseconds: number) {
@@ -29,7 +31,9 @@ async function runtimeIsStillReachable(delayMs = 1_000) {
 }
 
 export function RuntimeControls() {
+  const { confirmAction } = useActionConfirmation();
   const [availability, setAvailability] = useState<Availability>("loading");
+  const [runtimeRevision, setRuntimeRevision] = useState<string | undefined>();
   const [pending, setPending] = useState<RuntimeAction | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -42,7 +46,10 @@ export function RuntimeControls() {
         return response.json() as Promise<RuntimeStatus>;
       })
       .then((status) => {
-        if (active) setAvailability(status.enabled ? "available" : "unavailable");
+        if (active) {
+          setRuntimeRevision(status.revision);
+          setAvailability(status.enabled ? "available" : "unavailable");
+        }
       })
       .catch(() => {
         if (active) setAvailability("unavailable");
@@ -56,13 +63,9 @@ export function RuntimeControls() {
   async function runAction(action: RuntimeAction) {
     if (pending || availability !== "available") return;
 
-    if (
-      action === "shutdown" &&
-      !window.confirm(
-        "Полностью закрыть Artem Control Center? Окно панели и локальные серверы будут остановлены."
-      )
-    ) {
-      return;
+    if (action === "shutdown") {
+      const confirmation = await confirmAction("system.runtime.shutdown", { revision: runtimeRevision });
+      if (!confirmation.confirmed) return;
     }
 
     setPending(action);

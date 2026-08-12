@@ -73,7 +73,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
         description="Дом, ближайшие дела и состояние сервисов — без лишней технической детализации."
       />
 
-      <div className="overview-focus">
+      <div className="overview-focus" data-testid="overview-primary-content">
         <section className="overview-coffee" aria-label="Кофемашина">
           {coffee ? (
             <ErrorBoundary title={coffee.service.title}>
@@ -171,7 +171,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
         <section className="support-section backup-summary">
           <header className="section-heading">
             <div>
-              <p className="section-kicker">Backups</p>
+              <p className="section-kicker">Резервные копии</p>
               <h2>{backupServices.length ? "Состояние получено" : "Источник не подключён"}</h2>
             </div>
             <button type="button" onClick={() => onNavigate("/backups")}>Подробнее</button>
@@ -256,6 +256,14 @@ const groupOrder: ServiceGroup[] = [
   "External services"
 ];
 
+const groupLabels: Record<ServiceGroup, string> = {
+  AVALAR: "AVALAR",
+  "Home infrastructure": "Домашняя инфраструктура",
+  "Personal infrastructure": "Личная инфраструктура",
+  System: "Система",
+  "External services": "Внешние сервисы"
+};
+
 export function ServicesPage({ snapshot }: PageProps) {
   const catalog = servicesByPriority(snapshot.services).filter(
     (service) => service.presentation?.category !== "home-device"
@@ -289,7 +297,7 @@ export function ServicesPage({ snapshot }: PageProps) {
           return (
             <section className="service-group" key={group}>
               <header>
-                <h2>{group}</h2>
+                <h2>{groupLabels[group]}</h2>
                 <span>{services.length}</span>
               </header>
               <div className="service-list">
@@ -325,7 +333,7 @@ const placeholderCopy: Record<
   },
   "/backups": {
     eyebrow: "Надёжность",
-    title: "Backups",
+    title: "Резервные копии",
     description: "Свежесть критичных копий, активные операции и подтверждённые restore points.",
     status: "Backup contract подготовлен, но runtime data ещё не подключены."
   },
@@ -336,7 +344,7 @@ const placeholderCopy: Record<
     status: "Каталог приложений ещё не настроен."
   },
   "/system": {
-    eyebrow: "Control plane",
+    eyebrow: "Панель управления",
     title: "Система",
     description: "Состояние Panel Agent, registry reconciliation и локального runtime.",
     status: "Подробные системные данные появятся после read-only adapter integration."
@@ -383,7 +391,7 @@ export function SettingsPage({
       <section className="settings-section">
         <div>
           <h2>Тема</h2>
-          <p>Day и night используют одну систему поверхностей и семантических цветов.</p>
+          <p>День и ночь используют одну систему поверхностей и семантических цветов.</p>
         </div>
         <div className="segmented-control" role="group" aria-label="Тема">
           {(["day", "night"] as const).map((value) => (
@@ -401,13 +409,13 @@ export function SettingsPage({
       <section className="settings-section">
         <div>
           <h2>Движение</h2>
-          <p>Reduced, low-performance и battery-saving сохраняют информацию без декоративной анимации.</p>
+          <p>Уменьшенное движение, низкая производительность и экономия батареи сохраняют информацию без декоративной анимации.</p>
         </div>
         <select value={motion} onChange={(event) => onMotionChange(event.target.value as typeof motion)}>
           <option value="full">Полное</option>
-          <option value="reduced">Reduced motion</option>
-          <option value="low-performance">Low performance</option>
-          <option value="battery-saving">Battery saving</option>
+          <option value="reduced">Уменьшенное движение</option>
+          <option value="low-performance">Низкая производительность</option>
+          <option value="battery-saving">Экономия батареи</option>
         </select>
       </section>
       <RuntimeControls />

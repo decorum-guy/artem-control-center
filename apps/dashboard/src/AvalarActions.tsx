@@ -4,7 +4,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode
 } from "react";
@@ -12,6 +11,7 @@ import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import type { ActionConfirmationId } from "./actionConfirmationCatalog";
+import { useNoticeCenter } from "./NoticeCenter";
 import {
   avalarActionTitles,
   fetchAvalarAvailability,
@@ -81,26 +81,18 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   const [availability, setAvailability] = useState<Record<AvalarActionId, AvalarActionAvailability> | null>(null);
   const [available, setAvailable] = useState(false);
   const [pendingAction, setPendingAction] = useState<AvalarActionId | null>(null);
-  const [notice, setNotice] = useState<ActionNotice | null>(null);
-  const noticeTimerRef = useRef<number | null>(null);
-
+  const { showNotice: pushNotice } = useNoticeCenter();
   const showNotice = useCallback((next: ActionNotice, timeoutMs?: number) => {
-    if (noticeTimerRef.current !== null) {
-      window.clearTimeout(noticeTimerRef.current);
-      noticeTimerRef.current = null;
-    }
-    setNotice(next);
-    if (timeoutMs) {
-      noticeTimerRef.current = window.setTimeout(() => {
-        setNotice(null);
-        noticeTimerRef.current = null;
-      }, timeoutMs);
-    }
-  }, []);
-
-  useEffect(() => () => {
-    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
-  }, []);
+    pushNotice({
+      id: "avalar.action",
+      correlationId: next.meta,
+      severity: next.tone,
+      title: next.title,
+      detail: next.meta ? `${next.message} · ${next.meta}` : next.message,
+      timeoutMs,
+      testId: "avalar-action-notice"
+    });
+  }, [pushNotice]);
 
   const refresh = useCallback(async () => {
     try {
@@ -246,22 +238,6 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   return (
     <AvalarActionsContext.Provider value={value}>
       {children}
-      {notice && (
-        <aside
-          className={`action-notice action-notice--${notice.tone}`}
-          role={notice.tone === "error" ? "alert" : "status"}
-          aria-live={notice.tone === "error" ? "assertive" : "polite"}
-          aria-atomic="true"
-          data-testid="avalar-action-notice"
-        >
-          <span className="action-notice__indicator" aria-hidden="true" />
-          <span className="action-notice__copy">
-            <strong>{notice.title}</strong>
-            <span>{notice.message}</span>
-            {notice.meta && <small>{notice.meta}</small>}
-          </span>
-        </aside>
-      )}
     </AvalarActionsContext.Provider>
   );
 }

@@ -7,6 +7,7 @@ import { ConnectivityActionsProvider } from "./ConnectivityActions";
 import { WeatherProvider } from "./Weather";
 import { WeatherAutoRefresh } from "./WeatherAutoRefresh";
 import { App } from "./App";
+import { NoticeCenterProvider } from "./NoticeCenter";
 import "./ActionConfirmations.css";
 import "./AvalarActions.css";
 import "./ConnectivityActions.css";
@@ -15,17 +16,19 @@ import "./Weather.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ActionConfirmationProvider>
-      <AccessProvider>
-        <WeatherProvider>
-          <WeatherAutoRefresh />
-          <ConnectivityActionsProvider>
-            <AvalarActionsProvider>
-              <App />
-            </AvalarActionsProvider>
-          </ConnectivityActionsProvider>
-        </WeatherProvider>
-      </AccessProvider>
-    </ActionConfirmationProvider>
+    <NoticeCenterProvider>
+      <ActionConfirmationProvider>
+        <AccessProvider>
+          <WeatherProvider>
+            <WeatherAutoRefresh />
+            <ConnectivityActionsProvider>
+              <AvalarActionsProvider>
+                <App />
+              </AvalarActionsProvider>
+            </ConnectivityActionsProvider>
+          </WeatherProvider>
+        </AccessProvider>
+      </ActionConfirmationProvider>
+    </NoticeCenterProvider>
   </StrictMode>
 );
