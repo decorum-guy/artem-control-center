@@ -48,7 +48,11 @@ Planning credentials or AliceTG_Bot/Home Assistant changes are required.
   because the global list is capped at 20.
 - Calendar: choose from `calendar.today`, falling back to
   `calendar.upcoming`. Timed events show local time; all-day events show
-  `Весь день`.
+  `Весь день`. The selector excludes ended timed events, keeps an in-progress
+  event relevant, and matches all-day ranges against the event timezone's
+  local date. Current snapshots use the live presentation clock; stale,
+  degraded, and offline snapshots freeze selection to `lastSyncedAt`, then
+  `generatedAt`.
 
 Source health is combined into one card indicator: degraded `Есть проблемы`,
 stale `Данные от HH:MM`, and offline `Актуальные данные недоступны` with the

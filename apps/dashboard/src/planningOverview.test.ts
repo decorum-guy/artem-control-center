@@ -7,6 +7,7 @@ import {
   formatReminderDueLabel,
   formatReminderExactTime,
   planningHealthPresentation,
+  planningReferenceTime,
   selectNextCalendarEvent,
   selectNextReminder,
   selectPrimaryOverdueTask
@@ -61,15 +62,75 @@ describe("Planning Overview selectors and presentation", () => {
   });
 
   it("prefers today calendar events, then falls back to upcoming", () => {
-    expect(selectNextCalendarEvent(planningFixtures.timedEvent)?.id).toBe("00000000-0000-4000-8000-000000000020");
-    expect(formatCalendarEventTime(selectNextCalendarEvent(planningFixtures.timedEvent)!)).toBe("17:30");
-    expect(formatCalendarEventTime(selectNextCalendarEvent(planningFixtures.allDayEvent)!)).toBe("Весь день");
+    expect(selectNextCalendarEvent(planningFixtures.timedEvent, fixtureNow)?.id).toBe("00000000-0000-4000-8000-000000000020");
+    expect(formatCalendarEventTime(selectNextCalendarEvent(planningFixtures.timedEvent, fixtureNow)!)).toBe("17:30");
+    expect(formatCalendarEventTime(selectNextCalendarEvent(planningFixtures.allDayEvent, fixtureNow)!)).toBe("Весь день");
     const upcomingOnly = {
       ...planningFixtures.empty,
       calendar: { ...planningFixtures.empty.calendar, upcoming: planningFixtures.timedEvent.calendar.today }
     };
-    expect(selectNextCalendarEvent(upcomingOnly)?.id).toBe("00000000-0000-4000-8000-000000000020");
-    expect(selectNextCalendarEvent(planningFixtures.empty)).toBeNull();
+    expect(selectNextCalendarEvent(upcomingOnly, fixtureNow)?.id).toBe("00000000-0000-4000-8000-000000000020");
+    expect(selectNextCalendarEvent(planningFixtures.empty, fixtureNow)).toBeNull();
+  });
+
+  it("ignores ended today events and keeps the next future event", () => {
+    const afternoon = new Date("2026-08-12T14:00:00Z");
+    expect(selectNextCalendarEvent(planningFixtures.endedMorningAndFutureEvening, afternoon)?.title).toBe("Вечерняя встреча");
+  });
+
+  it("falls back to upcoming after every timed event today has ended", () => {
+    const afternoon = new Date("2026-08-12T14:00:00Z");
+    expect(selectNextCalendarEvent(planningFixtures.endedTodayWithUpcoming, afternoon)?.title).toBe("Завтрашняя встреча");
+  });
+
+  it("keeps an in-progress event relevant and orders future events by start then ID", () => {
+    const afternoon = new Date("2026-08-12T14:00:00Z");
+    expect(selectNextCalendarEvent(planningFixtures.runningEvent, afternoon)?.title).toBe("Встреча идёт");
+
+    const first = planningFixtures.timedEvent.calendar.today[0];
+    const tiedEarlierId = { ...first, id: "00000000-0000-4000-8000-000000000018", title: "Ранее по ID" };
+    const tiedLaterId = { ...first, id: "00000000-0000-4000-8000-000000000019", title: "Позже по ID" };
+    const tiedSnapshot = {
+      ...planningFixtures.empty,
+      calendar: { ...planningFixtures.empty.calendar, today: [tiedLaterId, tiedEarlierId] }
+    };
+    expect(selectNextCalendarEvent(tiedSnapshot, fixtureNow)?.id).toBe(tiedEarlierId.id);
+  });
+
+  it("advances current selection but freezes stale, degraded, and offline selection", () => {
+    const currentSnapshot = {
+      ...planningFixtures.timedEvent,
+      calendar: {
+        ...planningFixtures.timedEvent.calendar,
+        upcoming: [planningFixtures.endedTodayWithUpcoming.calendar.upcoming[0]]
+      }
+    };
+    expect(selectNextCalendarEvent(currentSnapshot, new Date("2026-08-12T15:00:00Z"))?.id).toBe("00000000-0000-4000-8000-000000000020");
+    expect(selectNextCalendarEvent(currentSnapshot, new Date("2026-08-12T16:00:00Z"))?.id).toBe("00000000-0000-4000-8000-000000000025");
+
+    for (const sourceStatus of ["stale", "degraded", "offline"] as const) {
+      const frozenSnapshot = { ...planningFixtures.endedMorningAndFutureEvening, sourceStatus };
+      expect(planningReferenceTime(frozenSnapshot, new Date("2026-08-12T20:00:00Z"))?.toISOString()).toBe("2026-08-12T11:59:00.000Z");
+      expect(selectNextCalendarEvent(frozenSnapshot, new Date("2026-08-12T20:00:00Z"))?.title).toBe("Вечерняя встреча");
+    }
+  });
+
+  it("does not invent a selection for an impossible timed event", () => {
+    const impossible = {
+      ...planningFixtures.timedEvent.calendar.today[0],
+      id: "00000000-0000-4000-8000-000000000099",
+      startAtUtc: "2026-08-12T16:00:00Z",
+      endAtUtc: "2026-08-12T15:00:00Z"
+    };
+    const snapshot = {
+      ...planningFixtures.empty,
+      calendar: {
+        ...planningFixtures.empty.calendar,
+        today: [impossible],
+        upcoming: planningFixtures.timedEvent.calendar.today
+      }
+    };
+    expect(selectNextCalendarEvent(snapshot, fixtureNow)?.id).toBe("00000000-0000-4000-8000-000000000020");
   });
 
   it("reports current, degraded, stale, offline, and absent Planning states", () => {

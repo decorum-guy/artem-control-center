@@ -41,6 +41,21 @@ function timestampValue(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
+function parseTimestamp(value: string | null | undefined): Date | null {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? new Date(parsed) : null;
+}
+
+function validDate(value: Date): Date | null {
+  return Number.isFinite(value.getTime()) ? new Date(value.getTime()) : null;
+}
+
+/** Current data follows the live presentation clock; non-current data follows its canonical snapshot time. */
+export function planningReferenceTime(snapshot: PlanningSnapshot, liveNow: Date): Date | null {
+  if (snapshot.sourceStatus === "current") return validDate(liveNow);
+  return parseTimestamp(snapshot.lastSyncedAt) ?? parseTimestamp(snapshot.generatedAt);
+}
+
 function compareTimestampThenId(
   left: { id: string; timestamp: string | null | undefined },
   right: { id: string; timestamp: string | null | undefined }
@@ -91,22 +106,102 @@ export function formatOverdueTaskCount(count: number): string {
   return count >= 20 ? "20+" : String(count);
 }
 
-function calendarEventSortKey(event: PlanningCalendarEvent): string {
-  if (event.allDay) return `${event.startDate ?? "9999-12-31"}T00:00:00Z`;
-  return event.startAtUtc ?? "9999-12-31T23:59:59Z";
+function validCalendarDate(value: string | null): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
+    ? value
+    : null;
 }
 
-/** Prefer the bounded today window and only fall back to the upcoming window when it is empty. */
-export function selectNextCalendarEvent(snapshot: PlanningSnapshot): PlanningCalendarEvent | null {
-  const candidates = snapshot.calendar.today.length
-    ? snapshot.calendar.today
-    : snapshot.calendar.upcoming;
-  return uniqueById(candidates)
-    .sort((left, right) => {
-      const startDifference = compareStrings(calendarEventSortKey(left), calendarEventSortKey(right));
-      if (startDifference !== 0) return startDifference;
-      return compareStrings(left.id, right.id);
-    })[0] ?? null;
+function localDateKey(value: Date, timeZone: string): string | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      day: "2-digit",
+      month: "2-digit",
+      timeZone,
+      year: "numeric"
+    }).formatToParts(value);
+    const year = parts.find((part) => part.type === "year")?.value;
+    const month = parts.find((part) => part.type === "month")?.value;
+    const day = parts.find((part) => part.type === "day")?.value;
+    return validCalendarDate(year && month && day ? `${year}-${month}-${day}` : null);
+  } catch {
+    return null;
+  }
+}
+
+function allDayCoversDate(event: PlanningCalendarEvent, date: string | null): boolean {
+  const startDate = validCalendarDate(event.startDate);
+  const endDateExclusive = validCalendarDate(event.endDateExclusive);
+  return Boolean(startDate && endDateExclusive && date && startDate < endDateExclusive && startDate <= date && date < endDateExclusive);
+}
+
+function allDayHasNotEnded(event: PlanningCalendarEvent, date: string | null): boolean {
+  const startDate = validCalendarDate(event.startDate);
+  const endDateExclusive = validCalendarDate(event.endDateExclusive);
+  return Boolean(startDate && endDateExclusive && date && startDate < endDateExclusive && endDateExclusive > date);
+}
+
+type CalendarCandidate = {
+  event: PlanningCalendarEvent;
+  rank: 0 | 1 | 2;
+  sortKey: string;
+};
+
+function relevantCalendarCandidates(
+  events: PlanningCalendarEvent[],
+  referenceTime: Date | null,
+  scope: "today" | "upcoming"
+): CalendarCandidate[] {
+  if (!referenceTime) return [];
+  const referenceMs = referenceTime.getTime();
+  const candidates: CalendarCandidate[] = [];
+
+  for (const event of uniqueById(events)) {
+    if (event.allDay) {
+      const eventLocalDate = localDateKey(referenceTime, event.timezone);
+      const relevant = scope === "today"
+        ? allDayCoversDate(event, eventLocalDate)
+        : allDayHasNotEnded(event, eventLocalDate);
+      if (relevant && event.startDate) {
+        candidates.push({ event, rank: 0, sortKey: event.startDate });
+      }
+      continue;
+    }
+
+    const start = parseTimestamp(event.startAtUtc);
+    const end = parseTimestamp(event.endAtUtc);
+    if (!start || !end || end.getTime() <= start.getTime()) continue;
+    if (start.getTime() <= referenceMs && end.getTime() > referenceMs) {
+      candidates.push({ event, rank: 1, sortKey: event.startAtUtc ?? "" });
+    } else if (start.getTime() > referenceMs) {
+      candidates.push({ event, rank: 2, sortKey: event.startAtUtc ?? "" });
+    }
+  }
+
+  return candidates;
+}
+
+function compareCalendarCandidates(left: CalendarCandidate, right: CalendarCandidate): number {
+  if (left.rank !== right.rank) return left.rank - right.rank;
+  const sortDifference = compareStrings(left.sortKey, right.sortKey);
+  return sortDifference || compareStrings(left.event.id, right.event.id);
+}
+
+/** Prefer relevant today events and fall back to upcoming when today's events have ended. */
+export function selectNextCalendarEvent(
+  snapshot: PlanningSnapshot,
+  liveNow: Date
+): PlanningCalendarEvent | null {
+  const referenceTime = planningReferenceTime(snapshot, liveNow);
+  const todayCandidates = relevantCalendarCandidates(snapshot.calendar.today, referenceTime, "today")
+    .sort(compareCalendarCandidates);
+  if (todayCandidates.length) return todayCandidates[0].event;
+
+  return relevantCalendarCandidates(snapshot.calendar.upcoming, referenceTime, "upcoming")
+    .sort(compareCalendarCandidates)[0]?.event ?? null;
 }
 
 function formatClock(value: string, timeZone?: string): string {

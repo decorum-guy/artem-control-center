@@ -19,7 +19,12 @@ const ids = {
   lowTask: "00000000-0000-4000-8000-000000000012",
   noneTask: "00000000-0000-4000-8000-000000000013",
   timedEvent: "00000000-0000-4000-8000-000000000020",
-  allDayEvent: "00000000-0000-4000-8000-000000000021"
+  allDayEvent: "00000000-0000-4000-8000-000000000021",
+  endedMorning: "00000000-0000-4000-8000-000000000022",
+  eveningEvent: "00000000-0000-4000-8000-000000000023",
+  endedLate: "00000000-0000-4000-8000-000000000024",
+  tomorrowEvent: "00000000-0000-4000-8000-000000000025",
+  runningEvent: "00000000-0000-4000-8000-000000000026"
 } as const;
 
 const capabilities = {
@@ -193,6 +198,63 @@ export const planningFixtures = {
         endAtUtc: null,
         startDate: "2026-08-12",
         endDateExclusive: "2026-08-13"
+      })],
+      upcoming: [],
+      conflicts: []
+    }
+  }),
+  endedMorningAndFutureEvening: planning({
+    calendar: {
+      today: [
+        calendarEvent({
+          id: ids.endedMorning,
+          title: "Утреннее совещание",
+          startAtUtc: "2026-08-12T09:00:00Z",
+          endAtUtc: "2026-08-12T10:00:00Z"
+        }),
+        calendarEvent({
+          id: ids.eveningEvent,
+          title: "Вечерняя встреча",
+          startAtUtc: "2026-08-12T16:00:00Z",
+          endAtUtc: "2026-08-12T17:00:00Z"
+        })
+      ],
+      upcoming: [],
+      conflicts: []
+    }
+  }),
+  endedTodayWithUpcoming: planning({
+    calendar: {
+      today: [
+        calendarEvent({
+          id: ids.endedMorning,
+          title: "Утреннее совещание",
+          startAtUtc: "2026-08-12T09:00:00Z",
+          endAtUtc: "2026-08-12T10:00:00Z"
+        }),
+        calendarEvent({
+          id: ids.endedLate,
+          title: "Дневная встреча",
+          startAtUtc: "2026-08-12T11:00:00Z",
+          endAtUtc: "2026-08-12T12:00:00Z"
+        })
+      ],
+      upcoming: [calendarEvent({
+        id: ids.tomorrowEvent,
+        title: "Завтрашняя встреча",
+        startAtUtc: "2026-08-13T09:00:00Z",
+        endAtUtc: "2026-08-13T10:00:00Z"
+      })],
+      conflicts: []
+    }
+  }),
+  runningEvent: planning({
+    calendar: {
+      today: [calendarEvent({
+        id: ids.runningEvent,
+        title: "Встреча идёт",
+        startAtUtc: "2026-08-12T13:30:00Z",
+        endAtUtc: "2026-08-12T15:00:00Z"
       })],
       upcoming: [],
       conflicts: []

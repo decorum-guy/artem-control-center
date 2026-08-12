@@ -36,6 +36,10 @@ function boxesOverlap(left: { x: number; y: number; width: number; height: numbe
 }
 
 test.describe("B2 Planning Overview", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.clock.install({ time: "2026-08-12T14:00:00Z" });
+  });
+
   test("required monitoring signals fit the canonical touch viewport", async ({ page }) => {
     await mockPlanning(page, planningFixtures.healthy);
     await page.goto("/overview?theme=day");
@@ -89,6 +93,14 @@ test.describe("B2 Planning Overview", () => {
     const notices = await page.getByTestId("global-notice-stack").locator("[data-testid='global-notice']").evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().toJSON()));
     expect(card).not.toBeNull();
     expect(notices.every((notice) => !boxesOverlap(card as { x: number; y: number; width: number; height: number }, notice))).toBeTruthy();
+  });
+
+  test("shows the future event instead of an ended morning event", async ({ page }) => {
+    await mockPlanning(page, planningFixtures.endedMorningAndFutureEvening);
+    await page.goto("/overview?theme=day");
+    const eventRow = page.getByTestId("planning-event-row");
+    await expect(eventRow).toContainText("Вечерняя встреча");
+    await expect(eventRow).not.toContainText("Утреннее совещание");
   });
 
   test("supports day/night themes and all motion modes without losing signals", async ({ page }) => {

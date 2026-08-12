@@ -122,7 +122,7 @@ export function PlanningOverviewCard({
 
   const reminder = selectNextReminder(planning);
   const overdueTask = selectPrimaryOverdueTask(planning);
-  const event = selectNextCalendarEvent(planning);
+  const event = selectNextCalendarEvent(planning, now);
   const overdueCount = formatOverdueTaskCount(countOverdueTasks(planning));
   const currentData = planning.sourceStatus === "current";
   const reminderTitle = reminder?.title ?? unavailableRowTitle(health, "Напоминаний нет");
