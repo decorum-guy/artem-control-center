@@ -9,10 +9,10 @@ $installer = Read-CompanionFile "install-rog-g703-companion.ps1"
 $companion = Read-CompanionFile "rog_g703_companion.py"
 
 foreach ($required in @(
-    "ValidateSet(\"install\", \"status\", \"restart\", \"uninstall\")",
+    'ValidateSet("install", "status", "restart", "uninstall")',
     "New-ScheduledTaskTrigger -AtStartup",
     "New-ScheduledTaskPrincipal",
-    "-UserId \"SYSTEM\"",
+    '-UserId "SYSTEM"',
     "New-NetFirewallRule",
     "-RemoteAddress `$FirewallRemoteAddress",
     "Remove-NetFirewallRule",
