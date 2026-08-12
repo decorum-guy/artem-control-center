@@ -83,6 +83,20 @@ describe("Planning Overview selectors and presentation", () => {
     expect(selectNextCalendarEvent(planningFixtures.endedTodayWithUpcoming, afternoon)?.title).toBe("Завтрашняя встреча");
   });
 
+  it("orders upcoming events by local calendar day before event type", () => {
+    expect(selectNextCalendarEvent(planningFixtures.upcomingTimedBeforeLaterAllDay, fixtureNow)?.title).toBe("Завтрашняя timed-встреча");
+  });
+
+  it("prefers an upcoming all-day event before a timed event on the same day", () => {
+    expect(selectNextCalendarEvent(planningFixtures.upcomingSameDayAllDayBeforeTimed, fixtureNow)?.title).toBe("Завтрашний день без времени");
+  });
+
+  it("orders upcoming timed events by day, then start time, then stable ID", () => {
+    expect(selectNextCalendarEvent(planningFixtures.upcomingTimedDays, fixtureNow)?.title).toBe("Встреча завтра");
+    expect(selectNextCalendarEvent(planningFixtures.upcomingTimedSameDay, fixtureNow)?.title).toBe("Ранняя встреча завтра");
+    expect(selectNextCalendarEvent(planningFixtures.upcomingTimedTie, fixtureNow)?.id).toBe("00000000-0000-4000-8000-000000000033");
+  });
+
   it("keeps an in-progress event relevant and orders future events by start then ID", () => {
     const afternoon = new Date("2026-08-12T14:00:00Z");
     expect(selectNextCalendarEvent(planningFixtures.runningEvent, afternoon)?.title).toBe("Встреча идёт");
@@ -112,6 +126,9 @@ describe("Planning Overview selectors and presentation", () => {
       const frozenSnapshot = { ...planningFixtures.endedMorningAndFutureEvening, sourceStatus };
       expect(planningReferenceTime(frozenSnapshot, new Date("2026-08-12T20:00:00Z"))?.toISOString()).toBe("2026-08-12T11:59:00.000Z");
       expect(selectNextCalendarEvent(frozenSnapshot, new Date("2026-08-12T20:00:00Z"))?.title).toBe("Вечерняя встреча");
+
+      const frozenUpcoming = { ...planningFixtures.upcomingTimedBeforeLaterAllDay, sourceStatus };
+      expect(selectNextCalendarEvent(frozenUpcoming, new Date("2026-08-20T20:00:00Z"))?.title).toBe("Завтрашняя timed-встреча");
     }
   });
 

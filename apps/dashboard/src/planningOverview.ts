@@ -146,8 +146,9 @@ function allDayHasNotEnded(event: PlanningCalendarEvent, date: string | null): b
 
 type CalendarCandidate = {
   event: PlanningCalendarEvent;
-  rank: 0 | 1 | 2;
+  orderRank: 0 | 1 | 2;
   sortKey: string;
+  calendarDay: string | null;
 };
 
 function relevantCalendarCandidates(
@@ -165,8 +166,14 @@ function relevantCalendarCandidates(
       const relevant = scope === "today"
         ? allDayCoversDate(event, eventLocalDate)
         : allDayHasNotEnded(event, eventLocalDate);
-      if (relevant && event.startDate) {
-        candidates.push({ event, rank: 0, sortKey: event.startDate });
+      const startDate = validCalendarDate(event.startDate);
+      if (relevant && startDate) {
+        candidates.push({
+          event,
+          orderRank: 0,
+          sortKey: startDate,
+          calendarDay: scope === "upcoming" ? startDate : null
+        });
       }
       continue;
     }
@@ -175,17 +182,39 @@ function relevantCalendarCandidates(
     const end = parseTimestamp(event.endAtUtc);
     if (!start || !end || end.getTime() <= start.getTime()) continue;
     if (start.getTime() <= referenceMs && end.getTime() > referenceMs) {
-      candidates.push({ event, rank: 1, sortKey: event.startAtUtc ?? "" });
+      const calendarDay = scope === "upcoming" ? localDateKey(start, event.timezone) : null;
+      if (scope === "upcoming" && !calendarDay) continue;
+      candidates.push({
+        event,
+        orderRank: 1,
+        sortKey: event.startAtUtc ?? "",
+        calendarDay
+      });
     } else if (start.getTime() > referenceMs) {
-      candidates.push({ event, rank: 2, sortKey: event.startAtUtc ?? "" });
+      const calendarDay = scope === "upcoming" ? localDateKey(start, event.timezone) : null;
+      if (scope === "upcoming" && !calendarDay) continue;
+      candidates.push({
+        event,
+        orderRank: scope === "upcoming" ? 1 : 2,
+        sortKey: event.startAtUtc ?? "",
+        calendarDay
+      });
     }
   }
 
   return candidates;
 }
 
-function compareCalendarCandidates(left: CalendarCandidate, right: CalendarCandidate): number {
-  if (left.rank !== right.rank) return left.rank - right.rank;
+function compareCalendarCandidates(
+  left: CalendarCandidate,
+  right: CalendarCandidate,
+  scope: "today" | "upcoming"
+): number {
+  if (scope === "upcoming") {
+    const calendarDayDifference = compareStrings(left.calendarDay ?? "9999-12-31", right.calendarDay ?? "9999-12-31");
+    if (calendarDayDifference !== 0) return calendarDayDifference;
+  }
+  if (left.orderRank !== right.orderRank) return left.orderRank - right.orderRank;
   const sortDifference = compareStrings(left.sortKey, right.sortKey);
   return sortDifference || compareStrings(left.event.id, right.event.id);
 }
@@ -197,11 +226,11 @@ export function selectNextCalendarEvent(
 ): PlanningCalendarEvent | null {
   const referenceTime = planningReferenceTime(snapshot, liveNow);
   const todayCandidates = relevantCalendarCandidates(snapshot.calendar.today, referenceTime, "today")
-    .sort(compareCalendarCandidates);
+    .sort((left, right) => compareCalendarCandidates(left, right, "today"));
   if (todayCandidates.length) return todayCandidates[0].event;
 
   return relevantCalendarCandidates(snapshot.calendar.upcoming, referenceTime, "upcoming")
-    .sort(compareCalendarCandidates)[0]?.event ?? null;
+    .sort((left, right) => compareCalendarCandidates(left, right, "upcoming"))[0]?.event ?? null;
 }
 
 function formatClock(value: string, timeZone?: string): string {

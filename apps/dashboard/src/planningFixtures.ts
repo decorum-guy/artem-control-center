@@ -24,7 +24,15 @@ const ids = {
   eveningEvent: "00000000-0000-4000-8000-000000000023",
   endedLate: "00000000-0000-4000-8000-000000000024",
   tomorrowEvent: "00000000-0000-4000-8000-000000000025",
-  runningEvent: "00000000-0000-4000-8000-000000000026"
+  runningEvent: "00000000-0000-4000-8000-000000000026",
+  upcomingTomorrowTimed: "00000000-0000-4000-8000-000000000027",
+  upcomingLaterAllDay: "00000000-0000-4000-8000-000000000028",
+  upcomingTomorrowAllDay: "00000000-0000-4000-8000-000000000029",
+  upcomingTomorrowTimedSameDay: "00000000-0000-4000-8000-000000000030",
+  upcomingEarlierDayTimed: "00000000-0000-4000-8000-000000000031",
+  upcomingLaterDayTimed: "00000000-0000-4000-8000-000000000032",
+  upcomingTieEarlier: "00000000-0000-4000-8000-000000000033",
+  upcomingTieLater: "00000000-0000-4000-8000-000000000034"
 } as const;
 
 const capabilities = {
@@ -257,6 +265,112 @@ export const planningFixtures = {
         endAtUtc: "2026-08-12T15:00:00Z"
       })],
       upcoming: [],
+      conflicts: []
+    }
+  }),
+  upcomingTimedBeforeLaterAllDay: planning({
+    calendar: {
+      today: [],
+      upcoming: [
+        calendarEvent({
+          id: ids.upcomingTomorrowTimed,
+          title: "Завтрашняя timed-встреча",
+          startAtUtc: "2026-08-13T06:00:00Z",
+          endAtUtc: "2026-08-13T07:00:00Z"
+        }),
+        calendarEvent({
+          id: ids.upcomingLaterAllDay,
+          title: "Поздний день без времени",
+          allDay: true,
+          startAtUtc: null,
+          endAtUtc: null,
+          startDate: "2026-08-17",
+          endDateExclusive: "2026-08-18"
+        })
+      ],
+      conflicts: []
+    }
+  }),
+  upcomingSameDayAllDayBeforeTimed: planning({
+    calendar: {
+      today: [],
+      upcoming: [
+        calendarEvent({
+          id: ids.upcomingTomorrowTimedSameDay,
+          title: "Завтрашняя timed-встреча",
+          startAtUtc: "2026-08-13T09:00:00Z",
+          endAtUtc: "2026-08-13T10:00:00Z"
+        }),
+        calendarEvent({
+          id: ids.upcomingTomorrowAllDay,
+          title: "Завтрашний день без времени",
+          allDay: true,
+          startAtUtc: null,
+          endAtUtc: null,
+          startDate: "2026-08-13",
+          endDateExclusive: "2026-08-14"
+        })
+      ],
+      conflicts: []
+    }
+  }),
+  upcomingTimedDays: planning({
+    calendar: {
+      today: [],
+      upcoming: [
+        calendarEvent({
+          id: ids.upcomingLaterDayTimed,
+          title: "Встреча через несколько дней",
+          startAtUtc: "2026-08-15T09:00:00Z",
+          endAtUtc: "2026-08-15T10:00:00Z"
+        }),
+        calendarEvent({
+          id: ids.upcomingEarlierDayTimed,
+          title: "Встреча завтра",
+          startAtUtc: "2026-08-13T11:00:00Z",
+          endAtUtc: "2026-08-13T12:00:00Z"
+        })
+      ],
+      conflicts: []
+    }
+  }),
+  upcomingTimedSameDay: planning({
+    calendar: {
+      today: [],
+      upcoming: [
+        calendarEvent({
+          id: ids.upcomingLaterDayTimed,
+          title: "Поздняя встреча завтра",
+          startAtUtc: "2026-08-13T11:00:00Z",
+          endAtUtc: "2026-08-13T12:00:00Z"
+        }),
+        calendarEvent({
+          id: ids.upcomingEarlierDayTimed,
+          title: "Ранняя встреча завтра",
+          startAtUtc: "2026-08-13T09:00:00Z",
+          endAtUtc: "2026-08-13T10:00:00Z"
+        })
+      ],
+      conflicts: []
+    }
+  }),
+  upcomingTimedTie: planning({
+    calendar: {
+      today: [],
+      upcoming: [
+        calendarEvent({
+          id: ids.upcomingTieLater,
+          title: "Позже по ID",
+          startAtUtc: "2026-08-13T09:00:00Z",
+          endAtUtc: "2026-08-13T10:00:00Z"
+        }),
+        calendarEvent({
+          id: ids.upcomingTieEarlier,
+          title: "Ранее по ID",
+          startAtUtc: "2026-08-13T09:00:00Z",
+          endAtUtc: "2026-08-13T10:00:00Z"
+        })
+      ],
       conflicts: []
     }
   }),

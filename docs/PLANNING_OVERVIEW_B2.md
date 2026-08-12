@@ -52,7 +52,9 @@ Planning credentials or AliceTG_Bot/Home Assistant changes are required.
   event relevant, and matches all-day ranges against the event timezone's
   local date. Current snapshots use the live presentation clock; stale,
   degraded, and offline snapshots freeze selection to `lastSyncedAt`, then
-  `generatedAt`.
+  `generatedAt`. In the upcoming fallback, effective local calendar day is
+  compared before event type; all-day wins over timed only within the same
+  local day, and timed events then use actual start time.
 
 Source health is combined into one card indicator: degraded `Есть проблемы`,
 stale `Данные от HH:MM`, and offline `Актуальные данные недоступны` with the

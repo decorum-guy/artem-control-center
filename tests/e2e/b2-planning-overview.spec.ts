@@ -103,6 +103,14 @@ test.describe("B2 Planning Overview", () => {
     await expect(eventRow).not.toContainText("Утреннее совещание");
   });
 
+  test("orders upcoming events by local day before all-day type", async ({ page }) => {
+    await mockPlanning(page, planningFixtures.upcomingTimedBeforeLaterAllDay);
+    await page.goto("/overview?theme=day");
+    const eventRow = page.getByTestId("planning-event-row");
+    await expect(eventRow).toContainText("Завтрашняя timed-встреча");
+    await expect(eventRow).not.toContainText("Поздний день без времени");
+  });
+
   test("supports day/night themes and all motion modes without losing signals", async ({ page }) => {
     for (const theme of ["day", "night"]) {
       for (const motion of ["full", "reduced", "low-performance", "battery-saving"]) {
