@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import panel_agent.planning_adapter as planning_adapter_module
 from panel_agent.contracts import ServiceSnapshot
 from panel_agent.fixtures import services_for_scenario
 from panel_agent.integrations import IntegrationRuntime
@@ -25,7 +26,11 @@ from panel_agent.planning_adapter import (
 )
 from panel_agent.planning_api import build_planning_router
 from panel_agent.planning_cache import PlanningProjectionCache
-from panel_agent.planning_fixtures import PlanningFixtureTransport
+from panel_agent.planning_fixtures import (
+    FIXTURE_TIMESTAMP,
+    PlanningFixtureTransport,
+    fixture_reference_datetime,
+)
 from panel_agent.settings import IntegrationSettings
 from panel_agent.snapshot import SnapshotPublisher
 
@@ -534,6 +539,83 @@ def test_runtime_disabled_planning_does_not_change_existing_service_shape():
     assert runtime.planning_snapshot() is None
     assert runtime.services()
     assert all(service.dataContract for service in runtime.services())
+
+
+@pytest.mark.parametrize("mode", ["fixtures", "integration_test"])
+def test_fixture_planning_clock_ignores_host_date_rollover(monkeypatch, tmp_path, mode):
+    host_now = datetime(2026, 8, 13, 21, 30, tzinfo=timezone.utc)
+
+    class HostDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return host_now if tz is None else host_now.astimezone(tz)
+
+    monkeypatch.setattr(planning_adapter_module, "datetime", HostDateTime)
+    runtime = IntegrationRuntime(
+        settings(
+            tmp_path,
+            panel_planning_fixture_scenario="b3-healthy",
+        ),
+        mode=mode,
+    )
+
+    async def exercise():
+        try:
+            await runtime.start_planning()
+            adapter = runtime.planning
+            wall_now = adapter._wall_now()
+            windows = adapter._windows(wall_now)
+            return adapter.projection, wall_now, windows
+        finally:
+            await runtime.close()
+
+    projection, wall_now, windows = asyncio.run(exercise())
+    assert wall_now == fixture_reference_datetime()
+    assert windows["today_from"] == "2026-08-11T21:00:00Z"
+    assert windows["today_to"] == "2026-08-12T21:00:00Z"
+    assert windows["upcoming_from"] == "2026-08-12T21:00:00Z"
+    assert windows["upcoming_to"] == "2026-08-19T21:00:00Z"
+    assert projection is not None
+    assert projection.generatedAt == FIXTURE_TIMESTAMP
+    assert projection.lastSyncedAt == FIXTURE_TIMESTAMP
+    assert len(projection.calendar.today) == 6
+    assert {event.title for event in projection.calendar.today} == {
+        "Командировка · несколько дней",
+        "Утреннее совещание",
+        "Текущая встреча",
+        "Первая пересекающаяся встреча",
+        "Вторая пересекающаяся встреча",
+        "Граничная встреча",
+    }
+    assert "Встреча в Берлине" in {
+        event.title for event in projection.calendar.upcoming
+    }
+
+
+def test_normal_planning_adapter_follows_explicit_later_wall_clock(tmp_path):
+    host_now = datetime(2026, 8, 13, 21, 30, tzinfo=timezone.utc)
+    adapter = PlanningAdapter(
+        settings(tmp_path, panel_planning_fixture_scenario="b3-healthy"),
+        transport=PlanningFixtureTransport("b3-healthy"),
+        wall_clock=lambda: host_now,
+    )
+
+    async def exercise():
+        try:
+            await adapter.start()
+            wall_now = adapter._wall_now()
+            return adapter.projection, wall_now, adapter._windows(wall_now)
+        finally:
+            await adapter.close()
+
+    projection, wall_now, windows = asyncio.run(exercise())
+    assert wall_now == host_now
+    assert windows["today_from"] == "2026-08-13T21:00:00Z"
+    assert windows["today_to"] == "2026-08-14T21:00:00Z"
+    assert windows["upcoming_from"] == "2026-08-14T21:00:00Z"
+    assert windows["upcoming_to"] == "2026-08-21T21:00:00Z"
+    assert projection is not None
+    assert projection.generatedAt == "2026-08-13T21:30:00Z"
 
 
 def test_online_route_reads_bypass_global_summary_and_preserve_a4_pagination(tmp_path):
