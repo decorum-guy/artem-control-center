@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator, Awaitable, Callable, Iterable
 
 from .contracts import DashboardSnapshot, PanelMode, ServiceSnapshot
+from .planning import PlanningProjection
 
 
 class SnapshotPublisher:
@@ -17,10 +18,12 @@ class SnapshotPublisher:
         *,
         mode: PanelMode,
         services_builder: Callable[[], Iterable[ServiceSnapshot]],
+        planning_builder: Callable[[], PlanningProjection | None] | None = None,
         heartbeat_seconds: float = 20,
     ) -> None:
         self._mode = mode
         self._services_builder = services_builder
+        self._planning_builder = planning_builder
         self._heartbeat_seconds = max(0.01, heartbeat_seconds)
         self._snapshot: DashboardSnapshot | None = None
         self._fingerprint: str | None = None
@@ -48,7 +51,8 @@ class SnapshotPublisher:
 
     async def rebuild(self) -> DashboardSnapshot:
         services = list(self._services_builder())
-        fingerprint = _fingerprint(services, self._mode)
+        planning = self._planning_builder() if self._planning_builder is not None else None
+        fingerprint = _fingerprint(services, self._mode, planning)
         loop = asyncio.get_running_loop()
         if self._lock is None or self._lock_loop is not loop:
             self._lock = asyncio.Lock()
@@ -67,6 +71,7 @@ class SnapshotPublisher:
                 mode=self._mode,
                 fixtureScenario=None,
                 services=services,
+                planning=planning,
             )
             revision = self._revision
             for queue in tuple(self._subscribers):
@@ -139,7 +144,11 @@ def sse_event(event: str, data: dict, *, event_id: int | None = None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def _fingerprint(services: list[ServiceSnapshot], mode: PanelMode) -> str:
+def _fingerprint(
+    services: list[ServiceSnapshot],
+    mode: PanelMode,
+    planning: PlanningProjection | None = None,
+) -> str:
     payload = {
         "mode": mode,
         "services": [
@@ -148,6 +157,11 @@ def _fingerprint(services: list[ServiceSnapshot], mode: PanelMode) -> str:
             )
             for service in services
         ],
+        "planning": (
+            _without_technical_fields(planning.model_dump(mode="json", exclude_none=False))
+            if planning is not None
+            else None
+        ),
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -165,6 +179,10 @@ _TECHNICAL_FIELDS = {
     "lastSuccessfulRestAt",
     "lastTransportConnectedAt",
     "lastTransportFailureAt",
+    "lastSyncedAt",
+    "staleAfter",
+    "providerLastSyncAt",
+    "healthObservedAt",
 }
 
 
