@@ -4,6 +4,7 @@ node_modules/
 __pycache__/
 .pytest_cache/
 .vite/
+.cache/
 dist/
 playwright-report/
 test-results/

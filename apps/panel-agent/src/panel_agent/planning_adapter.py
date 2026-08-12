@@ -8,6 +8,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import date, datetime, time as local_time, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -41,6 +42,7 @@ from .planning import (
     status_projection,
     timestamp_datetime,
     validate_date,
+    validate_uuid4,
     validate_utc_timestamp,
 )
 from .planning_cache import PlanningProjectionCache
@@ -59,6 +61,11 @@ PLANNING_ROUTES: Mapping[str, str] = {
 PLANNING_AUDIENCE = "panel-agent"
 PLANNING_PAGE_LIMIT = 20
 PLANNING_MAX_UPSTREAM_PAGE = 100
+PLANNING_REMINDER_SCAN_MAX_PAGES_PER_SOURCE = 2
+PLANNING_REMINDER_SCAN_MAX_ROWS_PER_SOURCE = (
+    PLANNING_MAX_UPSTREAM_PAGE * PLANNING_REMINDER_SCAN_MAX_PAGES_PER_SOURCE
+)
+PLANNING_REMINDER_SCAN_MAX_ROWS = PLANNING_REMINDER_SCAN_MAX_ROWS_PER_SOURCE * 2
 PLANNING_FAILURE_SCAN_MAX_PAGES = 1
 PLANNING_RANGE_DAYS = 30
 PLANNING_EVENT_UPCOMING_DAYS = 7
@@ -78,8 +85,27 @@ class PlanningUpstreamError(RuntimeError):
         self.status_code = status_code
 
 
+class PlanningBoundedScanError(PlanningUpstreamError):
+    """A derived read cannot be proven inside its fixed scan budget."""
+
+    def __init__(self) -> None:
+        super().__init__("reminder_view_scan_budget_exceeded")
+
+
 class PlanningReadUnavailable(RuntimeError):
     """A route read cannot be satisfied from the live upstream or a complete cache."""
+
+
+@dataclass
+class _ReminderScanSource:
+    state: Literal["pending", "due"]
+    from_utc: str | None = None
+    to_utc: str | None = None
+    items: list[UpstreamReminder] = field(default_factory=list)
+    envelopes: list[ReminderListEnvelope] = field(default_factory=list)
+    next_offset: int = 0
+    pages: int = 0
+    exhausted: bool = False
 
 
 def validate_planning_base_url(value: str) -> str:
@@ -620,6 +646,217 @@ class PlanningAdapter:
             offset=offset,
         )
         return self._read_upstream_envelope(envelope)
+
+    async def read_reminder_view(
+        self,
+        *,
+        view: Literal["upcoming", "overdue", "delivery"],
+        limit: int,
+        offset: int,
+    ) -> PlanningReadEnvelope:
+        """Build one bounded, truthful reminder monitor view from fixed reads.
+
+        AliceTG_Bot exposes lifecycle state, not the UI's derived delivery view.
+        The adapter therefore scans successive fixed 100-row A4 pages, up to two
+        pages per lifecycle source (200 rows per source, 400 rows for a composed
+        pending+due view). Delivery exhausts its single due source before sorting,
+        because the upstream due-time order cannot prove the derived delivery
+        rank. Upcoming/overdue use the more efficient due-time prefix proof. If
+        either proof needs another page beyond the budget, the read fails closed
+        with a dedicated bounded-scan error.
+        """
+
+        if view not in {"upcoming", "overdue", "delivery"}:
+            raise PlanningUpstreamError("reminder_view_out_of_range")
+        client = self._live_client()
+        now = self._wall_now()
+        windows = self._windows(now)
+        if view == "delivery":
+            sources = [
+                _ReminderScanSource(state="due")
+            ]
+        else:
+            from_utc = (
+                windows["now"]
+                if view == "upcoming"
+                else windows["reminder_overdue_from"]
+            )
+            to_utc = (
+                windows["reminder_upcoming_to"]
+                if view == "upcoming"
+                else windows["now"]
+            )
+            sources = [
+                _ReminderScanSource(
+                    state=state,
+                    from_utc=from_utc,
+                    to_utc=to_utc,
+                )
+                for state in ("pending", "due")
+            ]
+
+        page_end = offset + limit
+        await self._scan_reminder_sources(
+            client,
+            sources,
+            view=view,
+            page_end=page_end,
+        )
+        ordered_source = self._ordered_reminder_items(view, sources)
+        mapped = self._map_reminders(ordered_source)
+        page = mapped[offset : offset + limit]
+        envelopes = [
+            envelope
+            for source in sources
+            for envelope in source.envelopes
+        ]
+        last_synced_at = self._max_synced_at(envelopes)
+        return PlanningReadEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="list",
+            domain="reminder",
+            generatedAt=self._now_text(now),
+            sourceStatus=self._status_source_status(current=True),
+            lastSyncedAt=last_synced_at,
+            staleAfter=(
+                self._now_text(
+                    timestamp_datetime(last_synced_at)
+                    + timedelta(seconds=self._settings.panel_planning_stale_after_seconds)
+                )
+                if last_synced_at is not None
+                else None
+            ),
+            items=page,
+            limit=limit,
+            offset=offset,
+            count=len(page),
+            hasMore=offset + len(page) < len(mapped),
+        )
+
+    async def _scan_reminder_sources(
+        self,
+        client: PlanningClient,
+        sources: list[_ReminderScanSource],
+        *,
+        view: Literal["upcoming", "overdue", "delivery"],
+        page_end: int,
+    ) -> None:
+        """Read only enough fixed pages to prove one composed page.
+
+        Delivery is the exception to the prefix strategy: its due source is
+        ordered by due time, while the derived view promotes delivery state, so
+        the source must be exhausted before any page can be globally proven.
+        Every non-exhausted source must contribute at least ``page_end`` raw
+        rows before its prefix can prove the composed ordering. A source that
+        is already exhausted is fully known. When the requested page ends at
+        the current unique boundary, another unique row or exhaustion is also
+        required to prove ``hasMore``; otherwise this method fails closed at
+        the fixed two-page budget.
+        """
+
+        if view == "delivery":
+            source = sources[0]
+            while not source.exhausted:
+                if source.pages >= PLANNING_REMINDER_SCAN_MAX_PAGES_PER_SOURCE:
+                    raise PlanningBoundedScanError()
+                await self._read_next_reminder_source_page(client, source)
+                if sum(len(source.items) for source in sources) > PLANNING_REMINDER_SCAN_MAX_ROWS:
+                    raise PlanningBoundedScanError()
+            return
+
+        while True:
+            ordered = self._ordered_reminder_items_from_sources(sources, view=view)
+            all_exhausted = all(source.exhausted for source in sources)
+            prefixes_proven = all(
+                source.exhausted or len(source.items) >= page_end
+                for source in sources
+            )
+            has_more_proven = len(ordered) > page_end or all_exhausted
+            if all_exhausted or (prefixes_proven and has_more_proven):
+                return
+
+            active_sources = [source for source in sources if not source.exhausted]
+            if not active_sources or any(
+                source.pages >= PLANNING_REMINDER_SCAN_MAX_PAGES_PER_SOURCE
+                for source in active_sources
+            ):
+                raise PlanningBoundedScanError()
+
+            await asyncio.gather(
+                *(self._read_next_reminder_source_page(client, source) for source in active_sources)
+            )
+            if sum(len(source.items) for source in sources) > PLANNING_REMINDER_SCAN_MAX_ROWS:
+                raise PlanningBoundedScanError()
+
+    async def _read_next_reminder_source_page(
+        self,
+        client: PlanningClient,
+        source: _ReminderScanSource,
+    ) -> None:
+        if source.exhausted:
+            return
+        if source.pages >= PLANNING_REMINDER_SCAN_MAX_PAGES_PER_SOURCE:
+            raise PlanningBoundedScanError()
+        page_offset = source.next_offset
+        envelope = await client.reminders(
+            state=source.state,
+            from_utc=source.from_utc,
+            to_utc=source.to_utc,
+            limit=PLANNING_MAX_UPSTREAM_PAGE,
+            offset=page_offset,
+        )
+        source.pages += 1
+        source.envelopes.append(envelope)
+        source.items.extend(envelope.items)
+        if len(source.items) > PLANNING_REMINDER_SCAN_MAX_ROWS_PER_SOURCE:
+            raise PlanningBoundedScanError()
+        if not envelope.pagination.has_more:
+            source.exhausted = True
+            return
+        next_offset = envelope.pagination.next_offset
+        if next_offset is None or next_offset <= page_offset:
+            raise PlanningUpstreamError("reminder_view_pagination_invalid")
+        source.next_offset = next_offset
+
+    def _ordered_reminder_items(
+        self,
+        view: Literal["upcoming", "overdue", "delivery"],
+        sources: list[_ReminderScanSource],
+    ) -> list[UpstreamReminder]:
+        return self._ordered_reminder_items_from_sources(sources, view=view)
+
+    @staticmethod
+    def _ordered_reminder_items_from_sources(
+        sources: list[_ReminderScanSource],
+        *,
+        view: Literal["upcoming", "overdue", "delivery"],
+    ) -> list[UpstreamReminder]:
+        selected_source: list[UpstreamReminder] = []
+        for source in sources:
+            for item in source.items:
+                if view == "delivery":
+                    if item.status == "due" and item.delivery_state in {"queued", "retrying", "failed"}:
+                        selected_source.append(item)
+                elif item.status in {"pending", "due"}:
+                    selected_source.append(item)
+
+        unique_source: dict[str, UpstreamReminder] = {}
+        for item in selected_source:
+            unique_source.setdefault(item.id, item)
+        if view == "delivery":
+            delivery_rank = {"failed": 0, "retrying": 1, "queued": 2}
+            return sorted(
+                unique_source.values(),
+                key=lambda item: (
+                    delivery_rank.get(item.delivery_state, 3),
+                    item.due_at_utc,
+                    item.id,
+                ),
+            )
+        return sorted(
+            unique_source.values(),
+            key=lambda item: (item.due_at_utc, item.id),
+        )
 
     async def read_tasks(
         self,

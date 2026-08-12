@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -39,6 +39,13 @@ PLANNING_FIXTURE_SCENARIOS = frozenset(
         "overview-delivered-open",
         "overview-long-russian",
         "overview-bounded-20",
+        "b3-healthy",
+        "b3-empty",
+        "b3-route-pagination",
+        "b3-route-budget",
+        "b3-composed-route-pagination",
+        "b3-long-russian",
+        "b3-overlap",
     }
 )
 _IDS = {
@@ -106,17 +113,18 @@ def fixture_payload(scenario: str, path: str, query: httpx.QueryParams | None = 
         items = _filter_reminders(_reminder_items(scenario), query)
         return _list_envelope("reminder", items, query=query)
     if path == "/internal/planning/v1/tasks":
-        if scenario in {"empty", "overview-empty"}:
+        if scenario in {"empty", "overview-empty", "b3-empty"}:
             items: list[dict[str, Any]] = []
-        elif scenario == "route-pagination":
+        elif scenario in {"route-pagination", "b3-route-pagination"}:
             view = query.get("view") if query is not None else "today"
-            items = _route_tasks(view or "today")
+            items = _route_tasks(view or "today", b3=scenario == "b3-route-pagination")
         else:
             view = query.get("view") if query is not None else None
             items = _task_items(scenario, view or "today")
+        items = _filter_tasks(items, query)
         return _list_envelope("task", items, query=query)
     if path == "/internal/planning/v1/events":
-        items = [] if scenario in {"empty", "overview-empty"} else _event_items(scenario)
+        items = [] if scenario in {"empty", "overview-empty", "b3-empty"} else _event_items(scenario)
         return _list_envelope(
             "calendar_event",
             _filter_events(items, query),
@@ -163,8 +171,16 @@ def _synthetic_uuid(index: int) -> str:
 
 
 def _reminder_items(scenario: str) -> list[dict[str, Any]]:
-    if scenario in {"empty", "overview-empty"}:
+    if scenario in {"empty", "overview-empty", "b3-empty"}:
         return []
+    if scenario in {"b3-healthy", "b3-overlap", "b3-long-russian"}:
+        return _b3_reminder_items(long_russian=scenario == "b3-long-russian")
+    if scenario == "b3-route-pagination":
+        return _b3_paged_reminder_items()
+    if scenario == "b3-route-budget":
+        return _b3_budget_reminder_items()
+    if scenario == "b3-composed-route-pagination":
+        return _b3_composed_paged_reminder_items()
     if scenario == "overview-delivery-failure":
         return [_reminder(), _failure_reminder()]
     if scenario == "overview-delivered-open":
@@ -212,12 +228,14 @@ def _filter_reminders(
     return sorted(result, key=lambda item: (item["due_at_utc"], item["id"]))
 
 
-def _route_tasks(view: str) -> list[dict[str, Any]]:
+def _route_tasks(view: str, *, b3: bool = False) -> list[dict[str, Any]]:
     due_date = {
         "today": "2026-08-12",
         "overdue": "2026-08-11",
         "upcoming": "2026-08-15",
     }.get(view, "2026-08-12")
+    if b3:
+        return _b3_paged_tasks(view)
     return [
         _task(
             "today_task",
@@ -229,7 +247,285 @@ def _route_tasks(view: str) -> list[dict[str, Any]]:
     ]
 
 
+def _filter_tasks(
+    items: list[dict[str, Any]],
+    query: httpx.QueryParams | None,
+) -> list[dict[str, Any]]:
+    project_id = query.get("project_id") if query is not None else None
+    if project_id is None:
+        return items
+    return [item for item in items if item.get("project_id") == project_id]
+
+
+def _b3_reminder_items(*, long_russian: bool = False) -> list[dict[str, Any]]:
+    return [
+        _reminder(
+            due_at_utc="2026-08-13T10:00:00Z",
+            title=(
+                "Проверить длинное русское напоминание о доставке документов в бухгалтерию до конца рабочего дня"
+                if long_russian
+                else "Подготовить документы к отправке"
+            ),
+        ),
+        _reminder_variant(
+            "b3_overdue_pending",
+            "Просроченное напоминание",
+            "2026-08-12T07:30:00Z",
+            object_id=_synthetic_uuid(5001),
+            status="pending",
+            delivery_state="not_due",
+        ),
+        _reminder_variant(
+            "b3_due_queued",
+            "Доставить документы",
+            "2026-08-12T08:00:00Z",
+            object_id=_synthetic_uuid(5002),
+            status="due",
+            delivery_state="queued",
+        ),
+        _reminder_variant(
+            "b3_due_retrying",
+            "Повторить доставку",
+            "2026-08-12T08:15:00Z",
+            object_id=_synthetic_uuid(5003),
+            status="due",
+            delivery_state="retrying",
+            next_attempt_at="2026-08-12T09:15:00Z",
+        ),
+        _reminder_variant(
+            "b3_due_delivered",
+            "Доставлено, ждёт завершения",
+            "2026-08-12T08:30:00Z",
+            object_id=_synthetic_uuid(5004),
+            status="due",
+            delivery_state="delivered",
+        ),
+        _reminder_variant(
+            "b3_due_failed",
+            "Проверить сбой доставки",
+            "2026-08-12T08:45:00Z",
+            object_id=_synthetic_uuid(5005),
+            status="due",
+            delivery_state="failed",
+            final_failure_at="2026-08-12T08:50:00Z",
+        ),
+        _completed_reminder("completed_future", "2026-08-12T11:00:00Z"),
+        _cancelled_reminder(),
+    ]
+
+
+def _b3_paged_reminder_items() -> list[dict[str, Any]]:
+    return _b3_delivery_page_items(count=140, id_start=6000, title_prefix="Контроль доставки")
+
+
+def _b3_budget_reminder_items() -> list[dict[str, Any]]:
+    return _b3_delivery_page_items(count=260, id_start=6500, title_prefix="Бюджет доставки")
+
+
+def _b3_delivery_page_items(
+    *,
+    count: int,
+    id_start: int,
+    title_prefix: str,
+) -> list[dict[str, Any]]:
+    base = datetime(2026, 8, 12, 7, 0, tzinfo=timezone.utc)
+    result: list[dict[str, Any]] = []
+    for index in range(count):
+        due = (base + timedelta(minutes=index)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        delivery_state = ("failed", "retrying", "queued")[index % 3]
+        result.append(
+            _reminder_variant(
+                f"b3_paged_reminder_{index}",
+                f"{title_prefix} {index + 1}",
+                due,
+                object_id=_synthetic_uuid(id_start + index),
+                status="due",
+                delivery_state=delivery_state,
+                final_failure_at=FIXTURE_TIMESTAMP if delivery_state == "failed" else None,
+            )
+        )
+    return result
+
+
+def _b3_composed_paged_reminder_items() -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    upcoming_base = datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc)
+    overdue_base = datetime(2026, 8, 12, 6, 0, tzinfo=timezone.utc)
+    for index in range(120):
+        upcoming_due = (upcoming_base + timedelta(minutes=index)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        overdue_due = (overdue_base + timedelta(minutes=index)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        result.extend(
+            [
+                _reminder_variant(
+                    f"b3_composed_pending_{index}",
+                    f"Составное ожидающее {index + 1}",
+                    upcoming_due,
+                    object_id=_synthetic_uuid(7000 + index),
+                    status="pending",
+                    delivery_state="not_due",
+                ),
+                _reminder_variant(
+                    f"b3_composed_due_upcoming_{index}",
+                    f"Составное due скоро {index + 1}",
+                    upcoming_due,
+                    object_id=_synthetic_uuid(7200 + index),
+                    status="due",
+                    delivery_state="not_due",
+                ),
+                _reminder_variant(
+                    f"b3_composed_due_overdue_{index}",
+                    f"Составное due просрочено {index + 1}",
+                    overdue_due,
+                    object_id=_synthetic_uuid(7400 + index),
+                    status="due",
+                    delivery_state="not_due",
+                ),
+                _reminder_variant(
+                    f"b3_composed_pending_overdue_{index}",
+                    f"Составное pending просрочено {index + 1}",
+                    overdue_due,
+                    object_id=_synthetic_uuid(7600 + index),
+                    status="pending",
+                    delivery_state="not_due",
+                ),
+            ]
+        )
+    return result
+
+
+def _reminder_variant(
+    identifier: str,
+    title: str,
+    due_at_utc: str,
+    *,
+    object_id: str | None = None,
+    status: str,
+    delivery_state: str,
+    next_attempt_at: str | None = None,
+    final_failure_at: str | None = None,
+) -> dict[str, Any]:
+    item = _reminder(due_at_utc=due_at_utc, title=title)
+    item.update(
+        {
+            "id": object_id or _synthetic_uuid(5000),
+            "status": status,
+            "delivery_state": delivery_state,
+            "next_attempt_at": next_attempt_at,
+            "final_failure_at": final_failure_at,
+        }
+    )
+    return item
+
+
+def _b3_tasks(view: str, *, long_russian: bool = False) -> list[dict[str, Any]]:
+    if view == "today":
+        return [
+            _task("today_task", "2026-08-12", "high", due_time="10:30", timezone_name="Europe/Moscow"),
+            _task("today_task", "2026-08-12", "normal", object_id=_synthetic_uuid(5101), project_id=None),
+            _task("today_task", "2026-08-12", "low", object_id=_synthetic_uuid(5102), due_time="14:30", timezone_name="Europe/Berlin"),
+            _task("today_task", "2026-08-12", "none", object_id=_synthetic_uuid(5103), due_time=None, timezone_name=None),
+        ]
+    if view == "overdue":
+        return [
+            _task("overdue_task", "2026-08-11", "high", title=(
+                "Подготовить очень длинную просроченную задачу для квартального отчёта https://example.com light.turn_on /etc/passwd"
+                if long_russian
+                else "Согласовать квартальный отчёт"
+            ), due_time="15:20", timezone_name="Europe/Moscow"),
+            _task("overdue_task", "2026-08-10", "normal", object_id=_synthetic_uuid(5104), project_id=None),
+            _task("overdue_task", "2026-08-09", "low", object_id=_synthetic_uuid(5105), due_time=None, timezone_name=None),
+            _task("overdue_task", "2026-08-08", "none", object_id=_synthetic_uuid(5106), due_time="09:00", timezone_name="Europe/Berlin"),
+        ]
+    return [
+        _task("upcoming_task", "2026-08-15", "normal", due_time="09:30", timezone_name="Europe/Moscow"),
+        _task("upcoming_task", "2026-08-16", "low", object_id=_synthetic_uuid(5107), project_id=None),
+    ]
+
+
+def _b3_paged_tasks(view: str) -> list[dict[str, Any]]:
+    due_date = {"today": "2026-08-12", "overdue": "2026-08-11", "upcoming": "2026-08-15"}.get(view, "2026-08-12")
+    return [
+        _task(
+            "today_task",
+            due_date,
+            ("high", "normal", "low", "none")[index % 4],
+            object_id=_synthetic_uuid(5200 + index),
+            due_time=(None if index % 5 == 0 else "10:00"),
+            timezone_name=(None if index % 5 == 0 else "Europe/Moscow"),
+            project_id=(None if index % 4 == 0 else _IDS["project"]),
+        )
+        for index in range(60)
+    ]
+
+
+def _b3_events(*, long_russian: bool = False) -> list[dict[str, Any]]:
+    return [
+        _all_day_event(
+            object_id=_IDS["all_day_event"],
+            title="Командировка · несколько дней",
+            start_date="2026-08-12",
+            end_date_exclusive="2026-08-14",
+        ),
+        _timed_event(
+            object_id=_IDS["timed_event"],
+            title=(
+                "Длинная встреча с русским названием, которое должно спокойно занимать две строки"
+                if long_russian
+                else "Утреннее совещание"
+            ),
+            start_at_utc="2026-08-12T06:00:00Z",
+            end_at_utc="2026-08-12T07:00:00Z",
+        ),
+        _timed_event(
+            object_id=_synthetic_uuid(5301),
+            title="Текущая встреча",
+            start_at_utc="2026-08-12T08:30:00Z",
+            end_at_utc="2026-08-12T09:30:00Z",
+        ),
+        _timed_event(
+            object_id=_synthetic_uuid(5302),
+            title="Первая пересекающаяся встреча",
+            start_at_utc="2026-08-12T10:00:00Z",
+            end_at_utc="2026-08-12T11:00:00Z",
+        ),
+        _timed_event(
+            object_id=_synthetic_uuid(5303),
+            title="Вторая пересекающаяся встреча",
+            start_at_utc="2026-08-12T10:30:00Z",
+            end_at_utc="2026-08-12T11:30:00Z",
+        ),
+        _timed_event(
+            object_id=_synthetic_uuid(5304),
+            title="Граничная встреча",
+            start_at_utc="2026-08-12T11:30:00Z",
+            end_at_utc="2026-08-12T12:00:00Z",
+        ),
+        _timed_event(
+            object_id=_synthetic_uuid(5305),
+            title="Встреча в Берлине",
+            timezone="Europe/Berlin",
+            start_at_utc="2026-08-13T07:00:00Z",
+            end_at_utc="2026-08-13T08:00:00Z",
+        ),
+    ]
+
+
+def _b3_paged_events() -> list[dict[str, Any]]:
+    base = datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc)
+    return [
+        _timed_event(
+            object_id=_synthetic_uuid(5400 + index),
+            title=f"Событие повестки {index + 1}",
+            start_at_utc=(base + timedelta(hours=index * 3)).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            end_at_utc=(base + timedelta(hours=index * 3 + 1)).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        )
+        for index in range(30)
+    ]
+
+
 def _task_items(scenario: str, view: str) -> list[dict[str, Any]]:
+    if scenario in {"b3-healthy", "b3-overlap", "b3-long-russian"}:
+        return _b3_tasks(view, long_russian=scenario == "b3-long-russian")
     if scenario == "overview-task-priorities" and view == "overdue":
         return [
             _task("overdue_task", "2026-08-12", "high", title="Высокий приоритет"),
@@ -263,6 +559,10 @@ def _task_items(scenario: str, view: str) -> list[dict[str, Any]]:
 
 
 def _event_items(scenario: str) -> list[dict[str, Any]]:
+    if scenario in {"b3-healthy", "b3-overlap", "b3-long-russian"}:
+        return _b3_events(long_russian=scenario == "b3-long-russian")
+    if scenario == "b3-route-pagination":
+        return _b3_paged_events()
     if scenario == "overview-timed-event":
         return [_timed_event()]
     if scenario == "overview-all-day-event":
@@ -301,7 +601,14 @@ def _filter_events(
 
 
 def _project_items(scenario: str) -> list[dict[str, Any]]:
-    if scenario != "route-pagination":
+    if scenario == "b3-empty":
+        return []
+    if scenario in {"b3-healthy", "b3-overlap", "b3-long-russian"}:
+        return [
+            _project(name="Домашние дела"),
+            _project(object_id=_synthetic_uuid(2001), name="Работа"),
+        ]
+    if scenario != "route-pagination" and scenario != "b3-route-pagination":
         return [_project()]
     return [
         _project(object_id=_synthetic_uuid(2000 + index), name=f"Synthetic project {index}")
@@ -521,6 +828,9 @@ def _task(
     *,
     object_id: str | None = None,
     title: str | None = None,
+    due_time: str | None = None,
+    timezone_name: str | None = None,
+    project_id: str | None = _IDS["project"],
 ) -> dict[str, Any]:
     return {
         **_common(identifier, object_id=object_id),
@@ -530,9 +840,9 @@ def _task(
         "status": "open",
         "notes": None,
         "due_date": due_date,
-        "due_time": None,
-        "timezone": None,
-        "project_id": _IDS["project"],
+        "due_time": due_time,
+        "timezone": timezone_name,
+        "project_id": project_id,
         "source_ref": None,
         "completed_at": None,
         "archived_at": None,
@@ -540,18 +850,26 @@ def _task(
     }
 
 
-def _timed_event(*, title: str = "Synthetic timed event") -> dict[str, Any]:
+def _timed_event(
+    *,
+    title: str = "Synthetic timed event",
+    object_id: str | None = None,
+    timezone: str = "Europe/Moscow",
+    start_at_utc: str = "2026-08-12T12:00:00Z",
+    end_at_utc: str = "2026-08-12T13:00:00Z",
+    sync_state: str = "local_only",
+) -> dict[str, Any]:
     return {
-        **_common("timed_event", source="system"),
+        **_common("timed_event", source="system", object_id=object_id),
         "domain": "calendar_event",
         "title": title,
         "all_day": False,
-        "timezone": "Europe/Moscow",
-        "sync_state": "local_only",
+        "timezone": timezone,
+        "sync_state": sync_state,
         "notes": None,
         "location": None,
-        "start_at_utc": "2026-08-12T12:00:00Z",
-        "end_at_utc": "2026-08-12T13:00:00Z",
+        "start_at_utc": start_at_utc,
+        "end_at_utc": end_at_utc,
         "start_date": None,
         "end_date_exclusive": None,
         "recurrence_rule": None,
@@ -562,11 +880,17 @@ def _timed_event(*, title: str = "Synthetic timed event") -> dict[str, Any]:
     }
 
 
-def _all_day_event() -> dict[str, Any]:
+def _all_day_event(
+    *,
+    title: str = "Synthetic all-day event",
+    object_id: str | None = None,
+    start_date: str = "2026-08-12",
+    end_date_exclusive: str = "2026-08-13",
+) -> dict[str, Any]:
     return {
-        **_common("all_day_event", source="system"),
+        **_common("all_day_event", source="system", object_id=object_id),
         "domain": "calendar_event",
-        "title": "Synthetic all-day event",
+        "title": title,
         "all_day": True,
         "timezone": "Europe/Moscow",
         "sync_state": "local_only",
@@ -574,8 +898,8 @@ def _all_day_event() -> dict[str, Any]:
         "location": None,
         "start_at_utc": None,
         "end_at_utc": None,
-        "start_date": "2026-08-12",
-        "end_date_exclusive": "2026-08-13",
+        "start_date": start_date,
+        "end_date_exclusive": end_date_exclusive,
         "recurrence_rule": None,
         "provider_id": None,
         "provider_calendar_id": None,

@@ -73,5 +73,14 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run test:e2e -- tests/e2e/b0-samsung.spec.ts
 
+      - name: Run focused B3 browser gate
+        if: runner.os == 'Linux'
+        env:
+          B2_PLANNING_OVERVIEW_ENABLED: "true"
+          B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/b3-planning-routes.spec.ts
+
       - name: Smoke-test production runtime
         run: npm run test:production-smoke

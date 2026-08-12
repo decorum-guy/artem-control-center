@@ -14,8 +14,9 @@ import {
   selectNextReminder,
   selectPrimaryOverdueTask
 } from "./planningOverview";
+import { planningRemindersRouteEnabled } from "./planningRouteConfig";
 
-type PlanningNavigationPath = Extract<RoutePath, "/calendar" | "/tasks">;
+type PlanningNavigationPath = Extract<RoutePath, "/calendar" | "/tasks" | "/reminders">;
 
 function usePlanningPresentationNow(sourceStatus: PlanningSnapshot["sourceStatus"] | "unavailable") {
   const [now, setNow] = useState(() => new Date());
@@ -159,6 +160,7 @@ export function PlanningOverviewCard({
           meta={reminder ? formatReminderDueLabel(reminder, planning.sourceStatus, now) : undefined}
           time={reminder ? formatReminderExactTime(reminder) : undefined}
           dateTime={reminder?.dueAtUtc}
+          onClick={reminder && planningRemindersRouteEnabled ? () => onNavigate("/reminders") : undefined}
           ariaLabel={reminder ? `${reminder.title}. ${formatReminderDueLabel(reminder, planning.sourceStatus, now)}. Точное время ${formatReminderExactTime(reminder)}` : undefined}
           empty={!reminder}
         />

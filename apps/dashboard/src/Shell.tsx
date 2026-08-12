@@ -10,6 +10,7 @@ export type RoutePath =
   | "/services"
   | "/calendar"
   | "/tasks"
+  | "/reminders"
   | "/backups"
   | "/apps"
   | "/settings"
