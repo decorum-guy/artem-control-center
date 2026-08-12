@@ -6,7 +6,8 @@ import {
   OverviewPage,
   PlaceholderPage,
   ServicesPage,
-  SettingsPage
+  SettingsPage,
+  SystemPage
 } from "./pages";
 import { CalendarPage, RemindersPage, TasksPage } from "./PlanningRoutes";
 import {
@@ -332,10 +333,11 @@ export function App() {
               onMotionChange={setMotion}
             />
           )}
+          {route === "/system" && <SystemPage snapshot={snapshot} />}
           {route === "/tasks" && (planningTasksRouteEnabled ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
           {route === "/calendar" && (planningCalendarRouteEnabled ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
           {route === "/reminders" && planningRemindersRouteEnabled && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
-          {!["/overview", "/weather", "/home", "/services", "/settings", "/tasks", "/calendar", "/reminders"].includes(route) && (
+          {!["/overview", "/weather", "/home", "/services", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
             <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}
         </ProductShell>

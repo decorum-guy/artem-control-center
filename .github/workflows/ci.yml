@@ -61,6 +61,7 @@ jobs:
           ./scripts/windows/test-connectivity-keygen.ps1
           ./scripts/windows/test-avalar-identities-contract.ps1
           ./scripts/windows/test-avalar-identities.ps1
+          ./scripts/windows/test-rog-g703-companion.ps1
 
       - name: Run full validation
         run: npm run check

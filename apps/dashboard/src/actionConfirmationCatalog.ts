@@ -5,7 +5,8 @@ export type ActionConfirmationId =
   | "avalar.main.deploy"
   | "home.coffee.turn_on"
   | "home.kettle.boil"
-  | "system.runtime.shutdown";
+  | "system.runtime.shutdown"
+  | "system.rog_g703.hibernate";
 
 export type ActionConfirmationLevel = "simple" | "strong";
 export type ActionConfirmationTone = "standard" | "production";
@@ -94,5 +95,15 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "система",
     description: "Остановим окно панели и локальные процессы runtime. Скрытие панели остаётся отдельной командой.",
     confirmLabel: "Полностью закрыть"
+  },
+  "system.rog_g703.hibernate": {
+    id: "system.rog_g703.hibernate",
+    level: "simple",
+    tone: "standard",
+    title: "Перевести ASUS ROG G703GI в гибернацию?",
+    target: "ASUS ROG G703GI",
+    environment: "Windows S4",
+    description: "Отправим только фиксированную команду гибернации Windows и дождёмся, когда ASUS перестанет отвечать.",
+    confirmLabel: "Гибернация"
   }
 };

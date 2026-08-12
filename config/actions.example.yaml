@@ -256,3 +256,45 @@ actions:
       profile_id_from_parameter: profile_id
     verify:
       type: backup_result
+
+  - id: system.rog_g703.wake
+    enabled: false
+    enablement: PANEL_ROG_G703_ENABLED_and_Panel_Agent_access_policy
+    title: Wake ASUS ROG G703GI
+    target: rog_g703gi
+    risk: low
+    confirmation: instant
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+    executor:
+      type: fixed_wol
+      target_id: rog_g703gi
+      note: MAC, broadcast and interface are backend-only configuration.
+    verify:
+      type: fixed_companion_health
+      route: /health
+      timeout_seconds: 60
+
+  - id: system.rog_g703.hibernate
+    enabled: false
+    enablement: PANEL_ROG_G703_ENABLED_and_Panel_Agent_access_policy
+    title: Hibernate ASUS ROG G703GI
+    target: rog_g703gi
+    risk: medium
+    confirmation: confirm
+    cooldown_seconds: 10
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+    executor:
+      type: fixed_companion_action
+      target_id: rog_g703gi
+      route: /hibernate
+      operation: windows_s4_hibernate
+      allow_arbitrary_command: false
+    verify:
+      type: fixed_companion_unreachable
+      timeout_seconds: 45

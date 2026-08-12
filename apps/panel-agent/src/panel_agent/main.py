@@ -119,6 +119,7 @@ def ready() -> dict:
             "avalarMain": bool(SETTINGS.avalar_main_url),
             "avalarStage": bool(SETTINGS.avalar_stage_url),
             "avalarSshDetails": runtime.avalar_ssh.enabled,
+            "rogG703": SETTINGS.rog_g703_enabled,
             "weather": True,
             "planning": runtime.planning.enabled,
         },
