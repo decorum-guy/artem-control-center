@@ -41,6 +41,7 @@ from .planning import (
     status_projection,
     timestamp_datetime,
     validate_date,
+    validate_uuid4,
     validate_utc_timestamp,
 )
 from .planning_cache import PlanningProjectionCache
@@ -620,6 +621,116 @@ class PlanningAdapter:
             offset=offset,
         )
         return self._read_upstream_envelope(envelope)
+
+    async def read_reminder_view(
+        self,
+        *,
+        view: Literal["upcoming", "overdue", "delivery"],
+        limit: int,
+        offset: int,
+    ) -> PlanningReadEnvelope:
+        """Build one bounded, truthful reminder monitor view from fixed reads.
+
+        AliceTG_Bot exposes lifecycle state, not the UI's derived delivery view.
+        The adapter therefore scans at most one bounded page per lifecycle state,
+        merges by canonical due time/ID, and preserves ``hasMore`` whenever the
+        upstream page says that the bounded scan may have more results.
+        """
+
+        if view not in {"upcoming", "overdue", "delivery"}:
+            raise PlanningUpstreamError("reminder_view_out_of_range")
+        client = self._live_client()
+        now = self._wall_now()
+        windows = self._windows(now)
+        # Keep the composed order stable across page requests. A smaller scan
+        # for page zero followed by a larger scan for page one would change
+        # delivery-priority boundaries and could duplicate items. The fixed
+        # upstream cap still makes the derived read bounded and advertises
+        # ``hasMore`` when the source continues beyond that cap.
+        scan_limit = PLANNING_MAX_UPSTREAM_PAGE
+        if view == "delivery":
+            requests = [
+                client.reminders(
+                    state="due",
+                    limit=scan_limit,
+                    offset=0,
+                )
+            ]
+        else:
+            from_utc = (
+                windows["now"]
+                if view == "upcoming"
+                else windows["reminder_overdue_from"]
+            )
+            to_utc = (
+                windows["reminder_upcoming_to"]
+                if view == "upcoming"
+                else windows["now"]
+            )
+            requests = [
+                client.reminders(
+                    state=state,
+                    from_utc=from_utc,
+                    to_utc=to_utc,
+                    limit=scan_limit,
+                    offset=0,
+                )
+                for state in ("pending", "due")
+            ]
+
+        envelopes = await asyncio.gather(*requests)
+        selected_source: list[UpstreamReminder] = []
+        for envelope in envelopes:
+            for item in envelope.items:
+                if view == "delivery":
+                    if item.status == "due" and item.delivery_state in {"queued", "retrying", "failed"}:
+                        selected_source.append(item)
+                elif item.status in {"pending", "due"}:
+                    selected_source.append(item)
+
+        unique_source = {
+            item.id: item for item in selected_source
+        }
+        if view == "delivery":
+            delivery_rank = {"failed": 0, "retrying": 1, "queued": 2}
+            ordered_source = sorted(
+                unique_source.values(),
+                key=lambda item: (
+                    delivery_rank.get(item.delivery_state, 3),
+                    item.due_at_utc,
+                    item.id,
+                ),
+            )
+        else:
+            ordered_source = sorted(
+                unique_source.values(),
+                key=lambda item: (item.due_at_utc, item.id),
+            )
+        mapped = self._map_reminders(ordered_source)
+        page = mapped[offset : offset + limit]
+        source_has_more = any(envelope.pagination.has_more for envelope in envelopes)
+        last_synced_at = self._max_synced_at(envelopes)
+        return PlanningReadEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="list",
+            domain="reminder",
+            generatedAt=self._now_text(now),
+            sourceStatus=self._status_source_status(current=True),
+            lastSyncedAt=last_synced_at,
+            staleAfter=(
+                self._now_text(
+                    timestamp_datetime(last_synced_at)
+                    + timedelta(seconds=self._settings.panel_planning_stale_after_seconds)
+                )
+                if last_synced_at is not None
+                else None
+            ),
+            items=page,
+            limit=limit,
+            offset=offset,
+            count=len(page),
+            hasMore=offset + len(page) < len(mapped) or source_has_more,
+        )
 
     async def read_tasks(
         self,

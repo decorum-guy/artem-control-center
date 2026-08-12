@@ -8,6 +8,12 @@ import {
   ServicesPage,
   SettingsPage
 } from "./pages";
+import { CalendarPage, RemindersPage, TasksPage } from "./PlanningRoutes";
+import {
+  planningCalendarRouteEnabled,
+  planningRemindersRouteEnabled,
+  planningTasksRouteEnabled
+} from "./planningRouteConfig";
 import { reconcileLayout, resolveManifest } from "./registry";
 import { ProductShell, type ShellRoutePath } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -29,6 +35,7 @@ const userRoutes: ShellRoutePath[] = [
   "/services",
   "/calendar",
   "/tasks",
+  "/reminders",
   "/backups",
   "/apps",
   "/settings",
@@ -41,6 +48,10 @@ function routeFromLocation(): ShellRoutePath {
     return "/overview";
   }
   const requested = window.location.pathname as ShellRoutePath;
+  if (requested === "/reminders" && !planningRemindersRouteEnabled) {
+    window.history.replaceState({}, "", `/overview${window.location.search}`);
+    return "/overview";
+  }
   return [...userRoutes, "/dev/widget-gallery"].includes(requested) ? requested : "/overview";
 }
 
@@ -321,8 +332,11 @@ export function App() {
               onMotionChange={setMotion}
             />
           )}
-          {!["/overview", "/weather", "/home", "/services", "/settings"].includes(route) && (
-            <PlaceholderPage route={route as "/calendar" | "/tasks" | "/backups" | "/apps" | "/system"} />
+          {route === "/tasks" && (planningTasksRouteEnabled ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
+          {route === "/calendar" && (planningCalendarRouteEnabled ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
+          {route === "/reminders" && planningRemindersRouteEnabled && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
+          {!["/overview", "/weather", "/home", "/services", "/settings", "/tasks", "/calendar", "/reminders"].includes(route) && (
+            <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}
         </ProductShell>
       )}

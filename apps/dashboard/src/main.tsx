@@ -12,6 +12,7 @@ import "./ActionConfirmations.css";
 import "./AvalarActions.css";
 import "./ConnectivityActions.css";
 import "./styles.css";
+import "./planningRoutes.css";
 import "./Weather.css";
 
 createRoot(document.getElementById("root")!).render(

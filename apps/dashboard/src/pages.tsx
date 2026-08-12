@@ -322,7 +322,7 @@ export function ServicesPage({ snapshot }: PageProps) {
 }
 
 const placeholderCopy: Record<
-  Exclude<RoutePath, "/overview" | "/home" | "/services" | "/settings" | "/dev/widget-gallery">,
+  Exclude<RoutePath, "/overview" | "/home" | "/services" | "/settings" | "/reminders" | "/dev/widget-gallery">,
   { eyebrow: string; title: string; description: string; status: string }
 > = {
   "/calendar": {

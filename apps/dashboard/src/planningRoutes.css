@@ -1,0 +1,289 @@
+.planning-route-page {
+  max-width: 1120px;
+  min-width: 0;
+}
+
+.planning-route-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin: calc(var(--space-3) * -1) 0 var(--space-4);
+}
+
+.planning-route-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.planning-segmented {
+  display: inline-flex;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+}
+
+.planning-segmented button,
+.planning-secondary-button,
+.planning-pagination button,
+.planning-route-health__retry,
+.planning-route-state button {
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 0 14px;
+  color: var(--text-secondary);
+  background: var(--surface-primary);
+  font-size: 13px;
+  font-weight: 700;
+  touch-action: manipulation;
+}
+
+.planning-segmented button + button { border-left: 1px solid var(--border); border-radius: 0; }
+.planning-segmented button[aria-pressed="true"] { color: var(--text); background: var(--surface-inline); }
+.planning-secondary-button,
+.planning-route-health__retry,
+.planning-route-state button { border: 1px solid var(--border); }
+.planning-secondary-button { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.planning-secondary-button:hover,
+.planning-segmented button:hover,
+.planning-pagination button:hover:not(:disabled) { background: var(--surface-hover); }
+.planning-route-note { color: var(--text-muted); font-size: 12px; }
+
+.planning-route-health {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding: 12px var(--space-4);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius-control);
+  background: var(--surface-primary);
+}
+.planning-route-health--current { border-left-color: var(--success); }
+.planning-route-health--degraded { border-left-color: var(--warning); background: var(--warning-soft); }
+.planning-route-health--stale { border-left-color: var(--stale); border-style: dashed; background: var(--stale-soft); }
+.planning-route-health--offline,
+.planning-route-health--unavailable { border-left-color: var(--danger); border-style: dashed; background: var(--danger-soft); }
+.planning-route-health__copy { min-width: 0; }
+.planning-route-health__copy strong { display: block; color: var(--text); font-size: 13px; }
+.planning-route-health__copy p { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.planning-route-health__retry { flex: 0 0 auto; color: var(--accent-strong); }
+
+.planning-route-state {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  min-height: 116px;
+  padding: var(--space-5);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-section);
+  background: var(--surface-primary);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.planning-route-state strong { color: var(--text); font-size: 16px; }
+.planning-route-state p { margin: 0; font-size: 13px; }
+.planning-route-state--error { border-color: var(--danger); background: var(--danger-soft); }
+.planning-route-state--empty { border-style: solid; border-color: var(--border-soft); }
+.planning-route-state--empty strong { color: var(--text-secondary); }
+
+.planning-route-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-section);
+  background: var(--surface-primary);
+}
+
+.planning-route-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
+  min-height: 78px;
+  padding: 12px var(--space-4);
+  border: 0;
+  color: var(--text);
+  background: var(--surface-primary);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.planning-route-row + .planning-route-row { border-top: 1px solid var(--border-soft); }
+.planning-route-row:hover { background: var(--surface-hover); }
+.planning-route-row__main { display: grid; min-width: 0; gap: 5px; }
+.planning-route-row__eyebrow {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.planning-route-row__main strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.planning-route-row__source { color: var(--text-muted); font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }
+
+.planning-priority,
+.reminder-status-badge,
+.calendar-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  max-width: 170px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--surface-secondary);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.15;
+  text-align: center;
+}
+.planning-priority--high { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 58%, var(--border)); background: var(--danger-soft); }
+.planning-priority--normal { color: var(--accent-strong); }
+.planning-priority--low { color: var(--text-secondary); }
+.planning-priority--none { color: var(--text-muted); }
+
+.planning-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 72px;
+  margin-top: var(--space-3);
+}
+.planning-pagination button { border: 1px solid var(--border); }
+.planning-pagination span { min-width: 112px; color: var(--text-secondary); font-size: 12px; text-align: center; }
+
+.planning-sheet-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 18px;
+  background: rgb(0 0 0 / 62%);
+}
+.planning-sheet {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(720px, 100%);
+  max-height: min(680px, calc(100dvh - 24px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-primary) var(--radius-primary) var(--radius-section) var(--radius-section);
+  background: var(--surface-primary);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 42%);
+}
+.planning-sheet__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+}
+.planning-sheet__header h2 { max-width: 520px; margin: 5px 0 0; font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
+.planning-sheet__header p:last-child { margin: 7px 0 0; font-size: 12px; line-height: 1.45; }
+.planning-sheet__close {
+  flex: 0 0 auto;
+  min-width: 56px;
+  min-height: 56px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--surface-secondary);
+  font-size: 12px;
+  font-weight: 750;
+}
+.planning-sheet__body { min-height: 0; overflow: auto; padding: var(--space-5); overscroll-behavior: contain; }
+.planning-sheet__state { margin: 12px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.45; }
+.planning-sheet__state--error { color: var(--danger); }
+
+.planning-filter-list { display: grid; gap: 7px; }
+.planning-filter-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: 0 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--surface-secondary);
+  text-align: left;
+  font-size: 13px;
+  font-weight: 680;
+  overflow-wrap: anywhere;
+}
+.planning-filter-list button.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.planning-filter-list__mark { flex: 0 0 auto; color: var(--accent-strong); font-size: 11px; }
+
+.planning-detail-list { display: grid; gap: 0; margin: 0; }
+.planning-detail-field { display: grid; grid-template-columns: minmax(120px, .45fr) minmax(0, 1fr); gap: var(--space-4); min-height: 52px; padding: 11px 0; border-bottom: 1px solid var(--border-soft); }
+.planning-detail-field dt { color: var(--text-muted); font-size: 12px; }
+.planning-detail-field dd { min-width: 0; margin: 0; color: var(--text); font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.planning-detail-note { margin: var(--space-5) 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+.calendar-groups { display: grid; gap: var(--space-5); }
+.calendar-day-group > h2 { margin: 0 0 9px; color: var(--text-secondary); font-size: 15px; text-transform: capitalize; }
+.calendar-band { display: grid; gap: 0; margin-bottom: 9px; border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.calendar-band__label { margin: 0; padding: 8px 12px 3px; color: var(--accent-strong); font-size: 11px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
+.calendar-band .planning-route-row { background: transparent; }
+.calendar-timed-list { display: grid; gap: 7px; }
+.calendar-timed-list .planning-route-row { border: 1px solid var(--border-soft); border-radius: var(--radius-control); }
+.calendar-event-row--past { opacity: .7; }
+.calendar-event-row--running { border-left: 4px solid var(--success) !important; background: var(--success-soft); }
+.calendar-event-row__badges { display: grid; justify-items: end; gap: 5px; min-width: 86px; }
+.calendar-badge { max-width: 145px; font-size: 11px; }
+.calendar-badge--running { color: var(--success); border-color: var(--success); }
+.calendar-badge--overlap { color: var(--warning); border-color: var(--warning); background: var(--warning-soft); }
+
+.reminder-route-row--delivered-open { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.reminder-status-badge { color: var(--accent-strong); border-color: var(--accent); }
+
+@media (max-width: 720px) {
+  .planning-route-heading-row { align-items: stretch; }
+  .planning-segmented { width: 100%; }
+  .planning-segmented button { flex: 1 1 0; padding: 0 8px; }
+  .planning-route-controls { width: 100%; }
+  .planning-secondary-button { flex: 1 1 160px; max-width: none; }
+  .planning-route-health { align-items: flex-start; flex-direction: column; }
+  .planning-route-health__retry { width: 100%; }
+}
+
+@media (max-width: 520px) {
+  .planning-route-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .planning-priority, .reminder-status-badge, .calendar-event-row__badges { justify-self: start; }
+  .calendar-event-row__badges { display: flex; flex-wrap: wrap; justify-items: start; min-width: 0; }
+  .planning-sheet-backdrop { padding: 8px; }
+  .planning-sheet { max-height: calc(100dvh - 16px); }
+  .planning-sheet__header { padding: 16px; }
+  .planning-sheet__body { padding: 16px; }
+  .planning-detail-field { grid-template-columns: 1fr; gap: 4px; }
+}
+

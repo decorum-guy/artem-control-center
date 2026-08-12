@@ -50,6 +50,23 @@ def build_planning_router(
         except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
             raise _read_unavailable() from exc
 
+    @router.get("/reminders/view", response_model=PlanningReadEnvelope)
+    async def planning_reminder_view(request: Request, response: Response) -> PlanningReadEnvelope:
+        _enabled(adapter)
+        _no_store(response)
+        query = _query(request, allowed={"view", "limit", "offset"})
+        view = query.get("view")
+        if view not in {"upcoming", "overdue", "delivery"}:
+            raise HTTPException(status_code=422, detail="planning_reminder_view_required")
+        try:
+            return await adapter.read_reminder_view(
+                view=view,  # type: ignore[arg-type]
+                limit=_limit(query),
+                offset=_offset(query),
+            )
+        except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
+            raise _read_unavailable() from exc
+
     @router.get("/tasks", response_model=PlanningReadEnvelope)
     async def planning_tasks(request: Request, response: Response) -> PlanningReadEnvelope:
         _enabled(adapter)

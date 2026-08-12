@@ -1,0 +1,194 @@
+import { useEffect, useRef, type ReactNode } from "react";
+import type { PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
+import type { PlanningReadEnvelope, PlanningReadError } from "./planningReadClient";
+
+export function syncTimeLabel(value: string | null): string | null {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC"
+  }).format(new Date(value));
+}
+
+export function previewEnvelope<T>(
+  domain: PlanningReadEnvelope<T>["domain"],
+  items: T[],
+  planning: PlanningSnapshot,
+  limit = items.length
+): PlanningReadEnvelope<T> {
+  return {
+    schemaVersion: "planning.panel.v1",
+    kind: "list",
+    domain,
+    generatedAt: planning.generatedAt,
+    sourceStatus: planning.sourceStatus,
+    lastSyncedAt: planning.lastSyncedAt,
+    staleAfter: planning.staleAfter,
+    items: items.slice(0, limit),
+    limit,
+    offset: 0,
+    count: Math.min(items.length, limit),
+    hasMore: false
+  };
+}
+
+export function PlanningRouteHealth({
+  sourceStatus,
+  lastSyncedAt,
+  error,
+  preview,
+  onRetry
+}: {
+  sourceStatus: PlanningSourceStatus | "unavailable";
+  lastSyncedAt: string | null;
+  error?: PlanningReadError | null;
+  preview?: boolean;
+  onRetry?: () => void;
+}) {
+  const errorUnavailable = Boolean(error && error.status === 503);
+  const state = errorUnavailable ? "unavailable" : sourceStatus;
+  const label = preview
+    ? "Последние данные · краткий снимок"
+    : state === "degraded"
+      ? "Есть проблемы"
+      : state === "stale"
+        ? (syncTimeLabel(lastSyncedAt) ? `Данные от ${syncTimeLabel(lastSyncedAt)}` : "Данные устарели")
+        : state === "offline" || state === "unavailable"
+          ? "Актуальные данные недоступны"
+          : null;
+  if (!label && !error) return null;
+  return (
+    <section
+      className={`planning-route-health planning-route-health--${state}`}
+      data-testid="planning-route-health"
+      data-state={state}
+      aria-live="polite"
+    >
+      <div className="planning-route-health__copy">
+        <strong>{label ?? "Планирование"}</strong>
+        {preview ? (
+          <p>Показан ограниченный снимок Overview. Фильтры и пагинация отключены, потому что полный маршрут недоступен.</p>
+        ) : error ? (
+          <p>Не удалось получить данные маршрута. Это состояние не означает, что список пуст.</p>
+        ) : state === "degraded" ? (
+          <p>Источник отвечает с ограничениями; свежесть данных отмечена рядом с маршрутом.</p>
+        ) : state !== "current" ? (
+          <p>Проверьте соединение или повторите чтение, когда Panel Agent будет доступен.</p>
+        ) : null}
+      </div>
+      {onRetry && (
+        <button type="button" className="planning-route-health__retry" onClick={onRetry}>
+          Повторить
+        </button>
+      )}
+    </section>
+  );
+}
+
+export function PlanningRouteState({
+  loading,
+  empty,
+  error,
+  onRetry,
+  children
+}: {
+  loading: boolean;
+  empty: boolean;
+  error: boolean;
+  onRetry: () => void;
+  children: ReactNode;
+}) {
+  if (loading) return <div className="planning-route-state" data-testid="planning-route-loading">Загружаем данные…</div>;
+  if (error) {
+    return (
+      <section className="planning-route-state planning-route-state--error" data-testid="planning-route-error">
+        <strong>Не удалось получить данные</strong>
+        <p>Panel Agent не подтвердил полный ответ маршрута.</p>
+        <button type="button" onClick={onRetry}>Повторить</button>
+      </section>
+    );
+  }
+  if (empty) {
+    return (
+      <section className="planning-route-state planning-route-state--empty" data-testid="planning-route-empty">
+        <strong>Здесь пока пусто</strong>
+        <p>Для выбранного представления подтверждённых объектов нет.</p>
+      </section>
+    );
+  }
+  return <>{children}</>;
+}
+
+export function PaginationControls({
+  page,
+  hasMore,
+  disabled,
+  onPrevious,
+  onNext
+}: {
+  page: number;
+  hasMore: boolean;
+  disabled?: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  if (page === 0 && !hasMore) return null;
+  return (
+    <nav className="planning-pagination" aria-label="Постраничная навигация">
+      <button type="button" onClick={onPrevious} disabled={disabled || page === 0}>Назад</button>
+      <span>Страница {page + 1}</span>
+      <button type="button" onClick={onNext} disabled={disabled || !hasMore}>Ещё</button>
+    </nav>
+  );
+}
+
+export function PlanningSheet({
+  title,
+  eyebrow,
+  description,
+  onClose,
+  children,
+  testId = "planning-sheet"
+}: {
+  title: string;
+  eyebrow?: string;
+  description?: string;
+  onClose: () => void;
+  children: ReactNode;
+  testId?: string;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+  return (
+    <div className="planning-sheet-backdrop" data-testid={`${testId}-backdrop`}>
+      <section
+        className="planning-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${testId}-title`}
+        data-testid={testId}
+      >
+        <header className="planning-sheet__header">
+          <div>
+            {eyebrow && <p className="section-kicker">{eyebrow}</p>}
+            <h2 id={`${testId}-title`}>{title}</h2>
+            {description && <p>{description}</p>}
+          </div>
+          <button ref={closeRef} className="planning-sheet__close" type="button" onClick={onClose} aria-label="Закрыть">
+            Закрыть
+          </button>
+        </header>
+        <div className="planning-sheet__body">{children}</div>
+      </section>
+    </div>
+  );
+}
+
