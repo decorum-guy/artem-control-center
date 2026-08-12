@@ -1,0 +1,97 @@
+.rog-g703-controls {
+  max-width: 900px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-section);
+  background: var(--surface-primary);
+}
+
+.rog-g703-controls__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.rog-g703-controls h2 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  letter-spacing: -.025em;
+}
+
+.rog-g703-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 78px;
+  margin: 20px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+}
+
+.rog-g703-status__indicator {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.rog-g703-status--online .rog-g703-status__indicator { background: var(--success); }
+.rog-g703-status--waking .rog-g703-status__indicator,
+.rog-g703-status--hibernating .rog-g703-status__indicator { background: var(--warning); }
+.rog-g703-status--offline .rog-g703-status__indicator,
+.rog-g703-status--unavailable .rog-g703-status__indicator { background: var(--danger); }
+
+.rog-g703-status div {
+  display: grid;
+  gap: 4px;
+}
+
+.rog-g703-status strong { font-size: 18px; }
+.rog-g703-status span:not(.rog-g703-status__indicator) { color: var(--text-secondary); font-size: 13px; }
+
+.rog-g703-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rog-g703-action {
+  min-height: 56px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 0 18px;
+  color: var(--text);
+  background: var(--surface-secondary);
+  font-size: 15px;
+  font-weight: 720;
+  touch-action: manipulation;
+}
+
+.rog-g703-action--wake {
+  border-color: var(--accent);
+  color: var(--canvas);
+  background: var(--accent-strong);
+}
+
+.rog-g703-action--hibernate {
+  border-color: color-mix(in srgb, var(--warning) 58%, var(--border));
+}
+
+.rog-g703-controls__note,
+.rog-g703-controls__unavailable {
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.rog-g703-controls__unavailable { color: var(--warning); }
+
+@media (max-width: 650px) {
+  .rog-g703-controls { padding: 16px; }
+  .rog-g703-actions { grid-template-columns: 1fr; }
+}

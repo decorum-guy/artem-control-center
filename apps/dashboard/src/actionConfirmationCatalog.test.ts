@@ -15,16 +15,22 @@ describe("action confirmation catalog", () => {
     });
   });
 
-  it("uses simple shared confirmation for Stage, coffee and kettle boil", () => {
+  it("uses simple shared confirmation for Stage, coffee, kettle and ASUS hibernate", () => {
     for (const actionId of [
       "avalar.stage.restart",
       "avalar.stage.deploy",
       "home.coffee.turn_on",
-      "home.kettle.boil"
+      "home.kettle.boil",
+      "system.rog_g703.hibernate"
     ] as const) {
       expect(actionConfirmationCatalog[actionId].level).toBe("simple");
       expect(actionConfirmationCatalog[actionId].requiredPhrase).toBeUndefined();
     }
+    expect(actionConfirmationCatalog["system.rog_g703.hibernate"]).toMatchObject({
+      title: "Перевести ASUS ROG G703GI в гибернацию?",
+      target: "ASUS ROG G703GI",
+      environment: "Windows S4"
+    });
   });
 
   it("does not put smoke or stop actions in the confirmation catalog", () => {

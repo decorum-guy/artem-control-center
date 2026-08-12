@@ -79,6 +79,21 @@ export interface KettleData {
   observedAt: string;
 }
 
+export type RogG703DeviceStatus =
+  | "online"
+  | "offline"
+  | "waking"
+  | "hibernating"
+  | "unavailable";
+
+export interface RogG703Data {
+  targetId: "rog_g703gi";
+  status: RogG703DeviceStatus;
+  observedAt: string;
+  lastTransitionAt: string;
+  lastError: string | null;
+}
+
 export interface ServicePresentation {
   category: ServiceCategory;
   group: ServiceGroup;

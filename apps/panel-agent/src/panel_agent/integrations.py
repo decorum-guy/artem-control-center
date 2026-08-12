@@ -9,6 +9,7 @@ from .http_integrations import HttpIntegrationAdapter
 from .planning import PlanningProjection
 from .planning_adapter import PlanningAdapter
 from .planning_fixtures import PlanningFixtureTransport, fixture_reference_datetime
+from .rog_g703_power import RogG703Device
 from .settings import IntegrationSettings
 from .ssh_details import AvalarSshDetailsAdapter
 
@@ -28,6 +29,7 @@ class IntegrationRuntime:
             settings,
             details_provider=self.avalar_ssh,
         )
+        self.rog_g703 = RogG703Device(settings)
         fixture_planning = (
             mode in {"fixtures", "integration_test"}
             and settings.panel_planning_enabled
@@ -51,12 +53,14 @@ class IntegrationRuntime:
         self.home_assistant.set_on_change(callback)
         self.http.set_on_change(callback)
         self.planning.set_on_change(callback)
+        self.rog_g703.set_on_change(callback)
 
     async def start(self) -> None:
         await self.home_assistant.start()
         await self.avalar_ssh.start()
         await self.http.start()
         await self.planning.start()
+        await self.rog_g703.start()
 
     async def start_planning(self) -> None:
         """Start only the feature-gated Planning adapter in fixture modes."""
@@ -68,9 +72,14 @@ class IntegrationRuntime:
         await self.avalar_ssh.close()
         await self.home_assistant.close()
         await self.planning.close()
+        await self.rog_g703.close()
 
     def services(self) -> List[ServiceSnapshot]:
-        services = self.home_assistant.services() + self.http.services()
+        services = (
+            self.home_assistant.services()
+            + self.http.services()
+            + ([self.rog_g703.service_snapshot()] if self.rog_g703.enabled else [])
+        )
         return sorted(
             services,
             key=lambda service: service.presentation.priority

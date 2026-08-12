@@ -17,6 +17,7 @@ import {
 import { CoffeeSettingsPanel } from "./CoffeeSettings";
 import { RuntimeControls } from "./RuntimeControls";
 import { PlanningOverviewCard } from "./PlanningOverviewCard";
+import { RogG703Controls } from "./RogG703Controls";
 
 interface PageProps {
   snapshot: DashboardSnapshot;
@@ -317,6 +318,32 @@ export function ServicesPage({ snapshot }: PageProps) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+export function SystemPage({ snapshot }: { snapshot: DashboardSnapshot }) {
+  const rogG703 = snapshot.services.find((service) => service.id === "rog_g703gi");
+
+  return (
+    <div className="system-page" data-testid="route-system">
+      <PageHeading
+        eyebrow="Питание и доступность"
+        title="Система"
+        description="Фиксированные управляющие действия Panel Agent для локальной панели и ASUS ROG G703GI. Состояние остаётся простым и честным: в сети, не в сети или переход."
+      />
+      {rogG703 ? (
+        <RogG703Controls service={rogG703} />
+      ) : (
+        <section className="placeholder-surface" data-testid="rog-g703-disabled">
+          <span className="placeholder-status">ROG G703GI</span>
+          <h2>Интеграция ASUS отключена</h2>
+          <p>
+            Включите серверный PANEL_ROG_G703_ENABLED и настройте локальный companion,
+            чтобы увидеть управление. MAC-адрес и секрет никогда не передаются в браузер.
+          </p>
+        </section>
+      )}
     </div>
   );
 }

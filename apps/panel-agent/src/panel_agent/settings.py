@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import ipaddress
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -39,6 +41,21 @@ class IntegrationSettings:
     avalar_main_restart_enabled: bool = False
     avalar_stage_deploy_enabled: bool = False
     avalar_main_deploy_enabled: bool = False
+    rog_g703_enabled: bool = False
+    rog_g703_target_id: str = "rog_g703gi"
+    rog_g703_mac: str = ""
+    rog_g703_broadcast_address: str = "255.255.255.255"
+    rog_g703_broadcast_interface: str = ""
+    rog_g703_companion_base_url: str = ""
+    rog_g703_companion_secret: str = ""
+    rog_g703_wol_repeats: int = 3
+    rog_g703_wol_cooldown_seconds: int = 5
+    rog_g703_hibernate_cooldown_seconds: int = 10
+    rog_g703_health_timeout_seconds: int = 60
+    rog_g703_hibernate_timeout_seconds: int = 45
+    rog_g703_http_timeout_seconds: float = 3.0
+    rog_g703_health_poll_seconds: float = 15.0
+    rog_g703_response_limit_bytes: int = 16 * 1024
     writes_enabled: bool = False
     coffee_timing_writes_enabled: bool = False
     coffee_notification_writes_enabled: bool = False
@@ -150,6 +167,60 @@ class IntegrationSettings:
                 "PANEL_AVALAR_MAIN_DEPLOY_ENABLED",
                 False,
             ),
+            rog_g703_enabled=_bool_env("PANEL_ROG_G703_ENABLED", False),
+            rog_g703_target_id=os.getenv(
+                "PANEL_ROG_G703_TARGET_ID",
+                "rog_g703gi",
+            ).strip(),
+            rog_g703_mac=os.getenv("PANEL_ROG_G703_MAC", "").strip(),
+            rog_g703_broadcast_address=os.getenv(
+                "PANEL_ROG_G703_BROADCAST_ADDRESS",
+                "255.255.255.255",
+            ).strip(),
+            rog_g703_broadcast_interface=os.getenv(
+                "PANEL_ROG_G703_BROADCAST_INTERFACE",
+                "",
+            ).strip(),
+            rog_g703_companion_base_url=os.getenv(
+                "PANEL_ROG_G703_COMPANION_BASE_URL",
+                "",
+            ).strip().rstrip("/"),
+            rog_g703_companion_secret=os.getenv(
+                "PANEL_ROG_G703_COMPANION_SECRET",
+                "",
+            ),
+            rog_g703_wol_repeats=min(
+                3,
+                max(1, int(os.getenv("PANEL_ROG_G703_WOL_REPEATS", "3"))),
+            ),
+            rog_g703_wol_cooldown_seconds=min(
+                60,
+                max(3, int(os.getenv("PANEL_ROG_G703_WOL_COOLDOWN_SECONDS", "5"))),
+            ),
+            rog_g703_hibernate_cooldown_seconds=min(
+                120,
+                max(5, int(os.getenv("PANEL_ROG_G703_HIBERNATE_COOLDOWN_SECONDS", "10"))),
+            ),
+            rog_g703_health_timeout_seconds=min(
+                180,
+                max(5, int(os.getenv("PANEL_ROG_G703_HEALTH_TIMEOUT_SECONDS", "60"))),
+            ),
+            rog_g703_hibernate_timeout_seconds=min(
+                120,
+                max(5, int(os.getenv("PANEL_ROG_G703_HIBERNATE_TIMEOUT_SECONDS", "45"))),
+            ),
+            rog_g703_http_timeout_seconds=min(
+                10.0,
+                max(0.5, float(os.getenv("PANEL_ROG_G703_HTTP_TIMEOUT_SECONDS", "3"))),
+            ),
+            rog_g703_health_poll_seconds=min(
+                120.0,
+                max(5.0, float(os.getenv("PANEL_ROG_G703_HEALTH_POLL_SECONDS", "15"))),
+            ),
+            rog_g703_response_limit_bytes=min(
+                64 * 1024,
+                max(1024, int(os.getenv("PANEL_ROG_G703_RESPONSE_LIMIT_BYTES", str(16 * 1024)))),
+            ),
             writes_enabled=_bool_env("PANEL_WRITES_ENABLED", False),
             coffee_timing_writes_enabled=_bool_env(
                 "PANEL_COFFEE_TIMING_WRITES_ENABLED",
@@ -217,6 +288,8 @@ class IntegrationSettings:
         )
         if settings.panel_planning_enabled:
             _validate_planning_settings(settings)
+        if settings.rog_g703_enabled:
+            _validate_rog_g703_settings(settings)
         return settings
 
 
@@ -257,3 +330,60 @@ def _validate_planning_settings(settings: IntegrationSettings) -> None:
         raise RuntimeError(
             "PANEL_PLANNING_UNAVAILABLE_AFTER_SECONDS must be at least stale threshold"
         )
+
+
+def _validate_rog_g703_settings(settings: IntegrationSettings) -> None:
+    if settings.rog_g703_target_id != "rog_g703gi":
+        raise RuntimeError("PANEL_ROG_G703_TARGET_ID must be rog_g703gi")
+
+    compact_mac = re.sub(r"[-:.]", "", settings.rog_g703_mac)
+    if not re.fullmatch(r"[0-9a-fA-F]{12}", compact_mac):
+        raise RuntimeError(
+            "PANEL_ROG_G703_MAC must be a valid 12-digit Ethernet MAC address"
+        )
+    mac_bytes = bytes.fromhex(compact_mac)
+    if mac_bytes == b"\x00" * 6 or mac_bytes[0] & 1:
+        raise RuntimeError("PANEL_ROG_G703_MAC must be a unicast, non-zero MAC address")
+
+    for name, value in (
+        ("PANEL_ROG_G703_BROADCAST_ADDRESS", settings.rog_g703_broadcast_address),
+        ("PANEL_ROG_G703_BROADCAST_INTERFACE", settings.rog_g703_broadcast_interface),
+    ):
+        if not value and name.endswith("INTERFACE"):
+            continue
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{name} must be an IPv4 address") from exc
+        if address.version != 4:
+            raise RuntimeError(f"{name} must be an IPv4 address")
+        if name.endswith("ADDRESS") and (
+            address.is_unspecified or address.is_loopback or address.is_multicast
+        ):
+            raise RuntimeError(
+                "PANEL_ROG_G703_BROADCAST_ADDRESS must be a LAN broadcast address"
+            )
+
+    if not settings.rog_g703_companion_secret or len(settings.rog_g703_companion_secret) < 32:
+        raise RuntimeError(
+            "PANEL_ROG_G703_COMPANION_SECRET must contain at least 32 characters"
+        )
+    if any(character.isspace() or ord(character) < 32 for character in settings.rog_g703_companion_secret):
+        raise RuntimeError("PANEL_ROG_G703_COMPANION_SECRET must not contain whitespace")
+
+    parsed = urlsplit(settings.rog_g703_companion_base_url)
+    if parsed.scheme != "http" or not parsed.hostname:
+        raise RuntimeError(
+            "PANEL_ROG_G703_COMPANION_BASE_URL must be an http origin"
+        )
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise RuntimeError(
+            "PANEL_ROG_G703_COMPANION_BASE_URL must not contain credentials, query, or fragment"
+        )
+    if parsed.path not in {"", "/"}:
+        raise RuntimeError(
+            "PANEL_ROG_G703_COMPANION_BASE_URL must be an origin without a path"
+        )
+
+    if settings.rog_g703_wol_repeats > 3:
+        raise RuntimeError("PANEL_ROG_G703_WOL_REPEATS must be at most 3")
