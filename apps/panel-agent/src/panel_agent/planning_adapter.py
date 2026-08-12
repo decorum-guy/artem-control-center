@@ -659,10 +659,11 @@ class PlanningAdapter:
         AliceTG_Bot exposes lifecycle state, not the UI's derived delivery view.
         The adapter therefore scans successive fixed 100-row A4 pages, up to two
         pages per lifecycle source (200 rows per source, 400 rows for a composed
-        pending+due view). It merges by canonical due time/ID and only returns a
-        page after the requested boundary and ``hasMore`` state are provable from
-        the bounded prefixes. If that proof needs another page beyond the budget,
-        the read fails closed with a dedicated bounded-scan error.
+        pending+due view). Delivery exhausts its single due source before sorting,
+        because the upstream due-time order cannot prove the derived delivery
+        rank. Upcoming/overdue use the more efficient due-time prefix proof. If
+        either proof needs another page beyond the budget, the read fails closed
+        with a dedicated bounded-scan error.
         """
 
         if view not in {"upcoming", "overdue", "delivery"}:
@@ -742,6 +743,9 @@ class PlanningAdapter:
     ) -> None:
         """Read only enough fixed pages to prove one composed page.
 
+        Delivery is the exception to the prefix strategy: its due source is
+        ordered by due time, while the derived view promotes delivery state, so
+        the source must be exhausted before any page can be globally proven.
         Every non-exhausted source must contribute at least ``page_end`` raw
         rows before its prefix can prove the composed ordering. A source that
         is already exhausted is fully known. When the requested page ends at
@@ -749,6 +753,16 @@ class PlanningAdapter:
         required to prove ``hasMore``; otherwise this method fails closed at
         the fixed two-page budget.
         """
+
+        if view == "delivery":
+            source = sources[0]
+            while not source.exhausted:
+                if source.pages >= PLANNING_REMINDER_SCAN_MAX_PAGES_PER_SOURCE:
+                    raise PlanningBoundedScanError()
+                await self._read_next_reminder_source_page(client, source)
+                if sum(len(source.items) for source in sources) > PLANNING_REMINDER_SCAN_MAX_ROWS:
+                    raise PlanningBoundedScanError()
+            return
 
         while True:
             ordered = self._ordered_reminder_items_from_sources(sources, view=view)

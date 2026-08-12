@@ -65,7 +65,7 @@ The lifecycle and delivery dimensions remain distinct:
 
 `status=due` plus `deliveryState=delivered` is displayed as `Доставлено · ждёт завершения` with an `Открыто` marker. It remains active until the lifecycle is completed. No Complete, Cancel, Snooze, Retry, Edit, Delete, Add, or archive control is rendered. Stable ordering is due time then ID for lifecycle views; delivery attention prioritizes failed/retrying/queued and then uses due time/ID within the bounded result.
 
-Reminder pagination is finite and explicit. The Panel Agent derived helper requests the relevant fixed lifecycle reads, applies the lifecycle/delivery predicate server-side, de-duplicates, sorts, slices the requested offset/limit, and carries `hasMore` from both the composed result and bounded upstream page metadata. It never scans without a hard page budget and never presents a filtered single snapshot page as complete.
+Reminder pagination is finite and explicit. The Panel Agent derived helper requests the relevant fixed lifecycle reads, applies the lifecycle/delivery predicate server-side, de-duplicates, sorts, and slices the requested offset/limit. `Upcoming` and `Пропущено` can use a due-time-monotonic prefix proof. `Доставка` cannot: A4 orders its single `state=due` source by due time, while the derived view promotes `failed`, `retrying`, then `queued`, so that source is exhausted before any Delivery page is returned. If the second 100-row page still reports `hasMore`, Delivery fails closed with `503 reminder_view_scan_budget_exceeded`, including for offset zero. It never scans without a hard page budget and never presents a filtered single snapshot page as complete.
 
 ## Shared touch sheets and safety
 

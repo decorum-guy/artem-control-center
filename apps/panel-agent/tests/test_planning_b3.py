@@ -7,7 +7,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from panel_agent.planning_adapter import PlanningAdapter, PlanningBoundedScanError
+from panel_agent.planning_adapter import (
+    PlanningAdapter,
+    PlanningBoundedScanError,
+    PlanningClient,
+)
 from panel_agent.planning_api import build_planning_router
 from panel_agent.planning_fixtures import PlanningFixtureTransport
 from panel_agent.settings import IntegrationSettings
@@ -88,42 +92,59 @@ def test_reminder_derived_delivery_view_crosses_the_100_row_boundary(tmp_path):
         transport=PlanningFixtureTransport("b3-route-pagination"),
         wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
     )
+    reference_client = PlanningClient(
+        base_url="http://fixture.test",
+        internal_secret="synthetic-internal-secret",
+        panel_secret="synthetic-panel-agent-secret",
+        transport=PlanningFixtureTransport("b3-route-pagination"),
+    )
 
     async def exercise():
         await adapter.start()
-        first = await adapter.read_reminder_view(view="delivery", limit=100, offset=0)
-        after_100 = await adapter.read_reminder_view(view="delivery", limit=100, offset=100)
-        boundary = await adapter.read_reminder_view(view="delivery", limit=20, offset=100)
-        page_after_boundary = await adapter.read_reminder_view(view="delivery", limit=20, offset=120)
-        end = await adapter.read_reminder_view(view="delivery", limit=20, offset=140)
-        page_80 = await adapter.read_reminder_view(view="delivery", limit=20, offset=80)
-        await adapter.close()
-        return first, after_100, boundary, page_after_boundary, end, page_80
+        try:
+            upstream_page_0 = await reference_client.reminders(state="due", limit=100, offset=0)
+            upstream_page_1 = await reference_client.reminders(state="due", limit=100, offset=100)
+            delivery_rank = {"failed": 0, "retrying": 1, "queued": 2}
+            expected = sorted(
+                [
+                    item
+                    for item in [*upstream_page_0.items, *upstream_page_1.items]
+                    if item.delivery_state in delivery_rank
+                ],
+                key=lambda item: (delivery_rank[item.delivery_state], item.due_at_utc, item.id),
+            )
+            pages = {
+                offset: await adapter.read_reminder_view(view="delivery", limit=20, offset=offset)
+                for offset in range(0, 141, 20)
+            }
+            return expected, pages
+        finally:
+            await reference_client.close()
+            await adapter.close()
 
-    first, after_100, boundary, page_after_boundary, end, page_80 = asyncio.run(exercise())
-    first_ids = [item.id for item in first.items]
-    boundary_ids = [item.id for item in boundary.items]
-    page_after_boundary_ids = [item.id for item in page_after_boundary.items]
-    assert first.count == 100
-    assert first.hasMore is True
-    assert boundary.count == 20
-    assert page_after_boundary.count == 20
-    assert end.count == 0
-    assert end.hasMore is False
-    assert {item.id for item in page_80.items}.isdisjoint(set(boundary_ids))
-    assert set(boundary_ids).isdisjoint(set(page_after_boundary_ids))
-    assert boundary_ids == [item.id for item in after_100.items[:20]]
-    assert page_after_boundary_ids == [item.id for item in after_100.items[20:40]]
-    assert page_80.items == first.items[80:100]
-    assert page_after_boundary.hasMore is False
-
-    delivery_rank = {"failed": 0, "retrying": 1, "queued": 2}
-    ordered = first.items + list(after_100.items)
-    keys = [
-        (delivery_rank[item.deliveryState], item.dueAtUtc, item.id)
-        for item in ordered
+    expected, pages = asyncio.run(exercise())
+    expected_keys = [
+        (item.id, item.delivery_state, item.due_at_utc)
+        for item in expected
     ]
-    assert keys == sorted(keys)
+    assert len(expected_keys) == 140
+    assert all(item.deliveryState == "failed" for item in pages[20].items)
+    for offset in (0, 20, 40, 80, 100, 120):
+        actual_keys = [
+            (item.id, item.deliveryState, item.dueAtUtc)
+            for item in pages[offset].items
+        ]
+        assert actual_keys == expected_keys[offset : offset + 20]
+    concatenated = [
+        (item.id, item.deliveryState, item.dueAtUtc)
+        for offset in range(0, 140, 20)
+        for item in pages[offset].items
+    ]
+    assert concatenated == expected_keys
+    assert len({item[0] for item in concatenated}) == len(concatenated)
+    assert pages[140].items == []
+    assert pages[120].hasMore is False
+    assert pages[140].hasMore is False
 
 
 def test_reminder_derived_view_fails_closed_when_scan_budget_is_not_enough(tmp_path):
@@ -152,12 +173,16 @@ def test_reminder_derived_view_maps_budget_failure_to_truthful_http_503(tmp_path
     app.include_router(build_planning_router(adapter))
 
     with TestClient(app) as client:
-        response = client.get(
+        early_response = client.get(
+            "/api/v1/planning/reminders/view?view=delivery&limit=20&offset=0"
+        )
+        late_response = client.get(
             "/api/v1/planning/reminders/view?view=delivery&limit=20&offset=200"
         )
 
-    assert response.status_code == 503
-    assert response.json() == {"detail": "reminder_view_scan_budget_exceeded"}
+    for response in (early_response, late_response):
+        assert response.status_code == 503
+        assert response.json() == {"detail": "reminder_view_scan_budget_exceeded"}
 
 
 def test_composed_pending_and_due_views_remain_ordered_across_the_scan_boundary(tmp_path):
