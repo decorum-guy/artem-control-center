@@ -17,6 +17,7 @@ import { SnapshotCoordinator } from "./snapshotStream";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { ConnectivityRecoverySurface } from "./ConnectivityActions";
 import { WeatherPage } from "./Weather";
+import { useNoticeCenter } from "./NoticeCenter";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -50,6 +51,7 @@ function querySetting<T extends string>(name: string, allowed: readonly T[], fal
 
 export function App() {
   const { confirmAction, confirmationOpen } = useActionConfirmation();
+  const { showNotice } = useNoticeCenter();
   const [route, setRoute] = useState<ShellRoutePath>(routeFromLocation);
   const [scenario, setScenario] = useState<string>(() =>
     import.meta.env.DEV
@@ -70,7 +72,6 @@ export function App() {
   );
   const [kiosk, setKiosk] = useState(false);
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
-  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [coffeeActionPending, setCoffeeActionPending] = useState(false);
   const snapshotCoordinator = useRef<SnapshotCoordinator | null>(null);
 
@@ -145,21 +146,40 @@ export function App() {
       if (!confirmation.confirmed) return;
     }
     setCoffeeActionPending(true);
-    setActionNotice(`${service.title}: команда отправлена, ждём подтверждение Home Assistant…`);
+    showNotice({
+      id: "coffee.action",
+      severity: "progress",
+      title: service.title,
+      detail: "Команда отправлена, ждём подтверждение Home Assistant…"
+    });
     try {
       const result = await executeCoffeeAction(action, crypto.randomUUID());
-      setActionNotice(`${service.title}: команда подтверждена, обновляем данные панели…`);
+      showNotice({
+        id: "coffee.action",
+        severity: "progress",
+        title: service.title,
+        detail: "Команда подтверждена, обновляем данные панели…"
+      });
       const reconciled = await reconcileSnapshot();
-      setActionNotice(reconciled
-        ? `${service.title}: Home Assistant подтвердил состояние «${result.confirmedState === "on" ? "включена" : "выключена"}».`
-        : `${service.title}: команда подтверждена, но данные панели ещё обновляются.`);
+      showNotice({
+        id: "coffee.action",
+        severity: reconciled ? "success" : "warning",
+        title: service.title,
+        detail: reconciled
+          ? `Home Assistant подтвердил состояние «${result.confirmedState === "on" ? "включена" : "выключена"}».`
+          : "Команда подтверждена, но данные панели ещё обновляются.",
+        timeoutMs: 6_000
+      });
     } catch {
-      setActionNotice(
-        `${service.title}: подтверждение не получено. Проверьте текущее состояние перед повтором.`
-      );
+      showNotice({
+        id: "coffee.action",
+        severity: "error",
+        title: service.title,
+        detail: "Подтверждение не получено. Проверьте текущее состояние перед повтором.",
+        timeoutMs: 10_000
+      });
     } finally {
       setCoffeeActionPending(false);
-      window.setTimeout(() => setActionNotice(null), 6000);
     }
   }
 
@@ -306,7 +326,6 @@ export function App() {
           )}
         </ProductShell>
       )}
-      {actionNotice && <div className="action-notice" role="status">{actionNotice}</div>}
     </div>
   );
 }

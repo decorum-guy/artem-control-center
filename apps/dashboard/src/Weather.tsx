@@ -292,7 +292,7 @@ function WeatherHero({ forecast, preview }: { forecast: WeatherForecast; preview
             <span className={forecast.stale ? "weather-freshness--stale" : ""}>
               {forecast.stale ? "Данные устарели" : `Обновлено ${ageLabel(forecast.ageSeconds)}`}
             </span>
-            <small>{forecast.sourceMode === "fixture" ? "Fixture" : forecast.timezoneAbbreviation}</small>
+            <small>{forecast.sourceMode === "fixture" ? "Локальный тестовый режим" : forecast.timezoneAbbreviation}</small>
           </div>
         </div>
 
@@ -327,17 +327,20 @@ function HourlyForecast({ forecast }: { forecast: WeatherForecast }) {
         </div>
         <span>24 часа</span>
       </header>
-      <div className="weather-hourly" role="list">
-        {forecast.hourly.map((hour, index) => (
-          <article className={`weather-hour ${index === 0 ? "weather-hour--now" : ""}`} key={`${hour.time}-${index}`} role="listitem">
-            <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
-            <WeatherGlyph code={hour.weatherCode} compact />
-            <strong>{formatTemperature(hour.temperature)}</strong>
-            <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>
-              {hour.precipitationProbability}%
-            </span>
-          </article>
-        ))}
+      <div className="weather-hourly-viewport">
+        <div className="weather-hourly" role="list">
+          {forecast.hourly.map((hour, index) => (
+            <article className={`weather-hour ${index === 0 ? "weather-hour--now" : ""}`} key={`${hour.time}-${index}`} role="listitem">
+              <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
+              <WeatherGlyph code={hour.weatherCode} compact />
+              <strong>{formatTemperature(hour.temperature)}</strong>
+              <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>
+                {hour.precipitationProbability}%
+              </span>
+            </article>
+          ))}
+        </div>
+        <span className="weather-hourly-more" aria-hidden="true">Ещё&nbsp;→</span>
       </div>
     </section>
   );

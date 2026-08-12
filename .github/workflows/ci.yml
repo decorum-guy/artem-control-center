@@ -65,5 +65,13 @@ jobs:
       - name: Run full validation
         run: npm run check
 
+      - name: Install Chromium for focused B0 browser gate
+        if: runner.os == 'Linux'
+        run: npm run install:browsers
+
+      - name: Run focused B0 browser gate
+        if: runner.os == 'Linux'
+        run: npm run test:e2e -- tests/e2e/b0-samsung.spec.ts
+
       - name: Smoke-test production runtime
         run: npm run test:production-smoke

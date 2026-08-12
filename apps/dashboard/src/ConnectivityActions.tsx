@@ -4,7 +4,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode
 } from "react";
@@ -17,6 +16,7 @@ import {
   type ConnectivityActionAvailability,
   type ConnectivityActionStatus
 } from "./connectivityApi";
+import { useNoticeCenter } from "./NoticeCenter";
 
 interface ConnectivityActionsContextValue {
   available: boolean;
@@ -49,26 +49,18 @@ export function ConnectivityActionsProvider({ children }: { children: ReactNode 
   const [availability, setAvailability] = useState<ConnectivityActionAvailability | null>(null);
   const [available, setAvailable] = useState(false);
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<ConnectivityNotice | null>(null);
-  const noticeTimerRef = useRef<number | null>(null);
-
+  const { showNotice: pushNotice } = useNoticeCenter();
   const showNotice = useCallback((next: ConnectivityNotice, timeoutMs?: number) => {
-    if (noticeTimerRef.current !== null) {
-      window.clearTimeout(noticeTimerRef.current);
-      noticeTimerRef.current = null;
-    }
-    setNotice(next);
-    if (timeoutMs) {
-      noticeTimerRef.current = window.setTimeout(() => {
-        setNotice(null);
-        noticeTimerRef.current = null;
-      }, timeoutMs);
-    }
-  }, []);
-
-  useEffect(() => () => {
-    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
-  }, []);
+    pushNotice({
+      id: "connectivity.recovery",
+      correlationId: next.meta,
+      severity: next.tone,
+      title: "Домашнее подключение",
+      detail: next.meta ? `${next.message} · ${next.meta}` : next.message,
+      timeoutMs,
+      testId: "connectivity-action-notice"
+    });
+  }, [pushNotice]);
 
   const refresh = useCallback(async () => {
     try {
@@ -156,22 +148,6 @@ export function ConnectivityActionsProvider({ children }: { children: ReactNode 
   return (
     <ConnectivityActionsContext.Provider value={value}>
       {children}
-      {notice && (
-        <aside
-          className={`action-notice action-notice--${notice.tone} connectivity-action-notice`}
-          role={notice.tone === "error" ? "alert" : "status"}
-          aria-live={notice.tone === "error" ? "assertive" : "polite"}
-          aria-atomic="true"
-          data-testid="connectivity-action-notice"
-        >
-          <span className="action-notice__indicator" aria-hidden="true" />
-          <span className="action-notice__copy">
-            <strong>Домашнее подключение</strong>
-            <span>{notice.message}</span>
-            {notice.meta && <small>{notice.meta}</small>}
-          </span>
-        </aside>
-      )}
     </ConnectivityActionsContext.Provider>
   );
 }

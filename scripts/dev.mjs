@@ -102,9 +102,14 @@ function consumeRuntimeCommand() {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
+const uvicornArgs = [
+  "-m", "uvicorn", "panel_agent.main:app", "--app-dir", "apps/panel-agent/src", "--host", "127.0.0.1", "--port", "8787"
+];
+if (process.env.PANEL_AGENT_RELOAD !== "false") uvicornArgs.push("--reload");
+
 start(
   venvPython,
-  ["-m", "uvicorn", "panel_agent.main:app", "--app-dir", "apps/panel-agent/src", "--host", "127.0.0.1", "--port", "8787", "--reload"],
+  uvicornArgs,
   {
     PANEL_AGENT_MODE: requestedMode,
     PANEL_FIXTURE_WRITES_ENABLED: requestedMode === "fixtures" ? "true" : "false",

@@ -97,6 +97,14 @@ export function CoffeeSettingsPanel() {
     }
   }
 
+  function stepTiming(setter: (value: string) => void, current: string, delta: number) {
+    const parsed = Number(current);
+    const next = Number.isInteger(parsed) ? parsed + delta : 1;
+    setter(String(Math.max(1, next)));
+    timingDirtyRef.current = true;
+    setTimingDirty(true);
+  }
+
   async function toggleNotification(
     event: "warmup" | "longRunning",
     field: "enabled" | "telegram" | "iphone",
@@ -150,44 +158,20 @@ export function CoffeeSettingsPanel() {
         </div>
         {timing ? (
           <div className="timing-form">
-            <label>
-              <span>Время разогрева</span>
-              <span className="number-control">
-                <input
-                  aria-label="Время разогрева"
-                  inputMode="numeric"
-                  type="number"
-                  step="1"
-                value={warmup}
-                  onChange={(event) => {
-                    setWarmup(event.target.value);
-                    timingDirtyRef.current = true;
-                    setTimingDirty(true);
-                  }}
-                  disabled={pending || !timing.writesEnabled}
-                />
-                <i>мин</i>
-              </span>
-            </label>
-            <label>
-              <span>Предупредить о долгой работе через</span>
-              <span className="number-control">
-                <input
-                  aria-label="Предупредить о долгой работе через"
-                  inputMode="numeric"
-                  type="number"
-                  step="1"
-                  value={longRunning}
-                  onChange={(event) => {
-                    setLongRunning(event.target.value);
-                    timingDirtyRef.current = true;
-                    setTimingDirty(true);
-                  }}
-                  disabled={pending || !timing.writesEnabled}
-                />
-                <i>мин</i>
-              </span>
-            </label>
+            <TimingStepper
+              label="Время разогрева"
+              value={warmup}
+              onStep={(delta) => stepTiming(setWarmup, warmup, delta)}
+              disabled={pending || !timing.writesEnabled}
+              testId="warmup"
+            />
+            <TimingStepper
+              label="Предупредить о долгой работе через"
+              value={longRunning}
+              onStep={(delta) => stepTiming(setLongRunning, longRunning, delta)}
+              disabled={pending || !timing.writesEnabled}
+              testId="long-running"
+            />
             <button
               type="button"
               onClick={() => void saveTiming()}
@@ -264,6 +248,31 @@ export function CoffeeSettingsPanel() {
       )}
       {notice && <p className="settings-notice" role="status">{notice}</p>}
     </section>
+  );
+}
+
+function TimingStepper({
+  label,
+  value,
+  onStep,
+  disabled,
+  testId
+}: {
+  label: string;
+  value: string;
+  onStep: (delta: -1 | 1) => void;
+  disabled: boolean;
+  testId: string;
+}) {
+  return (
+    <div className="timing-stepper-field">
+      <span>{label}</span>
+      <div className="timing-stepper" data-testid={`coffee-timing-${testId}`}>
+        <button type="button" aria-label={`${label}: уменьшить`} onClick={() => onStep(-1)} disabled={disabled}>−</button>
+        <output aria-live="polite" aria-label={label}>{value || "—"} <span>мин</span></output>
+        <button type="button" aria-label={`${label}: увеличить`} onClick={() => onStep(1)} disabled={disabled}>+</button>
+      </div>
+    </div>
   );
 }
 

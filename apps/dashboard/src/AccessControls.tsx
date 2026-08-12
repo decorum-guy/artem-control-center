@@ -92,7 +92,6 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinBusy, setPinBusy] = useState(false);
-  const [clock, setClock] = useState(Date.now());
   const resolverRef = useRef<((accepted: boolean) => void) | null>(null);
   const dialogRef = useRef<HTMLElement | null>(null);
 
@@ -113,11 +112,6 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     if (!prompt) return;
@@ -286,24 +280,12 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     explainAvailability
   ]);
 
-  const remainingSeconds = status?.temporaryFullExpiresAt
-    ? Math.max(0, Math.ceil((Date.parse(status.temporaryFullExpiresAt) - clock) / 1000))
-    : 0;
-  const remainingMinutes = Math.floor(remainingSeconds / 60);
-  const remainingRemainder = remainingSeconds % 60;
   const pinValid = isValidPin(pin);
   const maskedPin = pin.length > 0 ? Array.from({ length: pin.length }, () => "●").join(" ") : "○ ○ ○ ○";
 
   return (
     <AccessContext.Provider value={value}>
       {children}
-      {status?.temporaryFull && remainingSeconds > 0 && (
-        <aside className="temporary-access-badge" role="status">
-          <span>Полный доступ</span>
-          <strong>{remainingMinutes}:{String(remainingRemainder).padStart(2, "0")}</strong>
-          <button type="button" onClick={() => void clearTemporary()}>Завершить</button>
-        </aside>
-      )}
       {prompt && (
         <div
           className="pin-modal-backdrop"
@@ -377,6 +359,31 @@ export function useAccess() {
   const value = useContext(AccessContext);
   if (!value) throw new Error("useAccess must be used inside AccessProvider");
   return value;
+}
+
+export function TemporaryAccessIndicator() {
+  const { status, clearTemporary } = useAccess();
+  const [clock, setClock] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const remainingSeconds = status?.temporaryFullExpiresAt
+    ? Math.max(0, Math.ceil((Date.parse(status.temporaryFullExpiresAt) - clock) / 1000))
+    : 0;
+  if (!status?.temporaryFull || remainingSeconds <= 0) return null;
+
+  const remainingMinutes = Math.floor(remainingSeconds / 60);
+  const remainingRemainder = remainingSeconds % 60;
+  return (
+    <div className="temporary-access-chip" role="status" data-testid="temporary-access-indicator">
+      <span>Полный доступ</span>
+      <strong>{remainingMinutes}:{String(remainingRemainder).padStart(2, "0")}</strong>
+      <button type="button" onClick={() => void clearTemporary()}>Завершить</button>
+    </div>
+  );
 }
 
 const profileCopy: Record<AccessProfile, { title: string; description: string }> = {

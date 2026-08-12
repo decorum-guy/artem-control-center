@@ -67,7 +67,7 @@ html[data-theme="day"] .action-confirmation-backdrop {
 .action-confirmation__kicker {
   margin: 0 0 6px;
   color: var(--confirm-text-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 780;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -95,7 +95,7 @@ html[data-theme="day"] .action-confirmation-backdrop {
   padding: 5px 10px;
   background: var(--confirm-surface-secondary);
   color: var(--confirm-text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
   letter-spacing: 0.04em;
 }
@@ -120,7 +120,7 @@ html[data-theme="day"] .action-confirmation-backdrop {
 .action-confirmation__target span,
 .action-confirmation__revision span {
   color: var(--confirm-text-muted);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 720;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -138,7 +138,7 @@ html[data-theme="day"] .action-confirmation-backdrop {
 .action-confirmation__revision code {
   color: var(--confirm-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
@@ -199,7 +199,7 @@ html[data-theme="day"] .action-confirmation-backdrop {
 
 .action-confirmation__phrase small {
   color: var(--confirm-text-muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
