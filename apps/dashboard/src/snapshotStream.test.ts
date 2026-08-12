@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSnapshot } from "@artem/contracts";
+import { planningFixtures } from "./planningFixtures";
 import { markRuntimeShutdownPending } from "./runtimeLifecycle";
 import { SnapshotCoordinator } from "./snapshotStream";
 
@@ -20,13 +21,16 @@ class FakeEventSource extends EventTarget {
   }
 }
 
-function snapshot(revision: number): DashboardSnapshot {
+function snapshot(revision: number, withPlanning = false): DashboardSnapshot {
   return {
     revision,
     generatedAt: `2026-07-29T16:00:0${revision}Z`,
     mode: "fixtures",
     fixtureScenario: "ha-healthy",
-    services: []
+    services: [],
+    planning: withPlanning
+      ? revision === 1 ? planningFixtures.sseBefore : planningFixtures.sseAfter
+      : undefined
   };
 }
 
@@ -102,6 +106,34 @@ describe("SnapshotCoordinator", () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(initialFetches + 1);
     coordinator.stop();
     expect(sources[0].closed).toBe(true);
+  });
+
+  it("replaces one Planning item through the normal SSE revision without duplicating it", async () => {
+    installBrowserGlobals();
+    const source = new FakeEventSource();
+    let nextRevision = 1;
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify(snapshot(nextRevision, true)),
+      { status: 200, headers: { "content-type": "application/json" } }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const received: DashboardSnapshot[] = [];
+    const coordinator = new SnapshotCoordinator({
+      scenario: "ha-healthy",
+      onSnapshot: (value) => received.push(value),
+      onError: () => undefined,
+      eventSourceFactory: () => source as unknown as EventSource
+    });
+
+    coordinator.start();
+    await coordinator.refresh();
+    nextRevision = 2;
+    source.emit("snapshot", JSON.stringify({ revision: 2 }));
+    await vi.waitFor(() => expect(received.at(-1)?.planning?.reminders.upcoming[0]?.title).toBe("Обновлённое напоминание"));
+
+    expect(received.filter((value) => value.revision === 2)).toHaveLength(1);
+    expect(received.at(-1)?.planning?.reminders.upcoming).toHaveLength(1);
+    coordinator.stop();
   });
 
   it("falls back to calm/fast polling, pauses aggression while hidden and coalesces", async () => {

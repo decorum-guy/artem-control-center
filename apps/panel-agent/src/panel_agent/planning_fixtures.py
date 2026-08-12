@@ -28,6 +28,17 @@ PLANNING_FIXTURE_SCENARIOS = frozenset(
         "offline",
         "oversized",
         "route-pagination",
+        "overview-healthy",
+        "overview-empty",
+        "overview-reminder-soon",
+        "overview-task-priorities",
+        "overview-timed-event",
+        "overview-all-day-event",
+        "overview-degraded",
+        "overview-delivery-failure",
+        "overview-delivered-open",
+        "overview-long-russian",
+        "overview-bounded-20",
     }
 )
 _IDS = {
@@ -95,28 +106,24 @@ def fixture_payload(scenario: str, path: str, query: httpx.QueryParams | None = 
         items = _filter_reminders(_reminder_items(scenario), query)
         return _list_envelope("reminder", items, query=query)
     if path == "/internal/planning/v1/tasks":
-        if scenario == "empty":
+        if scenario in {"empty", "overview-empty"}:
             items: list[dict[str, Any]] = []
         elif scenario == "route-pagination":
             view = query.get("view") if query is not None else "today"
             items = _route_tasks(view or "today")
         else:
             view = query.get("view") if query is not None else None
-            items = {
-                "today": [_task("today_task", "2026-08-12", "high")],
-                "overdue": [_task("overdue_task", "2026-08-11", "normal")],
-                "upcoming": [_task("upcoming_task", "2026-08-15", "low")],
-            }.get(view or "today", [])
+            items = _task_items(scenario, view or "today")
         return _list_envelope("task", items, query=query)
     if path == "/internal/planning/v1/events":
-        items = [] if scenario == "empty" else _event_items(scenario)
+        items = [] if scenario in {"empty", "overview-empty"} else _event_items(scenario)
         return _list_envelope(
             "calendar_event",
             _filter_events(items, query),
             query=query,
         )
     if path == "/internal/planning/v1/projects":
-        items = [] if scenario == "empty" else _project_items(scenario)
+        items = [] if scenario in {"empty", "overview-empty"} else _project_items(scenario)
         return _list_envelope("project", items, query=query)
     return None
 
@@ -156,8 +163,18 @@ def _synthetic_uuid(index: int) -> str:
 
 
 def _reminder_items(scenario: str) -> list[dict[str, Any]]:
-    if scenario == "empty":
+    if scenario in {"empty", "overview-empty"}:
         return []
+    if scenario == "overview-delivery-failure":
+        return [_reminder(), _failure_reminder()]
+    if scenario == "overview-delivered-open":
+        return [_delivered_reminder(due_at_utc="2026-08-12T09:45:00Z")]
+    if scenario == "overview-reminder-soon":
+        return [_reminder(due_at_utc="2026-08-12T09:40:00Z")]
+    if scenario == "overview-long-russian":
+        return [_reminder(
+            title="Проверить длинное русское напоминание о доставке документов в бухгалтерию до конца рабочего дня",
+        )]
     return [
         _reminder(),
         _failure_reminder(),
@@ -212,7 +229,50 @@ def _route_tasks(view: str) -> list[dict[str, Any]]:
     ]
 
 
+def _task_items(scenario: str, view: str) -> list[dict[str, Any]]:
+    if scenario == "overview-task-priorities" and view == "overdue":
+        return [
+            _task("overdue_task", "2026-08-12", "high", title="Высокий приоритет"),
+            _task("overdue_task", "2026-08-11", "normal", object_id=_synthetic_uuid(4001), title="Обычный приоритет"),
+            _task("overdue_task", "2026-08-10", "low", object_id=_synthetic_uuid(4002), title="Низкий приоритет"),
+            _task("overdue_task", "2026-08-09", "none", object_id=_synthetic_uuid(4003), title="Без приоритета"),
+        ]
+    if scenario == "overview-bounded-20" and view == "overdue":
+        return [
+            _task(
+                "overdue_task",
+                "2026-08-11",
+                "normal" if index else "high",
+                object_id=_synthetic_uuid(4000 + index),
+                title=f"Открытая просроченная задача {index + 1}",
+            )
+            for index in range(20)
+        ]
+    if scenario == "overview-long-russian" and view == "overdue":
+        return [_task(
+            "overdue_task",
+            "2026-08-11",
+            "high",
+            title="Подготовить очень длинную просроченную задачу для квартального отчёта https://example.com light.turn_on /etc/passwd",
+        )]
+    return {
+        "today": [_task("today_task", "2026-08-12", "high")],
+        "overdue": [_task("overdue_task", "2026-08-11", "normal")],
+        "upcoming": [_task("upcoming_task", "2026-08-15", "low")],
+    }.get(view, [])
+
+
 def _event_items(scenario: str) -> list[dict[str, Any]]:
+    if scenario == "overview-timed-event":
+        return [_timed_event()]
+    if scenario == "overview-all-day-event":
+        return [_all_day_event()]
+    if scenario == "overview-long-russian":
+        return [
+            _timed_event(
+                title="Длинная встреча с русским названием, которое должно спокойно занимать две строки",
+            )
+        ]
     items = [_timed_event(), _all_day_event()]
     if scenario == "route-pagination":
         items.append(_outside_event())
@@ -250,7 +310,7 @@ def _project_items(scenario: str) -> list[dict[str, Any]]:
 
 
 def _status(scenario: str) -> dict[str, Any]:
-    degraded = scenario == "degraded"
+    degraded = scenario in {"degraded", "overview-degraded"}
     return {
         "schemaVersion": "planning.v1",
         "kind": "status",
@@ -374,12 +434,16 @@ def _common(
     }
 
 
-def _reminder() -> dict[str, Any]:
+def _reminder(
+    *,
+    due_at_utc: str = "2026-08-12T10:00:00Z",
+    title: str = "Synthetic reminder",
+) -> dict[str, Any]:
     return {
         **_common("reminder"),
         "domain": "reminder",
-        "title": "Synthetic reminder",
-        "due_at_utc": "2026-08-12T10:00:00Z",
+        "title": title,
+        "due_at_utc": due_at_utc,
         "timezone": "Europe/Moscow",
         "status": "pending",
         "created_by": "fixture",
@@ -417,12 +481,12 @@ def _due_normal_reminder() -> dict[str, Any]:
     }
 
 
-def _delivered_reminder() -> dict[str, Any]:
+def _delivered_reminder(*, due_at_utc: str = "2026-08-12T08:15:00Z") -> dict[str, Any]:
     return {
         **_reminder(),
         "id": _IDS["delivered"],
         "title": "Synthetic delivered open reminder",
-        "due_at_utc": "2026-08-12T08:15:00Z",
+        "due_at_utc": due_at_utc,
         "status": "due",
         "delivery_state": "delivered",
     }
@@ -456,11 +520,12 @@ def _task(
     priority: str,
     *,
     object_id: str | None = None,
+    title: str | None = None,
 ) -> dict[str, Any]:
     return {
         **_common(identifier, object_id=object_id),
         "domain": "task",
-        "title": f"Synthetic {identifier.replace('_', ' ')}",
+        "title": title or f"Synthetic {identifier.replace('_', ' ')}",
         "priority": priority,
         "status": "open",
         "notes": None,
@@ -475,11 +540,11 @@ def _task(
     }
 
 
-def _timed_event() -> dict[str, Any]:
+def _timed_event(*, title: str = "Synthetic timed event") -> dict[str, Any]:
     return {
         **_common("timed_event", source="system"),
         "domain": "calendar_event",
-        "title": "Synthetic timed event",
+        "title": title,
         "all_day": False,
         "timezone": "Europe/Moscow",
         "sync_state": "local_only",
