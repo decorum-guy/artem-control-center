@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 @dataclass(frozen=True)
@@ -43,10 +45,23 @@ class IntegrationSettings:
     coffee_actions_enabled: bool = False
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
+    panel_planning_enabled: bool = False
+    panel_planning_base_url: str = ""
+    panel_planning_internal_secret: str = ""
+    panel_planning_secret: str = ""
+    panel_planning_refresh_seconds: int = 20
+    panel_planning_status_refresh_seconds: int = 300
+    panel_planning_stale_after_seconds: int = 90
+    panel_planning_unavailable_after_seconds: int = 300
+    panel_planning_max_backoff_seconds: int = 120
+    panel_planning_cache_path: str = ".cache/planning-snapshot.json"
+    panel_planning_response_limit_bytes: int = 256 * 1024
+    panel_planning_timezone: str = "Europe/Moscow"
+    panel_planning_fixture_scenario: str = "healthy"
 
     @classmethod
     def from_env(cls) -> "IntegrationSettings":
-        return cls(
+        settings = cls(
             ha_url=os.getenv("PANEL_HA_URL", "").rstrip("/"),
             ha_token=os.getenv("PANEL_HA_TOKEN", ""),
             ha_stale_after_seconds=max(
@@ -156,7 +171,53 @@ class IntegrationSettings:
                 5,
                 int(os.getenv("PANEL_SSE_HEARTBEAT_SECONDS", "20")),
             ),
+            panel_planning_enabled=_bool_env("PANEL_PLANNING_ENABLED", False),
+            panel_planning_base_url=os.getenv("PANEL_PLANNING_BASE_URL", "").strip().rstrip("/"),
+            panel_planning_internal_secret=os.getenv("PANEL_PLANNING_INTERNAL_SECRET", ""),
+            panel_planning_secret=os.getenv("PANEL_PLANNING_SECRET", ""),
+            panel_planning_refresh_seconds=max(
+                5,
+                min(300, int(os.getenv("PANEL_PLANNING_REFRESH_SECONDS", "20"))),
+            ),
+            panel_planning_status_refresh_seconds=max(
+                60,
+                min(3600, int(os.getenv("PANEL_PLANNING_STATUS_REFRESH_SECONDS", "300"))),
+            ),
+            panel_planning_stale_after_seconds=max(
+                15,
+                int(os.getenv("PANEL_PLANNING_STALE_AFTER_SECONDS", "90")),
+            ),
+            panel_planning_unavailable_after_seconds=max(
+                30,
+                int(os.getenv("PANEL_PLANNING_UNAVAILABLE_AFTER_SECONDS", "300")),
+            ),
+            panel_planning_max_backoff_seconds=max(
+                30,
+                min(3600, int(os.getenv("PANEL_PLANNING_MAX_BACKOFF_SECONDS", "120"))),
+            ),
+            panel_planning_cache_path=os.getenv(
+                "PANEL_PLANNING_CACHE_PATH",
+                ".cache/planning-snapshot.json",
+            ).strip(),
+            panel_planning_response_limit_bytes=max(
+                4096,
+                min(
+                    2 * 1024 * 1024,
+                    int(os.getenv("PANEL_PLANNING_RESPONSE_LIMIT_BYTES", str(256 * 1024))),
+                ),
+            ),
+            panel_planning_timezone=os.getenv(
+                "PANEL_PLANNING_TIMEZONE",
+                "Europe/Moscow",
+            ).strip(),
+            panel_planning_fixture_scenario=os.getenv(
+                "PANEL_PLANNING_FIXTURE_SCENARIO",
+                "healthy",
+            ).strip(),
         )
+        if settings.panel_planning_enabled:
+            _validate_planning_settings(settings)
+        return settings
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -164,3 +225,35 @@ def _bool_env(name: str, default: bool) -> bool:
     if not raw:
         return default
     return raw in {"1", "true", "yes", "on"}
+
+
+def _validate_planning_settings(settings: IntegrationSettings) -> None:
+    if not settings.panel_planning_base_url:
+        raise RuntimeError(
+            "PANEL_PLANNING_ENABLED requires PANEL_PLANNING_BASE_URL"
+        )
+    if not settings.panel_planning_internal_secret or not settings.panel_planning_secret:
+        raise RuntimeError(
+            "PANEL_PLANNING_ENABLED requires both Planning server secrets"
+        )
+    parsed = urlsplit(settings.panel_planning_base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise RuntimeError("PANEL_PLANNING_BASE_URL must use http or https")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise RuntimeError(
+            "PANEL_PLANNING_BASE_URL must not contain credentials, query, or fragment"
+        )
+    if parsed.path not in {"", "/"}:
+        raise RuntimeError("PANEL_PLANNING_BASE_URL must be an origin without a path")
+    try:
+        ZoneInfo(settings.panel_planning_timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise RuntimeError("PANEL_PLANNING_TIMEZONE must be an IANA timezone") from exc
+    if settings.panel_planning_status_refresh_seconds < settings.panel_planning_refresh_seconds:
+        raise RuntimeError(
+            "PANEL_PLANNING_STATUS_REFRESH_SECONDS must not be faster than domain polling"
+        )
+    if settings.panel_planning_unavailable_after_seconds < settings.panel_planning_stale_after_seconds:
+        raise RuntimeError(
+            "PANEL_PLANNING_UNAVAILABLE_AFTER_SECONDS must be at least stale threshold"
+        )

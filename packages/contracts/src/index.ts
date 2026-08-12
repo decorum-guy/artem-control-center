@@ -104,12 +104,144 @@ export interface ServiceSnapshot {
   presentation?: ServicePresentation;
 }
 
+export type PlanningSourceStatus = "current" | "stale" | "offline" | "degraded";
+export type PlanningSource =
+  | "alice"
+  | "telegram"
+  | "panel-agent"
+  | "operator"
+  | "ticktick"
+  | "calendar-provider"
+  | "system";
+export type PlanningReminderStatus = "pending" | "due" | "completed" | "cancelled";
+export type PlanningDeliveryState = "not_due" | "queued" | "retrying" | "delivered" | "failed";
+export type PlanningTaskPriority = "none" | "low" | "normal" | "high";
+export type PlanningTaskStatus = "open" | "completed" | "archived";
+export type PlanningEventSyncState =
+  | "local_only"
+  | "pending"
+  | "synced"
+  | "stale"
+  | "conflict"
+  | "error";
+
+export interface PlanningReminder {
+  id: string;
+  version: number;
+  source: PlanningSource;
+  sourceLabel: string;
+  title: string;
+  dueAtUtc: string;
+  timezone: string;
+  status: PlanningReminderStatus;
+  deliveryState: PlanningDeliveryState;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanningTask {
+  id: string;
+  version: number;
+  source: PlanningSource;
+  sourceLabel: string;
+  title: string;
+  priority: PlanningTaskPriority;
+  status: PlanningTaskStatus;
+  dueDate: string | null;
+  dueTime: string | null;
+  timezone: string | null;
+  projectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanningCalendarEvent {
+  id: string;
+  version: number;
+  source: PlanningSource;
+  sourceLabel: string;
+  title: string;
+  allDay: boolean;
+  timezone: string;
+  syncState: PlanningEventSyncState;
+  startAtUtc: string | null;
+  endAtUtc: string | null;
+  startDate: string | null;
+  endDateExclusive: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanningProject {
+  id: string;
+  version: number;
+  source: PlanningSource;
+  sourceLabel: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanningConflict {
+  id: string;
+  eventIds: string[];
+  source: "system";
+  sourceLabel: "Panel Agent";
+  startAtUtc: string | null;
+  endAtUtc: string | null;
+}
+
+export interface PlanningCapabilities {
+  create: boolean;
+  edit: boolean;
+  complete: boolean;
+  cancel: boolean;
+  delete: boolean;
+  voice: boolean;
+  providerSync: boolean;
+}
+
+export interface PlanningProviderStatus {
+  id: "native-planning";
+  label: "Local Planning";
+  status: "local_only" | "not_configured" | "degraded" | "offline";
+  configured: boolean;
+  lastSyncedAt: string | null;
+}
+
+export interface PlanningSnapshot {
+  schemaVersion: "planning.panel.v1";
+  generatedAt: string;
+  sourceStatus: PlanningSourceStatus;
+  lastSyncedAt: string | null;
+  staleAfter: string | null;
+  reminders: {
+    upcoming: PlanningReminder[];
+    overdue: PlanningReminder[];
+    deliveryFailures: PlanningReminder[];
+  };
+  tasks: {
+    today: PlanningTask[];
+    overdue: PlanningTask[];
+    upcoming: PlanningTask[];
+    projects: PlanningProject[];
+  };
+  calendar: {
+    today: PlanningCalendarEvent[];
+    upcoming: PlanningCalendarEvent[];
+    conflicts: PlanningConflict[];
+  };
+  capabilities: PlanningCapabilities;
+  providerStatuses: PlanningProviderStatus[];
+}
+
 export interface DashboardSnapshot {
   revision: number;
   generatedAt: string;
   mode: PanelMode;
   fixtureScenario: string | null;
   services: ServiceSnapshot[];
+  planning?: PlanningSnapshot | null;
 }
 
 export interface CoffeeTimingSettings {

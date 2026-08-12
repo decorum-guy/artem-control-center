@@ -2,6 +2,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .planning import PlanningProjection
+
 PanelMode = Literal["fixtures", "read_only", "integration_test", "production"]
 HealthState = Literal["healthy", "degraded", "offline", "stale"]
 SourceMode = Literal["live", "cached", "fixture", "stale", "unavailable"]
@@ -66,6 +68,7 @@ class DashboardSnapshot(BaseModel):
     mode: PanelMode
     fixtureScenario: Optional[str]
     services: List[ServiceSnapshot]
+    planning: Optional[PlanningProjection] = None
 
 
 class CoffeeTimingSettings(BaseModel):

@@ -22,6 +22,7 @@ from .contracts import (
 )
 from .fixtures import load_fixture_document, services_for_scenario
 from .integrations import IntegrationRuntime
+from .planning_api import build_planning_router
 from .runtime_control import router as runtime_control_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
@@ -42,6 +43,7 @@ weather_service = WeatherService(mode=MODE)
 snapshot_publisher = SnapshotPublisher(
     mode=MODE,
     services_builder=runtime.services,
+    planning_builder=runtime.planning_snapshot,
     heartbeat_seconds=SETTINGS.sse_heartbeat_seconds,
 )
 runtime.set_snapshot_callback(snapshot_publisher.rebuild)
@@ -51,6 +53,9 @@ runtime.set_snapshot_callback(snapshot_publisher.rebuild)
 async def lifespan(_: FastAPI):
     if MODE not in {"fixtures", "integration_test"}:
         await runtime.start()
+        await snapshot_publisher.rebuild()
+    elif SETTINGS.panel_planning_enabled:
+        await runtime.start_planning()
         await snapshot_publisher.rebuild()
     try:
         yield
@@ -66,6 +71,8 @@ app = FastAPI(
 )
 app.include_router(runtime_control_router)
 app.include_router(build_weather_router(weather_service))
+app.include_router(build_planning_router(runtime.planning))
+app.include_router(build_planning_router(runtime.planning, prefix="/api/planning"))
 fixture_services: List[ServiceSnapshot] = []
 revision = 1
 fixture_coffee_state_override: str | None = None
@@ -113,6 +120,7 @@ def ready() -> dict:
             "avalarStage": bool(SETTINGS.avalar_stage_url),
             "avalarSshDetails": runtime.avalar_ssh.enabled,
             "weather": True,
+            "planning": runtime.planning.enabled,
         },
     }
 
@@ -187,6 +195,7 @@ async def snapshot(
         mode=MODE,
         fixtureScenario=fixture_scenario,
         services=services,
+        planning=runtime.planning_snapshot(),
     )
 
 
