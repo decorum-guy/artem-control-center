@@ -11,6 +11,14 @@ import httpx
 
 FIXTURE_TIMESTAMP = "2026-08-12T09:00:00Z"
 FIXTURE_STALE_AFTER = "2026-08-12T09:05:00Z"
+
+
+def fixture_reference_datetime() -> datetime:
+    """Return the canonical wall-clock instant used by Planning fixtures."""
+
+    return datetime.fromisoformat(FIXTURE_TIMESTAMP.replace("Z", "+00:00"))
+
+
 PLANNING_FIXTURE_SCENARIOS = frozenset(
     {
         "healthy",

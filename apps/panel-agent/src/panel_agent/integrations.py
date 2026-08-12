@@ -8,7 +8,7 @@ from .home_assistant import HomeAssistantAdapter
 from .http_integrations import HttpIntegrationAdapter
 from .planning import PlanningProjection
 from .planning_adapter import PlanningAdapter
-from .planning_fixtures import PlanningFixtureTransport
+from .planning_fixtures import PlanningFixtureTransport, fixture_reference_datetime
 from .settings import IntegrationSettings
 from .ssh_details import AvalarSshDetailsAdapter
 
@@ -28,12 +28,21 @@ class IntegrationRuntime:
             settings,
             details_provider=self.avalar_ssh,
         )
+        fixture_planning = (
+            mode in {"fixtures", "integration_test"}
+            and settings.panel_planning_enabled
+        )
         planning_transport = (
             PlanningFixtureTransport(settings.panel_planning_fixture_scenario)
-            if mode in {"fixtures", "integration_test"} and settings.panel_planning_enabled
+            if fixture_planning
             else None
         )
-        self.planning = PlanningAdapter(settings, transport=planning_transport)
+        planning_wall_clock = fixture_reference_datetime if fixture_planning else None
+        self.planning = PlanningAdapter(
+            settings,
+            transport=planning_transport,
+            wall_clock=planning_wall_clock,
+        )
 
     def set_snapshot_callback(
         self,
