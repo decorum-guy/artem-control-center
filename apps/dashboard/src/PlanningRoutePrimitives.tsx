@@ -1,13 +1,21 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import type { PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
 import type { PlanningReadEnvelope, PlanningReadError } from "./planningReadClient";
+import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
+
+function focusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), input:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter((element) => !element.hasAttribute("hidden") && element.getAttribute("aria-hidden") !== "true");
+}
 
 export function syncTimeLabel(value: string | null): string | null {
   if (!value) return null;
   return new Intl.DateTimeFormat("ru-RU", {
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "UTC"
+    timeZone: DEFAULT_PLANNING_TIME_ZONE
   }).format(new Date(value));
 }
 
@@ -90,16 +98,27 @@ export function PlanningRouteState({
   loading,
   empty,
   error,
+  preview = false,
   onRetry,
   children
 }: {
   loading: boolean;
   empty: boolean;
   error: boolean;
+  preview?: boolean;
   onRetry: () => void;
   children: ReactNode;
 }) {
   if (loading) return <div className="planning-route-state" data-testid="planning-route-loading">Загружаем данные…</div>;
+  if (preview && empty) {
+    return (
+      <section className="planning-route-state planning-route-state--error" data-testid="planning-route-preview-empty">
+        <strong>В кратком снимке объектов нет</strong>
+        <p>Полный список сейчас недоступен. Повторите чтение.</p>
+        <button type="button" onClick={onRetry}>Повторить</button>
+      </section>
+    );
+  }
   if (error) {
     return (
       <section className="planning-route-state planning-route-state--error" data-testid="planning-route-error">
@@ -159,21 +178,87 @@ export function PlanningSheet({
   testId?: string;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    closeRef.current?.focus();
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+    previouslyFocusedRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const app = document.querySelector<HTMLElement>(".app");
+    const wasInert = app?.hasAttribute("inert") ?? false;
+    const previousAriaHidden = app?.getAttribute("aria-hidden") ?? null;
+    app?.setAttribute("inert", "");
+    app?.setAttribute("aria-hidden", "true");
+    const focusFirst = () => {
+      const dialog = dialogRef.current;
+      const firstFocusable = dialog ? focusableElements(dialog)[0] : null;
+      (firstFocusable ?? dialog ?? closeRef.current)?.focus();
     };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose]);
-  return (
-    <div className="planning-sheet-backdrop" data-testid={`${testId}-backdrop`}>
+    focusFirst();
+    const frame = window.requestAnimationFrame(focusFirst);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (app) {
+        if (!wasInert) app.removeAttribute("inert");
+        if (previousAriaHidden === null) app.removeAttribute("aria-hidden");
+        else app.setAttribute("aria-hidden", previousAriaHidden);
+      }
+      const opener = previouslyFocusedRef.current;
+      previouslyFocusedRef.current = null;
+      if (opener?.isConnected) {
+        opener.focus();
+        window.requestAnimationFrame(() => opener.focus());
+      }
+    };
+  }, []);
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCloseRef.current();
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+    const focusables = focusableElements(dialogRef.current);
+    if (!focusables.length) {
+      event.preventDefault();
+      dialogRef.current.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+    const atDialogBoundary = active === dialogRef.current || !dialogRef.current.contains(active);
+    if (event.shiftKey && (active === first || atDialogBoundary)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || atDialogBoundary)) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  const sheet = (
+    <div
+      className="planning-sheet-backdrop"
+      data-testid={`${testId}-backdrop`}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onCloseRef.current();
+      }}
+    >
       <section
+        ref={dialogRef}
         className="planning-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby={`${testId}-title`}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        onPointerDown={(event) => event.stopPropagation()}
         data-testid={testId}
       >
         <header className="planning-sheet__header">
@@ -190,5 +275,5 @@ export function PlanningSheet({
       </section>
     </div>
   );
+  return typeof document === "undefined" ? sheet : createPortal(sheet, document.body);
 }
-

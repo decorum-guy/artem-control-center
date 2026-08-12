@@ -42,6 +42,8 @@ PLANNING_FIXTURE_SCENARIOS = frozenset(
         "b3-healthy",
         "b3-empty",
         "b3-route-pagination",
+        "b3-route-budget",
+        "b3-composed-route-pagination",
         "b3-long-russian",
         "b3-overlap",
     }
@@ -175,6 +177,10 @@ def _reminder_items(scenario: str) -> list[dict[str, Any]]:
         return _b3_reminder_items(long_russian=scenario == "b3-long-russian")
     if scenario == "b3-route-pagination":
         return _b3_paged_reminder_items()
+    if scenario == "b3-route-budget":
+        return _b3_budget_reminder_items()
+    if scenario == "b3-composed-route-pagination":
+        return _b3_composed_paged_reminder_items()
     if scenario == "overview-delivery-failure":
         return [_reminder(), _failure_reminder()]
     if scenario == "overview-delivered-open":
@@ -309,21 +315,80 @@ def _b3_reminder_items(*, long_russian: bool = False) -> list[dict[str, Any]]:
 
 
 def _b3_paged_reminder_items() -> list[dict[str, Any]]:
+    return _b3_delivery_page_items(count=140, id_start=6000, title_prefix="Контроль доставки")
+
+
+def _b3_budget_reminder_items() -> list[dict[str, Any]]:
+    return _b3_delivery_page_items(count=260, id_start=6500, title_prefix="Бюджет доставки")
+
+
+def _b3_delivery_page_items(
+    *,
+    count: int,
+    id_start: int,
+    title_prefix: str,
+) -> list[dict[str, Any]]:
     base = datetime(2026, 8, 12, 7, 0, tzinfo=timezone.utc)
     result: list[dict[str, Any]] = []
-    for index in range(60):
+    for index in range(count):
         due = (base + timedelta(minutes=index)).isoformat(timespec="seconds").replace("+00:00", "Z")
         delivery_state = ("failed", "retrying", "queued")[index % 3]
         result.append(
             _reminder_variant(
                 f"b3_paged_reminder_{index}",
-                f"Контроль доставки {index + 1}",
+                f"{title_prefix} {index + 1}",
                 due,
-                object_id=_synthetic_uuid(6000 + index),
+                object_id=_synthetic_uuid(id_start + index),
                 status="due",
                 delivery_state=delivery_state,
                 final_failure_at=FIXTURE_TIMESTAMP if delivery_state == "failed" else None,
             )
+        )
+    return result
+
+
+def _b3_composed_paged_reminder_items() -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    upcoming_base = datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc)
+    overdue_base = datetime(2026, 8, 12, 6, 0, tzinfo=timezone.utc)
+    for index in range(120):
+        upcoming_due = (upcoming_base + timedelta(minutes=index)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        overdue_due = (overdue_base + timedelta(minutes=index)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        result.extend(
+            [
+                _reminder_variant(
+                    f"b3_composed_pending_{index}",
+                    f"Составное ожидающее {index + 1}",
+                    upcoming_due,
+                    object_id=_synthetic_uuid(7000 + index),
+                    status="pending",
+                    delivery_state="not_due",
+                ),
+                _reminder_variant(
+                    f"b3_composed_due_upcoming_{index}",
+                    f"Составное due скоро {index + 1}",
+                    upcoming_due,
+                    object_id=_synthetic_uuid(7200 + index),
+                    status="due",
+                    delivery_state="not_due",
+                ),
+                _reminder_variant(
+                    f"b3_composed_due_overdue_{index}",
+                    f"Составное due просрочено {index + 1}",
+                    overdue_due,
+                    object_id=_synthetic_uuid(7400 + index),
+                    status="due",
+                    delivery_state="not_due",
+                ),
+                _reminder_variant(
+                    f"b3_composed_pending_overdue_{index}",
+                    f"Составное pending просрочено {index + 1}",
+                    overdue_due,
+                    object_id=_synthetic_uuid(7600 + index),
+                    status="pending",
+                    delivery_state="not_due",
+                ),
+            ]
         )
     return result
 

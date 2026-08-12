@@ -7,7 +7,7 @@ import type {
   PlanningTask
 } from "@artem/contracts";
 import type { RoutePath } from "./Shell";
-import { planningReferenceTime, formatReminderDueLabel } from "./planningOverview";
+import { formatReminderDueLabel } from "./planningOverview";
 import {
   calendarAgendaRangeUtc,
   calendarDayRangeUtc,
@@ -27,6 +27,7 @@ import {
   deliveryLabels,
   eventOverlapIds,
   eventTemporalState,
+  calendarEventsInRange,
   formatEventRange,
   formatReminderExactDue,
   formatTaskDueForRoute,
@@ -34,6 +35,7 @@ import {
   lifecycleLabels,
   priorityLabels,
   projectNameForTask,
+  planningRouteReferenceTime,
   reminderMatchesView,
   reminderViewLabels,
   taskViewLabels
@@ -231,6 +233,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         loading={routeRead.loading}
         empty={Boolean(envelope && envelope.items.length === 0)}
         error={routeError}
+        preview={preview}
         onRetry={() => setRetry((value) => value + 1)}
       >
         {envelope && (
@@ -347,28 +350,44 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const [page, setPage] = useState(0);
   const [selectedEvent, setSelectedEvent] = useState<PlanningCalendarEvent | null>(null);
   const [retry, setRetry] = useState(0);
-  const [now, setNow] = useState(() => new Date());
-  const todayLocalDate = currentLocalDate(now, DEFAULT_PLANNING_TIME_ZONE);
-  const range = useMemo(() => {
-    if (segment === "today") return calendarDayRangeUtc(todayLocalDate, DEFAULT_PLANNING_TIME_ZONE);
-    return calendarAgendaRangeUtc(addCalendarDays(todayLocalDate, rangeOffset * 7), 7, DEFAULT_PLANNING_TIME_ZONE);
-  }, [segment, todayLocalDate, rangeOffset]);
+  const [liveNow, setLiveNow] = useState(() => new Date());
+  const requestTodayLocalDate = currentLocalDate(liveNow, DEFAULT_PLANNING_TIME_ZONE);
+  const requestRange = useMemo(() => {
+    if (segment === "today") return calendarDayRangeUtc(requestTodayLocalDate, DEFAULT_PLANNING_TIME_ZONE);
+    return calendarAgendaRangeUtc(addCalendarDays(requestTodayLocalDate, rangeOffset * 7), 7, DEFAULT_PLANNING_TIME_ZONE);
+  }, [segment, requestTodayLocalDate, rangeOffset]);
   const routeRead = usePlanningRead(
-    `events:${range.fromUtc}:${range.toUtc}:${page}:${snapshot.revision}:${retry}`,
-    (signal) => readPlanningEvents(range.fromUtc, range.toUtc, 20, page * 20, signal)
+    `events:${requestRange.fromUtc}:${requestRange.toUtc}:${page}:${snapshot.revision}:${retry}`,
+    (signal) => readPlanningEvents(requestRange.fromUtc, requestRange.toUtc, 20, page * 20, signal)
   );
   const planning = snapshot.planning ?? null;
-  const previewItems = planning ? [...planning.calendar.today, ...planning.calendar.upcoming.filter((event) => !planning.calendar.today.some((todayEvent) => todayEvent.id === event.id))] : [];
-  const fallback = planning && page === 0 ? previewEnvelope("calendar_event", previewItems, planning) : null;
+  const previewCandidate = Boolean(routeRead.error && planning && page === 0);
+  const referenceTime = planningRouteReferenceTime(
+    routeRead.data?.sourceStatus ?? planning?.sourceStatus ?? "unavailable",
+    routeRead.data?.generatedAt ?? planning?.generatedAt ?? null,
+    routeRead.data?.lastSyncedAt ?? planning?.lastSyncedAt ?? null,
+    liveNow,
+    previewCandidate || !routeRead.data
+  );
+  const displayTodayLocalDate = currentLocalDate(referenceTime, DEFAULT_PLANNING_TIME_ZONE);
+  const displayRange = useMemo(() => {
+    if (segment === "today") return calendarDayRangeUtc(displayTodayLocalDate, DEFAULT_PLANNING_TIME_ZONE);
+    return calendarAgendaRangeUtc(addCalendarDays(displayTodayLocalDate, rangeOffset * 7), 7, DEFAULT_PLANNING_TIME_ZONE);
+  }, [segment, displayTodayLocalDate, rangeOffset]);
+  const previewItems = planning
+    ? [...planning.calendar.today, ...planning.calendar.upcoming]
+    : [];
+  const fallbackItems = calendarEventsInRange(previewItems, displayRange);
+  const fallback = planning && page === 0 ? previewEnvelope("calendar_event", fallbackItems, planning) : null;
   const envelope = routeRead.data ?? fallback;
   const preview = !routeRead.data && Boolean(fallback) && Boolean(routeRead.error);
   const routeError = Boolean(routeRead.error && !fallback);
-  const events = envelope?.items ?? [];
+  const events = calendarEventsInRange(envelope?.items ?? [], displayRange);
   const overlapIds = eventOverlapIds(events);
-  const groups = groupCalendarEvents(events, range.fromLocalDate, range.toLocalDateExclusive);
+  const groups = groupCalendarEvents(events, displayRange.fromLocalDate, displayRange.toLocalDateExclusive);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    const timer = window.setInterval(() => setLiveNow(new Date()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => {
@@ -388,7 +407,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         )}
       </div>
       <PlanningRouteHealth sourceStatus={envelope?.sourceStatus ?? "unavailable"} lastSyncedAt={envelope?.lastSyncedAt ?? null} error={routeRead.error} preview={preview} onRetry={() => setRetry((value) => value + 1)} />
-      <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && envelope.items.length === 0)} error={routeError} onRetry={() => setRetry((value) => value + 1)}>
+      <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && events.length === 0)} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
         {envelope && (
           <>
             {groups.length ? (
@@ -399,11 +418,11 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
                     {group.allDay.length > 0 && (
                       <div className="calendar-band" data-testid="planning-calendar-all-day-band">
                         <p className="calendar-band__label">Весь день</p>
-                        {group.allDay.map((event) => <CalendarEventRow key={event.id} event={event} overlap={false} now={now} onOpen={() => setSelectedEvent(event)} />)}
+                        {group.allDay.map((event) => <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} onOpen={() => setSelectedEvent(event)} />)}
                       </div>
                     )}
                     <div className="calendar-timed-list">
-                      {group.timed.map((event) => <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={now} onOpen={() => setSelectedEvent(event)} />)}
+                      {group.timed.map((event) => <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} onOpen={() => setSelectedEvent(event)} />)}
                     </div>
                   </section>
                 ))}
@@ -420,16 +439,10 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   );
 }
 
-function reminderFallbackItems(planning: PlanningSnapshot, view: "upcoming" | "overdue" | "delivery", now: Date): PlanningReminder[] {
+function reminderFallbackItems(planning: PlanningSnapshot, view: "upcoming" | "overdue" | "delivery", referenceTime: Date): PlanningReminder[] {
   const all = [...planning.reminders.upcoming, ...planning.reminders.overdue, ...planning.reminders.deliveryFailures];
   const unique = [...new Map(all.map((item) => [item.id, item])).values()];
-  return unique.filter((reminder) => reminderMatchesView(reminder, view, planningReferenceTime(planning, now) ?? now));
-}
-
-function reminderReferenceTime(sourceStatus: PlanningSnapshot["sourceStatus"] | "unavailable", generatedAt: string | null, lastSyncedAt: string | null, now: Date): Date {
-  if (sourceStatus === "current") return now;
-  const value = lastSyncedAt ?? generatedAt;
-  return value ? new Date(value) : now;
+  return unique.filter((reminder) => reminderMatchesView(reminder, view, referenceTime));
 }
 
 function ReminderSegments({ view, onChange }: { view: "upcoming" | "overdue" | "delivery"; onChange: (view: "upcoming" | "overdue" | "delivery") => void }) {
@@ -482,11 +495,24 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
     (signal) => readPlanningReminders(view, 20, page * 20, signal)
   );
   const planning = snapshot.planning ?? null;
-  const fallback = planning && page === 0 ? previewEnvelope("reminder", reminderFallbackItems(planning, view, now), planning) : null;
+  const fallbackReferenceTime = planningRouteReferenceTime(
+    planning?.sourceStatus ?? "unavailable",
+    planning?.generatedAt ?? null,
+    planning?.lastSyncedAt ?? null,
+    now,
+    true
+  );
+  const fallback = planning && page === 0 ? previewEnvelope("reminder", reminderFallbackItems(planning, view, fallbackReferenceTime), planning) : null;
   const envelope = routeRead.data ?? fallback;
   const preview = !routeRead.data && Boolean(fallback) && Boolean(routeRead.error);
   const routeError = Boolean(routeRead.error && !fallback);
-  const referenceTime = reminderReferenceTime(envelope?.sourceStatus ?? "unavailable", envelope?.generatedAt ?? null, envelope?.lastSyncedAt ?? null, now);
+  const referenceTime = planningRouteReferenceTime(
+    envelope?.sourceStatus ?? "unavailable",
+    envelope?.generatedAt ?? null,
+    envelope?.lastSyncedAt ?? null,
+    now,
+    preview || !routeRead.data
+  );
   const visibleItems = envelope?.items
     .filter((reminder) => reminderMatchesView(reminder, view, referenceTime))
     .sort((left, right) => view === "delivery"
@@ -509,7 +535,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         <span className="planning-route-note">Отдельный monitor-only маршрут</span>
       </div>
       <PlanningRouteHealth sourceStatus={envelope?.sourceStatus ?? "unavailable"} lastSyncedAt={envelope?.lastSyncedAt ?? null} error={routeRead.error} preview={preview} onRetry={() => setRetry((value) => value + 1)} />
-      <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && visibleItems.length === 0)} error={routeError} onRetry={() => setRetry((value) => value + 1)}>
+      <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && visibleItems.length === 0)} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
         {envelope && (
           <>
             <div className="planning-route-list" data-testid="planning-reminder-list">

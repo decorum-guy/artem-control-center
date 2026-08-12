@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 import type { PlanningCalendarEvent, PlanningProject, PlanningReminder, PlanningTask } from "@artem/contracts";
 import {
   deliveryLabels,
+  calendarEventsInRange,
   eventOverlapIds,
+  eventTemporalState,
   formatTaskDueForRoute,
   groupCalendarEvents,
+  planningRouteReferenceTime,
   priorityLabels,
   projectNameForTask,
   reminderMatchesView
 } from "./planningRouteLogic";
+import { calendarAgendaRangeUtc, calendarDayRangeUtc, currentLocalDate } from "./calendarRange";
 
 const baseTask: PlanningTask = {
   id: "00000000-0000-4000-8000-000000000101",
@@ -115,5 +119,127 @@ describe("B3 route semantics", () => {
     expect(reminderMatchesView({ ...baseReminder, deliveryState: "failed" }, "delivery", now)).toBe(true);
     expect(reminderMatchesView({ ...baseReminder, status: "completed" }, "overdue", now)).toBe(false);
   });
-});
 
+  it("freezes stale and offline calendar temporal state at last sync while current data advances", () => {
+    const meeting = baseEvent({
+      startAtUtc: "2026-08-12T10:00:00Z",
+      endAtUtc: "2026-08-12T11:00:00Z"
+    });
+    const lastSyncedAt = "2026-08-12T10:30:00Z";
+    const liveLater = new Date("2026-08-12T12:00:00Z");
+    for (const sourceStatus of ["stale", "offline"] as const) {
+      const frozen = planningRouteReferenceTime(
+        sourceStatus,
+        "2026-08-12T09:00:00Z",
+        lastSyncedAt,
+        liveLater,
+        false
+      );
+      const frozenLater = planningRouteReferenceTime(
+        sourceStatus,
+        "2026-08-12T09:00:00Z",
+        lastSyncedAt,
+        new Date("2026-08-12T23:00:00Z"),
+        false
+      );
+      expect(eventTemporalState(meeting, frozen)).toBe("running");
+      expect(eventTemporalState(meeting, frozenLater)).toBe("running");
+    }
+    expect(eventTemporalState(meeting, planningRouteReferenceTime(
+      "current",
+      lastSyncedAt,
+      lastSyncedAt,
+      liveLater,
+      false
+    ))).toBe("past");
+  });
+
+  it("prefers lastSyncedAt, falls back to generatedAt, and freezes preview even when its snapshot says current", () => {
+    const liveLater = new Date("2026-08-13T00:05:00Z");
+    expect(planningRouteReferenceTime(
+      "stale",
+      "2026-08-12T09:00:00Z",
+      "2026-08-12T11:00:00Z",
+      liveLater,
+      false
+    ).toISOString()).toBe("2026-08-12T11:00:00.000Z");
+    expect(planningRouteReferenceTime(
+      "offline",
+      "2026-08-12T09:00:00Z",
+      null,
+      liveLater,
+      false
+    ).toISOString()).toBe("2026-08-12T09:00:00.000Z");
+    expect(planningRouteReferenceTime(
+      "current",
+      "2026-08-12T09:00:00Z",
+      "2026-08-12T11:00:00Z",
+      liveLater,
+      true
+    ).toISOString()).toBe("2026-08-12T11:00:00.000Z");
+  });
+
+  it("keeps a stale or offline preview on its original local day across midnight", () => {
+    const lastSyncedAt = new Date("2026-08-12T20:55:00Z");
+    const later = new Date("2026-08-12T21:05:00Z");
+    const reference = planningRouteReferenceTime(
+      "offline",
+      "2026-08-12T20:55:00Z",
+      lastSyncedAt.toISOString(),
+      later,
+      true
+    );
+    expect(currentLocalDate(reference, "Europe/Moscow")).toBe("2026-08-12");
+    expect(currentLocalDate(later, "Europe/Moscow")).toBe("2026-08-13");
+  });
+
+  it("filters bounded calendar previews to the selected shifted agenda range", () => {
+    const range = calendarAgendaRangeUtc("2026-08-19", 7, "Europe/Moscow");
+    const inside = baseEvent({
+      id: "00000000-0000-4000-8000-000000000207",
+      startAtUtc: "2026-08-20T10:00:00Z",
+      endAtUtc: "2026-08-20T11:00:00Z"
+    });
+    const outside = baseEvent({
+      id: "00000000-0000-4000-8000-000000000208",
+      startAtUtc: "2026-08-12T10:00:00Z",
+      endAtUtc: "2026-08-12T11:00:00Z"
+    });
+    const allDayBoundary = baseEvent({
+      id: "00000000-0000-4000-8000-000000000209",
+      allDay: true,
+      startAtUtc: null,
+      endAtUtc: null,
+      startDate: "2026-08-18",
+      endDateExclusive: "2026-08-20"
+    });
+    expect(calendarEventsInRange([outside, inside, allDayBoundary], range).map((event) => event.id)).toEqual([
+      inside.id,
+      allDayBoundary.id
+    ]);
+  });
+
+  it("keeps the current route on the live presentation clock", () => {
+    const meeting = baseEvent({
+      startAtUtc: "2026-08-12T10:00:00Z",
+      endAtUtc: "2026-08-12T11:00:00Z"
+    });
+    const currentAtStart = planningRouteReferenceTime(
+      "current",
+      "2026-08-12T09:00:00Z",
+      "2026-08-12T09:00:00Z",
+      new Date("2026-08-12T10:30:00Z"),
+      false
+    );
+    const currentLater = planningRouteReferenceTime(
+      "current",
+      "2026-08-12T09:00:00Z",
+      "2026-08-12T09:00:00Z",
+      new Date("2026-08-12T12:00:00Z"),
+      false
+    );
+    expect(eventTemporalState(meeting, currentAtStart)).toBe("running");
+    expect(eventTemporalState(meeting, currentLater)).toBe("past");
+    expect(calendarDayRangeUtc(currentLocalDate(currentLater, "Europe/Moscow"), "Europe/Moscow").fromLocalDate).toBe("2026-08-12");
+  });
+});

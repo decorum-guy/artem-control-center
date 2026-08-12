@@ -37,6 +37,22 @@ async function setRouteResponseState(page: Page, routePath: string, status: numb
   });
 }
 
+async function setEmptyPlanningPreview(page: Page, domain: "tasks" | "calendar" | "reminders") {
+  await page.route("**/api/v1/snapshot**", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json() as Record<string, unknown>;
+    const planning = payload.planning as Record<string, unknown>;
+    if (domain === "tasks") {
+      planning.tasks = { today: [], overdue: [], upcoming: [], projects: [] };
+    } else if (domain === "calendar") {
+      planning.calendar = { today: [], upcoming: [], conflicts: [] };
+    } else {
+      planning.reminders = { upcoming: [], overdue: [], deliveryFailures: [] };
+    }
+    await route.fulfill({ response, body: JSON.stringify(payload) });
+  });
+}
+
 test.describe("B3 Planning monitoring routes", () => {
   test.beforeEach(async ({ page }) => {
     await page.clock.install({ time: "2026-08-12T09:00:00Z" });
@@ -174,6 +190,65 @@ test.describe("B3 Planning monitoring routes", () => {
     failUntilRetry = false;
     await retryButton.tap();
     await expect(page.getByTestId("planning-task-list")).toBeVisible();
+  });
+
+  test("503 with an empty bounded preview is not rendered as successful empty for any route", async ({ page }) => {
+    for (const [domain, routePath, routeUrl] of [
+      ["tasks", "/api/v1/planning/tasks", "/tasks"],
+      ["calendar", "/api/v1/planning/events", "/calendar"],
+      ["reminders", "/api/v1/planning/reminders/view", "/reminders"]
+    ] as const) {
+      await setEmptyPlanningPreview(page, domain);
+      await setRouteResponseState(page, routePath, 503);
+      await page.goto(routeUrl);
+      await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
+      await expect(page.getByTestId("planning-route-preview-empty")).toContainText("В кратком снимке объектов нет");
+      await expect(page.getByTestId("planning-route-preview-empty")).toContainText("Полный список сейчас недоступен");
+      await expect(page.getByTestId("planning-route-empty")).toHaveCount(0);
+      await expect(page.getByTestId("planning-route-preview-empty").getByRole("button", { name: "Повторить" })).toBeVisible();
+      await page.unroute(`**${routePath}*`);
+      await page.unroute("**/api/v1/snapshot**");
+    }
+  });
+
+  test("shifted Agenda fallback preview is range-filtered and PlanningSheet contains focus", async ({ page }) => {
+    await setRouteResponseState(page, "/api/v1/planning/events", 503);
+    await page.goto("/calendar");
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(6);
+    await page.getByRole("button", { name: "Повестка" }).tap();
+    await page.getByRole("button", { name: "Следующие 7 дней" }).tap();
+    await expect(page.getByTestId("planning-route-preview-empty")).toBeVisible();
+    await expect(page.getByTestId("route-calendar")).not.toContainText("Утреннее совещание");
+    await page.unroute("**/api/v1/planning/events*");
+
+    await page.goto("/tasks");
+    const opener = page.getByRole("button", { name: "Проект", exact: true });
+    await opener.focus();
+    await opener.press("Enter");
+    const sheet = page.getByTestId("planning-project-sheet");
+    await expect(sheet).toBeVisible();
+    const activeInsideSheet = () => page.evaluate(() => {
+      const dialog = document.querySelector<HTMLElement>('[data-testid="planning-project-sheet"]');
+      return Boolean(dialog && document.activeElement && dialog.contains(document.activeElement));
+    });
+    expect(await activeInsideSheet()).toBeTruthy();
+    for (let index = 0; index < 6; index += 1) {
+      await page.keyboard.press("Tab");
+      expect(await activeInsideSheet()).toBeTruthy();
+    }
+    await page.keyboard.press("Shift+Tab");
+    expect(await activeInsideSheet()).toBeTruthy();
+    await page.evaluate(() => document.querySelector<HTMLElement>('a[href="/calendar"]')?.focus());
+    expect(await activeInsideSheet()).toBeTruthy();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0);
+    await expect(opener).toBeFocused();
+
+    await opener.tap();
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole("button", { name: "Закрыть" }).tap();
+    await expect(sheet).toHaveCount(0);
+    await expect(opener).toBeFocused();
   });
 
   test("offline without a global cache stays an unavailable error, not an empty state", async ({ page }) => {

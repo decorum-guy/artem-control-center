@@ -13,7 +13,12 @@ from .planning import (
     validate_uuid4,
     validate_utc_timestamp,
 )
-from .planning_adapter import PlanningAdapter, PlanningReadUnavailable, PlanningUpstreamError
+from .planning_adapter import (
+    PlanningAdapter,
+    PlanningBoundedScanError,
+    PlanningReadUnavailable,
+    PlanningUpstreamError,
+)
 
 
 def build_planning_router(
@@ -64,6 +69,8 @@ def build_planning_router(
                 limit=_limit(query),
                 offset=_offset(query),
             )
+        except PlanningBoundedScanError as exc:
+            raise _read_unavailable(detail=exc.category) from exc
         except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
             raise _read_unavailable() from exc
 
@@ -129,10 +136,10 @@ def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
 
 
-def _read_unavailable() -> HTTPException:
+def _read_unavailable(*, detail: str = "planning_read_unavailable") -> HTTPException:
     """Never turn a bounded summary cache into a false complete route page."""
 
-    return HTTPException(status_code=503, detail="planning_read_unavailable")
+    return HTTPException(status_code=503, detail=detail)
 
 
 def _query(request: Request, *, allowed: set[str]) -> dict[str, str]:

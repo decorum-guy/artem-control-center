@@ -2,8 +2,10 @@ import type {
   PlanningCalendarEvent,
   PlanningProject,
   PlanningReminder,
+  PlanningSourceStatus,
   PlanningTask
 } from "@artem/contracts";
+import type { CalendarRange } from "./calendarRange";
 import { localDateForInstant } from "./calendarRange";
 
 export const taskViewLabels: Record<"today" | "overdue" | "upcoming", string> = {
@@ -126,6 +128,47 @@ export function eventTemporalState(event: PlanningCalendarEvent, now: Date): Eve
   return "future";
 }
 
+function validRouteDate(value: string | null | undefined): Date | null {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? new Date(parsed) : null;
+}
+
+/** Freeze last-good route presentation at its canonical sync time. */
+export function planningRouteReferenceTime(
+  sourceStatus: PlanningSourceStatus | "unavailable",
+  generatedAt: string | null,
+  lastSyncedAt: string | null,
+  liveNow: Date,
+  preview: boolean
+): Date {
+  if (!preview && sourceStatus === "current") return new Date(liveNow.getTime());
+  return validRouteDate(lastSyncedAt)
+    ?? validRouteDate(generatedAt)
+    ?? new Date(liveNow.getTime());
+}
+
+export function calendarEventsInRange(
+  events: PlanningCalendarEvent[],
+  range: CalendarRange
+): PlanningCalendarEvent[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    if (seen.has(event.id)) return false;
+    seen.add(event.id);
+    if (event.allDay) {
+      return Boolean(
+        event.startDate &&
+        event.endDateExclusive &&
+        event.startDate < range.toLocalDateExclusive &&
+        event.endDateExclusive > range.fromLocalDate
+      );
+    }
+    if (!event.startAtUtc || !event.endAtUtc) return false;
+    return Date.parse(event.startAtUtc) < Date.parse(range.toUtc)
+      && Date.parse(event.endAtUtc) > Date.parse(range.fromUtc);
+  });
+}
+
 function addLocalDate(localDate: string, days: number): string {
   const [year, month, day] = localDate.split("-").map(Number);
   const result = new Date(Date.UTC(year, month - 1, day + days));
@@ -176,4 +219,3 @@ export function reminderMatchesView(
 export function deliveryAttentionRank(state: PlanningReminder["deliveryState"]): number {
   return state === "failed" ? 0 : state === "retrying" ? 1 : state === "queued" ? 2 : 3;
 }
-

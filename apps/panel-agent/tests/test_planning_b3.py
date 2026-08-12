@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from panel_agent.planning_adapter import PlanningAdapter
+from panel_agent.planning_adapter import PlanningAdapter, PlanningBoundedScanError
 from panel_agent.planning_api import build_planning_router
 from panel_agent.planning_fixtures import PlanningFixtureTransport
 from panel_agent.settings import IntegrationSettings
@@ -79,6 +80,120 @@ def test_reminder_derived_view_has_truthful_bounded_pagination(tmp_path):
     assert second.count == 20
     assert first.hasMore is True
     assert {item.id for item in first.items}.isdisjoint({item.id for item in second.items})
+
+
+def test_reminder_derived_delivery_view_crosses_the_100_row_boundary(tmp_path):
+    adapter = PlanningAdapter(
+        settings(tmp_path, "b3-route-pagination"),
+        transport=PlanningFixtureTransport("b3-route-pagination"),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+
+    async def exercise():
+        await adapter.start()
+        first = await adapter.read_reminder_view(view="delivery", limit=100, offset=0)
+        after_100 = await adapter.read_reminder_view(view="delivery", limit=100, offset=100)
+        boundary = await adapter.read_reminder_view(view="delivery", limit=20, offset=100)
+        page_after_boundary = await adapter.read_reminder_view(view="delivery", limit=20, offset=120)
+        end = await adapter.read_reminder_view(view="delivery", limit=20, offset=140)
+        page_80 = await adapter.read_reminder_view(view="delivery", limit=20, offset=80)
+        await adapter.close()
+        return first, after_100, boundary, page_after_boundary, end, page_80
+
+    first, after_100, boundary, page_after_boundary, end, page_80 = asyncio.run(exercise())
+    first_ids = [item.id for item in first.items]
+    boundary_ids = [item.id for item in boundary.items]
+    page_after_boundary_ids = [item.id for item in page_after_boundary.items]
+    assert first.count == 100
+    assert first.hasMore is True
+    assert boundary.count == 20
+    assert page_after_boundary.count == 20
+    assert end.count == 0
+    assert end.hasMore is False
+    assert {item.id for item in page_80.items}.isdisjoint(set(boundary_ids))
+    assert set(boundary_ids).isdisjoint(set(page_after_boundary_ids))
+    assert boundary_ids == [item.id for item in after_100.items[:20]]
+    assert page_after_boundary_ids == [item.id for item in after_100.items[20:40]]
+    assert page_80.items == first.items[80:100]
+    assert page_after_boundary.hasMore is False
+
+    delivery_rank = {"failed": 0, "retrying": 1, "queued": 2}
+    ordered = first.items + list(after_100.items)
+    keys = [
+        (delivery_rank[item.deliveryState], item.dueAtUtc, item.id)
+        for item in ordered
+    ]
+    assert keys == sorted(keys)
+
+
+def test_reminder_derived_view_fails_closed_when_scan_budget_is_not_enough(tmp_path):
+    adapter = PlanningAdapter(
+        settings(tmp_path, "b3-route-budget"),
+        transport=PlanningFixtureTransport("b3-route-budget"),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+
+    async def exercise():
+        await adapter.start()
+        with pytest.raises(PlanningBoundedScanError, match="reminder_view_scan_budget_exceeded"):
+            await adapter.read_reminder_view(view="delivery", limit=20, offset=200)
+        await adapter.close()
+
+    asyncio.run(exercise())
+
+
+def test_reminder_derived_view_maps_budget_failure_to_truthful_http_503(tmp_path):
+    adapter = PlanningAdapter(
+        settings(tmp_path, "b3-route-budget"),
+        transport=PlanningFixtureTransport("b3-route-budget"),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+    app = FastAPI()
+    app.include_router(build_planning_router(adapter))
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/planning/reminders/view?view=delivery&limit=20&offset=200"
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "reminder_view_scan_budget_exceeded"}
+
+
+def test_composed_pending_and_due_views_remain_ordered_across_the_scan_boundary(tmp_path):
+    adapter = PlanningAdapter(
+        settings(tmp_path, "b3-composed-route-pagination"),
+        transport=PlanningFixtureTransport("b3-composed-route-pagination"),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+
+    async def exercise():
+        await adapter.start()
+        result = {}
+        for view in ("upcoming", "overdue"):
+            result[view] = (
+                await adapter.read_reminder_view(view=view, limit=20, offset=0),
+                await adapter.read_reminder_view(view=view, limit=20, offset=100),
+                await adapter.read_reminder_view(view=view, limit=20, offset=220),
+                await adapter.read_reminder_view(view=view, limit=20, offset=240),
+            )
+        await adapter.close()
+        return result
+
+    result = asyncio.run(exercise())
+    for first, boundary, tail, end in result.values():
+        assert first.count == 20
+        assert boundary.count == 20
+        assert tail.count == 20
+        assert end.count == 0
+        assert first.hasMore is True
+        assert boundary.hasMore is True
+        assert tail.hasMore is False
+        assert end.hasMore is False
+        assert {item.id for item in first.items}.isdisjoint({item.id for item in boundary.items})
+        assert {item.id for item in boundary.items}.isdisjoint({item.id for item in tail.items})
+        assert [item.dueAtUtc for item in first.items] == sorted(item.dueAtUtc for item in first.items)
+        assert [item.dueAtUtc for item in boundary.items] == sorted(item.dueAtUtc for item in boundary.items)
 
 
 def test_b3_router_is_get_only_and_rejects_unallowlisted_view(tmp_path):
