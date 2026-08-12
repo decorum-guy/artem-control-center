@@ -4,6 +4,7 @@ import type {
   ServiceSnapshot,
   WidgetManifest
 } from "@artem/contracts";
+import { planningOverviewEnabled } from "./planningOverviewConfig";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { resolveManifest, servicesByPriority } from "./registry";
 import type { RoutePath } from "./Shell";
@@ -15,6 +16,7 @@ import {
 } from "./widgets";
 import { CoffeeSettingsPanel } from "./CoffeeSettings";
 import { RuntimeControls } from "./RuntimeControls";
+import { PlanningOverviewCard } from "./PlanningOverviewCard";
 
 interface PageProps {
   snapshot: DashboardSnapshot;
@@ -90,39 +92,43 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
           )}
         </section>
 
-        <aside className="today-column" aria-label="Ближайшее и важное">
-          <section className="context-section">
-            <header>
-              <p className="section-kicker">Дальше</p>
-              <button type="button" onClick={() => onNavigate("/calendar")}>Календарь</button>
-            </header>
-            <strong>События не подключены</strong>
-            <p>После подключения календаря здесь появится ближайшая встреча.</p>
-          </section>
-          <section className="context-section">
-            <header>
-              <p className="section-kicker">Задачи</p>
-              <button type="button" onClick={() => onNavigate("/tasks")}>Открыть</button>
-            </header>
-            <strong>Нет источника задач</strong>
-            <p>Срочные задачи появятся только из подключённого контракта.</p>
-          </section>
-          <section className={`attention-section ${attentionServices.length ? "attention-section--active" : ""}`}>
-            <p className="section-kicker">Требует внимания</p>
-            {attentionServices.length ? (
-              <ul>
-                {attentionServices.slice(0, 2).map((service) => (
-                  <li key={service.id}>
-                    <HealthMark health={service.health} compact />
-                    <span>{service.title}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <strong>Ничего срочного</strong>
-            )}
-          </section>
-        </aside>
+        {planningOverviewEnabled ? (
+          <PlanningOverviewCard planning={snapshot.planning} onNavigate={onNavigate} />
+        ) : (
+          <aside className="today-column" aria-label="Ближайшее и важное">
+            <section className="context-section">
+              <header>
+                <p className="section-kicker">Дальше</p>
+                <button type="button" onClick={() => onNavigate("/calendar")}>Календарь</button>
+              </header>
+              <strong>События не подключены</strong>
+              <p>После подключения календаря здесь появится ближайшая встреча.</p>
+            </section>
+            <section className="context-section">
+              <header>
+                <p className="section-kicker">Задачи</p>
+                <button type="button" onClick={() => onNavigate("/tasks")}>Открыть</button>
+              </header>
+              <strong>Нет источника задач</strong>
+              <p>Срочные задачи появятся только из подключённого контракта.</p>
+            </section>
+            <section className={`attention-section ${attentionServices.length ? "attention-section--active" : ""}`}>
+              <p className="section-kicker">Требует внимания</p>
+              {attentionServices.length ? (
+                <ul>
+                  {attentionServices.slice(0, 2).map((service) => (
+                    <li key={service.id}>
+                      <HealthMark health={service.health} compact />
+                      <span>{service.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <strong>Ничего срочного</strong>
+              )}
+            </section>
+          </aside>
+        )}
       </div>
 
       <div className="overview-support">
