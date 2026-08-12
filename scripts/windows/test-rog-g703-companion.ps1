@@ -16,6 +16,8 @@ foreach ($required in @(
     "New-NetFirewallRule",
     "-RemoteAddress `$FirewallRemoteAddress",
     "Remove-NetFirewallRule",
+    "Stop-ScheduledTask",
+    "Start-ScheduledTask",
     "companion.secret",
     "RandomNumberGenerator",
     "Python 3.10 or newer",
@@ -26,6 +28,28 @@ foreach ($required in @(
     if ($installer -notlike "*$required*") {
         throw "ROG G703 bootstrap contract is missing: $required"
     }
+}
+
+if ($installer -like "*Restart-ScheduledTask*") {
+    throw "ROG G703 bootstrap uses unsupported Restart-ScheduledTask."
+}
+
+$restartStart = $installer.IndexOf("function Invoke-Restart")
+$restartEnd = $installer.IndexOf("function Invoke-Uninstall", $restartStart)
+if ($restartStart -lt 0 -or $restartEnd -le $restartStart) {
+    throw "ROG G703 bootstrap restart function is missing or malformed."
+}
+$restartBlock = $installer.Substring($restartStart, $restartEnd - $restartStart)
+$stopIndex = $restartBlock.IndexOf("Stop-ScheduledTask")
+$startIndex = $restartBlock.IndexOf("Start-ScheduledTask")
+if ($stopIndex -lt 0 -or $startIndex -lt 0 -or $stopIndex -ge $startIndex) {
+    throw "ROG G703 bootstrap restart must stop before starting the scheduled task."
+}
+if ($restartBlock -notlike "*Get-ScheduledTask*") {
+    throw "ROG G703 bootstrap restart must inspect the scheduled task state."
+}
+if ($restartBlock -notlike "*Start-Sleep -Milliseconds 250*") {
+    throw "ROG G703 bootstrap restart must use a bounded stopped-state wait."
 }
 
 foreach ($required in @(

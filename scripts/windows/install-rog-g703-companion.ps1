@@ -281,10 +281,29 @@ function Invoke-Status {
 }
 
 function Invoke-Restart {
-    if ($null -eq (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($null -eq $task) {
         throw "Companion task is not installed. Use -Action install first."
     }
-    Restart-ScheduledTask -TaskName $taskName
+    if ([string]$task.State -eq "Running") {
+        Stop-ScheduledTask -TaskName $taskName
+        $stopped = $false
+        for ($attempt = 0; $attempt -lt 20; $attempt++) {
+            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            if ($null -eq $task) {
+                throw "Companion task disappeared while restarting."
+            }
+            if ([string]$task.State -ne "Running") {
+                $stopped = $true
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not $stopped) {
+            throw "Companion task did not stop within the restart timeout."
+        }
+    }
+    Start-ScheduledTask -TaskName $taskName
     $secret = Get-CompanionSecret
     $configuration = Read-CompanionConfig
     $healthAddress = if ([string]$configuration.listenAddress -eq "0.0.0.0") { "127.0.0.1" } else { [string]$configuration.listenAddress }

@@ -18,6 +18,33 @@ function actionAvailability(actionId: RogAction, status: RogStatus) {
   };
 }
 
+function accessStatus(elevated: boolean) {
+  const availability = elevated ? "allowed" : "elevation_required";
+  const effectiveProfile = elevated ? "full" : "read_only";
+  const decision = (capability: RogAction) => ({
+    capability,
+    minimumProfile: "standard",
+    effectiveProfile,
+    allowed: elevated,
+    availability,
+    cooldownUntil: null
+  });
+  return {
+    schemaVersion: 1,
+    revision: elevated ? 2 : 1,
+    baseProfile: "read_only",
+    effectiveProfile,
+    temporaryFull: elevated,
+    temporaryFullExpiresAt: elevated ? "2099-01-01T00:00:00Z" : null,
+    pinConfigured: true,
+    lockoutUntil: null,
+    capabilities: {
+      "system.rog_g703.wake": decision("system.rog_g703.wake"),
+      "system.rog_g703.hibernate": decision("system.rog_g703.hibernate")
+    }
+  };
+}
+
 function rogService(status: RogStatus) {
   const health = status === "online" ? "healthy" : status === "offline" ? "offline" : "degraded";
   return {
@@ -57,12 +84,51 @@ function rogService(status: RogStatus) {
   };
 }
 
-async function mockRogG703(page: Page) {
+async function mockRogG703(page: Page, options: { requireElevation?: boolean } = {}) {
+  const requireElevation = options.requireElevation ?? false;
   let status: RogStatus = "offline";
+  let elevated = false;
   const executionId = "rog-execution-1";
   let activeAction: RogAction | null = null;
   let polls = 0;
   const requestBodies: Record<string, unknown>[] = [];
+
+  if (requireElevation) {
+    await page.route(/\/api\/v1\/access(?:\/.*)?$/, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+
+      if (url.pathname === "/api/v1/access" && request.method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(accessStatus(elevated))
+        });
+        return;
+      }
+
+      if (url.pathname === "/api/v1/access/unlock" && request.method() === "POST") {
+        const body = request.postDataJSON() as { pin?: string };
+        if (body.pin !== "1234") {
+          await route.fulfill({
+            status: 403,
+            contentType: "application/json",
+            body: JSON.stringify({ detail: "invalid_pin" })
+          });
+          return;
+        }
+        elevated = true;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(accessStatus(elevated))
+        });
+        return;
+      }
+
+      await route.continue();
+    });
+  }
 
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
@@ -75,6 +141,18 @@ async function mockRogG703(page: Page) {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname.endsWith("/availability")) {
+      const availabilityFor = (actionId: RogAction) => {
+        const decision = actionAvailability(actionId, status);
+        if (requireElevation && !elevated && decision.allowed) {
+          return {
+            ...decision,
+            effectiveProfile: "read_only",
+            allowed: false,
+            availability: "elevation_required"
+          };
+        }
+        return decision;
+      };
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -89,8 +167,8 @@ async function mockRogG703(page: Page) {
             lastError: null
           },
           actions: {
-            "system.rog_g703.wake": actionAvailability("system.rog_g703.wake", status),
-            "system.rog_g703.hibernate": actionAvailability("system.rog_g703.hibernate", status)
+            "system.rog_g703.wake": availabilityFor("system.rog_g703.wake"),
+            "system.rog_g703.hibernate": availabilityFor("system.rog_g703.hibernate")
           }
         })
       });
@@ -209,4 +287,47 @@ test("touch-first ROG flow verifies wake, S4 hibernate and safe action payloads"
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.getByTestId("global-notice-stack")).toBeVisible();
   await expect(page.getByTestId("rog-g703-action-notice")).toHaveCount(1);
+});
+
+test("elevation-required ROG action reaches the existing PIN flow before POST", async ({ page }) => {
+  const api = await mockRogG703(page, { requireElevation: true });
+  await page.goto("/system");
+
+  const controls = page.getByTestId("rog-g703-controls");
+  const wake = page.getByTestId("rog-g703-wake");
+  await expect(controls).toBeVisible();
+  await expect(wake).toBeEnabled();
+  expect((await wake.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+
+  await wake.tap();
+  const dialog = page.getByRole("dialog", { name: "Включить" });
+  await expect(dialog).toBeVisible();
+  expect(api.getRequestBodies()).toHaveLength(0);
+
+  await dialog.getByRole("button", { name: "Отмена" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(api.getRequestBodies()).toHaveLength(0);
+
+  await wake.tap();
+  await expect(dialog).toBeVisible();
+  for (const digit of ["0", "0", "0", "0"]) {
+    await dialog.getByRole("button", { name: digit, exact: true }).click();
+  }
+  await dialog.getByRole("button", { name: "Разблокировать" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Неверный PIN.");
+  expect(api.getRequestBodies()).toHaveLength(0);
+  await dialog.getByRole("button", { name: "Отмена" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(api.getRequestBodies()).toHaveLength(0);
+
+  await wake.tap();
+  await expect(dialog).toBeVisible();
+  for (const digit of ["1", "2", "3", "4"]) {
+    await dialog.getByRole("button", { name: digit, exact: true }).click();
+  }
+  await dialog.getByRole("button", { name: "Разблокировать" }).click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(controls).toContainText("В сети");
+  expect(api.getRequestBodies()).toEqual([{ actionId: "system.rog_g703.wake" }]);
 });

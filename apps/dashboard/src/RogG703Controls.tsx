@@ -202,9 +202,15 @@ export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
     }
   }
 
-  const canUse = (actionId: RogG703ActionId) => Boolean(
-    apiAvailable && availability?.[actionId]?.allowed && !pendingAction
-  );
+  const canUse = (actionId: RogG703ActionId) => {
+    const decision = availability?.[actionId];
+    return Boolean(
+      apiAvailable &&
+      decision &&
+      (decision.allowed || decision.availability === "elevation_required") &&
+      !pendingAction
+    );
+  };
 
   return (
     <section className="rog-g703-controls" data-testid="rog-g703-controls" aria-labelledby="rog-g703-title">
