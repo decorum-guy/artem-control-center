@@ -46,6 +46,10 @@ When enabled, all connection values are server-side settings and are required:
 | `PANEL_PLANNING_TIMEZONE` | `Europe/Moscow` | deterministic local-day query timezone |
 | `PANEL_PLANNING_FIXTURE_SCENARIO` | `healthy` | fixture-mode scenario only |
 
+The Panel Agent runtime declares `tzdata` as a bounded dependency so Python's
+`zoneinfo` IANA validation and Europe/Moscow local-day calculations work on
+Windows as well as Unix hosts.
+
 Missing enabled credentials or an unsafe base URL fails closed during server
 configuration. Credentials are never part of a Pydantic response model, typed
 snapshot, cache document, or fixture.
@@ -71,11 +75,15 @@ X-Planning-Audience: panel-agent
 X-Planning-Secret: <PANEL_PLANNING_SECRET>
 ```
 
-The adapter uses the documented A4 queries only: `state/from/to/limit/offset`
-for reminders, `view=today|overdue|upcoming` for tasks, a bounded explicit UTC
-range for events, and the first bounded projects page. It never calls
-`POST`, `PATCH`, `DELETE`, complete/cancel/archive actions, or
-`/alice/interpret`.
+The adapter uses the documented A4 queries only: explicit `state=pending` and
+`state=due` plus `from/to/limit/offset` for active reminders, a bounded first
+`state=due` scan for terminal failures, `view=today|overdue|upcoming` plus the
+optional `project_id` for tasks, a bounded explicit UTC range for events, and
+the first bounded projects page. Completed/cancelled reminders are never
+treated as active; `due/delivered` remains open, while only `due/failed` with a
+terminal failure timestamp enters `deliveryFailures`. The global failure scan
+is capped at one 100-row A4 page. The adapter never calls `POST`, `PATCH`,
+`DELETE`, complete/cancel/archive actions, or `/alice/interpret`.
 
 Responses are streamed into a bounded byte buffer, duplicate JSON fields are
 rejected, and `planning.v1`/`planning.operations.v1` models use `extra="forbid"`.
@@ -108,7 +116,10 @@ receipts, and other unnecessary fields are not projected.
 Each global list is capped at 20 items. This is below the A4 maximum page size
 of 100. The adapter makes one bounded page request per fixed view/range and
 does not follow `has_more` indefinitely. Event ranges are local-day today plus
-a seven-day bounded upcoming window; no relative strings are stored.
+a seven-day bounded upcoming window; no relative strings are stored. Same-origin
+route reads are separate: while online they make their own fixed A4 GET with
+the requested bounded `limit`, `offset`, state, view, or range, so they can
+return rows beyond the global 20-item summary.
 
 ## Polling and source state
 
@@ -173,9 +184,13 @@ GET /api/v1/planning/projects
 
 The unversioned `/api/planning/...` spelling is a narrow compatibility alias;
 both surfaces use the same normalized adapter. Query names, limits, offsets,
-views, and date ranges are independently allowlisted and bounded. Unknown
-query fields, repeated fields, arbitrary URLs, and oversized ranges are
-rejected. There are no Planning write routes, raw routes, or proxy routes.
+views, and date ranges are independently allowlisted and bounded. Online route
+reads preserve strict A4 page metadata and normalized objects instead of
+slicing the global summary. If the upstream is unavailable, the route returns
+`503 planning_read_unavailable`; it does not claim that a bounded last-good
+summary completely satisfies an arbitrary page, historical state, or range.
+Unknown query fields, repeated fields, arbitrary URLs, and oversized ranges
+are rejected. There are no Planning write routes, raw routes, or proxy routes.
 
 Read routes follow the existing monitor/read policy. B1 panel capabilities are
 all `false` for `create`, `edit`, `complete`, `cancel`, `delete`, `voice`, and
@@ -186,10 +201,12 @@ provider network calls are made.
 ## Fixtures and rollout
 
 `PlanningFixtureTransport` is deterministic and synthetic. It covers healthy,
-empty, reminders, today/overdue/upcoming tasks, events, projects, delivery
-failure, degraded status, timeout, malformed JSON, incompatible schema, offline,
-and oversized response states. It is used only in fixture/integration-test
-modes and contains no production titles or IDs.
+empty, reminder lifecycle/delivery states, today/overdue/upcoming tasks, events,
+projects, delivery failure, degraded status, timeout, malformed JSON,
+incompatible schema, offline, oversized responses, and a route-pagination
+scenario with more than 20 rows and an event outside the global window. It is
+used only in fixture/integration-test modes and contains no production titles or
+IDs.
 
 B1 rollout is disabled by default and has no production action. After review,
 merge, and a separately approved rollout, enable the Panel Agent gate with
@@ -204,4 +221,8 @@ The separate operational debt remains:
 PERIODIC_BACKUP_SCHEDULER_PENDING
 ```
 
-It is not a B1 blocker.
+It is not a B1 blocker. The separate deferred product decisions remain
+`STRONG_CONFIRMATION_TOUCH_REPLACEMENT_DECISION_PENDING`,
+`SAMSUNG_DEFAULT_PERFORMANCE_TRACE_DEFERRED`,
+`SNOOZE_PRESET_PRODUCT_DECISION_PENDING`, and
+`TELEGRAM_TASK_EVENT_CREATION_PRODUCT_DECISION_DEFERRED`.

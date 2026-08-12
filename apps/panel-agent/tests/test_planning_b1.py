@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from panel_agent.contracts import ServiceSnapshot
@@ -22,6 +23,7 @@ from panel_agent.planning_adapter import (
     PlanningConfigurationError,
     PlanningUpstreamError,
 )
+from panel_agent.planning_api import build_planning_router
 from panel_agent.planning_cache import PlanningProjectionCache
 from panel_agent.planning_fixtures import PlanningFixtureTransport
 from panel_agent.settings import IntegrationSettings
@@ -141,7 +143,11 @@ def test_fixed_base_url_rejects_unsafe_forms(tmp_path, base_url):
 
 def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
     transport = RecordingFixtureTransport()
-    adapter = PlanningAdapter(settings(tmp_path), transport=transport)
+    adapter = PlanningAdapter(
+        settings(tmp_path),
+        transport=transport,
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
 
     async def exercise():
         await adapter.start()
@@ -171,6 +177,21 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
     assert all(len(getattr(projection.reminders, field)) <= 20 for field in ("upcoming", "overdue", "deliveryFailures"))
     assert all(len(getattr(projection.tasks, field)) <= 20 for field in ("today", "overdue", "upcoming", "projects"))
     assert all(len(getattr(projection.calendar, field)) <= 20 for field in ("today", "upcoming", "conflicts"))
+    overdue_titles = {item.title for item in projection.reminders.overdue}
+    upcoming_titles = {item.title for item in projection.reminders.upcoming}
+    failure_titles = {item.title for item in projection.reminders.deliveryFailures}
+    assert "Synthetic completed past" not in overdue_titles
+    assert "Synthetic completed future" not in upcoming_titles
+    assert "Synthetic reminder" in upcoming_titles
+    assert "Synthetic due reminder" in overdue_titles
+    assert "Synthetic delivery failure" in failure_titles
+    assert "Synthetic delivered open reminder" not in failure_titles
+    delivered = next(
+        item for item in projection.reminders.overdue
+        if item.title == "Synthetic delivered open reminder"
+    )
+    assert delivered.status == "due"
+    assert delivered.deliveryState == "delivered"
     assert {path for _, path, _, _ in transport.requests} == set(PLANNING_ROUTES.values())
     assert all(method == "GET" for method, _, _, _ in transport.requests)
     assert all(
@@ -181,7 +202,13 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
         }
         for _, _, headers, _ in transport.requests
     )
-    assert all("limit=20" in query for method, path, headers, query in transport.requests if path != PLANNING_ROUTES["status"])
+    list_requests = [
+        query
+        for _, path, _, query in transport.requests
+        if path != PLANNING_ROUTES["status"]
+    ]
+    assert sum("limit=100" in query for query in list_requests) == 1
+    assert sum("limit=20" in query for query in list_requests) == len(list_requests) - 1
     assert "synthetic-internal-secret" not in projection.model_dump_json()
     assert "synthetic-panel-agent-secret" not in projection.model_dump_json()
 
@@ -507,6 +534,88 @@ def test_runtime_disabled_planning_does_not_change_existing_service_shape():
     assert runtime.planning_snapshot() is None
     assert runtime.services()
     assert all(service.dataContract for service in runtime.services())
+
+
+def test_online_route_reads_bypass_global_summary_and_preserve_a4_pagination(tmp_path):
+    adapter = PlanningAdapter(
+        settings(tmp_path),
+        transport=RecordingFixtureTransport("route-pagination"),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+
+    async def exercise():
+        await adapter.start()
+        projection = adapter.projection
+        tasks = await adapter.read_tasks(view="today", project_id=None, limit=50, offset=20)
+        projects = await adapter.read_projects(limit=50, offset=20)
+        events = await adapter.read_events(
+            from_utc="2026-08-25T00:00:00Z",
+            to_utc="2026-08-26T00:00:00Z",
+            limit=100,
+            offset=0,
+        )
+        completed = await adapter.read_reminders(
+            state="completed",
+            from_utc=None,
+            to_utc=None,
+            limit=100,
+            offset=0,
+        )
+        cancelled = await adapter.read_reminders(
+            state="cancelled",
+            from_utc=None,
+            to_utc=None,
+            limit=100,
+            offset=0,
+        )
+        await adapter.close()
+        return projection, tasks, projects, events, completed, cancelled
+
+    projection, tasks, projects, events, completed, cancelled = asyncio.run(exercise())
+    assert projection is not None
+    assert len(projection.tasks.today) == 20
+    assert len(tasks.items) == 40
+    assert tasks.items[0].id == "00000000-0000-4000-8000-000000001020"
+    assert tasks.limit == 50
+    assert tasks.offset == 20
+    assert tasks.hasMore is False
+    assert len(projects.items) == 40
+    assert projects.items[0].id == "00000000-0000-4000-8000-000000002020"
+    assert len(events.items) == 1
+    assert events.items[0].title == "Synthetic outside-range event"
+    assert {item.status for item in completed.items} == {"completed"}
+    assert len(completed.items) == 2
+    assert {item.status for item in cancelled.items} == {"cancelled"}
+    assert len(cancelled.items) == 1
+
+
+def test_offline_route_read_fails_closed_instead_of_slicing_bounded_cache(tmp_path):
+    adapter = PlanningAdapter(
+        settings(tmp_path),
+        transport=RecordingFixtureTransport("offline"),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+    app = FastAPI()
+    app.include_router(build_planning_router(adapter))
+
+    async def exercise():
+        await adapter.start()
+        assert adapter.projection is not None
+        assert adapter.projection.sourceStatus == "offline"
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://panel.test",
+        ) as client:
+            response = await client.get(
+                "/api/v1/planning/tasks?view=today&limit=50&offset=20"
+            )
+        await adapter.close()
+        return response
+
+    response = asyncio.run(exercise())
+    assert response.status_code == 503
+    assert response.json() == {"detail": "planning_read_unavailable"}
+    assert "items" not in response.text
 
 
 def test_read_only_same_origin_routes_are_bounded_and_have_no_writes(monkeypatch, tmp_path):

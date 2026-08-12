@@ -22,6 +22,7 @@ from .planning import (
     PlanningConflict,
     PlanningProjection,
     PlanningReadEnvelope,
+    PlanningListEnvelope,
     PlanningSourceStatus,
     PlanningStatusProjection,
     ProjectListEnvelope,
@@ -58,6 +59,7 @@ PLANNING_ROUTES: Mapping[str, str] = {
 PLANNING_AUDIENCE = "panel-agent"
 PLANNING_PAGE_LIMIT = 20
 PLANNING_MAX_UPSTREAM_PAGE = 100
+PLANNING_FAILURE_SCAN_MAX_PAGES = 1
 PLANNING_RANGE_DAYS = 30
 PLANNING_EVENT_UPCOMING_DAYS = 7
 PLANNING_JITTER_RATIO = 0.10
@@ -74,6 +76,10 @@ class PlanningUpstreamError(RuntimeError):
         super().__init__(category)
         self.category = category
         self.status_code = status_code
+
+
+class PlanningReadUnavailable(RuntimeError):
+    """A route read cannot be satisfied from the live upstream or a complete cache."""
 
 
 def validate_planning_base_url(value: str) -> str:
@@ -168,14 +174,17 @@ class PlanningClient:
         self,
         *,
         view: Literal["today", "overdue", "upcoming"],
+        project_id: str | None = None,
         limit: int = PLANNING_PAGE_LIMIT,
         offset: int = 0,
     ) -> TaskListEnvelope:
         if view not in {"today", "overdue", "upcoming"}:
             raise PlanningUpstreamError("query_view_out_of_range")
+        if project_id is not None:
+            validate_uuid4(project_id, "planning.project_id")
         params = _fixed_list_query(
-            {"view": view, "limit": limit, "offset": offset},
-            allowed={"view", "limit", "offset"},
+            {"view": view, "project_id": project_id, "limit": limit, "offset": offset},
+            allowed={"view", "project_id", "limit", "offset"},
         )
         payload = await self._get_json("tasks", params)
         return _validate_envelope(TaskListEnvelope, payload)
@@ -487,21 +496,40 @@ class PlanningAdapter:
             windows = self._windows(now)
             results = await asyncio.gather(
                 self._client.reminders(
+                    state="pending",
                     from_utc=windows["reminder_overdue_from"],
                     to_utc=windows["now"],
                     limit=PLANNING_PAGE_LIMIT,
                     offset=0,
                 ),
                 self._client.reminders(
+                    state="due",
+                    from_utc=windows["reminder_overdue_from"],
+                    to_utc=windows["now"],
+                    limit=PLANNING_PAGE_LIMIT,
+                    offset=0,
+                ),
+                self._client.reminders(
+                    state="pending",
                     from_utc=windows["now"],
                     to_utc=windows["reminder_upcoming_to"],
                     limit=PLANNING_PAGE_LIMIT,
                     offset=0,
                 ),
                 self._client.reminders(
-                    state="pending",
+                    state="due",
+                    from_utc=windows["now"],
+                    to_utc=windows["reminder_upcoming_to"],
                     limit=PLANNING_PAGE_LIMIT,
                     offset=0,
+                ),
+                *(
+                    self._client.reminders(
+                        state="due",
+                        limit=PLANNING_MAX_UPSTREAM_PAGE,
+                        offset=page * PLANNING_MAX_UPSTREAM_PAGE,
+                    )
+                    for page in range(PLANNING_FAILURE_SCAN_MAX_PAGES)
                 ),
                 self._client.tasks(view="today", limit=PLANNING_PAGE_LIMIT, offset=0),
                 self._client.tasks(view="overdue", limit=PLANNING_PAGE_LIMIT, offset=0),
@@ -574,7 +602,7 @@ class PlanningAdapter:
         projection = self._read_projection()
         return status_projection(projection)
 
-    def read_reminders(
+    async def read_reminders(
         self,
         *,
         state: str | None,
@@ -583,25 +611,17 @@ class PlanningAdapter:
         limit: int,
         offset: int,
     ) -> PlanningReadEnvelope:
-        projection = self._read_projection()
-        items = [
-            *projection.reminders.upcoming,
-            *projection.reminders.overdue,
-            *projection.reminders.deliveryFailures,
-        ]
-        items = _unique_by_id(items)
-        if state is not None:
-            items = [item for item in items if item.status == state]
-        if from_utc is not None and to_utc is not None:
-            start, end = timestamp_datetime(from_utc), timestamp_datetime(to_utc)
-            items = [
-                item
-                for item in items
-                if start <= timestamp_datetime(item.dueAtUtc) < end
-            ]
-        return self._read_envelope("reminder", items, limit, offset, projection)
+        client = self._live_client()
+        envelope = await client.reminders(
+            state=state,
+            from_utc=from_utc,
+            to_utc=to_utc,
+            limit=limit,
+            offset=offset,
+        )
+        return self._read_upstream_envelope(envelope)
 
-    def read_tasks(
+    async def read_tasks(
         self,
         *,
         view: Literal["today", "overdue", "upcoming"],
@@ -609,13 +629,16 @@ class PlanningAdapter:
         limit: int,
         offset: int,
     ) -> PlanningReadEnvelope:
-        projection = self._read_projection()
-        items = list(getattr(projection.tasks, view))
-        if project_id is not None:
-            items = [item for item in items if item.projectId == project_id]
-        return self._read_envelope("task", items, limit, offset, projection)
+        client = self._live_client()
+        envelope = await client.tasks(
+            view=view,
+            project_id=project_id,
+            limit=limit,
+            offset=offset,
+        )
+        return self._read_upstream_envelope(envelope)
 
-    def read_events(
+    async def read_events(
         self,
         *,
         from_utc: str,
@@ -624,19 +647,17 @@ class PlanningAdapter:
         offset: int,
     ) -> PlanningReadEnvelope:
         _validate_range(from_utc, to_utc)
-        projection = self._read_projection()
-        start, end = timestamp_datetime(from_utc), timestamp_datetime(to_utc)
-        all_events = _unique_by_id([*projection.calendar.today, *projection.calendar.upcoming])
-        selected = [
-            item
-            for item in all_events
-            if _event_overlaps(item, start, end, self._settings.panel_planning_timezone)
-        ]
-        return self._read_envelope("calendar_event", selected, limit, offset, projection)
+        envelope = await self._live_client().events(
+            from_utc=from_utc,
+            to_utc=to_utc,
+            limit=limit,
+            offset=offset,
+        )
+        return self._read_upstream_envelope(envelope)
 
-    def read_projects(self, *, limit: int, offset: int) -> PlanningReadEnvelope:
-        projection = self._read_projection()
-        return self._read_envelope("project", projection.tasks.projects, limit, offset, projection)
+    async def read_projects(self, *, limit: int, offset: int) -> PlanningReadEnvelope:
+        envelope = await self._live_client().projects(limit=limit, offset=offset)
+        return self._read_upstream_envelope(envelope)
 
     async def _poll(self) -> None:
         failures = 0
@@ -707,30 +728,25 @@ class PlanningAdapter:
             generated_at=self._now_text(),
             source_status="offline",
         )
-        reminder_overdue = (
-            self._map_reminders(results[0].items)
-            if isinstance(results[0], ReminderListEnvelope)
-            else list(previous.reminders.overdue)
+        reminder_overdue = self._map_active_reminders(
+            results[0:2],
+            previous.reminders.overdue,
         )
-        reminder_upcoming = (
-            self._map_reminders(results[1].items)
-            if isinstance(results[1], ReminderListEnvelope)
-            else list(previous.reminders.upcoming)
+        reminder_upcoming = self._map_active_reminders(
+            results[2:4],
+            previous.reminders.upcoming,
         )
-        failure_source = results[2]
-        failure_items = (
-            self._map_reminders(
-                [item for item in failure_source.items if item.delivery_state == "failed"]
-            )
-            if isinstance(failure_source, ReminderListEnvelope)
-            else list(previous.reminders.deliveryFailures)
+        failure_items = self._map_failure_scan(
+            results[4 : 4 + PLANNING_FAILURE_SCAN_MAX_PAGES],
+            previous.reminders.deliveryFailures,
         )
-        task_today = self._map_tasks(results[3], previous.tasks.today)
-        task_overdue = self._map_tasks(results[4], previous.tasks.overdue)
-        task_upcoming = self._map_tasks(results[5], previous.tasks.upcoming)
-        event_today = self._map_events(results[6], previous.calendar.today)
-        event_upcoming = self._map_events(results[7], previous.calendar.upcoming)
-        projects = self._map_projects(results[8], previous.tasks.projects)
+        task_index = 4 + PLANNING_FAILURE_SCAN_MAX_PAGES
+        task_today = self._map_tasks(results[task_index], previous.tasks.today)
+        task_overdue = self._map_tasks(results[task_index + 1], previous.tasks.overdue)
+        task_upcoming = self._map_tasks(results[task_index + 2], previous.tasks.upcoming)
+        event_today = self._map_events(results[task_index + 3], previous.calendar.today)
+        event_upcoming = self._map_events(results[task_index + 4], previous.calendar.upcoming)
+        projects = self._map_projects(results[task_index + 5], previous.tasks.projects)
         events = [*event_today, *event_upcoming]
         return {
             "reminders": {
@@ -769,6 +785,40 @@ class PlanningAdapter:
             )
             for item in items
         ]
+
+    @classmethod
+    def _map_active_reminders(
+        cls,
+        results: list[Any],
+        fallback: list[ReminderProjection],
+    ) -> list[ReminderProjection]:
+        if not all(isinstance(result, ReminderListEnvelope) for result in results):
+            return list(fallback)
+        items = [
+            item
+            for result in results
+            for item in result.items
+            if item.status in {"pending", "due"}
+        ]
+        return cls._map_reminders(items)
+
+    @classmethod
+    def _map_failure_scan(
+        cls,
+        results: list[Any],
+        fallback: list[ReminderProjection],
+    ) -> list[ReminderProjection]:
+        if not results or not all(isinstance(result, ReminderListEnvelope) for result in results):
+            return list(fallback)
+        items = [
+            item
+            for result in results
+            for item in result.items
+            if item.status == "due"
+            and item.delivery_state == "failed"
+            and item.final_failure_at is not None
+        ]
+        return cls._map_reminders(items)
 
     @staticmethod
     def _map_tasks(
@@ -886,28 +936,38 @@ class PlanningAdapter:
             ],
         )
 
-    def _read_envelope(
+    def _live_client(self) -> PlanningClient:
+        if not self._enabled or self._client is None:
+            raise PlanningReadUnavailable("planning_live_read_unavailable")
+        return self._client
+
+    def _read_upstream_envelope(
         self,
-        domain: Literal["reminder", "task", "calendar_event", "project"],
-        items: list[Any],
-        limit: int,
-        offset: int,
-        projection: PlanningProjection,
+        envelope: PlanningListEnvelope,
     ) -> PlanningReadEnvelope:
-        selected = items[offset : offset + limit]
+        if isinstance(envelope, ReminderListEnvelope):
+            items = self._map_reminders(envelope.items)
+        elif isinstance(envelope, TaskListEnvelope):
+            items = self._map_tasks(envelope, [])
+        elif isinstance(envelope, EventListEnvelope):
+            items = self._map_events(envelope, [])
+        elif isinstance(envelope, ProjectListEnvelope):
+            items = self._map_projects(envelope, [])
+        else:
+            raise PlanningReadUnavailable("planning_domain_read_unavailable")
         return PlanningReadEnvelope(
             schemaVersion="planning.panel.v1",
             kind="list",
-            domain=domain,
-            generatedAt=projection.generatedAt,
-            sourceStatus=projection.sourceStatus,
-            lastSyncedAt=projection.lastSyncedAt,
-            staleAfter=projection.staleAfter,
-            items=selected,
-            limit=limit,
-            offset=offset,
-            count=len(selected),
-            hasMore=offset + len(selected) < len(items),
+            domain=envelope.domain,
+            generatedAt=envelope.generatedAt,
+            sourceStatus=self._status_source_status(current=True),
+            lastSyncedAt=envelope.lastSyncedAt,
+            staleAfter=envelope.staleAfter,
+            items=items,
+            limit=envelope.pagination.limit,
+            offset=envelope.pagination.offset,
+            count=len(items),
+            hasMore=envelope.pagination.has_more,
         )
 
     def _status_due(self) -> bool:

@@ -13,7 +13,7 @@ from .planning import (
     validate_uuid4,
     validate_utc_timestamp,
 )
-from .planning_adapter import PlanningAdapter, PlanningUpstreamError
+from .planning_adapter import PlanningAdapter, PlanningReadUnavailable, PlanningUpstreamError
 
 
 def build_planning_router(
@@ -39,13 +39,16 @@ def build_planning_router(
         if state is not None and state not in {"pending", "due", "completed", "cancelled"}:
             raise HTTPException(status_code=422, detail="planning_state_invalid")
         from_utc, to_utc = _optional_range(query)
-        return adapter.read_reminders(
-            state=state,
-            from_utc=from_utc,
-            to_utc=to_utc,
-            limit=_limit(query),
-            offset=_offset(query),
-        )
+        try:
+            return await adapter.read_reminders(
+                state=state,
+                from_utc=from_utc,
+                to_utc=to_utc,
+                limit=_limit(query),
+                offset=_offset(query),
+            )
+        except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
+            raise _read_unavailable() from exc
 
     @router.get("/tasks", response_model=PlanningReadEnvelope)
     async def planning_tasks(request: Request, response: Response) -> PlanningReadEnvelope:
@@ -61,12 +64,15 @@ def build_planning_router(
                 validate_uuid4(project_id, "planning.projectId")
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail="planning_project_id_invalid") from exc
-        return adapter.read_tasks(
-            view=view,  # type: ignore[arg-type]
-            project_id=project_id,
-            limit=_limit(query),
-            offset=_offset(query),
-        )
+        try:
+            return await adapter.read_tasks(
+                view=view,  # type: ignore[arg-type]
+                project_id=project_id,
+                limit=_limit(query),
+                offset=_offset(query),
+            )
+        except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
+            raise _read_unavailable() from exc
 
     @router.get("/events", response_model=PlanningReadEnvelope)
     async def planning_events(request: Request, response: Response) -> PlanningReadEnvelope:
@@ -74,19 +80,25 @@ def build_planning_router(
         _no_store(response)
         query = _query(request, allowed={"from", "to", "limit", "offset"})
         from_utc, to_utc = _required_range(query)
-        return adapter.read_events(
-            from_utc=from_utc,
-            to_utc=to_utc,
-            limit=_limit(query),
-            offset=_offset(query),
-        )
+        try:
+            return await adapter.read_events(
+                from_utc=from_utc,
+                to_utc=to_utc,
+                limit=_limit(query),
+                offset=_offset(query),
+            )
+        except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
+            raise _read_unavailable() from exc
 
     @router.get("/projects", response_model=PlanningReadEnvelope)
     async def planning_projects(request: Request, response: Response) -> PlanningReadEnvelope:
         _enabled(adapter)
         _no_store(response)
         query = _query(request, allowed={"limit", "offset"})
-        return adapter.read_projects(limit=_limit(query), offset=_offset(query))
+        try:
+            return await adapter.read_projects(limit=_limit(query), offset=_offset(query))
+        except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
+            raise _read_unavailable() from exc
 
     return router
 
@@ -98,6 +110,12 @@ def _enabled(adapter: PlanningAdapter) -> None:
 
 def _no_store(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
+
+
+def _read_unavailable() -> HTTPException:
+    """Never turn a bounded summary cache into a false complete route page."""
+
+    return HTTPException(status_code=503, detail="planning_read_unavailable")
 
 
 def _query(request: Request, *, allowed: set[str]) -> dict[str, str]:
