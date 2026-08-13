@@ -93,6 +93,24 @@ jobs:
           path: artifacts/v2-shell-review
           if-no-files-found: error
 
+      - name: Run focused V2 overlay gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          V2_OVERLAY_ARTIFACT_DIR: artifacts/v2-overlays-review
+          B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/v2-overlays.spec.ts
+
+      - name: Upload V2 overlay review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-overlays-review-${{ github.sha }}
+          path: artifacts/v2-overlays-review
+          if-no-files-found: error
+
       - name: Run focused B3 browser gate
         if: runner.os == 'Linux'
         env:

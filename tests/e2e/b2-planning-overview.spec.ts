@@ -31,10 +31,6 @@ async function expectNoDocumentHorizontalOverflow(page: Page) {
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
 }
 
-function boxesOverlap(left: { x: number; y: number; width: number; height: number }, right: { left: number; right: number; top: number; bottom: number }): boolean {
-  return left.x < right.right && left.x + left.width > right.left && left.y < right.bottom && left.y + left.height > right.top;
-}
-
 test.describe("B2 Planning Overview", () => {
   test.beforeEach(async ({ page }) => {
     await page.clock.install({ time: "2026-08-12T14:00:00Z" });
@@ -85,14 +81,25 @@ test.describe("B2 Planning Overview", () => {
     await expect(page.getByTestId("route-calendar")).toBeVisible();
   });
 
-  test("keeps the card clear of the synthetic NoticeCenter stack", async ({ page }) => {
+  test("keeps route geometry stable when the synthetic NoticeCenter stack appears", async ({ page }) => {
     await mockPlanning(page, planningFixtures.healthy);
+    await page.goto("/overview?theme=day");
+    const before = await page.getByTestId("planning-overview-card").boundingBox();
+    expect(before).not.toBeNull();
+
     await page.goto("/overview?theme=day&b0=triple-notice");
     await expect(page.getByTestId("global-notice-stack")).toBeVisible();
-    const card = await page.getByTestId("planning-overview-card").boundingBox();
-    const notices = await page.getByTestId("global-notice-stack").locator("[data-testid='global-notice']").evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().toJSON()));
-    expect(card).not.toBeNull();
-    expect(notices.every((notice) => !boxesOverlap(card as { x: number; y: number; width: number; height: number }, notice))).toBeTruthy();
+    const after = await page.getByTestId("planning-overview-card").boundingBox();
+    expect(after).toMatchObject({
+      x: before?.x,
+      y: before?.y,
+      width: before?.width,
+      height: before?.height
+    });
+    expect(await page.getByTestId("global-notice-stack").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { parentIsBody: element.parentElement === document.body, position: style.position };
+    })).toEqual({ parentIsBody: true, position: "fixed" });
   });
 
   test("shows the future event instead of an ended morning event", async ({ page }) => {

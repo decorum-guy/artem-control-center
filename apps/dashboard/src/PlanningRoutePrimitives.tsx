@@ -1,14 +1,8 @@
-import { createPortal } from "react-dom";
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import type { PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
 import type { PlanningReadEnvelope, PlanningReadError } from "./planningReadClient";
 import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
-
-function focusableElements(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>(
-    'button:not([disabled]), input:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  )).filter((element) => !element.hasAttribute("hidden") && element.getAttribute("aria-hidden") !== "true");
-}
+import { Sheet } from "./Sheet";
 
 export function syncTimeLabel(value: string | null): string | null {
   if (!value) return null;
@@ -177,103 +171,15 @@ export function PlanningSheet({
   children: ReactNode;
   testId?: string;
 }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLElement>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    previouslyFocusedRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const app = document.querySelector<HTMLElement>(".app");
-    const wasInert = app?.hasAttribute("inert") ?? false;
-    const previousAriaHidden = app?.getAttribute("aria-hidden") ?? null;
-    app?.setAttribute("inert", "");
-    app?.setAttribute("aria-hidden", "true");
-    const focusFirst = () => {
-      const dialog = dialogRef.current;
-      const firstFocusable = dialog ? focusableElements(dialog)[0] : null;
-      (firstFocusable ?? dialog ?? closeRef.current)?.focus();
-    };
-    focusFirst();
-    const frame = window.requestAnimationFrame(focusFirst);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      if (app) {
-        if (!wasInert) app.removeAttribute("inert");
-        if (previousAriaHidden === null) app.removeAttribute("aria-hidden");
-        else app.setAttribute("aria-hidden", previousAriaHidden);
-      }
-      const opener = previouslyFocusedRef.current;
-      previouslyFocusedRef.current = null;
-      if (opener?.isConnected) {
-        opener.focus();
-        window.requestAnimationFrame(() => opener.focus());
-      }
-    };
-  }, []);
-
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onCloseRef.current();
-      return;
-    }
-    if (event.key !== "Tab" || !dialogRef.current) return;
-    const focusables = focusableElements(dialogRef.current);
-    if (!focusables.length) {
-      event.preventDefault();
-      dialogRef.current.focus();
-      return;
-    }
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    const active = document.activeElement;
-    const atDialogBoundary = active === dialogRef.current || !dialogRef.current.contains(active);
-    if (event.shiftKey && (active === first || atDialogBoundary)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (active === last || atDialogBoundary)) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
-  const sheet = (
-    <div
-      className="planning-sheet-backdrop"
-      data-testid={`${testId}-backdrop`}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onCloseRef.current();
-      }}
+  return (
+    <Sheet
+      title={title}
+      eyebrow={eyebrow}
+      description={description}
+      onClose={onClose}
+      testId={testId}
     >
-      <section
-        ref={dialogRef}
-        className="planning-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={`${testId}-title`}
-        tabIndex={-1}
-        onKeyDown={handleKeyDown}
-        onPointerDown={(event) => event.stopPropagation()}
-        data-testid={testId}
-      >
-        <header className="planning-sheet__header">
-          <div>
-            {eyebrow && <p className="section-kicker">{eyebrow}</p>}
-            <h2 id={`${testId}-title`}>{title}</h2>
-            {description && <p>{description}</p>}
-          </div>
-          <button ref={closeRef} className="planning-sheet__close" type="button" onClick={onClose} aria-label="Закрыть">
-            Закрыть
-          </button>
-        </header>
-        <div className="planning-sheet__body">{children}</div>
-      </section>
-    </div>
+      {children}
+    </Sheet>
   );
-  return typeof document === "undefined" ? sheet : createPortal(sheet, document.body);
 }

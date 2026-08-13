@@ -3,7 +3,6 @@ import type { ServiceSnapshot } from "@artem/contracts";
 import { WeatherHeaderSummary } from "./Weather";
 import { TemporaryAccessIndicator, useAccess } from "./AccessControls";
 import type { AccessStatus } from "./accessApi";
-import { B0NoticeFixture, GlobalNoticeRegion } from "./NoticeCenter";
 import { Icon, type IconName } from "./icons";
 import { StatusText } from "./ShellPrimitives";
 import { v2VisualShellEnabled } from "./visualShellConfig";
@@ -199,8 +198,6 @@ function LegacyProductShell({
             <TemporaryAccessIndicator />
           </div>
         </header>
-        <GlobalNoticeRegion />
-        <B0NoticeFixture />
         <div className="route-content">{children}</div>
       </main>
     </div>
@@ -385,8 +382,6 @@ function V2ProductShell({
             <TemporaryAccessIndicator />
           </div>
         </header>
-        <GlobalNoticeRegion />
-        <B0NoticeFixture />
         <div className="route-content v2-route-content">{children}</div>
       </main>
     </div>
