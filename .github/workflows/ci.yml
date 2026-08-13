@@ -111,6 +111,29 @@ jobs:
           path: artifacts/v2-overlays-review
           if-no-files-found: error
 
+      - name: Run focused V2 Overview grid gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          VITE_V2_VISUAL_SHELL: "true"
+          V2_OVERVIEW_ARTIFACT_DIR: artifacts/v2-overview-grid-review
+        run: npm run test:e2e -- tests/e2e/v2-overview-grid.spec.ts
+
+      - name: Upload V2 Overview grid review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-overview-grid-review-${{ github.sha }}
+          path: artifacts/v2-overview-grid-review
+          if-no-files-found: error
+
+      - name: Run Overview grid gate without V2 visual shell
+        if: runner.os == 'Linux'
+        env:
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          VITE_V2_VISUAL_SHELL: "false"
+        run: npm run test:e2e -- tests/e2e/v2-overview-grid.spec.ts --grep "does not require the V2 visual shell"
+
       - name: Run focused B3 browser gate
         if: runner.os == 'Linux'
         env:
