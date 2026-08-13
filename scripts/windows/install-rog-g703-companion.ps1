@@ -18,6 +18,7 @@ $configPath = Join-Path $installRoot "companion.json"
 $secretPath = Join-Path $installRoot "companion.secret"
 $companionPath = Join-Path $installRoot "rog_g703_companion.py"
 $sourcePath = Join-Path $PSScriptRoot "rog_g703_companion.py"
+. (Join-Path $PSScriptRoot "rog-g703-companion-config.ps1")
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -44,22 +45,6 @@ function Assert-FirewallRemoteAddress {
     if ($FirewallRemoteAddress -eq "LocalSubnet") { return }
     if ($FirewallRemoteAddress -notmatch '^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$') {
         throw "FirewallRemoteAddress must be LocalSubnet or an IPv4 address/CIDR."
-    }
-}
-
-function Protect-Path {
-    param([Parameter(Mandatory)][string]$Path)
-    $currentUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    $aclArguments = @(
-        $Path,
-        "/inheritance:r",
-        "/grant:r",
-        "*${currentUserSid}:(F)",
-        "*S-1-5-18:(F)"
-    )
-    & icacls.exe @aclArguments | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to protect companion path: $Path"
     }
 }
 
@@ -113,28 +98,6 @@ function Get-CompanionSecret {
         throw "Companion secret is invalid: $secretPath"
     }
     return $secret
-}
-
-function Write-CompanionConfig {
-    param(
-        [Parameter(Mandatory)]$Python,
-        [Parameter(Mandatory)][string]$Secret
-    )
-    New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
-    Copy-Item -LiteralPath $sourcePath -Destination $companionPath -Force
-    Set-Content -LiteralPath $secretPath -Value $Secret -Encoding ASCII -NoNewline
-    $configuration = [ordered]@{
-        schemaVersion = 1
-        listenAddress = $ListenAddress
-        port = $Port
-        secretFile = $secretPath
-        python = $Python.Path
-    }
-    $configuration | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $configPath -Encoding UTF8
-    Protect-Path -Path $installRoot
-    Protect-Path -Path $configPath
-    Protect-Path -Path $secretPath
-    Protect-Path -Path $companionPath
 }
 
 function Get-QuotedArgument {
@@ -246,7 +209,16 @@ function Invoke-Install {
     $python = Get-PythonCommand
     $existingSecret = Get-CompanionSecret
     $secret = if ($existingSecret) { $existingSecret } else { New-CompanionSecret }
-    Write-CompanionConfig -Python $python -Secret $secret
+    Write-CompanionConfig `
+        -InstallRoot $installRoot `
+        -ConfigPath $configPath `
+        -SecretPath $secretPath `
+        -CompanionPath $companionPath `
+        -SourcePath $sourcePath `
+        -ListenAddress $ListenAddress `
+        -Port $Port `
+        -Python $python `
+        -Secret $secret
     Configure-CompanionFirewall
     Register-CompanionTask -Python $python
     Start-ScheduledTask -TaskName $taskName
