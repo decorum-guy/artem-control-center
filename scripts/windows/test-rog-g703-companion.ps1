@@ -86,6 +86,7 @@ $testCompanionPath = Join-Path $testRoot "rog_g703_companion.py"
 $testSourcePath = Join-Path $PSScriptRoot "rog_g703_companion.py"
 $testSecret = "test-secret-" + ("x" * 37)
 $pythonCommand = Get-Command "python.exe" -ErrorAction Stop
+$pythonValidationPath = [IO.Path]::GetTempFileName()
 $testPython = [pscustomobject]@{
     Path = $pythonCommand.Source
     PrefixArguments = @()
@@ -151,7 +152,8 @@ expected = {
 if config != expected:
     raise SystemExit(f"Unexpected companion.json fields: {config!r}")
 '@
-    & $pythonCommand.Source -c $pythonValidation $testConfigPath $testSecretPath $testPython.Path
+    [IO.File]::WriteAllText($pythonValidationPath, $pythonValidation, [Text.Encoding]::ASCII)
+    & $pythonCommand.Source $pythonValidationPath $testConfigPath $testSecretPath $testPython.Path
     if ($LASTEXITCODE -ne 0) {
         throw "Python utf-8 companion.json validation failed."
     }
@@ -167,6 +169,7 @@ if config != expected:
 }
 finally {
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $pythonValidationPath -Force -ErrorAction SilentlyContinue
 }
 
 $restartStart = $installer.IndexOf("function Invoke-Restart")
