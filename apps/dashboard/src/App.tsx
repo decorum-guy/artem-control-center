@@ -309,7 +309,7 @@ export function App() {
       {!snapshot && !error && <p className="loading">Собираем локальный snapshot…</p>}
       {snapshot && (
         <ProductShell route={route} services={snapshot.services} onNavigate={navigate}>
-          {(route === "/overview" || route === "/home" || route === "/services") && (
+          {((route !== "/overview" || !overviewV2Enabled) && (route === "/overview" || route === "/home" || route === "/services")) && (
             <ConnectivityRecoverySurface
               services={snapshot.services}
               showWhenHealthy={route === "/services"}
@@ -317,7 +317,12 @@ export function App() {
           )}
           {route === "/overview" && (
             overviewV2Enabled ? (
-              <OverviewV2Page snapshot={snapshot} />
+              <OverviewV2Page
+                snapshot={snapshot}
+                onNavigate={navigate}
+                onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
+                coffeeActionPending={coffeeActionPending}
+              />
             ) : (
               <OverviewPage
                 snapshot={snapshot}

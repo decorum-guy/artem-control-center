@@ -63,6 +63,7 @@ function CoffeeAsset({ manifest }: { manifest: WidgetManifest }) {
       className="coffee-asset__image"
       src={resolved}
       alt={asset.alt}
+      decoding="async"
       style={{ objectFit: asset.fit }}
       onError={() => setFailed(true)}
     />
@@ -80,7 +81,7 @@ export function CoffeeWidget({
   service: ServiceSnapshot;
   generatedAt: string;
   manifest: WidgetManifest;
-  variant?: "featured" | "home" | "gallery";
+  variant?: "featured" | "home" | "gallery" | "overview";
   onAction?: (service: ServiceSnapshot, actionId: string) => void;
   actionPending?: boolean;
 }) {
