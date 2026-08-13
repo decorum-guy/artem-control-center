@@ -322,3 +322,43 @@ export interface MaterializedWidget {
   section: "overview" | "home" | "new-items" | "services";
   preserved: boolean;
 }
+
+/**
+ * Code-owned Overview V2 layout vocabulary. These types intentionally do not
+ * contain persistence, data-binding, endpoint, or action configuration.
+ */
+export type OverviewWidgetType =
+  | "home.coffee-machine"
+  | "system.rog-g703-operational"
+  | "planning.summary"
+  | "home.quick-actions"
+  | "system.health-summary"
+  | "weather.alert"
+  | "planning.calendar-agenda"
+  | "planning.task-list";
+
+export type OverviewWidgetSizeVariant = "compact" | "standard" | "large" | "detail";
+
+export interface OverviewWidgetSize {
+  w: number;
+  h: number;
+}
+
+export interface OverviewWidgetPlacement {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * A deliberately bounded, in-memory layout item. `widgetType` and
+ * `sizeVariant` remain strings at this boundary so malformed/unknown input
+ * can be classified safely before it reaches trusted renderers.
+ */
+export interface OverviewLayoutItem {
+  instanceId: string;
+  widgetType: string;
+  sizeVariant: string;
+  placement: OverviewWidgetPlacement;
+}

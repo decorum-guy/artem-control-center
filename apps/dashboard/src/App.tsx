@@ -26,6 +26,8 @@ import { ConnectivityRecoverySurface } from "./ConnectivityActions";
 import { WeatherPage } from "./Weather";
 import { B0NoticeFixture, GlobalNoticeRegion, useNoticeCenter } from "./NoticeCenter";
 import { v2VisualShellEnabled } from "./visualShellConfig";
+import { overviewV2Enabled } from "./overviewConfig";
+import { OverviewV2Page } from "./features/overview/OverviewPage";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -314,12 +316,16 @@ export function App() {
             />
           )}
           {route === "/overview" && (
-            <OverviewPage
-              snapshot={snapshot}
-              onNavigate={navigate}
-              onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
-              coffeeActionPending={coffeeActionPending}
-            />
+            overviewV2Enabled ? (
+              <OverviewV2Page snapshot={snapshot} />
+            ) : (
+              <OverviewPage
+                snapshot={snapshot}
+                onNavigate={navigate}
+                onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
+                coffeeActionPending={coffeeActionPending}
+              />
+            )
           )}
           {route === "/weather" && <WeatherPage />}
           {route === "/home" && (
