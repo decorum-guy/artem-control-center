@@ -22,6 +22,17 @@ function item(
   return { instanceId, widgetType, sizeVariant, placement };
 }
 
+function expectInvalidProjection(
+  projection: ReturnType<typeof projectOverviewLayout>,
+  canonicalIndex: number
+): void {
+  const projected = projection.items.find((entry) => entry.canonicalIndex === canonicalIndex);
+  expect(projected).toBeDefined();
+  expect(projected?.state).toBe("fallback");
+  expect(projected?.fallbackReason).toBe("invalid-layout");
+  expect(projected?.definition).not.toBeNull();
+}
+
 describe("Overview V2 placement validation", () => {
   it("accepts the neutral canonical foundation fixture", () => {
     const result = validateOverviewLayout(overviewFoundationLayout());
@@ -86,6 +97,63 @@ describe("Overview V2 placement validation", () => {
     expect(result.issues).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "unknown-widget-type", widgetType: "future.untrusted-widget" })
     ]));
+    const projection = projectOverviewLayout([item("unknown", "future.untrusted-widget")], 1280);
+    expect(projection.items[0]).toMatchObject({
+      canonicalIndex: 0,
+      state: "fallback",
+      fallbackReason: "unknown",
+      definition: null
+    });
+  });
+});
+
+describe("Overview V2 trusted-render eligibility", () => {
+  it("never renders either record when instance IDs are duplicated", () => {
+    const projection = projectOverviewLayout([
+      item("same"),
+      item("same", "home.quick-actions", "standard", { x: 0, y: 4, w: 7, h: 2 })
+    ], 1280);
+    expectInvalidProjection(projection, 0);
+    expectInvalidProjection(projection, 1);
+  });
+
+  it("never renders either record when a singleton is duplicated", () => {
+    const projection = projectOverviewLayout([
+      item("coffee-one"),
+      item("coffee-two", "home.coffee-machine", "standard", { x: 0, y: 4, w: 7, h: 4 })
+    ], 1280);
+    expectInvalidProjection(projection, 0);
+    expectInvalidProjection(projection, 1);
+  });
+
+  it("never renders either record when canonical rectangles overlap", () => {
+    const projection = projectOverviewLayout([
+      item("coffee", "home.coffee-machine", "standard", { x: 0, y: 0, w: 7, h: 4 }),
+      item("planning", "planning.summary", "standard", { x: 4, y: 0, w: 5, h: 4 })
+    ], 1280);
+    expectInvalidProjection(projection, 0);
+    expectInvalidProjection(projection, 1);
+  });
+
+  it.each([
+    ["negative coordinate", item("negative", "home.coffee-machine", "standard", { x: -1, y: 0, w: 7, h: 4 })],
+    ["out-of-bounds coordinate", item("overflow", "planning.summary", "standard", { x: 8, y: 0, w: 5, h: 4 })],
+    ["variant dimension mismatch", item("mismatch", "home.coffee-machine", "compact", { x: 0, y: 0, w: 7, h: 4 })],
+    ["unknown size variant", item("unknown-size", "home.coffee-machine", "future", { x: 0, y: 0, w: 7, h: 4 })],
+    ["minimum size violation", item("too-small", "home.coffee-machine", "compact", { x: 0, y: 0, w: 3, h: 3 })],
+    ["maximum size violation", item("too-large", "home.coffee-machine", "large", { x: 0, y: 0, w: 9, h: 5 })]
+  ])("does not trust a known widget with %s", (_label, invalidItem) => {
+    const projection = projectOverviewLayout([invalidItem], 719);
+    expectInvalidProjection(projection, 0);
+  });
+
+  it("still renders a valid known record while isolating an invalid sibling", () => {
+    const projection = projectOverviewLayout([
+      item("valid", "home.coffee-machine", "standard", { x: 0, y: 0, w: 7, h: 4 }),
+      item("invalid", "planning.task-list", "compact", { x: 0, y: 8, w: 6, h: 3 })
+    ], 1280);
+    expect(projection.items.find((entry) => entry.canonicalIndex === 0)).toMatchObject({ state: "rendered" });
+    expectInvalidProjection(projection, 1);
   });
 });
 

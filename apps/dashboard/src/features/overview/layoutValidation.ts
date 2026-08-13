@@ -4,7 +4,6 @@ import type {
   OverviewWidgetSizeVariant
 } from "@artem/contracts";
 import {
-  getOverviewWidgetDefinition,
   overviewWidgetRegistry,
   resolveOverviewWidgetSize,
   type OverviewWidgetDefinition
@@ -50,16 +49,26 @@ export interface OverviewLayoutIssue {
   readonly message: string;
 }
 
+export interface OverviewValidationRecord {
+  readonly index: number;
+  readonly item: OverviewLayoutItem;
+  readonly definition: OverviewWidgetDefinition | null;
+  readonly issues: readonly OverviewLayoutIssue[];
+  readonly valid: boolean;
+}
+
 export interface OverviewValidationResult {
   readonly valid: boolean;
   readonly issues: readonly OverviewLayoutIssue[];
+  readonly records: readonly OverviewValidationRecord[];
   readonly validItems: readonly OverviewLayoutItem[];
 }
 
 export type OverviewProjectionItemState = "rendered" | "fallback";
-export type OverviewFallbackReason = "unknown" | "unsupported-profile";
+export type OverviewFallbackReason = "unknown" | "invalid-layout" | "unsupported-profile";
 
 export interface OverviewProjectionItem {
+  readonly canonicalIndex: number;
   readonly item: OverviewLayoutItem;
   readonly placement: OverviewWidgetPlacement;
   readonly sizeVariant: OverviewWidgetSizeVariant | null;
@@ -81,7 +90,7 @@ interface LayoutRecord {
   readonly widgetType: string | null;
   readonly sizeVariant: string | null;
   readonly placement: OverviewWidgetPlacement | null;
-  definition: OverviewWidgetDefinition | null;
+  readonly definition: OverviewWidgetDefinition | null;
   readonly issues: OverviewLayoutIssue[];
 }
 
@@ -111,8 +120,8 @@ function addIssue(
   record.issues.push(issue(code, record.instanceId, record.widgetType, message));
 }
 
-function recordValue(record: Record<string, unknown>, key: string): unknown {
-  return Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
+function recordValue(record: Record<string, unknown> | null, key: string): unknown {
+  return record && Object.prototype.hasOwnProperty.call(record, key) ? record[key] : undefined;
 }
 
 function parseRecord(
@@ -120,7 +129,9 @@ function parseRecord(
   item: OverviewLayoutItem,
   registryMap: ReadonlyMap<string, OverviewWidgetDefinition>
 ): LayoutRecord {
-  const candidate = item as unknown as Record<string, unknown>;
+  const candidate = item && typeof item === "object"
+    ? item as unknown as Record<string, unknown>
+    : null;
   const instanceId = typeof recordValue(candidate, "instanceId") === "string"
     ? String(recordValue(candidate, "instanceId"))
     : null;
@@ -145,9 +156,15 @@ function parseRecord(
       }
     : null;
   const definition = widgetType ? registryMap.get(widgetType) ?? null : null;
+  const normalizedItem: OverviewLayoutItem = {
+    instanceId: instanceId ?? "",
+    widgetType: widgetType ?? "",
+    sizeVariant: sizeVariant ?? "",
+    placement: numericPlacement ?? { x: 0, y: 0, w: 0, h: 0 }
+  };
   const record: LayoutRecord = {
     index,
-    item,
+    item: normalizedItem,
     instanceId,
     widgetType,
     sizeVariant,
@@ -263,11 +280,19 @@ export function validateOverviewLayout(
   }
 
   const issues = records.flatMap((record) => record.issues);
+  const validatedRecords: readonly OverviewValidationRecord[] = records.map((record) => ({
+    index: record.index,
+    item: cloneItem(record.item),
+    definition: record.definition,
+    issues: [...record.issues],
+    valid: record.issues.length === 0
+  }));
   return {
     valid: issues.length === 0,
     issues,
-    validItems: records
-      .filter((record) => record.issues.length === 0)
+    records: validatedRecords,
+    validItems: validatedRecords
+      .filter((record) => record.valid)
       .map((record) => cloneItem(record.item))
   };
 }
@@ -291,24 +316,43 @@ function compareStableStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function compareCanonicalItems(
+  left: OverviewLayoutItem,
+  leftIndex: number,
+  right: OverviewLayoutItem,
+  rightIndex: number
+): number {
+  return (
+    sortNumber(left?.placement?.y) - sortNumber(right?.placement?.y) ||
+    sortNumber(left?.placement?.x) - sortNumber(right?.placement?.x) ||
+    compareStableStrings(
+      typeof left?.instanceId === "string" ? left.instanceId : "",
+      typeof right?.instanceId === "string" ? right.instanceId : ""
+    ) ||
+    leftIndex - rightIndex
+  );
+}
+
 export function sortCanonicalLayoutItems(
   items: readonly OverviewLayoutItem[]
 ): readonly OverviewLayoutItem[] {
   return items
     .map((item, index) => ({
       item,
-      index,
-      x: sortNumber(item?.placement?.x),
-      y: sortNumber(item?.placement?.y),
-      instanceId: typeof item?.instanceId === "string" ? item.instanceId : ""
+      index
     }))
     .sort((left, right) =>
-      left.y - right.y ||
-      left.x - right.x ||
-      compareStableStrings(left.instanceId, right.instanceId) ||
-      left.index - right.index
+      compareCanonicalItems(left.item, left.index, right.item, right.index)
     )
     .map(({ item }) => cloneItem(item));
+}
+
+export function sortCanonicalValidationRecords(
+  records: readonly OverviewValidationRecord[]
+): readonly OverviewValidationRecord[] {
+  return records
+    .slice()
+    .sort((left, right) => compareCanonicalItems(left.item, left.index, right.item, right.index));
 }
 
 export function findFirstFit(
@@ -400,18 +444,35 @@ export function projectOverviewLayout(
   const occupied: OverviewWidgetPlacement[] = [];
   const issues = [...validation.issues];
 
-  for (const item of sortCanonicalLayoutItems(canonicalItems)) {
-    const definition = getOverviewWidgetDefinition(item.widgetType);
+  for (const record of sortCanonicalValidationRecords(validation.records)) {
+    const { item, definition } = record;
     if (!definition) {
       const placement = findFirstFit(FALLBACK_SIZE, occupied, profile.columns, safeStartY(item));
       if (!placement) continue;
       projected.push({
+        canonicalIndex: record.index,
         item,
         placement,
         sizeVariant: null,
         definition: null,
         state: "fallback",
         fallbackReason: "unknown"
+      });
+      occupied.push(placement);
+      continue;
+    }
+
+    if (!record.valid) {
+      const placement = findFirstFit(FALLBACK_SIZE, occupied, profile.columns);
+      if (!placement) continue;
+      projected.push({
+        canonicalIndex: record.index,
+        item,
+        placement,
+        sizeVariant: null,
+        definition,
+        state: "fallback",
+        fallbackReason: "invalid-layout"
       });
       occupied.push(placement);
       continue;
@@ -428,6 +489,7 @@ export function projectOverviewLayout(
       const placement = findFirstFit(FALLBACK_SIZE, occupied, profile.columns, safeStartY(item));
       if (!placement) continue;
       projected.push({
+        canonicalIndex: record.index,
         item,
         placement,
         sizeVariant: null,
@@ -456,6 +518,7 @@ export function projectOverviewLayout(
       : findFirstFit(selected.size, occupied, profile.columns);
     if (!placement) continue;
     projected.push({
+      canonicalIndex: record.index,
       item,
       placement,
       sizeVariant: selected.variant,

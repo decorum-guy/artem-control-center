@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
 import { Icon } from "../../icons";
 import { WorkZone } from "../../ShellPrimitives";
-import type { OverviewProjectionItem } from "./layoutValidation";
+import type {
+  OverviewFallbackReason,
+  OverviewProjectionItem
+} from "./layoutValidation";
 
 export function TrustedOverviewWidget({ item }: { item: OverviewProjectionItem }): ReactNode {
   const definition = item.definition;
@@ -39,7 +42,7 @@ export function TrustedOverviewWidget({ item }: { item: OverviewProjectionItem }
 export function OverviewUnavailableWidget({
   reason
 }: {
-  reason: "unknown" | "unsupported-profile";
+  reason: OverviewFallbackReason;
 }): ReactNode {
   return (
     <WorkZone className="overview-v2-widget overview-v2-widget--unavailable" data-testid="overview-widget-unavailable">
@@ -55,7 +58,9 @@ export function OverviewUnavailableWidget({
       <p className="overview-v2-widget__copy">
         {reason === "unknown"
           ? "Рендерер не зарегистрирован в локальном реестре."
-          : "Для этого профиля нет безопасного размера."}
+          : reason === "unsupported-profile"
+            ? "Для этого профиля нет безопасного размера."
+            : "Конфигурация расположения некорректна."}
       </p>
     </WorkZone>
   );

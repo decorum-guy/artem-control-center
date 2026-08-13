@@ -100,6 +100,31 @@ test.describe("Overview V2 safe grid foundation", () => {
     await expectNoDocumentOverflow(page);
   });
 
+  test("invalid known fixture data uses a fallback without invoking a trusted renderer", async ({ page }) => {
+    test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
+    await page.goto("/overview?overviewFixture=invalid");
+    await waitForGrid(page);
+
+    const invalid = gridItem(page, "fixture.invalid");
+    await expect(invalid).toHaveAttribute("data-grid-state", "fallback");
+    await expect(invalid).toContainText("Виджет недоступен");
+    await expect(invalid.locator(".overview-v2-widget[data-widget-type]")).toHaveCount(0);
+    await expect(gridItem(page, "fixture.coffee")).toHaveAttribute("data-grid-state", "rendered");
+    await expect(gridItem(page, "fixture.planning")).toHaveAttribute("data-grid-state", "rendered");
+
+    const boxes = await page.locator(".overview-v2-grid-item").evaluateAll((elements) => elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    }));
+    for (let index = 0; index < boxes.length; index += 1) {
+      for (let next = index + 1; next < boxes.length; next += 1) {
+        expect(boxes[index].right <= boxes[next].left || boxes[next].right <= boxes[index].left ||
+          boxes[index].bottom <= boxes[next].top || boxes[next].bottom <= boxes[index].top).toBeTruthy();
+      }
+    }
+    await expectNoDocumentOverflow(page);
+  });
+
   test("projects the canonical layout to eight columns at the medium boundary", async ({ page }) => {
     test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
     await page.setViewportSize({ width: 1120, height: 720 });
@@ -159,9 +184,9 @@ test.describe("Overview V2 safe grid foundation", () => {
     test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
     const artifactDir = process.env.V2_OVERVIEW_ARTIFACT_DIR ?? testInfo.outputPath("v2-overview-grid-artifacts");
     await mkdir(artifactDir, { recursive: true });
-    const capture = async (name: string) => {
+    const capture = async (name: string, fullPage = false) => {
       await expect(page.getByTestId("overview-grid")).toBeVisible();
-      await page.screenshot({ path: path.join(artifactDir, name), animations: "disabled" });
+      await page.screenshot({ path: path.join(artifactDir, name), animations: "disabled", fullPage });
     };
 
     await page.setViewportSize({ width: 1280, height: 720 });
@@ -186,5 +211,11 @@ test.describe("Overview V2 safe grid foundation", () => {
     await page.addStyleTag({ content: ".connectivity-recovery-surface { display: none !important; }" });
     await gridItem(page, "fixture.throwing").scrollIntoViewIfNeeded();
     await capture("overview-grid-error-isolation.png");
+
+    await page.goto("/overview?overviewFixture=invalid&theme=night");
+    await waitForGrid(page);
+    await page.addStyleTag({ content: ".connectivity-recovery-surface { display: none !important; }" });
+    await gridItem(page, "fixture.invalid").scrollIntoViewIfNeeded();
+    await capture("overview-grid-invalid-layout.png", true);
   });
 });

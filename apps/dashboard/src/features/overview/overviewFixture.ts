@@ -1,6 +1,6 @@
 import type { OverviewLayoutItem } from "@artem/contracts";
 
-export type OverviewFixtureMode = "default" | "unknown" | "error";
+export type OverviewFixtureMode = "default" | "unknown" | "invalid" | "error";
 
 const foundationLayout: readonly OverviewLayoutItem[] = [
   {
@@ -38,7 +38,7 @@ const foundationLayout: readonly OverviewLayoutItem[] = [
 export function overviewFixtureModeFromLocation(): OverviewFixtureMode {
   if (!import.meta.env.DEV) return "default";
   const value = new URLSearchParams(window.location.search).get("overviewFixture");
-  return value === "unknown" || value === "error" ? value : "default";
+  return value === "unknown" || value === "invalid" || value === "error" ? value : "default";
 }
 
 export function overviewFoundationLayout(
@@ -64,6 +64,15 @@ export function overviewFoundationLayout(
       widgetType: "planning.task-list",
       sizeVariant: "compact",
       placement: { x: 0, y: 8, w: 4, h: 3 }
+    });
+  }
+
+  if (mode === "invalid") {
+    layout.push({
+      instanceId: "fixture.invalid",
+      widgetType: "planning.task-list",
+      sizeVariant: "compact",
+      placement: { x: 0, y: 8, w: 6, h: 3 }
     });
   }
 
