@@ -1,0 +1,189 @@
+.cc-overlay-backdrop {
+  position: fixed;
+  z-index: 200;
+  top: var(--cc-viewport-offset-top, 0px);
+  right: 0;
+  bottom: var(--cc-viewport-bottom-inset, 0px);
+  left: 0;
+  display: flex;
+  padding: 12px;
+  background: var(--cc-overlay);
+}
+
+.cc-overlay-backdrop--sheet {
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+.cc-overlay-backdrop--dialog {
+  align-items: center;
+  justify-content: center;
+}
+
+.cc-overlay {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  max-height: calc(var(--cc-visible-height, 100dvh) - 24px);
+  overflow: hidden;
+  border: 1px solid var(--cc-border);
+  background: var(--cc-surface-1);
+  color: var(--cc-text);
+  box-shadow: var(--cc-shadow-overlay);
+}
+
+.cc-sheet {
+  width: min(560px, calc(100vw - 24px));
+  height: min(680px, calc(var(--cc-visible-height, 100dvh) - 24px));
+  border-radius: var(--cc-radius-sheet);
+}
+
+.cc-dialog {
+  width: min(520px, calc(100vw - 24px));
+  max-height: calc(var(--cc-visible-height, 100dvh) - 24px);
+  border-radius: var(--cc-radius-sheet);
+}
+
+.cc-overlay__header,
+.cc-overlay__footer {
+  position: sticky;
+  z-index: 1;
+  background: var(--cc-surface-1);
+}
+
+.cc-overlay__header {
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cc-space-4);
+  min-height: 72px;
+  padding: var(--cc-space-5);
+  border-bottom: 1px solid var(--cc-divider);
+}
+
+.cc-overlay__heading {
+  min-width: 0;
+}
+
+.cc-overlay__eyebrow {
+  margin: 0;
+  color: var(--cc-text-muted);
+  font-size: var(--cc-type-short-label-size);
+  font-weight: var(--cc-type-short-label-weight);
+  line-height: var(--cc-type-short-label-line);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.cc-overlay__heading h2 {
+  max-width: 440px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--cc-type-section-title-size);
+  font-weight: var(--cc-type-section-title-weight);
+  line-height: var(--cc-type-section-title-line);
+}
+
+.cc-overlay__heading p:last-child {
+  margin: var(--cc-space-1) 0 0;
+  color: var(--cc-text-secondary);
+  font-size: var(--cc-type-metadata-size);
+  line-height: var(--cc-type-metadata-line);
+}
+
+.cc-overlay__close {
+  display: inline-grid;
+  flex: 0 0 48px;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-control);
+  color: var(--cc-text);
+  background: var(--cc-surface-2);
+}
+
+.cc-overlay__body {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--cc-space-5);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.cc-overlay__footer {
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--cc-space-2);
+  min-height: 80px;
+  padding: var(--cc-space-3) var(--cc-space-5);
+  border-top: 1px solid var(--cc-divider);
+}
+
+.cc-overlay__footer > * {
+  min-height: 48px;
+}
+
+.cc-overlay__footer > :where(button, a).cc-overlay__primary-action {
+  min-height: 56px;
+}
+
+body.cc-overlay-open {
+  overscroll-behavior: none;
+}
+
+@media (max-height: 420px) {
+  .cc-overlay__header {
+    height: 60px;
+    min-height: 60px;
+    padding: 5px var(--cc-space-4);
+  }
+
+  .cc-overlay__heading h2 {
+    font-size: var(--cc-type-widget-title-size);
+    line-height: var(--cc-type-widget-title-line);
+  }
+
+  .cc-overlay__eyebrow,
+  .cc-overlay__heading p:last-child {
+    display: none;
+  }
+
+  .cc-overlay__body {
+    min-height: 204px;
+    padding: var(--cc-space-4);
+  }
+
+  .cc-overlay__footer {
+    min-height: 72px;
+    padding: var(--cc-space-2) var(--cc-space-4);
+  }
+}
+
+@media (max-width: 760px) {
+  .cc-overlay {
+    max-width: calc(100vw - 24px);
+  }
+
+  .cc-overlay__heading h2 {
+    max-width: calc(100vw - 112px);
+  }
+}
+
+@media (min-width: 761px) and (max-width: 951px) {
+  body.cc-overlay-open .cc-sheet {
+    width: var(--cc-overlay-sheet-width, min(560px, calc(100vw - 24px)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-overlay,
+  .cc-overlay-backdrop {
+    transition: none;
+  }
+}

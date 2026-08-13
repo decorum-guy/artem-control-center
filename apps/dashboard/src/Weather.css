@@ -423,7 +423,7 @@
 .weather-attribution { display: block; margin-top: 12px; color: var(--text-muted); font-size: 12px; }
 .weather-inline-error { margin: 8px 0 0; padding: 9px 11px; border-radius: var(--radius-control); color: var(--danger); background: var(--danger-soft); font-size: 12px; }
 
-.weather-location-manager { padding: var(--space-4); }
+.weather-location-manager { padding: 0; border: 0; border-radius: 0; background: transparent; }
 .weather-location-list { display: grid; }
 .weather-location-list article {
   display: grid;

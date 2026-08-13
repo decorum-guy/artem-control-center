@@ -10,7 +10,8 @@ export type IconName =
   | "reminder"
   | "system"
   | "settings"
-  | "shield";
+  | "shield"
+  | "close";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   name: IconName;
@@ -84,6 +85,9 @@ const iconPaths: Record<IconName, ReactNode> = {
       <path d="M12 3 5 6v5c0 5 3 8 7 10 4-2 7-5 7-10V6l-7-3Z" />
       <path d="m9 12 2 2 4-5" />
     </>
+  ),
+  close: (
+    <path d="m6 6 12 12M18 6 6 18" />
   )
 };
 

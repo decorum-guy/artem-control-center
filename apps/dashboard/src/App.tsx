@@ -24,7 +24,7 @@ import { SnapshotCoordinator } from "./snapshotStream";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { ConnectivityRecoverySurface } from "./ConnectivityActions";
 import { WeatherPage } from "./Weather";
-import { useNoticeCenter } from "./NoticeCenter";
+import { B0NoticeFixture, GlobalNoticeRegion, useNoticeCenter } from "./NoticeCenter";
 import { v2VisualShellEnabled } from "./visualShellConfig";
 
 type Theme = "day" | "night";
@@ -118,6 +118,10 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.dataset.motion = motion;
+  }, [motion]);
 
   const widgets = useMemo(
     () => (snapshot ? reconcileLayout(snapshot.services) : []),
@@ -344,6 +348,8 @@ export function App() {
           )}
         </ProductShell>
       )}
+      <GlobalNoticeRegion />
+      <B0NoticeFixture />
     </div>
   );
 }

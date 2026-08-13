@@ -177,49 +177,6 @@
 .planning-pagination button { border: 1px solid var(--border); }
 .planning-pagination span { min-width: 112px; color: var(--text-secondary); font-size: 12px; text-align: center; }
 
-.planning-sheet-backdrop {
-  position: fixed;
-  z-index: 120;
-  inset: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 18px;
-  background: rgb(0 0 0 / 62%);
-}
-.planning-sheet {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  width: min(720px, 100%);
-  max-height: min(680px, calc(100dvh - 24px));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-primary) var(--radius-primary) var(--radius-section) var(--radius-section);
-  background: var(--surface-primary);
-  box-shadow: 0 24px 80px rgb(0 0 0 / 42%);
-}
-.planning-sheet__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-5);
-  border-bottom: 1px solid var(--border-soft);
-}
-.planning-sheet__header h2 { max-width: 520px; margin: 5px 0 0; font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
-.planning-sheet__header p:last-child { margin: 7px 0 0; font-size: 12px; line-height: 1.45; }
-.planning-sheet__close {
-  flex: 0 0 auto;
-  min-width: 56px;
-  min-height: 56px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text);
-  background: var(--surface-secondary);
-  font-size: 12px;
-  font-weight: 750;
-}
-.planning-sheet__body { min-height: 0; overflow: auto; padding: var(--space-5); overscroll-behavior: contain; }
 .planning-sheet__state { margin: 12px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.45; }
 .planning-sheet__state--error { color: var(--danger); }
 
@@ -280,10 +237,5 @@
   .planning-route-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .planning-priority, .reminder-status-badge, .calendar-event-row__badges { justify-self: start; }
   .calendar-event-row__badges { display: flex; flex-wrap: wrap; justify-items: start; min-width: 0; }
-  .planning-sheet-backdrop { padding: 8px; }
-  .planning-sheet { max-height: calc(100dvh - 16px); }
-  .planning-sheet__header { padding: 16px; }
-  .planning-sheet__body { padding: 16px; }
   .planning-detail-field { grid-template-columns: 1fr; gap: 4px; }
 }
-

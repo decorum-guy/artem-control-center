@@ -132,14 +132,20 @@ test("all visible product controls meet the touch target floor", async ({ page }
 
 test("Weather management actions work with touch tap", async ({ page }) => {
   await page.goto("/weather");
-  await page.getByRole("button", { name: "Управление" }).tap();
-  const manager = page.locator(".weather-location-manager");
+  const managementTrigger = page.getByRole("button", { name: "Управление" });
+  await managementTrigger.tap();
+  const sheet = page.getByTestId("weather-management-sheet");
+  await expect(sheet).toBeVisible();
+  const manager = sheet.locator(".weather-location-manager");
   await expect(manager).toBeVisible();
   await manager.getByRole("button", { name: /Сохранить/ }).first().tap();
+  await sheet.getByRole("button", { name: "Закрыть" }).tap();
+  await expect(sheet).toHaveCount(0);
+  await expect(managementTrigger).toBeFocused();
   await page.getByRole("button", { name: "+ Место" }).tap();
   await expect(page.getByTestId("weather-location-search")).toBeVisible();
   await page.getByTestId("weather-location-search").getByRole("button", { name: "Закрыть поиск" }).tap();
-  await expect(manager).toBeVisible();
+  await expect(sheet).toHaveCount(0);
 });
 
 test("coffee timing uses touch steppers without an editable numeric input", async ({ page }) => {

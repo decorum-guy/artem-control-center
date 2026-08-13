@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import {
   createContext,
   useCallback,
@@ -29,12 +30,12 @@ export interface NoticeInput {
   testId?: string;
 }
 
-interface Notice extends Omit<NoticeInput, "timeoutMs"> {
+export interface NoticeRecord extends Omit<NoticeInput, "timeoutMs"> {
   createdAt: number;
 }
 
 interface NoticeCenterContextValue {
-  notices: Notice[];
+  notices: NoticeRecord[];
   showNotice: (notice: NoticeInput) => void;
   dismissNotice: (id: string) => void;
 }
@@ -49,23 +50,51 @@ const severityOrder: Record<NoticeSeverity, number> = {
   info: 4
 };
 
-function identityMatches(left: Notice, right: NoticeInput): boolean {
-  return left.id === right.id || Boolean(right.correlationId && left.correlationId === right.correlationId);
+const defaultTimeoutBySeverity: Partial<Record<NoticeSeverity, number>> = {
+  success: 6_000,
+  warning: 10_000,
+  error: 12_000
+};
+
+const severityLabel: Record<NoticeSeverity, string> = {
+  info: "Информация",
+  progress: "Выполняется",
+  success: "Успешно",
+  warning: "Предупреждение",
+  error: "Ошибка"
+};
+
+export function noticeIdentityMatches(
+  left: Pick<NoticeInput, "id" | "correlationId">,
+  right: Pick<NoticeInput, "id" | "correlationId">
+): boolean {
+  return left.id === right.id || Boolean(
+    left.correlationId &&
+    right.correlationId &&
+    left.correlationId === right.correlationId
+  );
+}
+
+export function noticeExpiresAt(input: NoticeInput, now = Date.now()): number | undefined {
+  if (input.expiresAt !== undefined) return input.expiresAt;
+  if (input.timeoutMs !== undefined) return now + input.timeoutMs;
+  const defaultTimeout = defaultTimeoutBySeverity[input.severity];
+  return defaultTimeout === undefined ? undefined : now + defaultTimeout;
 }
 
 export function NoticeCenterProvider({ children }: { children: ReactNode }) {
-  const [notices, setNotices] = useState<Notice[]>([]);
+  const [notices, setNotices] = useState<NoticeRecord[]>([]);
   const sequenceRef = useRef(0);
 
   const showNotice = useCallback((input: NoticeInput) => {
     setNotices((current) => {
-      const existing = current.find((notice) => identityMatches(notice, input));
-      const next: Notice = {
+      const existing = current.find((notice) => noticeIdentityMatches(notice, input));
+      const next: NoticeRecord = {
         ...input,
-        expiresAt: input.expiresAt ?? (input.timeoutMs ? Date.now() + input.timeoutMs : undefined),
+        expiresAt: noticeExpiresAt(input),
         createdAt: existing?.createdAt ?? sequenceRef.current++
       };
-      return [...current.filter((notice) => !identityMatches(notice, input)), next];
+      return [...current.filter((notice) => !noticeIdentityMatches(notice, input)), next];
     });
   }, []);
 
@@ -94,10 +123,13 @@ export function useNoticeCenter() {
 
 export function GlobalNoticeRegion() {
   const { notices, dismissNotice } = useNoticeCenter();
-  return <NoticeRegion notices={notices} dismissNotice={dismissNotice} />;
+  const region = <NoticeRegion notices={notices} dismissNotice={dismissNotice} />;
+  return typeof document === "undefined" || !document.body
+    ? region
+    : createPortal(region, document.body);
 }
 
-function NoticeRegion({ notices, dismissNotice }: { notices: Notice[]; dismissNotice: (id: string) => void }) {
+function NoticeRegion({ notices, dismissNotice }: { notices: NoticeRecord[]; dismissNotice: (id: string) => void }) {
   const visible = [...notices]
     .sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity] || left.createdAt - right.createdAt)
     .slice(0, 3);
@@ -120,7 +152,10 @@ function NoticeRegion({ notices, dismissNotice }: { notices: Notice[]; dismissNo
           <span className="global-notice__indicator" aria-hidden="true" />
           <div className="global-notice__body">
             <div className="global-notice__heading">
-              <strong>{notice.title}</strong>
+              <div className="global-notice__heading-copy">
+                <span className="global-notice__severity">{severityLabel[notice.severity]}</span>
+                <strong>{notice.title}</strong>
+              </div>
               <button type="button" className="global-notice__dismiss" onClick={() => dismissNotice(notice.id)} aria-label="Закрыть уведомление">×</button>
             </div>
             <p>{notice.detail}</p>
@@ -139,6 +174,11 @@ function NoticeRegion({ notices, dismissNotice }: { notices: Notice[]; dismissNo
           </div>
         </article>
       ))}
+      {notices.length > 1 && (
+        <p className="global-notice__count" data-testid="global-notice-count">
+          Ещё уведомлений: {Math.max(0, notices.length - 1)}
+        </p>
+      )}
     </section>
   );
 }
@@ -158,6 +198,30 @@ export function B0NoticeFixture() {
       showNotice({ id: "b0.duplicate-first", correlationId: "b0-same-correlation", severity: "info", title: "Повторное событие", detail: "Первое сообщение." });
       showNotice({ id: "b0.duplicate-second", correlationId: "b0-same-correlation", severity: "info", title: "Повторное событие", detail: "Дубликат устранён." });
     }
+    if (mode === "notice-four") {
+      for (const [id, title] of [["b0.four-1", "Первое"], ["b0.four-2", "Второе"], ["b0.four-3", "Третье"], ["b0.four-4", "Четвёртое"]] as const) {
+        showNotice({ id, severity: "info", title, detail: "Проверка ограничения видимого стека." });
+      }
+    }
+    if (mode === "notice-action") {
+      showNotice({
+        id: "b0.action",
+        severity: "warning",
+        title: "Требуется действие",
+        detail: "Проверка безопасной кнопки уведомления.",
+        action: { label: "Открыть", onAction: () => undefined }
+      });
+    }
+    let terminalTimer: number | undefined;
+    if (mode === "notice-lifecycle") {
+      showNotice({ id: "b0.lifecycle-progress", correlationId: "b0-lifecycle", severity: "progress", title: "Синхронизация", detail: "Операция выполняется." });
+      terminalTimer = window.setTimeout(() => {
+        showNotice({ id: "b0.lifecycle-success", correlationId: "b0-lifecycle", severity: "success", title: "Синхронизация", detail: "Операция завершена." });
+      }, 120);
+    }
+    return () => {
+      if (terminalTimer !== undefined) window.clearTimeout(terminalTimer);
+    };
   }, [showNotice]);
 
   return null;

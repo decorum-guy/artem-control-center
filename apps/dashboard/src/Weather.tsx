@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode
@@ -23,6 +24,7 @@ import {
   type WeatherLocation,
   type WeatherSearchResult
 } from "./weatherApi";
+import { Sheet } from "./Sheet";
 
 interface WeatherContextValue {
   locations: WeatherLocation[];
@@ -494,10 +496,6 @@ function LocationManager() {
 
   return (
     <section className="weather-location-manager">
-      <header className="weather-section__heading">
-        <div><p className="section-kicker">Настройка</p><h2>Мои места</h2></div>
-        <span>Хранятся только локально</span>
-      </header>
       {error && <p className="weather-inline-error" role="alert">{error}</p>}
       <div className="weather-location-list">
         {locations.map((location, index) => (
@@ -538,6 +536,7 @@ export function WeatherPage() {
   } = useWeather();
   const [searchOpen, setSearchOpen] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
+  const managerTriggerRef = useRef<HTMLButtonElement>(null);
   const [preview, setPreview] = useState<WeatherForecast | null>(null);
   const [previewCandidate, setPreviewCandidate] = useState<WeatherCandidate | null>(null);
   const [saving, setSaving] = useState(false);
@@ -584,7 +583,14 @@ export function WeatherPage() {
         </div>
         <div className="weather-toolbar__actions">
           <button type="button" onClick={() => setSearchOpen((value) => !value)}>+ Место</button>
-          <button type="button" onClick={() => setManagerOpen((value) => !value)}>Управление</button>
+          <button
+            ref={managerTriggerRef}
+            type="button"
+            aria-expanded={managerOpen}
+            onClick={() => setManagerOpen((value) => !value)}
+          >
+            Управление
+          </button>
           <button type="button" className="weather-icon-button" onClick={() => void refresh()} disabled={loading || Boolean(preview)} aria-label="Обновить прогноз">↻</button>
         </div>
       </div>
@@ -637,7 +643,18 @@ export function WeatherPage() {
         </>
       )}
 
-      {managerOpen && <LocationManager />}
+      {managerOpen && (
+        <Sheet
+          title="Мои места"
+          eyebrow="Настройка"
+          description="Хранятся только локально"
+          onClose={() => setManagerOpen(false)}
+          restoreFocusRef={managerTriggerRef}
+          testId="weather-management-sheet"
+        >
+          <LocationManager />
+        </Sheet>
+      )}
     </div>
   );
 }
