@@ -136,7 +136,8 @@ from pathlib import Path
 
 config_path = Path(sys.argv[1])
 raw = config_path.read_bytes()
-if raw.startswith(b"\xef\xbb\xbf"):
+bom = bytes((0xEF, 0xBB, 0xBF))
+if raw.startswith(bom):
     raise SystemExit("Generated companion.json contains a UTF-8 BOM")
 with config_path.open("r", encoding="utf-8") as handle:
     config = json.load(handle)
