@@ -175,6 +175,12 @@ body.cc-overlay-open {
   }
 }
 
+@media (min-width: 761px) and (max-width: 951px) {
+  body.cc-overlay-open .cc-sheet {
+    width: var(--cc-overlay-sheet-width, min(560px, calc(100vw - 24px)));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cc-overlay,
   .cc-overlay-backdrop {

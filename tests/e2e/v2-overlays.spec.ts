@@ -156,6 +156,48 @@ test("shared Sheet keeps route geometry, focus, inert background, collision safe
   await expectNoDocumentOverflow(page);
 });
 
+test("intermediate Sheet and NoticeCenter widths stay side-by-side", async ({ page }) => {
+  for (const width of [1280, 952, 900, 761]) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.goto("/tasks?theme=night&b0=triple-notice");
+    const opener = page.getByRole("button", { name: "Проект", exact: true });
+    await opener.press("Enter");
+
+    const sheet = page.getByTestId("planning-project-sheet");
+    const notice = page.locator(".global-notice-stack .global-notice").first();
+    await expect(sheet).toBeVisible();
+    await expect(notice).toBeVisible();
+    const sheetBox = await readBox(sheet);
+    const noticeBox = await readBox(notice);
+    expect(noticeBox.x).toBeGreaterThanOrEqual(0);
+    expect(noticeBox.x + noticeBox.width).toBeLessThanOrEqual(sheetBox.x - 8);
+    expect(sheetBox.x + sheetBox.width).toBeLessThanOrEqual(width);
+    expect(await notice.locator("button").evaluateAll((elements) => elements.every((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width >= 48 && rect.height >= 48;
+    }))).toBeTruthy();
+    await expectNoDocumentOverflow(page);
+  }
+});
+
+test("760px keeps the compact NoticeCenter projection while a Sheet is open", async ({ page }) => {
+  await page.setViewportSize({ width: 760, height: 720 });
+  await page.goto("/tasks?theme=night&b0=triple-notice");
+  await page.getByRole("button", { name: "Проект", exact: true }).press("Enter");
+
+  const sheet = page.getByTestId("planning-project-sheet");
+  const stack = page.getByTestId("global-notice-stack");
+  await expect(sheet).toBeVisible();
+  await expect(stack.locator(".global-notice:visible")).toHaveCount(1);
+  await expect(page.getByTestId("global-notice-count")).toHaveText("Ещё уведомлений: 2");
+  const stackBox = await readBox(stack);
+  const sheetBox = await readBox(sheet);
+  expect(stackBox.x).toBeCloseTo(12, 0);
+  expect(stackBox.x + stackBox.width).toBeCloseTo(748, 0);
+  expect(sheetBox.x + sheetBox.width).toBeLessThanOrEqual(760);
+  await expectNoDocumentOverflow(page);
+});
+
 test("Weather management uses a non-reflow Sheet and retains existing operations", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto("/weather");
@@ -231,4 +273,10 @@ test("captures the PR2 visual review pack", async ({ page }, testInfo) => {
   await trigger.press("Enter");
   await expect(page.getByTestId("weather-management-sheet")).toBeVisible();
   await page.screenshot({ path: path.join(artifactDir, "weather-management.png"), animations: "disabled" });
+
+  await page.setViewportSize({ width: 900, height: 720 });
+  await page.goto("/tasks?theme=night&b0=triple-notice");
+  await page.getByRole("button", { name: "Проект", exact: true }).press("Enter");
+  await expect(page.getByTestId("planning-project-sheet")).toBeVisible();
+  await page.screenshot({ path: path.join(artifactDir, "overlay-intermediate.png"), animations: "disabled" });
 });

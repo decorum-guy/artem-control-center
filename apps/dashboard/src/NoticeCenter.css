@@ -149,6 +149,21 @@ body.cc-overlay-open .global-notice-stack {
   }
 }
 
+/* Between compact mode and the canonical desktop frame, reserve a
+   deterministic side-by-side lane for both overlays. The 951px ceiling is
+   the first width below which 560px + 360px + the required insets cannot fit. */
+@media (min-width: 761px) and (max-width: 951px) {
+  body.cc-overlay-open {
+    --cc-overlay-sheet-width: min(560px, calc(100vw - 312px));
+  }
+
+  body.cc-overlay-open .global-notice-stack {
+    right: calc(var(--cc-overlay-sheet-width) + 20px);
+    width: min(360px, calc(100vw - var(--cc-overlay-sheet-width) - 32px));
+    max-width: none;
+  }
+}
+
 html[data-motion="reduced"] .global-notice--progress .global-notice__indicator,
 html[data-motion="low-performance"] .global-notice--progress .global-notice__indicator,
 html[data-motion="battery-saving"] .global-notice--progress .global-notice__indicator {
