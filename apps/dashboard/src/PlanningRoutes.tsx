@@ -48,6 +48,7 @@ import {
   previewEnvelope
 } from "./PlanningRoutePrimitives";
 import { planningRemindersRouteEnabled } from "./planningRouteConfig";
+import { RouteHeader } from "./ShellPrimitives";
 
 interface PlanningRouteProps {
   snapshot: { revision: number; planning?: PlanningSnapshot | null };
@@ -55,13 +56,7 @@ interface PlanningRouteProps {
 }
 
 function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return (
-    <header className="page-heading">
-      <p className="section-kicker">{eyebrow}</p>
-      <h1>{title}</h1>
-      <p>{description}</p>
-    </header>
-  );
+  return <RouteHeader eyebrow={eyebrow} title={title} description={description} />;
 }
 
 function RouteControls({ children }: { children: ReactNode }) {

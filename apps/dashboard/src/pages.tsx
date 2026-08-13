@@ -18,6 +18,7 @@ import { CoffeeSettingsPanel } from "./CoffeeSettings";
 import { RuntimeControls } from "./RuntimeControls";
 import { PlanningOverviewCard } from "./PlanningOverviewCard";
 import { RogG703Controls } from "./RogG703Controls";
+import { RouteHeader, WorkZone } from "./ShellPrimitives";
 
 interface PageProps {
   snapshot: DashboardSnapshot;
@@ -35,13 +36,7 @@ function PageHeading({
   title: string;
   description: string;
 }) {
-  return (
-    <header className="page-heading">
-      <p className="section-kicker">{eyebrow}</p>
-      <h1>{title}</h1>
-      <p>{description}</p>
-    </header>
-  );
+  return <RouteHeader eyebrow={eyebrow} title={title} description={description} />;
 }
 
 function findManifestService(
@@ -393,11 +388,11 @@ export function PlaceholderPage({
   return (
     <div className="placeholder-page" data-testid={`route-${route.slice(1)}`}>
       <PageHeading {...copy} />
-      <section className="placeholder-surface">
+      <WorkZone className="placeholder-surface">
         <span className="placeholder-status">Подготовлено</span>
         <h2>{copy.status}</h2>
         <p>Раздел использует общую navigation shell и будет наполняться только подтверждёнными данными.</p>
-      </section>
+      </WorkZone>
     </div>
   );
 }

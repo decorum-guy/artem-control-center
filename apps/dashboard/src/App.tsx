@@ -25,6 +25,7 @@ import { useActionConfirmation } from "./ActionConfirmations";
 import { ConnectivityRecoverySurface } from "./ConnectivityActions";
 import { WeatherPage } from "./Weather";
 import { useNoticeCenter } from "./NoticeCenter";
+import { v2VisualShellEnabled } from "./visualShellConfig";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -199,6 +200,7 @@ export function App() {
     "app",
     `theme-${theme}`,
     `motion-${motion}`,
+    v2VisualShellEnabled ? "v2-shell-enabled" : "",
     kiosk ? "simulated-kiosk" : ""
   ].filter(Boolean).join(" ");
 
