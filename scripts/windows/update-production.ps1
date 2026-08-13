@@ -31,7 +31,11 @@ function Invoke-IsolatedValidation {
     try {
         $env:TEMP = $validationRoot
         $env:TMP = $validationRoot
-        $isolatedArgs = "--basetemp=$pytestTemp -p no:cacheprovider"
+        # PYTEST_ADDOPTS is reparsed by pytest. Normalize the absolute Windows
+        # path to forward slashes and quote it so backslashes/spaces cannot turn
+        # the basetemp into a repo-relative path.
+        $pytestTempForPytest = $pytestTemp.Replace('\', '/')
+        $isolatedArgs = "--basetemp=`"$pytestTempForPytest`" -p no:cacheprovider"
         $env:PYTEST_ADDOPTS = if ([string]::IsNullOrWhiteSpace($previousPytestAddopts)) {
             $isolatedArgs
         }
