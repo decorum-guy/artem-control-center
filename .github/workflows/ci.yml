@@ -57,6 +57,7 @@ jobs:
         shell: powershell
         run: |
           ./scripts/windows/test-production-scripts.ps1
+          ./scripts/windows/test-update-production-validation-temp.ps1
           ./scripts/windows/test-connectivity-contract.ps1
           ./scripts/windows/test-connectivity-keygen.ps1
           ./scripts/windows/test-avalar-identities-contract.ps1
