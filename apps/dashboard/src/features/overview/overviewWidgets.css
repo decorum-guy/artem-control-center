@@ -315,6 +315,13 @@
   background: transparent;
 }
 
+/* Keep the quiet/default composition centered beneath the service status.
+   Dense copy keeps the asset in its reserved right track so it cannot cover text. */
+.overview-v2-grid-shell[data-grid-profile="landscape-12"]
+  .coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-asset {
+  transform: translateX(calc(-1 * clamp(96px, 11.2vw, 143px)));
+}
+
 .coffee-panel--overview .coffee-asset__image {
   width: auto;
   height: 204px;
@@ -326,6 +333,10 @@
 .coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset__image {
   height: 156px;
   max-width: 104px;
+}
+
+.coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset {
+  transform: none;
 }
 
 .coffee-panel--overview .coffee-state-marker {

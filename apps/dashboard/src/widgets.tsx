@@ -20,15 +20,19 @@ const healthLabels = {
 
 export function HealthMark({
   health,
-  compact = false
+  compact = false,
+  healthyLabel
 }: {
   health: ServiceSnapshot["health"];
   compact?: boolean;
+  healthyLabel?: string;
 }) {
+  const label = health === "healthy" && healthyLabel ? healthyLabel : healthLabels[health];
+
   return (
     <span className={`health-mark health-mark--${health} ${compact ? "health-mark--compact" : ""}`}>
       <i aria-hidden="true" />
-      {healthLabels[health]}
+      {label}
     </span>
   );
 }
@@ -143,7 +147,7 @@ export function CoffeeWidget({
     })}`;
   }
   const showsPolicyNote = data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable";
-  const overviewCopyDensity = stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
+  const overviewCopyDensity = warming || stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
     ? "dense"
     : "spacious";
 
@@ -160,7 +164,7 @@ export function CoffeeWidget({
             <p className="section-kicker">Дом · кофемашина</p>
             <h2>{service.title}</h2>
           </div>
-          <HealthMark health={service.health} compact />
+          <HealthMark health={service.health} compact healthyLabel="Онлайн" />
         </div>
 
         <div className="coffee-panel__state" aria-live="polite">

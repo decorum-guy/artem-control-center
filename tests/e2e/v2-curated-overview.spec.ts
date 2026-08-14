@@ -552,8 +552,12 @@ test.describe("PR4 curated Overview", () => {
     const coffee = page.getByTestId("widget-coffee-machine");
     const image = coffee.locator(".coffee-asset__image");
     const asset = coffee.locator(".coffee-asset");
+    const online = coffee.locator(".coffee-panel__heading .health-mark");
+    const marker = coffee.locator(".coffee-state-marker");
     const spaciousImageBox = await image.boundingBox();
     const spaciousAssetBox = await asset.boundingBox();
+    const onlineBox = await online.boundingBox();
+    const markerBox = await marker.boundingBox();
     expect(await coffee.getAttribute("data-overview-copy-density")).toBe("spacious");
     expect(spaciousImageBox?.width).toBeGreaterThan(112);
     expect(spaciousImageBox?.width).toBeLessThanOrEqual(140);
@@ -561,9 +565,27 @@ test.describe("PR4 curated Overview", () => {
     expect(Math.abs(
       (spaciousImageBox!.x + spaciousImageBox!.width / 2) - (spaciousAssetBox!.x + spaciousAssetBox!.width / 2)
     )).toBeLessThanOrEqual(1);
+    expect(await online).toContainText("Онлайн");
+    expect(await online).not.toContainText("Работает");
+    expect(Math.abs(
+      (spaciousImageBox!.x + spaciousImageBox!.width / 2) - (onlineBox!.x + onlineBox!.width / 2)
+    )).toBeLessThanOrEqual(4);
+    expect(Math.abs(
+      (markerBox!.x + markerBox!.width / 2) - (onlineBox!.x + onlineBox!.width / 2)
+    )).toBeLessThanOrEqual(4);
     await expect(coffee).toContainText("Источник: Home Assistant");
     await expect(asset).toHaveCSS("border-left-width", "0px");
     expect(await asset.evaluate((element) => getComputedStyle(element).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+
+    await page.goto("/overview?scenario=coffee-warming&theme=night");
+    await waitForOverview(page);
+    const warmingCoffee = page.getByTestId("widget-coffee-machine");
+    const warmingImageBox = await warmingCoffee.locator(".coffee-asset__image").boundingBox();
+    const warmingProgressBox = await warmingCoffee.locator(".coffee-progress").boundingBox();
+    expect(await warmingCoffee.getAttribute("data-overview-copy-density")).toBe("dense");
+    expect(warmingImageBox?.x).toBeGreaterThanOrEqual(
+      (warmingProgressBox?.x ?? 0) + (warmingProgressBox?.width ?? 0) - 1
+    );
 
     await page.goto("/overview?scenario=ha-offline-policy-available&theme=night");
     await waitForOverview(page);
