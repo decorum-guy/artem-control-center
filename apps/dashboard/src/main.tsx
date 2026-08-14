@@ -16,6 +16,10 @@ import "./planningRoutes.css";
 import "./Weather.css";
 import "./features/overview/overviewGrid.css";
 import "./features/overview/overviewWidgets.css";
+import "./features/operations/operations.css";
+import "./features/home/homeV2.css";
+import "./features/services/servicesV2.css";
+import "./features/system/systemV2.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

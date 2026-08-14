@@ -95,7 +95,7 @@ export function CoffeeWidget({
   service: ServiceSnapshot;
   generatedAt: string;
   manifest: WidgetManifest;
-  variant?: "featured" | "home" | "gallery" | "overview";
+  variant?: "featured" | "home" | "home-v2" | "gallery" | "overview";
   onAction?: (service: ServiceSnapshot, actionId: string) => void;
   actionPending?: boolean;
   interactive?: boolean;

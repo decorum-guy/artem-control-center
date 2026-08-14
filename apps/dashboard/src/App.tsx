@@ -28,6 +28,9 @@ import { B0NoticeFixture, GlobalNoticeRegion, useNoticeCenter } from "./NoticeCe
 import { v2VisualShellEnabled } from "./visualShellConfig";
 import { overviewV2Enabled } from "./overviewConfig";
 import { OverviewV2Page } from "./features/overview/OverviewPage";
+import { HomeV2Page } from "./features/home/HomeV2Page";
+import { ServicesV2Page } from "./features/services/ServicesV2Page";
+import { SystemV2Page } from "./features/system/SystemV2Page";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -209,6 +212,7 @@ export function App() {
     v2VisualShellEnabled ? "v2-shell-enabled" : "",
     kiosk ? "simulated-kiosk" : ""
   ].filter(Boolean).join(" ");
+  const v2DensityRoute = v2VisualShellEnabled && ["/home", "/services", "/system"].includes(route);
 
   if (route === "/dev/widget-gallery") {
     if (import.meta.env.PROD) {
@@ -309,7 +313,7 @@ export function App() {
       {!snapshot && !error && <p className="loading">Собираем локальный snapshot…</p>}
       {snapshot && (
         <ProductShell route={route} services={snapshot.services} onNavigate={navigate}>
-          {((route !== "/overview" || !overviewV2Enabled) && (route === "/overview" || route === "/home" || route === "/services")) && (
+          {!v2DensityRoute && ((route !== "/overview" || !overviewV2Enabled) && (route === "/overview" || route === "/home" || route === "/services")) && (
             <ConnectivityRecoverySurface
               services={snapshot.services}
               showWhenHealthy={route === "/services"}
@@ -334,14 +338,26 @@ export function App() {
           )}
           {route === "/weather" && <WeatherPage />}
           {route === "/home" && (
-            <HomePage
-              snapshot={snapshot}
-              onNavigate={navigate}
-              onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
-              coffeeActionPending={coffeeActionPending}
-            />
+            v2VisualShellEnabled ? (
+              <HomeV2Page
+                snapshot={snapshot}
+                onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
+                coffeeActionPending={coffeeActionPending}
+              />
+            ) : (
+              <HomePage
+                snapshot={snapshot}
+                onNavigate={navigate}
+                onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
+                coffeeActionPending={coffeeActionPending}
+              />
+            )
           )}
-          {route === "/services" && <ServicesPage snapshot={snapshot} onNavigate={navigate} />}
+          {route === "/services" && (
+            v2VisualShellEnabled
+              ? <ServicesV2Page snapshot={snapshot} />
+              : <ServicesPage snapshot={snapshot} onNavigate={navigate} />
+          )}
           {route === "/settings" && (
             <SettingsPage
               theme={theme}
@@ -350,7 +366,7 @@ export function App() {
               onMotionChange={setMotion}
             />
           )}
-          {route === "/system" && <SystemPage snapshot={snapshot} />}
+          {route === "/system" && (v2VisualShellEnabled ? <SystemV2Page snapshot={snapshot} /> : <SystemPage snapshot={snapshot} />)}
           {route === "/tasks" && (planningTasksRouteEnabled ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
           {route === "/calendar" && (planningCalendarRouteEnabled ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
           {route === "/reminders" && planningRemindersRouteEnabled && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}

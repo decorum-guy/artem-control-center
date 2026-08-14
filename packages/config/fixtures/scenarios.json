@@ -239,6 +239,81 @@
   ],
   "scenarios": {
     "ha-healthy": {},
+    "home-normal": {},
+    "home-coffee-only": {
+      "kettle": {
+        "enabled": false
+      }
+    },
+    "home-coffee-kettle": {},
+    "home-no-coffee": {
+      "coffee-machine": {
+        "enabled": false
+      }
+    },
+    "home-no-devices": {
+      "coffee-machine": {
+        "enabled": false
+      },
+      "kettle": {
+        "enabled": false
+      }
+    },
+    "home-ha-stale": {
+      "home-assistant": {
+        "health": "stale",
+        "source": "stale",
+        "summary": "Последнее подтверждение Home Assistant устарело"
+      },
+      "coffee-machine": {
+        "health": "stale",
+        "summary": "Последнее состояние кофемашины устарело",
+        "data": {
+          "machine": {
+            "stale": true,
+            "state": "stale",
+            "observedAt": "2026-07-29T11:20:00Z"
+          }
+        }
+      }
+    },
+    "home-ha-offline": {
+      "home-assistant": {
+        "health": "offline",
+        "source": "unavailable",
+        "summary": "Home Assistant недоступен"
+      },
+      "coffee-machine": {
+        "health": "offline",
+        "summary": "Состояние кофемашины не подтверждено",
+        "data": {
+          "machine": {
+            "available": false,
+            "state": "unavailable",
+            "stale": true
+          }
+        }
+      },
+      "kettle": {
+        "health": "offline",
+        "summary": "Чайник недоступен",
+        "data": {
+          "stage": "unavailable"
+        }
+      }
+    },
+    "home-long-russian": {
+      "home-assistant": {
+        "summary": "Очень длинное русское описание источника домашнего состояния, которое должно переноситься без горизонтального переполнения"
+      },
+      "coffee-machine": {
+        "title": "Кофемашина с длинным названием для проверки плотного домашнего ряда",
+        "summary": "Очень длинное русское описание состояния кофемашины для проверки первого экрана и безопасного переноса текста"
+      },
+      "kettle": {
+        "title": "Чайник с длинным названием устройства"
+      }
+    },
     "ha-degraded": {
       "home-assistant": {
         "health": "degraded",

@@ -30,7 +30,11 @@ async function runtimeIsStillReachable(delayMs = 1_000) {
   }
 }
 
-export function RuntimeControls() {
+export function RuntimeControls({
+  variant = "settings"
+}: {
+  variant?: "settings" | "system-v2";
+} = {}) {
   const { confirmAction } = useActionConfirmation();
   const [availability, setAvailability] = useState<Availability>("loading");
   const [runtimeRevision, setRuntimeRevision] = useState<string | undefined>();
@@ -122,13 +126,18 @@ export function RuntimeControls() {
 
   return (
     <>
-      <AccessSettingsPanel />
-      <section className="settings-section runtime-controls" aria-labelledby="runtime-controls-title">
+      {variant === "settings" && <AccessSettingsPanel />}
+      <section
+        className={`settings-section runtime-controls${variant === "system-v2" ? " system-runtime-zone" : ""}`}
+        aria-labelledby="runtime-controls-title"
+        data-testid={variant === "system-v2" ? "system-runtime-zone" : undefined}
+      >
         <div className="runtime-controls-copy">
           <h2 id="runtime-controls-title">Управление панелью</h2>
           <p>
-            Скрытие закрывает только полноэкранное окно: локальные сервисы продолжают работать,
-            а панель можно вернуть обычным ярлыком запуска.
+            {variant === "system-v2"
+              ? "Panel Agent runtime и фиксированные действия kiosk-runtime."
+              : "Скрытие закрывает только полноэкранное окно: локальные сервисы продолжают работать, а панель можно вернуть обычным ярлыком запуска."}
           </p>
           {availability === "unavailable" && (
             <span className="runtime-controls-status">
