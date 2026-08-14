@@ -98,17 +98,19 @@ function unavailableRowTitle(health: ReturnType<typeof planningHealthPresentatio
 
 export function PlanningOverviewCard({
   planning,
-  onNavigate
+  onNavigate,
+  density = "comfortable"
 }: {
   planning?: PlanningSnapshot | null;
   onNavigate: (path: PlanningNavigationPath) => void;
+  density?: "comfortable" | "compact";
 }) {
   const health = planningHealthPresentation(planning);
   const now = usePlanningPresentationNow(health.state);
 
   if (!planning) {
     return (
-      <section className="planning-card planning-card--unavailable" data-testid="planning-overview-card" data-state="unavailable" aria-label="Дела">
+        <section className={`planning-card planning-card--unavailable planning-card--${density}`} data-testid="planning-overview-card" data-state="unavailable" aria-label="Дела">
         <header className="planning-card__header">
           <div>
             <p className="section-kicker">Планирование</p>
@@ -138,9 +140,10 @@ export function PlanningOverviewCard({
 
   return (
     <section
-      className={`planning-card planning-card--${health.state}`}
+      className={`planning-card planning-card--${health.state} planning-card--${density}`}
       data-testid="planning-overview-card"
       data-state={health.state}
+      data-density={density}
       aria-label="Дела"
     >
       <header className="planning-card__header">

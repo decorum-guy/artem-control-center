@@ -8,6 +8,7 @@ import {
   resolveOverviewWidgetSize,
   type OverviewWidgetDefinition
 } from "./overviewRegistry";
+import { validateAppearanceConfig } from "./appearanceConfig";
 
 export const OVERVIEW_CANONICAL_COLUMNS = 12;
 export const OVERVIEW_MAX_WIDGET_ROWS = 8;
@@ -40,6 +41,8 @@ export type OverviewLayoutIssueCode =
   | "variant-dimension-mismatch"
   | "duplicate-singleton"
   | "overlap"
+  | "invalid-visibility"
+  | "invalid-config"
   | "responsive-unsupported";
 
 export interface OverviewLayoutIssue {
@@ -99,7 +102,9 @@ function cloneItem(item: OverviewLayoutItem): OverviewLayoutItem {
     instanceId: item.instanceId,
     widgetType: item.widgetType,
     sizeVariant: item.sizeVariant,
-    placement: { ...item.placement }
+    placement: { ...item.placement },
+    visibility: item.visibility ?? "visible",
+    config: item.config ? { ...item.config } : {}
   };
 }
 
@@ -141,6 +146,8 @@ function parseRecord(
   const sizeVariant = typeof recordValue(candidate, "sizeVariant") === "string"
     ? String(recordValue(candidate, "sizeVariant"))
     : null;
+  const visibility = recordValue(candidate, "visibility");
+  const config = recordValue(candidate, "config");
   const rawPlacement = recordValue(candidate, "placement");
   const placementRecord = rawPlacement && typeof rawPlacement === "object"
     ? rawPlacement as Record<string, unknown>
@@ -160,7 +167,11 @@ function parseRecord(
     instanceId: instanceId ?? "",
     widgetType: widgetType ?? "",
     sizeVariant: sizeVariant ?? "",
-    placement: numericPlacement ?? { x: 0, y: 0, w: 0, h: 0 }
+    placement: numericPlacement ?? { x: 0, y: 0, w: 0, h: 0 },
+    visibility: visibility === "hidden" ? "hidden" : "visible",
+    config: config && typeof config === "object" && !Array.isArray(config)
+      ? { ...(config as Record<string, never>) }
+      : {}
   };
   const record: LayoutRecord = {
     index,
@@ -179,6 +190,13 @@ function parseRecord(
     addIssue(record, "unknown-widget-type", "The Overview widget type is not registered.");
   }
   if (!sizeVariant) addIssue(record, "unknown-size-variant", "The Overview size variant is unavailable.");
+  if (visibility !== undefined && visibility !== "visible" && visibility !== "hidden") {
+    addIssue(record, "invalid-visibility", "Overview visibility must be visible or hidden.");
+  }
+  const configValidation = validateAppearanceConfig(widgetType ?? "", config, true);
+  if (!configValidation.valid) {
+    addIssue(record, "invalid-config", configValidation.errors.join("; "));
+  }
   if (sizeVariant && definition && !resolveOverviewWidgetSize(definition, sizeVariant)) {
     addIssue(record, "unknown-size-variant", "The named Overview size variant is not registered.");
   }
@@ -446,6 +464,7 @@ export function projectOverviewLayout(
 
   for (const record of sortCanonicalValidationRecords(validation.records)) {
     const { item, definition } = record;
+    if (item.visibility === "hidden") continue;
     if (!definition) {
       const placement = findFirstFit(FALLBACK_SIZE, occupied, profile.columns, safeStartY(item));
       if (!placement) continue;

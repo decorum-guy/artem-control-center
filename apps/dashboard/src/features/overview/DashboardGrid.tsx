@@ -7,6 +7,7 @@ import {
   projectOverviewLayout,
   type OverviewProjectionItem
 } from "./layoutValidation";
+import { EditableWidgetFrame } from "./EditableWidgetFrame";
 
 function useMeasuredWidth(elementRef: RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(1064);
@@ -53,11 +54,29 @@ function renderProjectionItem(
 export function DashboardGrid({
   items,
   className,
-  runtime
+  runtime,
+  editMode = false,
+  selectedInstanceId,
+  editingDisabled = false,
+  onSelect,
+  onMove,
+  onResize,
+  onRemove,
+  onOpenAppearance,
+  onAnnounce
 }: {
   items: readonly OverviewLayoutItem[];
   className?: string;
   runtime: OverviewRuntimeContext;
+  editMode?: boolean;
+  selectedInstanceId?: string | null;
+  editingDisabled?: boolean;
+  onSelect?: (instanceId: string) => void;
+  onMove?: (instanceId: string, dx: number, dy: number) => void;
+  onResize?: (instanceId: string, sizeVariant: string) => void;
+  onRemove?: (instanceId: string) => void;
+  onOpenAppearance?: (instanceId: string) => void;
+  onAnnounce?: (message: string) => void;
 }): ReactNode {
   const shellRef = useRef<HTMLElement | null>(null);
   const workspaceWidth = useMeasuredWidth(shellRef);
@@ -87,6 +106,7 @@ export function DashboardGrid({
           Сетка обработала {projection.issues.length} ограничений безопасно.
         </p>
       )}
+      {editMode && <p className="overview-edit-live-message" aria-live="polite" data-testid="overview-edit-live-message" />}
       <div className="overview-v2-grid" style={profileStyle}>
         {projection.items.map((item, index) => (
           <div
@@ -103,7 +123,21 @@ export function DashboardGrid({
             data-grid-h={item.placement.h}
             style={gridItemStyle(item)}
           >
-            {renderProjectionItem(item, runtime)}
+            {editMode && onSelect && onMove && onResize && onRemove && onOpenAppearance && onAnnounce ? (
+              <EditableWidgetFrame
+                item={item.item}
+                selected={selectedInstanceId === item.item.instanceId}
+                disabled={editingDisabled}
+                onSelect={() => onSelect(item.item.instanceId)}
+                onMove={(dx, dy) => onMove(item.item.instanceId, dx, dy)}
+                onResize={(sizeVariant) => onResize(item.item.instanceId, sizeVariant)}
+                onRemove={() => onRemove(item.item.instanceId)}
+                onOpenAppearance={() => onOpenAppearance(item.item.instanceId)}
+                onAnnounce={onAnnounce}
+              >
+                {renderProjectionItem(item, runtime)}
+              </EditableWidgetFrame>
+            ) : renderProjectionItem(item, runtime)}
           </div>
         ))}
       </div>

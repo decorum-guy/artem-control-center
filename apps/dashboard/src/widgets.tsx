@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type {
   CoffeeData,
   KettleData,
@@ -10,6 +10,8 @@ import { useAvalarActions } from "./AvalarActions";
 import { avalarActionTitles } from "./avalarApi";
 import { coffeePresentation } from "./coffee";
 import { resolveWidgetAsset } from "./widgetAssets";
+import type { CoffeeAppearanceConfig } from "./features/overview/appearanceConfig";
+import { sourceOwnedCoffeeScale } from "./features/overview/appearanceConfig";
 
 const healthLabels = {
   healthy: "Работает",
@@ -47,7 +49,13 @@ function formatDuration(seconds: number | null): string | null {
   return remainder ? `${hours} ч ${remainder} мин` : `${hours} ч`;
 }
 
-function CoffeeAsset({ manifest }: { manifest: WidgetManifest }) {
+function CoffeeAsset({
+  manifest,
+  scale
+}: {
+  manifest: WidgetManifest;
+  scale: number;
+}) {
   const asset = manifest.visualAsset;
   const resolved = asset ? resolveWidgetAsset(asset.sourcePath) : null;
   const [failed, setFailed] = useState(false);
@@ -68,7 +76,7 @@ function CoffeeAsset({ manifest }: { manifest: WidgetManifest }) {
       src={resolved}
       alt={asset.alt}
       decoding="async"
-      style={{ objectFit: asset.fit }}
+      style={{ objectFit: asset.fit, "--cc-coffee-image-scale": scale / 100 } as CSSProperties}
       onError={() => setFailed(true)}
     />
   );
@@ -80,7 +88,9 @@ export function CoffeeWidget({
   manifest,
   variant = "featured",
   onAction,
-  actionPending = false
+  actionPending = false,
+  interactive = true,
+  appearanceConfig
 }: {
   service: ServiceSnapshot;
   generatedAt: string;
@@ -88,6 +98,8 @@ export function CoffeeWidget({
   variant?: "featured" | "home" | "gallery" | "overview";
   onAction?: (service: ServiceSnapshot, actionId: string) => void;
   actionPending?: boolean;
+  interactive?: boolean;
+  appearanceConfig?: CoffeeAppearanceConfig;
 }) {
   const data = service.data as unknown as CoffeeData;
   const [presentationTime, setPresentationTime] = useState(() => Date.parse(generatedAt));
@@ -150,13 +162,32 @@ export function CoffeeWidget({
   const overviewCopyDensity = warming || stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
     ? "dense"
     : "spacious";
+  const appearance: CoffeeAppearanceConfig = appearanceConfig ?? {
+    imageScalePct: 100,
+    imageXStep: 0,
+    imageYStep: 0,
+    composition: "auto",
+    showStateMarker: true,
+    showAuthority: true,
+    showImage: true
+  };
+  const requestedDensity = appearance.composition === "compact"
+    ? "dense"
+    : appearance.composition === "spacious"
+      ? "spacious"
+      : overviewCopyDensity;
+  const safeMaximum = requestedDensity === "dense" || view.stage === "unavailable" ? 100 : 120;
+  const imageScale = sourceOwnedCoffeeScale(appearance.imageScalePct, safeMaximum);
 
   return (
     <article
-      className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} ${view.warning ? "surface--warning" : ""}`}
+      className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} coffee-panel--density-${requestedDensity} coffee-panel--image-x-${appearance.imageXStep + 3} coffee-panel--image-y-${appearance.imageYStep + 2} ${view.warning ? "surface--warning" : ""}`}
       data-testid="widget-coffee-machine"
       data-stage={view.stage}
-      data-overview-copy-density={variant === "overview" ? overviewCopyDensity : undefined}
+      data-overview-copy-density={variant === "overview" ? requestedDensity : undefined}
+      data-image-scale={imageScale}
+      data-image-x={appearance.imageXStep}
+      data-image-y={appearance.imageYStep}
     >
       <div className="coffee-panel__copy">
         <div className="coffee-panel__heading">
@@ -191,7 +222,7 @@ export function CoffeeWidget({
           <button
             className="primary-action"
             type="button"
-            disabled={!activeAction.enabled || !onAction || actionPending}
+            disabled={!interactive || !activeAction.enabled || !onAction || actionPending}
             onClick={() => onAction?.(service, activeAction.id)}
           >
             {actionPending ? "Подтверждаем…" : activeAction.title}
@@ -200,13 +231,13 @@ export function CoffeeWidget({
         {activeAction && !activeAction.enabled && (
           <span className="action-hint">Управление отключено политикой панели.</span>
         )}
-        {variant === "overview" && (
+        {variant === "overview" && appearance.showAuthority && (
           <p className="coffee-authority">Источник: Home Assistant</p>
         )}
       </div>
 
-      <div className="coffee-asset" data-fit={manifest.visualAsset?.fit ?? "contain"}>
-        <CoffeeAsset manifest={manifest} />
+      <div className="coffee-asset" data-fit={manifest.visualAsset?.fit ?? "contain"} data-image-visible={appearance.showImage}>
+        {appearance.showImage && <CoffeeAsset manifest={manifest} scale={imageScale} />}
         {view.stage === "warming" && (
           <span className="coffee-activity" aria-hidden="true">
             <i />
@@ -214,9 +245,11 @@ export function CoffeeWidget({
             <i />
           </span>
         )}
-        <span className={`coffee-state-marker coffee-state-marker--${view.stage}`}>
-          {view.stage === "warming" ? "Разогрев" : view.label}
-        </span>
+        {appearance.showStateMarker && (
+          <span className={`coffee-state-marker coffee-state-marker--${view.stage}`}>
+            {view.stage === "warming" ? "Разогрев" : view.label}
+          </span>
+        )}
       </div>
     </article>
   );

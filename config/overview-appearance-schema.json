@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "overview.appearance.v1",
+  "widgets": {
+    "home.coffee-machine": {
+      "defaults": {
+        "imageScalePct": 100,
+        "imageXStep": 0,
+        "imageYStep": 0,
+        "composition": "auto",
+        "showStateMarker": true,
+        "showAuthority": true,
+        "showImage": true
+      },
+      "controls": [
+        {
+          "key": "imageScalePct",
+          "control": "integer_range",
+          "min": 70,
+          "max": 120,
+          "step": 5,
+          "defaultValue": 100,
+          "label": "Размер изображения",
+          "section": "Изображение"
+        },
+        {
+          "key": "imageXStep",
+          "control": "integer_range",
+          "min": -3,
+          "max": 3,
+          "step": 1,
+          "defaultValue": 0,
+          "label": "По горизонтали",
+          "section": "Композиция"
+        },
+        {
+          "key": "imageYStep",
+          "control": "integer_range",
+          "min": -2,
+          "max": 2,
+          "step": 1,
+          "defaultValue": 0,
+          "label": "По вертикали",
+          "section": "Композиция"
+        },
+        {
+          "key": "composition",
+          "control": "enum",
+          "values": [
+            { "value": "auto", "label": "Авто" },
+            { "value": "compact", "label": "Компактно" },
+            { "value": "spacious", "label": "Просторно" }
+          ],
+          "defaultValue": "auto",
+          "label": "Композиция",
+          "section": "Композиция"
+        },
+        {
+          "key": "showStateMarker",
+          "control": "boolean",
+          "defaultValue": true,
+          "label": "Показывать подпись состояния",
+          "section": "Отображение"
+        },
+        {
+          "key": "showAuthority",
+          "control": "boolean",
+          "defaultValue": true,
+          "label": "Показывать источник",
+          "section": "Отображение"
+        },
+        {
+          "key": "showImage",
+          "control": "boolean",
+          "defaultValue": true,
+          "label": "Показывать изображение",
+          "section": "Изображение"
+        }
+      ]
+    },
+    "planning.summary": {
+      "defaults": {
+        "density": "comfortable"
+      },
+      "controls": [
+        {
+          "key": "density",
+          "control": "enum",
+          "values": [
+            { "value": "comfortable", "label": "Комфортная" },
+            { "value": "compact", "label": "Компактная" }
+          ],
+          "defaultValue": "comfortable",
+          "label": "Плотность",
+          "section": "Композиция"
+        }
+      ]
+    },
+    "home.quick-actions": { "defaults": {}, "controls": [] },
+    "system.health-summary": { "defaults": {}, "controls": [] },
+    "system.rog-g703-operational": { "defaults": {}, "controls": [] },
+    "weather.alert": { "defaults": {}, "controls": [] },
+    "planning.calendar-agenda": { "defaults": {}, "controls": [] },
+    "planning.task-list": { "defaults": {}, "controls": [] }
+  }
+}

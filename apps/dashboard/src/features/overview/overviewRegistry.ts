@@ -4,6 +4,7 @@ import type {
   OverviewWidgetType
 } from "@artem/contracts";
 import type { IconName } from "../../icons";
+import { appearanceSchemaFor, type AppearanceSchema } from "./appearanceConfig";
 
 export type OverviewWidgetCategory = "Управление" | "Планирование" | "Дом" | "Состояние" | "Контекст";
 
@@ -20,12 +21,13 @@ export interface OverviewWidgetDefinition {
   readonly defaultSizeVariant: OverviewWidgetSizeVariant;
   readonly sizes: Readonly<Partial<Record<OverviewWidgetSizeVariant, OverviewWidgetSize>>>;
   readonly fixtureCopy: string;
+  readonly appearanceSchema: AppearanceSchema;
 }
 
 function definition(
-  value: OverviewWidgetDefinition
+  value: Omit<OverviewWidgetDefinition, "appearanceSchema">
 ): OverviewWidgetDefinition {
-  return value;
+  return { ...value, appearanceSchema: appearanceSchemaFor(value.widgetType) };
 }
 
 /**

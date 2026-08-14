@@ -24,6 +24,27 @@ storage_destinations:
     availability: optional
 
 backup_profiles:
+  - id: artem-control-center-config
+    project_id: artem-control-center
+    environment_id: local-panel
+    service_id: panel-agent
+    enabled: true
+    source:
+      adapter: config_only
+      paths:
+        - .cache/overview-layout.json
+      note: Dedicated Overview layout JSON; no secrets, credentials, endpoints, or runtime snapshots.
+    destinations:
+      - id: laptop-primary
+        mode: always
+    encryption:
+      required: false
+    verification:
+      checksum: sha256
+      manifest_required: true
+    restore:
+      semantics: Place the file at PANEL_OVERVIEW_LAYOUT_PATH; Panel Agent validates and recovers without overwriting bytes until an explicit save.
+
   - id: home-assistant-native
     project_id: home-stack
     environment_id: remote-primary

@@ -77,7 +77,7 @@ function rogG703Tone(status: ReturnType<typeof useRogG703Controller>["displaySta
 }
 
 /** Compact/standard Overview presentation backed by the same controller as System. */
-export function RogG703CompactControl({ service }: { service: ServiceSnapshot }) {
+export function RogG703CompactControl({ service, interactive = true }: { service: ServiceSnapshot; interactive?: boolean }) {
   const controller = useRogG703Controller(service);
   const status = controller.displayStatus;
   const actionId = status === "online"
@@ -111,10 +111,10 @@ export function RogG703CompactControl({ service }: { service: ServiceSnapshot })
           <button
             type="button"
             data-testid="overview-rog-g703-action"
-            disabled={!controller.canUse(actionId)}
+            disabled={!interactive || !controller.canUse(actionId)}
             title={controller.availabilityReason(actionId)}
             aria-busy={controller.pendingAction === actionId}
-            onClick={() => void controller.run(actionId)}
+            onClick={() => { if (interactive) void controller.run(actionId); }}
           >
             {controller.pendingAction === actionId ? "Проверяем…" : controller.actionTitles[actionId]}
           </button>

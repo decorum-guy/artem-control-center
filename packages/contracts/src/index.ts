@@ -351,6 +351,15 @@ export interface OverviewWidgetPlacement {
   h: number;
 }
 
+export type OverviewWidgetVisibility = "visible" | "hidden";
+export type OverviewConfigValue = boolean | number | string;
+
+export interface OverviewUnplacedWidget {
+  instanceId: string;
+  widgetType: string;
+  reason: string;
+}
+
 /**
  * A deliberately bounded, in-memory layout item. `widgetType` and
  * `sizeVariant` remain strings at this boundary so malformed/unknown input
@@ -361,4 +370,20 @@ export interface OverviewLayoutItem {
   widgetType: string;
   sizeVariant: string;
   placement: OverviewWidgetPlacement;
+  visibility?: OverviewWidgetVisibility;
+  config?: Record<string, OverviewConfigValue>;
+}
+
+export interface OverviewLayoutDocument {
+  schemaVersion: "overview.layout.v2";
+  profileId: "samsung-control";
+  presetId: "overview.default";
+  presetVersion: 2;
+  revision: number;
+  viewportClass: "landscape-12";
+  updatedAt: string;
+  items: OverviewLayoutItem[];
+  warnings?: string[];
+  unplaced?: OverviewUnplacedWidget[];
+  writesEnabled?: boolean;
 }

@@ -721,12 +721,20 @@ credentials, endpoints or executable definitions.
   "updatedAt": "2026-08-13T12:00:00Z",
   "items": [
     {
-      "instanceId": "widget.coffee.primary",
+      "instanceId": "fixture.coffee",
       "widgetType": "home.coffee-machine",
       "visibility": "visible",
       "placement": { "x": 0, "y": 1, "w": 7, "h": 4 },
       "sizeVariant": "standard",
-      "config": { "showRemainingTime": true }
+      "config": {
+        "imageScalePct": 100,
+        "imageXStep": 0,
+        "imageYStep": 0,
+        "composition": "auto",
+        "showStateMarker": true,
+        "showAuthority": true,
+        "showImage": true
+      }
     }
   ]
 }
@@ -749,6 +757,50 @@ Requirements:
   resets;
 - reset references the current shipped preset version;
 - layout is included in config backup and contains no secrets.
+
+### K1. Bounded widget appearance
+
+Appearance is an optional, source-owned extension of a layout item. The single
+trusted vocabulary lives in `config/overview-appearance-schema.json`, which is
+consumed by both Dashboard and Panel Agent. A widget may expose only registered
+boolean, enum, or stepped integer controls; the schema carries labels, bounds,
+defaults and safe sections. The current policy is deliberately narrow:
+
+- Coffee allows image scale `70..120%` in `5%` steps, semantic x/y composition
+  steps, `auto/compact/spacious` composition, and visibility of image/state/
+  authority markers;
+- Planning allows only `comfortable/compact` density;
+- ROG, Home actions, Health, Weather and future Planning slots expose no
+  appearance controls until a separate source-owned schema is added.
+
+`config` never accepts CSS, class/style names, HTML, JavaScript, URLs,
+endpoints, action IDs, bindings, arbitrary paths or nested objects. Dashboard
+validates draft changes for immediate feedback; Panel Agent repeats strict
+full-candidate validation before every write. Stored corruption may be
+clamped/recovered to registered defaults for display, but an explicit invalid
+candidate is rejected and never silently repaired. Appearance changes are draft
+only until `Готово`; `Отмена` restores the entry snapshot.
+
+### K2. Persistence and recovery contract
+
+`GET /api/v1/overview/layout` is `no-store` and returns the canonical document
+with a revision ETag. `PATCH` accepts the complete candidate only with an
+exact `If-Match`; a missing precondition is rejected and a stale revision
+returns a conflict. Writes are opt-in through
+`PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED=false` and the frontend
+`VITE_OVERVIEW_EDITOR_ENABLED=false`. The JSON file is bounded to 256 KiB,
+UTF-8 without BOM, and written through an fsynced same-directory temporary
+file followed by replace. Requests are bounded separately and never contain
+credentials or remote endpoint configuration.
+
+V1 migration and stored-layout recovery are pure, read-only transformations.
+They preserve instance identity, classify unknown widgets as `Неразмещённые`,
+and fall back to the shipped preset for corrupt roots or zero valid widgets
+without rewriting the source bytes. A transport timeout enters `uncertain`;
+the browser performs a GET read-back before offering any retry. Config backup
+includes `.cache/overview-layout.json` as a `config_only` artifact. The
+repository currently documents that contract; it does not claim a generic
+backup engine or backup-success state for this file.
 
 ## L. Luna PR-by-PR implementation handoff
 

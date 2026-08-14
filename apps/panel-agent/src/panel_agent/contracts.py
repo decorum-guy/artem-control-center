@@ -159,3 +159,53 @@ class CoffeeActionResponse(BaseModel):
     confirmedState: Literal["on", "off"]
     alreadyInState: bool
     observedAt: Optional[str]
+
+
+class OverviewPlacement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x: int = Field(strict=True, ge=0, le=12)
+    y: int = Field(strict=True, ge=0, le=10_000)
+    w: int = Field(strict=True, ge=1, le=12)
+    h: int = Field(strict=True, ge=1, le=8)
+
+
+class OverviewLayoutItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instanceId: str = Field(strict=True, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    widgetType: str = Field(strict=True, min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    visibility: Literal["visible", "hidden"] = "visible"
+    placement: OverviewPlacement
+    sizeVariant: str = Field(strict=True, min_length=1, max_length=24, pattern=r"^[a-z0-9-]+$")
+    config: Dict[str, Any] = Field(default_factory=dict)
+
+
+class OverviewLayoutPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: List[OverviewLayoutItemRequest] = Field(min_length=1, max_length=32)
+
+
+class OverviewUnplacedWidget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instanceId: str = Field(min_length=1, max_length=80)
+    widgetType: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=240)
+
+
+class OverviewLayoutResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Literal["overview.layout.v2"]
+    profileId: Literal["samsung-control"]
+    presetId: Literal["overview.default"]
+    presetVersion: Literal[2]
+    revision: int = Field(ge=0)
+    viewportClass: Literal["landscape-12"]
+    updatedAt: str
+    items: List[OverviewLayoutItemRequest]
+    warnings: List[str] = Field(default_factory=list)
+    unplaced: List[OverviewUnplacedWidget] = Field(default_factory=list)
+    writesEnabled: bool = False
