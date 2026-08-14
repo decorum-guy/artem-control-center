@@ -134,15 +134,59 @@ export type SystemServiceKind = "rog" | "runtime" | "update" | "backup" | "syste
  */
 export function classifySystemService(service: ServiceSnapshot): SystemServiceKind {
   if (service.id === "rog_g703gi" || service.dataContract === "system.rog-g703.v1") return "rog";
-  if (service.dataContract.startsWith("system.runtime.") || service.id.includes("runtime")) return "runtime";
+  if (service.dataContract.startsWith("system.runtime.")) return "runtime";
   if (service.dataContract.startsWith("system.update.") || service.dataContract.startsWith("update.")) return "update";
-  if (service.dataContract.startsWith("backup.") || service.id.includes("backup")) return "backup";
+  if (service.dataContract.startsWith("backup.")) return "backup";
   if (service.presentation?.category === "system") return "system";
   return "other";
 }
 
 export function systemRelevantServices(services: readonly ServiceSnapshot[]): ServiceSnapshot[] {
   return enabledServices(services).filter((service) => classifySystemService(service) !== "other");
+}
+
+export interface SystemServiceSubjects {
+  relevant: ServiceSnapshot[];
+  rog: ServiceSnapshot | null;
+  runtime: ServiceSnapshot | null;
+  update: ServiceSnapshot | null;
+  backup: ServiceSnapshot | null;
+  diagnostics: ServiceSnapshot[];
+}
+
+/**
+ * Resolves the one bounded primary subject for each known System zone and
+ * keeps every additional explicit System service visible as a compact row.
+ * This makes the aggregate a projection of subjects the route can identify.
+ */
+export function selectSystemServiceSubjects(services: readonly ServiceSnapshot[]): SystemServiceSubjects {
+  const relevant = systemRelevantServices(services);
+  const firstOfKind = (kind: SystemServiceKind): ServiceSnapshot | null =>
+    relevant.find((service) => classifySystemService(service) === kind) ?? null;
+  const rog = firstOfKind("rog");
+  const runtime = firstOfKind("runtime");
+  const update = firstOfKind("update");
+  const backup = firstOfKind("backup");
+  const primaryIds = new Set(
+    [rog, runtime, update, backup]
+      .filter((service): service is ServiceSnapshot => service !== null)
+      .map((service) => service.id)
+  );
+
+  return {
+    relevant,
+    rog,
+    runtime,
+    update,
+    backup,
+    diagnostics: relevant.filter((service) => !primaryIds.has(service.id))
+  };
+}
+
+export function visibleSystemServices(subjects: SystemServiceSubjects): ServiceSnapshot[] {
+  return [subjects.rog, subjects.runtime, subjects.update, subjects.backup]
+    .filter((service): service is ServiceSnapshot => service !== null)
+    .concat(subjects.diagnostics);
 }
 
 export function countHealth(services: readonly ServiceSnapshot[]): Record<HealthState, number> {

@@ -8,11 +8,11 @@ import { Sheet } from "../../Sheet";
 import { StatusText, WorkZone } from "../../ShellPrimitives";
 import { RogG703DetailControl } from "../../RogG703Controls";
 import {
-  classifySystemService,
   countHealth,
   healthLabel,
   healthTone,
-  systemRelevantServices
+  selectSystemServiceSubjects,
+  visibleSystemServices
 } from "../operations/routeDensity";
 
 function SystemFactRow({
@@ -40,14 +40,53 @@ function SystemFactRow({
   );
 }
 
+function SystemRuntimeSnapshot({ service }: { service: ServiceSnapshot }) {
+  return (
+    <section
+      className={`system-runtime-snapshot system-runtime-snapshot--${service.health}`}
+      data-testid="system-runtime-snapshot"
+      data-service-id={service.id}
+      aria-label="Снимок состояния Panel Agent runtime"
+    >
+      <div className="system-runtime-snapshot__copy">
+        <p className="section-kicker">Снимок состояния</p>
+        <h3>{service.title}</h3>
+        <p>{service.summary}</p>
+        <span>{service.presentation?.freshnessLabel ?? "Свежесть не указана"}</span>
+      </div>
+      <StatusText label={healthLabel(service.health)} tone={healthTone(service.health)} />
+    </section>
+  );
+}
+
+function SystemDiagnosticRow({ service }: { service: ServiceSnapshot }) {
+  return (
+    <div
+      className={`system-diagnostic-row system-diagnostic-row--${service.health}`}
+      data-testid={`system-diagnostic-${service.id}`}
+      data-service-id={service.id}
+      data-health={service.health}
+    >
+      <span className="system-diagnostic-row__icon" aria-hidden="true"><Icon name="system" /></span>
+      <div className="system-diagnostic-row__copy">
+        <h3>{service.title}</h3>
+        <p>{service.summary}</p>
+      </div>
+      <div className="system-diagnostic-row__status">
+        <StatusText label={healthLabel(service.health)} tone={healthTone(service.health)} />
+        <span>{service.presentation?.freshnessLabel ?? "Свежесть не указана"}</span>
+      </div>
+    </div>
+  );
+}
+
 export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const relevant = systemRelevantServices(snapshot.services);
+  const subjects = selectSystemServiceSubjects(snapshot.services);
+  const { rog, runtime, update, backup, diagnostics } = subjects;
+  const relevant = visibleSystemServices(subjects);
   const attention = relevant.filter((service) => service.health !== "healthy");
   const counts = countHealth(relevant);
-  const rog = relevant.find((service) => classifySystemService(service) === "rog") ?? null;
-  const update = relevant.find((service) => classifySystemService(service) === "update") ?? null;
-  const backup = relevant.find((service) => classifySystemService(service) === "backup") ?? null;
   const aggregateLabel = !relevant.length
     ? "Состояние недоступно"
     : attention.length
@@ -96,15 +135,19 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
 
         <ErrorBoundary title="Panel Agent">
           <WorkZone className="system-primary-zone system-primary-zone--runtime">
-            <RuntimeControls variant="system-v2" />
+            <div className="system-runtime-workzone">
+              {runtime && <SystemRuntimeSnapshot service={runtime} />}
+              <RuntimeControls variant="system-v2" />
+            </div>
           </WorkZone>
         </ErrorBoundary>
       </section>
 
       <section className="system-v2-lower-rows" data-testid="system-lower-rows" aria-label="Системные источники">
         <ConnectivityRecoverySurface services={snapshot.services} showWhenHealthy />
-        <SystemFactRow kind="update" label="Обновления и runtime" service={update} />
+        <SystemFactRow kind="update" label="Обновления" service={update} />
         <SystemFactRow kind="backup" label="Резервные копии" service={backup} />
+        {diagnostics.map((service) => <SystemDiagnosticRow key={service.id} service={service} />)}
       </section>
 
       {detailsOpen && (
@@ -120,6 +163,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
             <div><dt>Здоровые</dt><dd>{counts.healthy}</dd></div>
             <div><dt>Требуют внимания</dt><dd>{attention.length}</dd></div>
             <div><dt>ROG</dt><dd>{rog ? healthLabel(rog.health) : "интеграция недоступна"}</dd></div>
+            <div><dt>Диагностика</dt><dd>{diagnostics.length || "нет"}</dd></div>
             <div><dt>Обновления</dt><dd>{update ? healthLabel(update.health) : "источник не подключён"}</dd></div>
             <div><dt>Backup</dt><dd>{backup ? healthLabel(backup.health) : "источник не подключён"}</dd></div>
           </dl>

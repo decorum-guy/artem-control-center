@@ -263,7 +263,10 @@
       "home-assistant": {
         "health": "stale",
         "source": "stale",
-        "summary": "Последнее подтверждение Home Assistant устарело"
+        "summary": "Последнее подтверждение Home Assistant устарело",
+        "presentation": {
+          "freshnessLabel": "40 мин назад"
+        }
       },
       "coffee-machine": {
         "health": "stale",
@@ -281,7 +284,10 @@
       "home-assistant": {
         "health": "offline",
         "source": "unavailable",
-        "summary": "Home Assistant недоступен"
+        "summary": "Home Assistant недоступен",
+        "presentation": {
+          "freshnessLabel": "последнее подтверждение недоступно"
+        }
       },
       "coffee-machine": {
         "health": "offline",

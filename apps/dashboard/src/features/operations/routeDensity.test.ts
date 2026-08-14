@@ -6,8 +6,11 @@ import {
   groupHealthyServices,
   healthLabel,
   selectHomePrimaryDevices,
+  selectSystemServiceSubjects,
   servicesByAttention,
-  trustedServiceGroup
+  systemRelevantServices,
+  trustedServiceGroup,
+  visibleSystemServices
 } from "./routeDensity";
 
 function service(
@@ -75,11 +78,47 @@ describe("PR7 route density helpers", () => {
     expect(selectHomePrimaryDevices([lamp])).toMatchObject({ fallback: lamp, additional: [] });
   });
 
-  it("classifies only explicit system contracts into System zones", () => {
+  it("classifies only trusted system contracts and explicit System categories", () => {
     expect(classifySystemService(service("rog_g703gi", { dataContract: "system.rog-g703.v1" }))).toBe("rog");
     expect(classifySystemService(service("runtime", { dataContract: "system.runtime.v1" }))).toBe("runtime");
+    expect(classifySystemService(service("update", { dataContract: "system.update.v1" }))).toBe("update");
     expect(classifySystemService(service("backup", { dataContract: "backup.snapshot.v1" }))).toBe("backup");
+    expect(classifySystemService(service("diagnostic", { dataContract: "service.health.v1", presentation: { category: "system", group: "System", overview: "incident-only", priority: 20 } }))).toBe("system");
     expect(classifySystemService(service("new-service", { dataContract: "future.service.v1" }))).toBe("other");
+  });
+
+  it("does not promote unknown ID substrings into System semantics", () => {
+    expect(classifySystemService(service("future-runtime-proxy", { dataContract: "future.service.v1" }))).toBe("other");
+    expect(classifySystemService(service("backup-helper-unknown", { dataContract: "future.service.v1" }))).toBe("other");
+    expect(classifySystemService(service("my-update-monitor", { dataContract: "future.service.v1" }))).toBe("other");
+    expect(classifySystemService(service("something-rog-like", { dataContract: "future.service.v1" }))).toBe("other");
+  });
+
+  it("keeps every System aggregate contributor represented by a primary subject or diagnostic row", () => {
+    const fixtureDiagnostic = service("fixture-multi-action", {
+      dataContract: "service.health.v1",
+      health: "degraded",
+      presentation: { category: "system", group: "System", overview: "incident-only", priority: 20 }
+    });
+    const runtime = service("panel-runtime", {
+      dataContract: "system.runtime.v1",
+      health: "degraded",
+      summary: "Runtime requires attention",
+      presentation: { category: "system", group: "System", overview: "aggregate", priority: 75 }
+    });
+    const subjects = selectSystemServiceSubjects([fixtureDiagnostic, runtime]);
+    const represented = visibleSystemServices(subjects);
+
+    expect(systemRelevantServices([fixtureDiagnostic, runtime]).map((item) => item.id)).toEqual([
+      "panel-runtime",
+      "fixture-multi-action"
+    ]);
+    expect(represented.map((item) => item.id)).toEqual(["panel-runtime", "fixture-multi-action"]);
+    expect(represented.filter((item) => item.health !== "healthy").map((item) => item.id)).toEqual([
+      "panel-runtime",
+      "fixture-multi-action"
+    ]);
+    expect(subjects.diagnostics.map((item) => item.id)).toEqual(["fixture-multi-action"]);
   });
 
   it("uses the bounded Russian health vocabulary", () => {
