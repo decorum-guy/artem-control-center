@@ -142,7 +142,9 @@ export function OverviewV2Page({
         void reconcileUncertain(candidate);
         return;
       }
-      dispatch({ type: "message", message: error instanceof Error ? error.message : "Сохранение не выполнено." });
+      const message = error instanceof Error ? error.message : "Сохранение не выполнено.";
+      dispatch({ type: "save-failed", message });
+      setAnnouncement(message);
     }
   }
 

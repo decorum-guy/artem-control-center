@@ -1,9 +1,52 @@
+from __future__ import annotations
+
 import importlib
+import asyncio
 import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+
+def raw_patch(app, body: bytes, headers: dict[str, str], chunks: list[bytes] | None = None):
+    request_chunks = chunks or [body]
+
+    async def run_request():
+        messages = []
+        index = 0
+
+        async def receive():
+            nonlocal index
+            if index >= len(request_chunks):
+                return {"type": "http.disconnect"}
+            chunk = request_chunks[index]
+            index += 1
+            return {"type": "http.request", "body": chunk, "more_body": index < len(request_chunks)}
+
+        async def send(message):
+            messages.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.0"},
+            "http_version": "1.1",
+            "method": "PATCH",
+            "scheme": "http",
+            "path": "/api/v1/overview/layout",
+            "raw_path": b"/api/v1/overview/layout",
+            "query_string": b"",
+            "headers": [(key.lower().encode("ascii"), value.encode("latin-1")) for key, value in headers.items()],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+        }
+        await app(scope, receive, send)
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        response_body = b"".join(message.get("body", b"") for message in messages if message["type"] == "http.response.body")
+        response_headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in start["headers"]}
+        return start["status"], response_headers, response_body
+
+    return asyncio.run(run_request())
 
 
 def load_app(monkeypatch, path: Path, *, writes: bool = True):
@@ -106,6 +149,157 @@ def test_valid_appearance_patch_is_atomic_revisioned_and_survives_restart(tmp_pa
         loaded = get_layout(client).json()
         assert loaded["revision"] == 1
         assert next(item for item in loaded["items"] if item["widgetType"] == "home.coffee-machine")["config"]["imageScalePct"] == 120
+
+
+def test_overview_body_below_limit_is_read_and_strictly_validated(tmp_path, monkeypatch):
+    module = load_app(monkeypatch, tmp_path / "layout.json", writes=True)
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        body = json.dumps({"items": initial.json()["items"]}, separators=(",", ":")).encode("utf-8")
+        status_code, headers, response_body = raw_patch(
+            module.app,
+            body,
+            {
+                "if-match": initial.headers["etag"],
+                "content-type": "application/json",
+                "content-length": str(len(body)),
+            },
+        )
+        assert status_code == 200, response_body
+        assert headers["etag"] == '"1"'
+        assert json.loads(response_body)["revision"] == 1
+
+
+def test_overview_body_content_length_above_limit_is_rejected_before_parsing(tmp_path, monkeypatch):
+    from panel_agent.overview_layout import MAX_REQUEST_BYTES
+
+    module = load_app(monkeypatch, tmp_path / "layout.json", writes=True)
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        status_code, _, response_body = raw_patch(
+            module.app,
+            b"{}",
+            {
+                "if-match": initial.headers["etag"],
+                "content-type": "application/json",
+                "content-length": str(MAX_REQUEST_BYTES + 1),
+            },
+        )
+        assert status_code == 413
+        assert json.loads(response_body)["detail"] == "overview_layout_request_too_large"
+
+
+def test_overview_actual_oversized_body_is_rejected_without_or_with_misleading_length(tmp_path, monkeypatch):
+    from panel_agent.overview_layout import MAX_REQUEST_BYTES
+
+    path = tmp_path / "layout.json"
+    module = load_app(monkeypatch, path, writes=True)
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        saved = client.patch(
+            "/api/v1/overview/layout",
+            headers={"If-Match": initial.headers["etag"]},
+            json={"items": initial.json()["items"]},
+        )
+        assert saved.status_code == 200
+        old_bytes = path.read_bytes()
+        oversized_body = b'{"items":[' + (b"null," * (MAX_REQUEST_BYTES // 4)) + b"]}"
+
+        status_code, _, response_body = raw_patch(
+            module.app,
+            oversized_body,
+            {
+                "if-match": saved.headers["etag"],
+                "content-type": "application/json",
+            },
+            chunks=[oversized_body[:MAX_REQUEST_BYTES // 2], oversized_body[MAX_REQUEST_BYTES // 2:]],
+        )
+        assert status_code == 413
+        assert json.loads(response_body)["detail"] == "overview_layout_request_too_large"
+        assert path.read_bytes() == old_bytes
+
+        status_code, _, response_body = raw_patch(
+            module.app,
+            oversized_body,
+            {
+                "if-match": saved.headers["etag"],
+                "content-type": "application/json",
+                "content-length": "1",
+            },
+            chunks=[oversized_body[:MAX_REQUEST_BYTES // 2], oversized_body[MAX_REQUEST_BYTES // 2:]],
+        )
+        assert status_code == 413
+        assert json.loads(response_body)["detail"] == "overview_layout_request_too_large"
+        assert path.read_bytes() == old_bytes
+
+
+def test_overview_invalid_json_is_safe_and_oversized_candidate_is_rejected_before_pydantic(tmp_path, monkeypatch):
+    from panel_agent.overview_layout import MAX_REQUEST_BYTES
+
+    path = tmp_path / "layout.json"
+    module = load_app(monkeypatch, path, writes=True)
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        status_code, _, response_body = raw_patch(
+            module.app,
+            b'{"items":',
+            {
+                "if-match": initial.headers["etag"],
+                "content-type": "application/json",
+            },
+        )
+        assert status_code == 400
+        assert json.loads(response_body)["detail"] == "invalid_json"
+
+        oversized_valid_json = b'{"items":[' + (b"null," * (MAX_REQUEST_BYTES // 4)) + b"]}"
+        status_code, _, response_body = raw_patch(
+            module.app,
+            oversized_valid_json,
+            {
+                "if-match": initial.headers["etag"],
+                "content-type": "application/json",
+            },
+        )
+        assert status_code == 413
+        assert json.loads(response_body)["detail"] == "overview_layout_request_too_large"
+        assert not path.exists()
+
+
+def test_overview_body_limit_is_deterministic_at_exact_limit(tmp_path, monkeypatch):
+    from panel_agent.overview_layout import MAX_REQUEST_BYTES
+
+    module = load_app(monkeypatch, tmp_path / "layout.json", writes=True)
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        base_body = json.dumps({"items": initial.json()["items"]}, separators=(",", ":")).encode("utf-8")
+        assert len(base_body) < MAX_REQUEST_BYTES
+        exact_body = base_body + (b" " * (MAX_REQUEST_BYTES - len(base_body)))
+        assert len(exact_body) == MAX_REQUEST_BYTES
+        status_code, _, response_body = raw_patch(
+            module.app,
+            exact_body,
+            {
+                "if-match": initial.headers["etag"],
+                "content-type": "application/json",
+                "content-length": str(MAX_REQUEST_BYTES),
+            },
+        )
+        assert status_code == 200, response_body
+        saved = json.loads(response_body)
+        assert saved["revision"] == 1
+
+        over_limit_body = base_body + (b" " * (MAX_REQUEST_BYTES - len(base_body) + 1))
+        status_code, _, response_body = raw_patch(
+            module.app,
+            over_limit_body,
+            {
+                "if-match": '"1"',
+                "content-type": "application/json",
+                "content-length": str(len(over_limit_body)),
+            },
+        )
+        assert status_code == 413
+        assert json.loads(response_body)["detail"] == "overview_layout_request_too_large"
 
 
 def test_invalid_full_candidate_and_dangerous_config_leave_old_file_unchanged(tmp_path, monkeypatch):

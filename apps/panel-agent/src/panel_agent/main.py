@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -7,6 +8,7 @@ from typing import List
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 
 from .alice_control import AliceControlError
 from .contracts import (
@@ -222,23 +224,51 @@ def get_overview_layout(response: Response) -> OverviewLayoutResponse:
     return layout.model_copy(update={"writesEnabled": _overview_write_allowed()})
 
 
+async def _read_bounded_overview_request_body(request: Request) -> bytes:
+    declared_length = request.headers.get("content-length")
+    if declared_length is not None:
+        try:
+            declared_bytes = int(declared_length)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid_content_length")
+        if declared_bytes < 0:
+            raise HTTPException(status_code=400, detail="invalid_content_length")
+        if declared_bytes > MAX_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="overview_layout_request_too_large")
+
+    chunks: list[bytes] = []
+    total_bytes = 0
+    async for chunk in request.stream():
+        total_bytes += len(chunk)
+        if total_bytes > MAX_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="overview_layout_request_too_large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _parse_overview_layout_patch(raw_body: bytes) -> OverviewLayoutPatch:
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="invalid_json")
+    try:
+        return OverviewLayoutPatch.model_validate(payload)
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="invalid_overview_layout_patch")
+
+
 @app.patch("/api/v1/overview/layout", response_model=OverviewLayoutResponse)
 async def patch_overview_layout(
-    patch: OverviewLayoutPatch,
     request: Request,
     response: Response,
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> OverviewLayoutResponse:
-    if request.headers.get("content-length"):
-        try:
-            if int(request.headers["content-length"]) > MAX_REQUEST_BYTES:
-                raise HTTPException(status_code=413, detail="overview_layout_request_too_large")
-        except ValueError:
-            raise HTTPException(status_code=400, detail="invalid_content_length")
+    raw_body = await _read_bounded_overview_request_body(request)
     _require_overview_write()
     expected_revision = OverviewLayoutStore.parse_if_match(if_match)
     if expected_revision is None:
         raise HTTPException(status_code=428, detail="if_match_required")
+    patch = _parse_overview_layout_patch(raw_body)
     try:
         saved = overview_layout_store.write(patch, expected_revision)
     except OverviewRevisionConflict:

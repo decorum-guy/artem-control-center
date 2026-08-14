@@ -41,6 +41,7 @@ export type OverviewEditorAction =
   | { type: "cancel" }
   | { type: "save-started" }
   | { type: "save-succeeded"; document: OverviewLayoutDocument }
+  | { type: "save-failed"; message: string }
   | { type: "save-conflict"; message: string }
   | { type: "save-uncertain"; message: string }
   | { type: "load-server"; document: OverviewLayoutDocument }
@@ -403,6 +404,10 @@ export function overviewEditorReducer(
         dirtyOverride: false
       };
     }
+    case "save-failed":
+      return state.mode === "saving"
+        ? { ...state, mode: "editing", message: action.message, conflict: false }
+        : state;
     case "save-conflict":
       return { ...state, mode: "editing", message: action.message, conflict: true };
     case "save-uncertain":

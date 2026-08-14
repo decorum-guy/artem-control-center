@@ -28,7 +28,7 @@ type LayoutDocument = {
   writesEnabled: true;
 };
 
-type PatchMode = "success" | "conflict" | "abort" | "abort-different" | "abort-unavailable";
+type PatchMode = "success" | "conflict" | "validation-error" | "server-error" | "abort" | "abort-different" | "abort-unavailable";
 
 function artifactDirectory(testInfo: { outputPath: (name: string) => string }): string {
   return process.env.V2_OVERVIEW_EDITOR_ARTIFACT_DIR ?? testInfo.outputPath("v2-overview-editor-review");
@@ -173,6 +173,15 @@ async function installLayoutRoute(page: Page, initialMode: PatchMode = "success"
       return;
     }
 
+    if (state.mode === "validation-error" || state.mode === "server-error") {
+      await route.fulfill({
+        status: state.mode === "validation-error" ? 422 : 500,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: state.mode === "validation-error" ? "invalid_overview_layout_patch" : "internal_error" })
+      });
+      return;
+    }
+
     if (state.mode === "abort" || state.mode === "abort-different" || state.mode === "abort-unavailable") {
       state.document = state.mode === "abort-different" ? makeDocument(1) : makeDocument(1, state.lastPatch);
       await route.abort("connectionreset");
@@ -313,6 +322,50 @@ test.describe("Overview V2 Edit mode and persistence", () => {
 
     await page.reload();
     await expect(page.locator('.overview-v2-grid-item[data-widget-type="weather.alert"]')).toHaveCount(1);
+  });
+
+  test("returns to usable editing after an explicit 422 without retrying", async ({ page }) => {
+    const routeState = await installLayoutRoute(page, "validation-error");
+    await openEditor(page);
+    await setCoffeeScale(page, "115");
+
+    await page.getByTestId("overview-save").click();
+    await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
+    await expect(page.getByTestId("overview-edit-toolbar").getByText("Сервер отклонил конфигурацию панели.")).toBeVisible();
+    await expect(page.getByText("Сохраняем…")).toHaveCount(0);
+    await expect(page.getByTestId("overview-save")).toBeEnabled();
+    await expect(page.getByTestId("overview-add-widget")).toBeEnabled();
+    expect(routeState.patchCount).toBe(1);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageScalePct).toBe(115);
+
+    await page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]').getByRole("button", { name: "Настройки виджета" }).click();
+    await expect(page.getByTestId("overview-widget-appearance").getByLabel("Размер изображения")).toHaveValue("115");
+    await page.getByTestId("overview-widget-appearance").getByRole("button", { name: "Закрыть" }).click();
+    await expect.poll(() => routeState.patchCount).toBe(1);
+
+    await page.getByTestId("overview-cancel").click();
+    await expect(page.getByTestId("overview-edit-toolbar")).toHaveCount(0);
+    expect(routeState.patchCount).toBe(1);
+  });
+
+  test("returns to usable editing after an explicit 500 without retrying", async ({ page }) => {
+    const routeState = await installLayoutRoute(page, "server-error");
+    await openEditor(page);
+    await setCoffeeScale(page, "110");
+
+    await page.getByTestId("overview-save").click();
+    await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
+    await expect(page.getByTestId("overview-edit-toolbar").getByText("Сервер отклонил конфигурацию панели.")).toBeVisible();
+    await expect(page.getByText("Сохраняем…")).toHaveCount(0);
+    await expect(page.getByTestId("overview-save")).toBeEnabled();
+    await expect(page.getByTestId("overview-reset")).toBeEnabled();
+    expect(routeState.patchCount).toBe(1);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageScalePct).toBe(110);
+    await expect.poll(() => routeState.patchCount).toBe(1);
+
+    await page.getByTestId("overview-cancel").click();
+    await expect(page.getByTestId("overview-edit-toolbar")).toHaveCount(0);
+    expect(routeState.patchCount).toBe(1);
   });
 
   test("reset is confirmed in the draft and cancel performs no write", async ({ page }) => {

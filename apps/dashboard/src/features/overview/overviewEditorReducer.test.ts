@@ -126,4 +126,25 @@ describe("Overview edit reducer", () => {
     expect(cancelled.mode).toBe("normal");
     expect(cancelled.draft).toEqual(initial.canonical.items);
   });
+
+  it("returns an explicit save failure to editing without changing the draft", () => {
+    const initial = createOverviewEditorState(makeShippedOverviewDocument(true));
+    const editing = overviewEditorReducer(initial, { type: "enter" });
+    const changed = overviewEditorReducer(editing, {
+      type: "set-config",
+      instanceId: "fixture.coffee",
+      key: "imageScalePct",
+      value: 115
+    });
+    const saving = overviewEditorReducer(changed, { type: "save-started" });
+    const failed = overviewEditorReducer(saving, { type: "save-failed", message: "Сервер отклонил конфигурацию панели." });
+
+    expect(failed.mode).toBe("editing");
+    expect(failed.draft).toEqual(saving.draft);
+    expect(failed.entrySnapshot).toEqual(saving.entrySnapshot);
+    expect(failed.selectedInstanceId).toBe(saving.selectedInstanceId);
+    expect(failed.message).toBe("Сервер отклонил конфигурацию панели.");
+    expect(failed.conflict).toBe(false);
+    expect(overviewEditorDirty(failed)).toBe(true);
+  });
 });
