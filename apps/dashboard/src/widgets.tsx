@@ -191,6 +191,9 @@ export function CoffeeWidget({
         {activeAction && !activeAction.enabled && (
           <span className="action-hint">Управление отключено политикой панели.</span>
         )}
+        {variant === "overview" && (
+          <p className="coffee-authority">Источник: Home Assistant</p>
+        )}
       </div>
 
       <div className="coffee-asset" data-fit={manifest.visualAsset?.fit ?? "contain"}>

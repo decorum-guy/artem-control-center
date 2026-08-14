@@ -91,7 +91,6 @@ export function RogG703CompactControl({ service }: { service: ServiceSnapshot })
     <WorkZone className="overview-v2-real-widget overview-rog-widget" data-testid="overview-rog-g703">
       <span className="overview-rog-widget__icon" aria-hidden="true"><Icon name="system" /></span>
       <div className="overview-rog-widget__identity">
-        <p className="overview-v2-real-widget__eyebrow">Система · Windows</p>
         <h2>{service.title}</h2>
       </div>
       <span className="overview-rog-widget__separator" aria-hidden="true">·</span>

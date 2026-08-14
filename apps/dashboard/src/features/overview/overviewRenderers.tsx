@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
-import { ConnectivityRecoveryButton, useConnectivityActions } from "../../ConnectivityActions";
+import { useConnectivityActions } from "../../ConnectivityActions";
 import { Icon } from "../../icons";
 import { StatusText, WorkZone } from "../../ShellPrimitives";
 import { resolveManifest, servicesByPriority } from "../../registry";
@@ -33,7 +33,6 @@ function OverviewRuntimeUnavailable({
   return (
     <WorkZone className="overview-v2-real-widget overview-v2-runtime-unavailable" data-testid={testId}>
       <div className="overview-v2-real-widget__heading">
-        <p className="overview-v2-real-widget__eyebrow">Состояние</p>
         <h2>{title}</h2>
       </div>
       <p>{detail}</p>
@@ -104,15 +103,18 @@ function renderHome(runtime: OverviewRuntimeContext): ReactNode {
     return "unavailable";
   };
   return (
-    <WorkZone className="overview-v2-real-widget overview-home-widget" data-testid="overview-home-widget">
-      <header className="overview-v2-real-widget__header">
-        <span className="overview-v2-real-widget__icon" aria-hidden="true"><Icon name="home" /></span>
-        <div className="overview-v2-real-widget__heading">
-          <p className="overview-v2-real-widget__eyebrow">Дом</p>
-          <h2>Быстрые действия</h2>
-        </div>
-      </header>
-      <div className="overview-home-widget__cells">
+      <WorkZone className="overview-v2-real-widget overview-home-widget" data-testid="overview-home-widget">
+        <header className="overview-v2-real-widget__header">
+          <span className="overview-v2-real-widget__icon" aria-hidden="true"><Icon name="home" /></span>
+          <div className="overview-v2-real-widget__heading">
+            <h2>Быстрые действия</h2>
+          </div>
+        </header>
+      <div
+        className="overview-home-widget__cells"
+        data-testid="overview-home-cells"
+        data-device-count={devices.length}
+      >
         {devices.length ? devices.map((service) => (
           <button
             className="overview-home-widget__cell"
@@ -138,6 +140,19 @@ function liveService(service: ServiceSnapshot | undefined): boolean {
   return Boolean(service && service.health === "healthy" && service.source === "live");
 }
 
+function healthIncidentLabel(service: ServiceSnapshot): string {
+  switch (service.health) {
+    case "healthy":
+      return "В норме";
+    case "degraded":
+      return "Требует внимания";
+    case "stale":
+      return "Данные устарели";
+    case "offline":
+      return "Недоступен";
+  }
+}
+
 function OverviewHealthWidget(runtime: OverviewRuntimeContext): ReactNode {
   const services = servicesByPriority(runtime.snapshot.services);
   const catalog = services.filter((service) =>
@@ -151,11 +166,18 @@ function OverviewHealthWidget(runtime: OverviewRuntimeContext): ReactNode {
   const alice = services.find((service) => service.id === "alice-tg-bot");
   const connectivity = useConnectivityActions();
   const connectivityDegraded = !liveService(homeAssistant) || !liveService(alice);
-  const backupCopy = backups[0]
-    ? backups[0].presentation?.freshnessLabel
-      ? `Резервные копии: ${backups[0].presentation.freshnessLabel}`
-      : `Резервные копии: ${backups[0].summary}`
-    : "Резервные копии: источник не подключён";
+  const backup = backups[0];
+  const backupCopy = !backup || backup.health === "offline" || backup.source === "unavailable"
+    ? "Backup · источник недоступен"
+    : backup.presentation?.freshnessLabel
+      ? `Backup · ${backup.presentation.freshnessLabel}`
+      : "Backup · свежесть не указана";
+  const recoveryAvailable = Boolean(connectivity.available && connectivity.availability?.allowed);
+  const recoveryState = connectivity.pending
+    ? "pending"
+    : recoveryAvailable
+      ? "available"
+      : "unavailable";
 
   return (
     <WorkZone
@@ -166,7 +188,6 @@ function OverviewHealthWidget(runtime: OverviewRuntimeContext): ReactNode {
       <header className="overview-v2-real-widget__header">
         <span className="overview-v2-real-widget__icon" aria-hidden="true"><Icon name="services" /></span>
         <div className="overview-v2-real-widget__heading">
-          <p className="overview-v2-real-widget__eyebrow">Состояние</p>
           <h2>Сервисы и backup</h2>
         </div>
       </header>
@@ -177,17 +198,47 @@ function OverviewHealthWidget(runtime: OverviewRuntimeContext): ReactNode {
         />
       </div>
       <p className="overview-health-widget__incident">
-        {incident ? `${incident.title}: ${incident.summary}` : "Критичных инцидентов нет."}
+        {incident ? `${incident.title}: ${healthIncidentLabel(incident)}` : "Критичных инцидентов нет."}
       </p>
       <footer className="overview-health-widget__footer">
         <span>{backupCopy}</span>
-        {connectivityDegraded && connectivity.available && (
-          <ConnectivityRecoveryButton degraded className="overview-health-widget__recovery" />
-        )}
+        <span
+          className="overview-health-widget__recovery-slot"
+          data-testid="overview-health-recovery-slot"
+          data-recovery-state={connectivityDegraded ? recoveryState : "normal"}
+        >
+          {connectivityDegraded && recoveryState === "available" && (
+            <button
+              type="button"
+              className="overview-health-widget__recovery"
+              data-testid="overview-health-recovery"
+              onClick={() => void connectivity.run()}
+              aria-busy="false"
+            >
+              Восстановить
+            </button>
+          )}
+          {connectivityDegraded && recoveryState === "pending" && (
+            <button
+              type="button"
+              className="overview-health-widget__recovery"
+              data-testid="overview-health-recovery"
+              disabled
+              aria-busy="true"
+            >
+              Проверяем…
+            </button>
+          )}
+          {connectivityDegraded && recoveryState === "unavailable" && (
+            <span
+              className="overview-health-widget__recovery-state"
+              data-testid="overview-health-recovery-unavailable"
+            >
+              Восстановление недоступно
+            </span>
+          )}
+        </span>
       </footer>
-      {connectivityDegraded && !connectivity.available && (
-        <span className="overview-health-widget__recovery-state">Recovery API недоступен</span>
-      )}
     </WorkZone>
   );
 }
@@ -220,7 +271,6 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
           <WorkZone className="overview-v2-real-widget overview-rog-widget overview-rog-widget--unavailable" data-testid="overview-rog-g703-unavailable">
             <span className="overview-rog-widget__icon" aria-hidden="true"><Icon name="system" /></span>
             <div className="overview-rog-widget__identity">
-              <p className="overview-v2-real-widget__eyebrow">Система · Windows</p>
               <h2>ASUS ROG G703GI</h2>
             </div>
             <StatusText label="Недоступен" tone="unavailable" className="overview-rog-widget__status" />

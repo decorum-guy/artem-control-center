@@ -138,6 +138,11 @@
 }
 
 .overview-rog-widget__identity h2 {
+  margin: 0;
+  color: var(--cc-text);
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -146,13 +151,20 @@
 .overview-rog-widget__separator {
   flex: 0 0 auto;
   color: var(--cc-text-muted);
-  font-size: 20px;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .overview-rog-widget__status {
   flex: 0 0 auto;
   font-size: var(--cc-type-body-size);
   line-height: var(--cc-type-body-line);
+}
+
+.overview-rog-widget__status > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .overview-rog-widget__freshness {
@@ -233,6 +245,11 @@
   letter-spacing: 0;
 }
 
+.coffee-panel--overview .coffee-panel__heading .section-kicker,
+.overview-v2-grid-item > .planning-card .planning-card__header .section-kicker {
+  display: none;
+}
+
 .coffee-panel--overview .coffee-panel__state {
   gap: 4px;
   margin: auto 0 var(--cc-space-3);
@@ -271,13 +288,20 @@
   font-weight: var(--cc-type-control-weight);
 }
 
+.coffee-panel--overview .coffee-authority {
+  margin: 8px 0 0;
+  color: var(--cc-text-secondary);
+  font-size: var(--cc-type-metadata-size);
+  line-height: var(--cc-type-metadata-line);
+}
+
 .coffee-panel--overview .coffee-asset {
   align-self: center;
   width: 112px;
   height: 148px;
   min-height: 148px;
-  border-left: 1px solid var(--cc-divider);
-  background: var(--cc-surface-2);
+  border-left: 0;
+  background: transparent;
 }
 
 .coffee-panel--overview .coffee-asset__image {
@@ -315,6 +339,10 @@
   gap: 8px;
   min-width: 0;
   min-height: 0;
+}
+
+.overview-home-widget__cells[data-device-count="1"] {
+  grid-template-columns: 1fr;
 }
 
 .overview-home-widget__cell {
@@ -386,8 +414,8 @@
 .overview-health-widget {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 4px;
-  padding: 10px 16px;
+  gap: 2px;
+  padding: 8px 16px;
 }
 
 .overview-health-widget--attention {
@@ -409,8 +437,7 @@
 }
 
 .overview-health-widget__incident,
-.overview-health-widget__footer,
-.overview-health-widget__recovery-state {
+.overview-health-widget__footer {
   min-width: 0;
   margin: 0;
   color: var(--cc-text-secondary);
@@ -429,18 +456,29 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 48px;
 }
 
-.overview-health-widget__footer > span {
+.overview-health-widget__footer > span:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.overview-health-widget__recovery {
-  min-width: 48px;
+.overview-health-widget__recovery-slot {
+  display: flex;
+  flex: 0 0 156px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 156px;
   min-height: 48px;
-  margin: -4px 0;
+}
+
+.overview-health-widget__recovery {
+  width: 156px;
+  min-height: 48px;
   padding: 6px 10px;
   border-color: var(--cc-warning-border);
   border-radius: var(--cc-radius-control);
@@ -451,7 +489,17 @@
 }
 
 .overview-health-widget__recovery-state {
-  display: none;
+  color: var(--cc-unavailable);
+  font-size: var(--cc-type-metadata-size);
+  line-height: var(--cc-type-metadata-line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.overview-v2-grid-item > .planning-card .planning-row__meta,
+.overview-v2-grid-item > .planning-card .planning-row__meta time {
+  font-size: var(--cc-type-metadata-size);
+  line-height: var(--cc-type-metadata-line);
 }
 
 .overview-v2-grid-item > .coffee-panel,

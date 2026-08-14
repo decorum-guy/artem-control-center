@@ -97,7 +97,7 @@ test.describe("Control Center V2 shell", () => {
         whiteSpace: style.whiteSpace,
         overflowing: element.scrollWidth > element.clientWidth
       };
-    })).toEqual({ overflowWrap: "anywhere", whiteSpace: "normal", overflowing: false });
+    })).toEqual({ overflowWrap: "anywhere", whiteSpace: "nowrap", overflowing: false });
     await expect(page.locator(".v2-nav-link[data-nav-route='/apps'], .v2-nav-link[data-nav-route='/backups']")).toHaveCount(0);
     await expect(page.locator(".v2-navigation-primary .v2-nav-link--child")).toHaveCount(3);
     await expect(page.locator(".navigation-link__short, .v2-navigation-link__short")).toHaveCount(0);

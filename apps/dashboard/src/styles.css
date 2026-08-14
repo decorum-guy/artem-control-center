@@ -1604,7 +1604,12 @@ body::-webkit-scrollbar {
 .v2-nav-link .v2-icon,
 .v2-nav-link > svg { flex: 0 0 20px; color: currentColor; }
 .v2-nav-link > span { min-width: 0; }
-.v2-nav-link--child { padding-left: 10px; }
+.v2-nav-link--child {
+  gap: 8px;
+  padding-right: 6px;
+  padding-left: 6px;
+  white-space: nowrap;
+}
 
 .v2-nav-link[aria-current="page"] {
   color: var(--cc-text);
