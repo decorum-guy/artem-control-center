@@ -145,6 +145,7 @@ export function EditableWidgetFrame({
       data-instance-id={item.instanceId}
       data-widget-type={item.widgetType}
       data-selected={selected}
+      data-editor-chrome-hidden={hideEditorChrome ? "true" : "false"}
       tabIndex={0}
       role="group"
       aria-label={`${definition?.title ?? item.widgetType}${selected ? ", выбран" : ""}`}

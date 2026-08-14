@@ -203,8 +203,8 @@ async function installLayoutRoute(page: Page, initialMode: PatchMode = "success"
   return state;
 }
 
-async function openEditor(page: Page): Promise<void> {
-  await page.goto("/overview?theme=night");
+async function openEditor(page: Page, url = "/overview?theme=night"): Promise<void> {
+  await page.goto(url);
   await expect(page.getByTestId("route-overview-v2")).toBeVisible();
   await expect(page.getByTestId("overview-configure")).toBeEnabled();
   await page.getByTestId("overview-configure").click();
@@ -234,6 +234,7 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
       ".overview-edit-frame__drag-handle, .overview-edit-frame__actions button, .overview-edit-frame__resize-handle, .overview-edit-frame__menu-toggle, .overview-edit-frame__size"
     ) ?? []).map((element) => ({
       className: element.className,
+      label: element.getAttribute("aria-label") ?? "",
       rect: rectFor(element),
       visualRect: element.classList.contains("overview-edit-frame__size") ? rectFor(element) : (() => {
         const rect = rectFor(element);
@@ -244,10 +245,37 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
       neighborId,
       rectFor(document.querySelector(`.overview-edit-frame[data-instance-id="${neighborId}"]`))
     ]));
+    const semanticSelectors = currentId === "fixture.rog"
+      ? [
+          ".overview-rog-widget__identity",
+          ".overview-rog-widget__status",
+          ".overview-rog-widget__freshness",
+          ".overview-rog-widget__action",
+          ".overview-rog-widget__unavailable"
+        ]
+      : currentId === "fixture.quick-actions"
+        ? [
+            ".overview-home-widget__heading h2",
+            ".overview-home-widget__cell-kicker",
+            ".overview-home-widget__cell strong",
+            ".overview-home-widget__cell-state"
+          ]
+        : currentId === "fixture.health"
+          ? [
+              ".overview-health-widget__heading h2",
+              ".overview-health-widget__aggregate",
+              ".overview-health-widget__incident",
+              ".overview-health-widget__footer",
+              ".overview-health-widget__recovery-slot"
+            ]
+          : [];
     return {
       frame: rectFor(frame),
       controls,
       neighbors,
+      semanticContent: semanticSelectors
+        .map((selector) => rectFor(frame?.querySelector(selector) ?? null))
+        .filter(Boolean),
       coffeeContent: currentId === "fixture.coffee"
         ? [
             ".coffee-panel--overview .coffee-panel__heading h2",
@@ -256,7 +284,7 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
             ".coffee-panel--overview .coffee-authority",
             ".coffee-panel--overview .coffee-asset",
             ".coffee-panel--overview .coffee-state-marker"
-          ].map((selector) => rectFor(frame?.querySelector(selector) ?? null)).filter(Boolean)
+          ].map((selector) => ({ selector, rect: rectFor(frame?.querySelector(selector) ?? null) })).filter(({ rect }) => rect)
         : []
     };
   }, { instanceId, neighborIds });
@@ -273,9 +301,60 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
     }
     if (instanceId === "fixture.coffee") {
       for (const content of geometry.coffeeContent) {
-        if (control.visualRect && content) expect(rectIntersects(control.visualRect, content)).toBe(false);
+        if (control.visualRect && content.rect) expect(rectIntersects(control.visualRect, content.rect), `${control.label} intersects ${content.selector}`).toBe(false);
       }
     }
+    if (instanceId === "fixture.rog" || instanceId === "fixture.quick-actions" || instanceId === "fixture.health") {
+      for (const content of geometry.semanticContent) {
+        if (control.visualRect && content) expect(rectIntersects(control.visualRect, content), `${control.label} intersects semantic content`).toBe(false);
+      }
+    }
+  }
+}
+
+async function assertCoffeeContentGeometry(page: Page): Promise<void> {
+  const geometry = await page.evaluate(() => {
+    const rectFor = (element: Element | null): Rect | null => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const coffee = document.querySelector(".coffee-panel--overview");
+    const image = rectFor(coffee?.querySelector(".coffee-asset__image") ?? null);
+    const activity = Array.from(coffee?.querySelectorAll(".coffee-activity i") ?? []).map((element) => rectFor(element)).filter(Boolean);
+    const semanticContent = [
+      ".coffee-panel__heading h2",
+      ".coffee-panel__heading .health-mark",
+      ".coffee-panel__state",
+      ".coffee-progress",
+      ".coffee-policy-note",
+      ".coffee-panel__copy .primary-action",
+      ".coffee-authority",
+      ".coffee-state-marker"
+    ].map((selector) => rectFor(coffee?.querySelector(selector) ?? null)).filter(Boolean);
+    return { image, activity, semanticContent };
+  });
+
+  expect(geometry.image).not.toBeNull();
+  for (const content of geometry.semanticContent) {
+    if (geometry.image) expect(rectIntersects(geometry.image, content)).toBe(false);
+  }
+  for (const bar of geometry.activity) {
+    for (const content of geometry.semanticContent) {
+      if (bar) expect(rectIntersects(bar, content)).toBe(false);
+    }
+  }
+}
+
+async function assertCoffeeActivityPhases(page: Page): Promise<void> {
+  for (const phase of [0.1, 0.8, 1.5]) {
+    await page.evaluate((phaseOffset) => {
+      document.querySelectorAll(".coffee-activity i").forEach((element, index) => {
+        (element as HTMLElement).style.animationDelay = `${-(phaseOffset + index * 0.18)}s`;
+      });
+    }, phase);
+    await page.waitForTimeout(20);
+    await assertCoffeeContentGeometry(page);
   }
 }
 
@@ -412,6 +491,45 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await selectFrame(page, "fixture.quick-actions");
     await assertEditorChromeGeometry(page, "fixture.quick-actions", ["fixture.coffee", "fixture.health"]);
     await captureArtifact(page, testInfo, "overview-edit-selected-lower-widget.png");
+
+    await selectFrame(page, "fixture.health");
+    await assertEditorChromeGeometry(page, "fixture.health", ["fixture.coffee", "fixture.quick-actions"]);
+    await captureArtifact(page, testInfo, "overview-edit-selected-health.png");
+  });
+
+  test("keeps Coffee imagery and warming activity in the asset safe zone", async ({ page }, testInfo) => {
+    await installLayoutRoute(page);
+    for (const [scenario, stage] of [
+      ["coffee-off", "off"],
+      ["coffee-warming", "warming"],
+      ["coffee-ready", "ready"],
+      ["coffee-running-too-long", "running_too_long"],
+      ["coffee-stale", "stale"],
+      ["ha-offline-policy-available", "unavailable"]
+    ] as const) {
+      await page.goto(`/overview?scenario=${scenario}&theme=night`);
+      await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", stage);
+      await assertCoffeeContentGeometry(page);
+    }
+
+    await openEditor(page, "/overview?scenario=coffee-off&theme=night");
+    await selectFrame(page, "fixture.coffee");
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await assertCoffeeContentGeometry(page);
+    await captureArtifact(page, testInfo, "overview-edit-coffee-off-selected.png");
+
+    await page.goto("/overview?scenario=coffee-warming&theme=night");
+    await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", "warming");
+    await assertCoffeeContentGeometry(page);
+    await assertCoffeeActivityPhases(page);
+    await captureArtifact(page, testInfo, "overview-coffee-warming.png");
+
+    await page.getByTestId("overview-configure").click();
+    await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
+    await selectFrame(page, "fixture.coffee");
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await assertCoffeeActivityPhases(page);
+    await captureArtifact(page, testInfo, "overview-edit-coffee-warming-selected.png");
   });
 
   test("adds bounded widgets and sends one complete canonical save", async ({ page }, testInfo) => {
