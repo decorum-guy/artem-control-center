@@ -109,6 +109,7 @@ test.describe("Control Center V2 Weather", () => {
         const compositor = page.locator(".weather-compositor");
         await expect(compositor).toHaveAttribute("data-weather-is-day", fixture === "clear-day" ? "true" : "false");
         await expect(page.locator(".weather-hero__condition-glyph")).toHaveAttribute("data-weather-celestial", celestial);
+        await expect(page.locator(".weather-hero__condition-glyph .weather-glyph")).toHaveText(celestial === "moon" ? "☾" : "☀");
         await expect(page.getByTestId("weather-hero")).toHaveAttribute("data-weather-tone", fixture);
       }
     }

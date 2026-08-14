@@ -50,11 +50,11 @@ interface WeatherContextValue {
 const WeatherContext = createContext<WeatherContextValue | null>(null);
 const ACTIVE_LOCATION_KEY = "artem.weather.active-location";
 
-function WeatherGlyph({ code, compact = false }: { code: number; compact?: boolean }) {
+function WeatherGlyph({ code, compact = false, isDay = true }: { code: number; compact?: boolean; isDay?: boolean }) {
   const kind = weatherKind(code);
   const glyph = {
-    clear: "☀",
-    partly: "◒",
+    clear: isDay ? "☀" : "☾",
+    partly: isDay ? "◒" : "☾",
     cloudy: "☁",
     fog: "≋",
     rain: "☂",
@@ -794,7 +794,7 @@ function WeatherHeroV2({
             <span>{model.label}</span>
           </div>
           <div className="weather-hero__condition-glyph" data-weather-celestial={model.celestialBody ?? "none"}>
-            <WeatherGlyph code={forecast.current.weatherCode} />
+            <WeatherGlyph code={forecast.current.weatherCode} isDay={forecast.current.isDay} />
           </div>
         </div>
 
@@ -834,7 +834,7 @@ function HourlyForecastV2({ forecast }: { forecast: WeatherForecast }) {
         {hours.map((hour, index) => (
           <article className={`weather-hour weather-hour--v2 ${index === 0 ? "weather-hour--now" : ""}`} key={`${hour.time}-${index}`} role="listitem" title={`${formatClock(hour.time)} · ${Math.round(hour.windSpeed)} км/ч`}>
             <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
-            <WeatherGlyph code={hour.weatherCode} compact />
+            <WeatherGlyph code={hour.weatherCode} compact isDay={forecast.current.isDay} />
             <strong>{formatTemperature(hour.temperature)}</strong>
             <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>{hour.precipitationProbability}%</span>
           </article>
@@ -892,7 +892,7 @@ function DailyForecastV2({ forecast }: { forecast: WeatherForecast }) {
               <strong>{index === 0 ? "Сегодня" : formatWeekday(day.date)}</strong>
               <span>{new Date(`${day.date}T12:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
             </div>
-            <WeatherGlyph code={day.weatherCode} compact />
+            <WeatherGlyph code={day.weatherCode} compact isDay={forecast.current.isDay} />
             <span className="weather-day__condition">{weatherLabel(day.weatherCode)}</span>
             <span className={day.precipitationProbabilityMax >= 40 ? "weather-rain-chance--active" : ""}>{day.precipitationProbabilityMax}%</span>
             <div className="weather-day__temperatures"><strong>{formatTemperature(day.temperatureMax)}</strong><span>{formatTemperature(day.temperatureMin)}</span></div>
