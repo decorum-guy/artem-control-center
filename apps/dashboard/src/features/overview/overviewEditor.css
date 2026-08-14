@@ -117,6 +117,11 @@
   box-sizing: border-box;
   padding: 8px 148px 8px 8px;
 }
+.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.coffee-machine"]
+  .coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-asset {
+  transform: translateX(calc(12px * var(--cc-coffee-image-x, 0)))
+    translateY(calc(4px * var(--cc-coffee-image-y, 0)));
+}
 
 .overview-edit-frame__handle,
 .overview-edit-frame__resize-handle,

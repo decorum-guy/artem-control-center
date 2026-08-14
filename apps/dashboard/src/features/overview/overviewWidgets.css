@@ -258,6 +258,9 @@
   gap: 4px;
   margin: auto 0 var(--cc-space-3);
 }
+.coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-panel__state {
+  max-width: min(260px, 100%);
+}
 
 .coffee-panel--overview .coffee-panel__state strong {
   color: var(--cc-text);
@@ -315,12 +318,11 @@
   background: transparent;
 }
 
-/* Keep the asset in its reserved right track so it cannot cover the copy.
-   Dense and spacious copy use the same source-owned safe-zone rule. */
+/* Keep the quiet/default composition centered beneath the service status.
+   The spacious state copy remains bounded so it cannot reach the image zone. */
 .overview-v2-grid-shell[data-grid-profile="landscape-12"]
   .coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-asset {
-  transform: translateX(calc(12px * var(--cc-coffee-image-x, 0)))
-    translateY(calc(4px * var(--cc-coffee-image-y, 0)));
+  transform: translateX(calc(-1 * clamp(96px, 11.2vw, 143px)));
 }
 
 .coffee-panel--overview .coffee-asset__image {
@@ -366,7 +368,7 @@
 .coffee-panel--overview.coffee-panel--image-y-4 { --cc-coffee-image-y: 2; }
 
 .coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-asset {
-  transform: translateX(calc(12px * var(--cc-coffee-image-x, 0)))
+  transform: translateX(calc(-1 * clamp(96px, 11.2vw, 143px) + 12px * var(--cc-coffee-image-x, 0)))
     translateY(calc(4px * var(--cc-coffee-image-y, 0)));
 }
 .coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset {
