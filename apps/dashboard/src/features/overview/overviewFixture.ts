@@ -13,25 +13,25 @@ const foundationLayout: readonly OverviewLayoutItem[] = [
     instanceId: "fixture.coffee",
     widgetType: "home.coffee-machine",
     sizeVariant: "standard",
-    placement: { x: 0, y: 2, w: 7, h: 4 }
+    placement: { x: 0, y: 1, w: 7, h: 4 }
   },
   {
     instanceId: "fixture.planning",
     widgetType: "planning.summary",
     sizeVariant: "standard",
-    placement: { x: 7, y: 2, w: 5, h: 4 }
+    placement: { x: 7, y: 1, w: 5, h: 4 }
   },
   {
     instanceId: "fixture.quick-actions",
     widgetType: "home.quick-actions",
     sizeVariant: "standard",
-    placement: { x: 0, y: 6, w: 7, h: 2 }
+    placement: { x: 0, y: 5, w: 7, h: 2 }
   },
   {
     instanceId: "fixture.health",
     widgetType: "system.health-summary",
     sizeVariant: "compact",
-    placement: { x: 7, y: 6, w: 5, h: 2 }
+    placement: { x: 7, y: 5, w: 5, h: 2 }
   }
 ];
 

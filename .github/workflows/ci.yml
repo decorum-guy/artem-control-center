@@ -127,6 +127,25 @@ jobs:
           path: artifacts/v2-overview-grid-review
           if-no-files-found: error
 
+      - name: Run focused PR4 curated Overview gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          VITE_V2_VISUAL_SHELL: "true"
+          V2_OVERVIEW_CURATED_ARTIFACT_DIR: artifacts/v2-overview-curated-review
+          B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/v2-curated-overview.spec.ts
+
+      - name: Upload PR4 curated Overview review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-overview-curated-review-${{ github.sha }}
+          path: artifacts/v2-overview-curated-review
+          if-no-files-found: error
+
       - name: Run Overview grid gate without V2 visual shell
         if: runner.os == 'Linux'
         env:

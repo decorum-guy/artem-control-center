@@ -15,6 +15,7 @@ import "./styles.css";
 import "./planningRoutes.css";
 import "./Weather.css";
 import "./features/overview/overviewGrid.css";
+import "./features/overview/overviewWidgets.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

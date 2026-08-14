@@ -1,4 +1,4 @@
-const discoveredAssets = import.meta.glob("./assets/widgets/*.png", {
+const discoveredAssets = import.meta.glob("./assets/widgets/*.{png,webp}", {
   eager: true,
   query: "?url",
   import: "default"

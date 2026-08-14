@@ -1,216 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { RogG703Data, ServiceSnapshot } from "@artem/contracts";
-import { useAccess } from "./AccessControls";
-import { useActionConfirmation } from "./ActionConfirmations";
+import type { ServiceSnapshot } from "@artem/contracts";
+import { Icon } from "./icons";
+import { StatusText, WorkZone } from "./ShellPrimitives";
 import { HealthMark } from "./widgets";
-import { useNoticeCenter } from "./NoticeCenter";
 import {
-  fetchRogG703Availability,
+  useRogG703Controller,
+  rogG703StatusCopy
+} from "./RogG703Controller";
+import {
   ROG_G703_HIBERNATE_ACTION,
-  ROG_G703_WAKE_ACTION,
-  startRogG703Action,
-  waitForRogG703Execution,
-  type RogG703ActionAvailability,
-  type RogG703ActionExecution,
-  type RogG703ActionId,
-  type RogG703DeviceStatus
+  ROG_G703_WAKE_ACTION
 } from "./rogG703Api";
 import "./RogG703Controls.css";
 
-type AvailabilityMap = Record<RogG703ActionId, RogG703ActionAvailability>;
-
-const statusCopy: Record<RogG703DeviceStatus, { label: string; detail: string }> = {
-  online: { label: "В сети", detail: "Companion ASUS отвечает" },
-  offline: { label: "Не в сети", detail: "Сон или гибернация — по сети их не различаем" },
-  waking: { label: "Пробуждение", detail: "Ждём, когда ASUS появится в сети" },
-  hibernating: { label: "Гибернация", detail: "Ждём переход Windows в S4" },
-  unavailable: { label: "Недоступен", detail: "Проверка companion сейчас недоступна" }
-};
-
-const actionProgressCopy: Record<RogG703ActionExecution["status"], string> = {
-  requested: "Запрос зарегистрирован",
-  waking: "Пакет пробуждения отправлен",
-  online: "ASUS появился в сети",
-  wake_timeout: "Не удалось разбудить ASUS",
-  hibernating: "ASUS переходит в гибернацию",
-  offline: "ASUS больше не отвечает — гибернация подтверждена",
-  failed: "Операция ASUS завершилась ошибкой"
-};
-
-function actionErrorCopy(error: string | null): string {
-  switch (error) {
-    case "wake_timeout":
-      return "Не удалось разбудить ASUS в заданное время.";
-    case "hibernate_timeout":
-      return "ASUS остаётся доступен: переход в гибернацию не подтверждён.";
-    case "companion_health_failed":
-    case "companion_hibernate_failed":
-      return "ASUS companion не подтвердил операцию.";
-    default:
-      return "Операция ASUS не выполнена. Проверьте состояние и повторите попытку.";
-  }
-}
-
-function statusFromService(service: ServiceSnapshot): RogG703DeviceStatus {
-  const data = service.data as Partial<RogG703Data>;
-  return data.status ?? "unavailable";
-}
-
 export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
-  const { ensureCapability, explainAvailability } = useAccess();
-  const { confirmAction, confirmationOpen } = useActionConfirmation();
-  const { showNotice } = useNoticeCenter();
-  const [availability, setAvailability] = useState<AvailabilityMap | null>(null);
-  const [apiAvailable, setApiAvailable] = useState(false);
-  const [pendingAction, setPendingAction] = useState<RogG703ActionId | null>(null);
-  const [transitionStatus, setTransitionStatus] = useState<RogG703DeviceStatus | null>(null);
-
-  const serviceStatus = statusFromService(service);
-  const displayStatus = transitionStatus ?? serviceStatus;
-  const display = statusCopy[displayStatus];
-
-  const refresh = useCallback(async () => {
-    try {
-      const next = await fetchRogG703Availability();
-      setAvailability(next.actions);
-      setApiAvailable(true);
-      return next;
-    } catch {
-      setAvailability(null);
-      setApiAvailable(false);
-      return null;
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 10_000);
-    return () => window.clearInterval(timer);
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!pendingAction && transitionStatus === serviceStatus) setTransitionStatus(null);
-  }, [serviceStatus, pendingAction, transitionStatus]);
-
-  const actionTitles = useMemo<Record<RogG703ActionId, string>>(() => ({
-    [ROG_G703_WAKE_ACTION]: "Включить",
-    [ROG_G703_HIBERNATE_ACTION]: "Гибернация"
-  }), []);
-
-  const showActionNotice = useCallback((
-    severity: "progress" | "success" | "warning" | "error",
-    detail: string,
-    correlationId?: string,
-    timeoutMs?: number
-  ) => {
-    showNotice({
-      id: "rog-g703.action",
-      correlationId,
-      severity,
-      title: "ASUS ROG G703GI",
-      detail,
-      timeoutMs,
-      testId: "rog-g703-action-notice"
-    });
-  }, [showNotice]);
-
-  async function run(actionId: RogG703ActionId) {
-    if (pendingAction || confirmationOpen) return;
-
-    let decision = availability?.[actionId] ?? null;
-    if (!decision) {
-      const next = await refresh();
-      decision = next?.actions[actionId] ?? null;
-    }
-    if (!decision) {
-      showActionNotice("warning", "Исполнитель ASUS пока недоступен.", undefined, 6_000);
-      return;
-    }
-
-    if (!decision.allowed && decision.availability === "elevation_required") {
-      const elevated = await ensureCapability(actionId, actionTitles[actionId]);
-      if (elevated) {
-        const next = await refresh();
-        decision = next?.actions[actionId] ?? decision;
-      }
-    }
-    if (!decision.allowed) {
-      showActionNotice("warning", explainAvailability(decision.availability), undefined, 6_000);
-      return;
-    }
-
-    if (actionId === ROG_G703_HIBERNATE_ACTION) {
-      const confirmation = await confirmAction("system.rog_g703.hibernate");
-      if (!confirmation.confirmed) return;
-    }
-
-    setPendingAction(actionId);
-    setTransitionStatus(actionId === ROG_G703_WAKE_ACTION ? "waking" : "hibernating");
-    showActionNotice(
-      "progress",
-      actionId === ROG_G703_WAKE_ACTION
-        ? "Отправляем пакет пробуждения…"
-        : "Отправляем команду гибернации Windows S4…"
-    );
-
-    try {
-      const started = await startRogG703Action(actionId);
-      const finished = await waitForRogG703Execution(
-        started.correlationId,
-        (execution) => {
-          const failed = execution.status === "failed" || execution.status === "wake_timeout";
-          if (execution.status === "waking") setTransitionStatus("waking");
-          if (execution.status === "hibernating") setTransitionStatus("hibernating");
-          if (execution.status === "online") setTransitionStatus("online");
-          if (execution.status === "offline" || execution.status === "wake_timeout") setTransitionStatus("offline");
-          if (execution.status === "failed") {
-            setTransitionStatus(actionId === ROG_G703_WAKE_ACTION ? "offline" : "online");
-          }
-          showActionNotice(
-            failed ? "error" : execution.status === "online" || execution.status === "offline" ? "success" : "progress",
-            failed ? actionErrorCopy(execution.error) : actionProgressCopy[execution.status],
-            execution.correlationId.slice(0, 8),
-            failed ? 10_000 : undefined
-          );
-        }
-      );
-      if (finished.status === "online" || finished.status === "offline") {
-        showActionNotice(
-          "success",
-          actionProgressCopy[finished.status],
-          finished.correlationId.slice(0, 8),
-          8_000
-        );
-      } else {
-        showActionNotice(
-          "error",
-          actionErrorCopy(finished.error),
-          finished.correlationId.slice(0, 8),
-          10_000
-        );
-      }
-      await refresh();
-    } catch (error) {
-      showActionNotice(
-        "error",
-        error instanceof Error ? actionErrorCopy(error.message) : actionErrorCopy(null),
-        undefined,
-        10_000
-      );
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  const canUse = (actionId: RogG703ActionId) => {
-    const decision = availability?.[actionId];
-    return Boolean(
-      apiAvailable &&
-      decision &&
-      (decision.allowed || decision.availability === "elevation_required") &&
-      !pendingAction
-    );
-  };
+  const controller = useRogG703Controller(service);
+  const display = rogG703StatusCopy[controller.displayStatus];
 
   return (
     <section className="rog-g703-controls" data-testid="rog-g703-controls" aria-labelledby="rog-g703-title">
@@ -222,7 +26,7 @@ export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
         <HealthMark health={service.health} compact />
       </header>
 
-      <div className={`rog-g703-status rog-g703-status--${displayStatus}`} role="status" aria-live="polite">
+      <div className={`rog-g703-status rog-g703-status--${controller.displayStatus}`} role="status" aria-live="polite">
         <span className="rog-g703-status__indicator" aria-hidden="true" />
         <div>
           <strong>{display.label}</strong>
@@ -235,32 +39,91 @@ export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
           className="rog-g703-action rog-g703-action--wake"
           type="button"
           data-testid="rog-g703-wake"
-          disabled={!canUse(ROG_G703_WAKE_ACTION)}
-          aria-busy={pendingAction === ROG_G703_WAKE_ACTION}
-          title={availability?.[ROG_G703_WAKE_ACTION] ? explainAvailability(availability[ROG_G703_WAKE_ACTION].availability) : "Проверяем доступность"}
-          onClick={() => void run(ROG_G703_WAKE_ACTION)}
+          disabled={!controller.canUse(ROG_G703_WAKE_ACTION)}
+          aria-busy={controller.pendingAction === ROG_G703_WAKE_ACTION}
+          title={controller.availabilityReason(ROG_G703_WAKE_ACTION)}
+          onClick={() => void controller.run(ROG_G703_WAKE_ACTION)}
         >
-          {pendingAction === ROG_G703_WAKE_ACTION ? "Пробуждаем…" : "Включить"}
+          {controller.pendingAction === ROG_G703_WAKE_ACTION ? "Пробуждаем…" : "Включить"}
         </button>
         <button
           className="rog-g703-action rog-g703-action--hibernate"
           type="button"
           data-testid="rog-g703-hibernate"
-          disabled={!canUse(ROG_G703_HIBERNATE_ACTION)}
-          aria-busy={pendingAction === ROG_G703_HIBERNATE_ACTION}
-          title={availability?.[ROG_G703_HIBERNATE_ACTION] ? explainAvailability(availability[ROG_G703_HIBERNATE_ACTION].availability) : "Проверяем доступность"}
-          onClick={() => void run(ROG_G703_HIBERNATE_ACTION)}
+          disabled={!controller.canUse(ROG_G703_HIBERNATE_ACTION)}
+          aria-busy={controller.pendingAction === ROG_G703_HIBERNATE_ACTION}
+          title={controller.availabilityReason(ROG_G703_HIBERNATE_ACTION)}
+          onClick={() => void controller.run(ROG_G703_HIBERNATE_ACTION)}
         >
-          {pendingAction === ROG_G703_HIBERNATE_ACTION ? "Гибернация…" : "Гибернация"}
+          {controller.pendingAction === ROG_G703_HIBERNATE_ACTION ? "Гибернация…" : "Гибернация"}
         </button>
       </div>
 
       <p className="rog-g703-controls__note">
         Выключение здесь означает только гибернацию Windows S4. Полный S5 shutdown не предлагается.
       </p>
-      {!apiAvailable && (
+      {!controller.apiAvailable && (
         <p className="rog-g703-controls__unavailable">Панель не получила доступность фиксированного ASUS action API.</p>
       )}
     </section>
+  );
+}
+
+function rogG703Tone(status: ReturnType<typeof useRogG703Controller>["displayStatus"]): "success" | "warning" | "offline" | "unavailable" {
+  if (status === "online") return "success";
+  if (status === "waking" || status === "hibernating") return "warning";
+  if (status === "unavailable") return "unavailable";
+  return "offline";
+}
+
+/** Compact/standard Overview presentation backed by the same controller as System. */
+export function RogG703CompactControl({ service }: { service: ServiceSnapshot }) {
+  const controller = useRogG703Controller(service);
+  const status = controller.displayStatus;
+  const actionId = status === "online"
+    ? ROG_G703_HIBERNATE_ACTION
+    : status === "offline"
+      ? ROG_G703_WAKE_ACTION
+      : null;
+  const transition = status === "waking" || status === "hibernating";
+
+  return (
+    <WorkZone className="overview-v2-real-widget overview-rog-widget" data-testid="overview-rog-g703">
+      <span className="overview-rog-widget__icon" aria-hidden="true"><Icon name="system" /></span>
+      <div className="overview-rog-widget__identity">
+        <h2>{service.title}</h2>
+      </div>
+      <span className="overview-rog-widget__separator" aria-hidden="true">·</span>
+      <StatusText
+        label={controller.display.label}
+        tone={rogG703Tone(status)}
+        className="overview-rog-widget__status"
+      />
+      <span className="overview-rog-widget__freshness">
+        {service.presentation?.freshnessLabel ?? "свежесть не указана"}
+      </span>
+      <div className="overview-rog-widget__action">
+        {transition ? (
+          <button type="button" data-testid="overview-rog-g703-action" disabled aria-busy="true">
+            {controller.display.label}
+          </button>
+        ) : actionId ? (
+          <button
+            type="button"
+            data-testid="overview-rog-g703-action"
+            disabled={!controller.canUse(actionId)}
+            title={controller.availabilityReason(actionId)}
+            aria-busy={controller.pendingAction === actionId}
+            onClick={() => void controller.run(actionId)}
+          >
+            {controller.pendingAction === actionId ? "Проверяем…" : controller.actionTitles[actionId]}
+          </button>
+        ) : (
+          <span className="overview-rog-widget__unavailable" data-testid="overview-rog-g703-unavailable">
+            Недоступен
+          </span>
+        )}
+      </div>
+    </WorkZone>
   );
 }

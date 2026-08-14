@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, 
 import type { OverviewLayoutItem } from "@artem/contracts";
 import { ErrorBoundary } from "../../ErrorBoundary";
 import { OverviewUnavailableWidget, TrustedOverviewWidget } from "./overviewRenderers";
+import type { OverviewRuntimeContext } from "./overviewRuntime";
 import {
   projectOverviewLayout,
   type OverviewProjectionItem
@@ -35,23 +36,28 @@ function gridItemStyle(item: OverviewProjectionItem): CSSProperties {
   };
 }
 
-function renderProjectionItem(item: OverviewProjectionItem): ReactNode {
+function renderProjectionItem(
+  item: OverviewProjectionItem,
+  runtime: OverviewRuntimeContext
+): ReactNode {
   if (item.state === "fallback") {
     return <OverviewUnavailableWidget reason={item.fallbackReason ?? "unknown"} />;
   }
   return (
     <ErrorBoundary title={item.definition?.title ?? "Виджет"}>
-      <TrustedOverviewWidget item={item} />
+      <TrustedOverviewWidget item={item} runtime={runtime} />
     </ErrorBoundary>
   );
 }
 
 export function DashboardGrid({
   items,
-  className
+  className,
+  runtime
 }: {
   items: readonly OverviewLayoutItem[];
   className?: string;
+  runtime: OverviewRuntimeContext;
 }): ReactNode {
   const shellRef = useRef<HTMLElement | null>(null);
   const workspaceWidth = useMeasuredWidth(shellRef);
@@ -73,13 +79,14 @@ export function DashboardGrid({
       data-grid-columns={projection.profile.columns}
       data-grid-issue-count={projection.issues.length}
     >
-      <p
-        className="overview-v2-grid__validation"
-        data-testid="overview-grid-validation"
-        aria-hidden={projection.issues.length === 0}
-      >
-        {projection.issues.length > 0 ? `Сетка обработала ${projection.issues.length} ограничений безопасно.` : " "}
-      </p>
+      {projection.issues.length > 0 && (
+        <p
+          className="overview-v2-grid__validation"
+          data-testid="overview-grid-validation"
+        >
+          Сетка обработала {projection.issues.length} ограничений безопасно.
+        </p>
+      )}
       <div className="overview-v2-grid" style={profileStyle}>
         {projection.items.map((item, index) => (
           <div
@@ -89,13 +96,14 @@ export function DashboardGrid({
             data-instance-id={item.item.instanceId}
             data-widget-type={item.item.widgetType}
             data-grid-state={item.state}
+            data-size-variant={item.sizeVariant ?? ""}
             data-grid-x={item.placement.x}
             data-grid-y={item.placement.y}
             data-grid-w={item.placement.w}
             data-grid-h={item.placement.h}
             style={gridItemStyle(item)}
           >
-            {renderProjectionItem(item)}
+            {renderProjectionItem(item, runtime)}
           </div>
         ))}
       </div>

@@ -206,7 +206,7 @@ describe("Overview V2 responsive projection", () => {
     const compact = projectOverviewLayout(canonical, 719);
     expect(JSON.stringify(canonical)).toBe(before);
     expect(landscape.items.find((entry) => entry.item.instanceId === "fixture.coffee")?.placement)
-      .toEqual({ x: 0, y: 2, w: 7, h: 4 });
+      .toEqual({ x: 0, y: 1, w: 7, h: 4 });
     expect(medium.profile.columns).toBe(8);
     expect(compact.profile.columns).toBe(4);
     for (const projection of [medium, compact]) {

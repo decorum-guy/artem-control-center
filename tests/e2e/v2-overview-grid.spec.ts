@@ -55,10 +55,10 @@ test.describe("Overview V2 safe grid foundation", () => {
 
     const expected = [
       ["fixture.rog", 0, 0, 12, 1],
-      ["fixture.coffee", 0, 2, 7, 4],
-      ["fixture.planning", 7, 2, 5, 4],
-      ["fixture.quick-actions", 0, 6, 7, 2],
-      ["fixture.health", 7, 6, 5, 2]
+      ["fixture.coffee", 0, 1, 7, 4],
+      ["fixture.planning", 7, 1, 5, 4],
+      ["fixture.quick-actions", 0, 5, 7, 2],
+      ["fixture.health", 7, 5, 5, 2]
     ] as const;
     for (const [instanceId, x, y, w, h] of expected) {
       await expect(gridItem(page, instanceId)).toHaveAttribute("data-grid-x", String(x));
@@ -174,7 +174,7 @@ test.describe("Overview V2 safe grid foundation", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await expect(page.getByTestId("overview-grid")).toHaveAttribute("data-grid-profile", "landscape-12");
     await expect(gridItem(page, "fixture.coffee")).toHaveAttribute("data-grid-x", "0");
-    await expect(gridItem(page, "fixture.coffee")).toHaveAttribute("data-grid-y", "2");
+    await expect(gridItem(page, "fixture.coffee")).toHaveAttribute("data-grid-y", "1");
     await expect(gridItem(page, "fixture.coffee")).toHaveAttribute("data-grid-w", "7");
     await expect(gridItem(page, "fixture.coffee")).toHaveAttribute("data-grid-h", "4");
     await expectNoDocumentOverflow(page);

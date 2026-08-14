@@ -20,15 +20,19 @@ const healthLabels = {
 
 export function HealthMark({
   health,
-  compact = false
+  compact = false,
+  healthyLabel
 }: {
   health: ServiceSnapshot["health"];
   compact?: boolean;
+  healthyLabel?: string;
 }) {
+  const label = health === "healthy" && healthyLabel ? healthyLabel : healthLabels[health];
+
   return (
     <span className={`health-mark health-mark--${health} ${compact ? "health-mark--compact" : ""}`}>
       <i aria-hidden="true" />
-      {healthLabels[health]}
+      {label}
     </span>
   );
 }
@@ -63,6 +67,7 @@ function CoffeeAsset({ manifest }: { manifest: WidgetManifest }) {
       className="coffee-asset__image"
       src={resolved}
       alt={asset.alt}
+      decoding="async"
       style={{ objectFit: asset.fit }}
       onError={() => setFailed(true)}
     />
@@ -80,7 +85,7 @@ export function CoffeeWidget({
   service: ServiceSnapshot;
   generatedAt: string;
   manifest: WidgetManifest;
-  variant?: "featured" | "home" | "gallery";
+  variant?: "featured" | "home" | "gallery" | "overview";
   onAction?: (service: ServiceSnapshot, actionId: string) => void;
   actionPending?: boolean;
 }) {
@@ -141,12 +146,17 @@ export function CoffeeWidget({
       minute: "2-digit"
     })}`;
   }
+  const showsPolicyNote = data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable";
+  const overviewCopyDensity = warming || stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
+    ? "dense"
+    : "spacious";
 
   return (
     <article
       className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} ${view.warning ? "surface--warning" : ""}`}
       data-testid="widget-coffee-machine"
       data-stage={view.stage}
+      data-overview-copy-density={variant === "overview" ? overviewCopyDensity : undefined}
     >
       <div className="coffee-panel__copy">
         <div className="coffee-panel__heading">
@@ -154,7 +164,7 @@ export function CoffeeWidget({
             <p className="section-kicker">Дом · кофемашина</p>
             <h2>{service.title}</h2>
           </div>
-          <HealthMark health={service.health} compact />
+          <HealthMark health={service.health} compact healthyLabel="Онлайн" />
         </div>
 
         <div className="coffee-panel__state" aria-live="polite">
@@ -189,6 +199,9 @@ export function CoffeeWidget({
         )}
         {activeAction && !activeAction.enabled && (
           <span className="action-hint">Управление отключено политикой панели.</span>
+        )}
+        {variant === "overview" && (
+          <p className="coffee-authority">Источник: Home Assistant</p>
         )}
       </div>
 
