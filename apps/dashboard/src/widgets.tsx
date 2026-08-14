@@ -142,12 +142,17 @@ export function CoffeeWidget({
       minute: "2-digit"
     })}`;
   }
+  const showsPolicyNote = data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable";
+  const overviewCopyDensity = stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
+    ? "dense"
+    : "spacious";
 
   return (
     <article
       className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} ${view.warning ? "surface--warning" : ""}`}
       data-testid="widget-coffee-machine"
       data-stage={view.stage}
+      data-overview-copy-density={variant === "overview" ? overviewCopyDensity : undefined}
     >
       <div className="coffee-panel__copy">
         <div className="coffee-panel__heading">

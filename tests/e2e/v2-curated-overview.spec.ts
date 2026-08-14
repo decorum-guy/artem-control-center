@@ -552,12 +552,36 @@ test.describe("PR4 curated Overview", () => {
     const coffee = page.getByTestId("widget-coffee-machine");
     const image = coffee.locator(".coffee-asset__image");
     const asset = coffee.locator(".coffee-asset");
-    const imageBox = await image.boundingBox();
-    expect(imageBox?.width).toBeLessThanOrEqual(112);
-    expect(imageBox?.height).toBeLessThanOrEqual(148);
+    const spaciousImageBox = await image.boundingBox();
+    const spaciousAssetBox = await asset.boundingBox();
+    expect(await coffee.getAttribute("data-overview-copy-density")).toBe("spacious");
+    expect(spaciousImageBox?.width).toBeGreaterThan(112);
+    expect(spaciousImageBox?.width).toBeLessThanOrEqual(140);
+    expect(spaciousImageBox?.height).toBeLessThanOrEqual(204);
+    expect(Math.abs(
+      (spaciousImageBox!.x + spaciousImageBox!.width / 2) - (spaciousAssetBox!.x + spaciousAssetBox!.width / 2)
+    )).toBeLessThanOrEqual(1);
     await expect(coffee).toContainText("Источник: Home Assistant");
     await expect(asset).toHaveCSS("border-left-width", "0px");
     expect(await asset.evaluate((element) => getComputedStyle(element).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+
+    await page.goto("/overview?scenario=ha-offline-policy-available&theme=night");
+    await waitForOverview(page);
+    const denseCoffee = page.getByTestId("widget-coffee-machine");
+    const denseImage = denseCoffee.locator(".coffee-asset__image");
+    const denseAsset = denseCoffee.locator(".coffee-asset");
+    const denseMarker = denseCoffee.locator(".coffee-state-marker");
+    const denseImageBox = await denseImage.boundingBox();
+    const denseAssetBox = await denseAsset.boundingBox();
+    const denseMarkerBox = await denseMarker.boundingBox();
+    expect(await denseCoffee.getAttribute("data-overview-copy-density")).toBe("dense");
+    expect(denseImageBox?.width).toBeLessThan(spaciousImageBox?.width ?? Number.POSITIVE_INFINITY);
+    expect(denseImageBox?.x).toBeGreaterThan(spaciousImageBox?.x ?? 0);
+    expect(Math.abs(
+      (denseImageBox!.x + denseImageBox!.width / 2) - (denseAssetBox!.x + denseAssetBox!.width / 2)
+    )).toBeLessThanOrEqual(1);
+    expect((denseImageBox?.y ?? 0) + (denseImageBox?.height ?? 0)).toBeLessThanOrEqual(denseMarkerBox?.y ?? Number.POSITIVE_INFINITY);
+    await expect(denseMarker).toHaveText("Недоступна");
     await expectNoOverflow(page);
   });
 
