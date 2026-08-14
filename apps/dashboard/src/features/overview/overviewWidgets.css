@@ -324,16 +324,16 @@
 
 .coffee-panel--overview .coffee-asset__image {
   width: auto;
-  height: min(192px, calc((100% - 44px) / var(--cc-coffee-image-scale, 1)));
+  height: min(184px, calc((100% - 52px) / var(--cc-coffee-image-scale, 1)));
   max-width: 140px;
-  max-height: calc(100% - 40px);
+  max-height: calc(100% - 48px);
   object-fit: contain;
   transform: scale(var(--cc-coffee-image-scale, 1));
   transform-origin: center bottom;
 }
 
 .coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset__image {
-  height: 156px;
+  height: 148px;
   max-width: 104px;
 }
 

@@ -312,7 +312,7 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
   }
 }
 
-async function assertCoffeeContentGeometry(page: Page): Promise<void> {
+async function assertCoffeeContentGeometry(page: Page, scenarioLabel = "current Coffee state"): Promise<void> {
   const geometry = await page.evaluate(() => {
     const rectFor = (element: Element | null): Rect | null => {
       if (!element) return null;
@@ -331,17 +331,17 @@ async function assertCoffeeContentGeometry(page: Page): Promise<void> {
       ".coffee-panel__copy .primary-action",
       ".coffee-authority",
       ".coffee-state-marker"
-    ].map((selector) => rectFor(coffee?.querySelector(selector) ?? null)).filter(Boolean);
+    ].map((selector) => ({ selector, rect: rectFor(coffee?.querySelector(selector) ?? null) })).filter(({ rect }) => rect);
     return { image, activity, semanticContent };
   });
 
   expect(geometry.image).not.toBeNull();
   for (const content of geometry.semanticContent) {
-    if (geometry.image) expect(rectIntersects(geometry.image, content)).toBe(false);
+    if (geometry.image) expect(rectIntersects(geometry.image, content.rect), `${scenarioLabel}: image intersects ${content.selector}`).toBe(false);
   }
   for (const bar of geometry.activity) {
     for (const content of geometry.semanticContent) {
-      if (bar) expect(rectIntersects(bar, content)).toBe(false);
+      if (bar) expect(rectIntersects(bar, content.rect), `${scenarioLabel}: activity intersects ${content.selector}`).toBe(false);
     }
   }
 }
@@ -509,18 +509,18 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     ] as const) {
       await page.goto(`/overview?scenario=${scenario}&theme=night`);
       await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", stage);
-      await assertCoffeeContentGeometry(page);
+      await assertCoffeeContentGeometry(page, scenario);
     }
 
     await openEditor(page, "/overview?scenario=coffee-off&theme=night");
     await selectFrame(page, "fixture.coffee");
     await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
-    await assertCoffeeContentGeometry(page);
+    await assertCoffeeContentGeometry(page, "coffee-off selected");
     await captureArtifact(page, testInfo, "overview-edit-coffee-off-selected.png");
 
     await page.goto("/overview?scenario=coffee-warming&theme=night");
     await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", "warming");
-    await assertCoffeeContentGeometry(page);
+    await assertCoffeeContentGeometry(page, "coffee-warming");
     await assertCoffeeActivityPhases(page);
     await captureArtifact(page, testInfo, "overview-coffee-warming.png");
 
