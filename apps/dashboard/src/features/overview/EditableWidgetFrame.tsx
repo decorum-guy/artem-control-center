@@ -143,6 +143,7 @@ export function EditableWidgetFrame({
       className={`overview-edit-frame${selected ? " overview-edit-frame--selected" : ""}${preview ? " overview-edit-frame--dragging" : ""}${preview?.invalid ? " overview-edit-frame--invalid" : ""}`}
       data-testid="overview-edit-frame"
       data-instance-id={item.instanceId}
+      data-widget-type={item.widgetType}
       data-selected={selected}
       tabIndex={0}
       role="group"

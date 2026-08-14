@@ -60,10 +60,10 @@ export function EditToolbar({
             : saving
               ? "Сохраняем…"
               : uncertain
-                ? "Проверяем результат сохранения…"
+                ? "Проверяем…"
                 : dirty
-                  ? "Есть несохранённые изменения"
-                  : "Изменений нет"}
+                ? "Есть изменения"
+                : "Изменений нет"}
           {message && !conflict && <span className="overview-v2-toolbar__message">{message}</span>}
         </div>
         <div className="overview-v2-toolbar__edit-actions overview-v2-toolbar__edit-actions--end">

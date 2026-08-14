@@ -216,6 +216,69 @@ async function selectFrame(page: Page, instanceId: string): Promise<void> {
   await page.locator(`.overview-edit-frame[data-instance-id="${instanceId}"]`).press("Enter");
 }
 
+type Rect = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+
+function rectIntersects(left: Rect, right: Rect): boolean {
+  return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+}
+
+async function assertEditorChromeGeometry(page: Page, instanceId: string, neighborIds: string[]): Promise<void> {
+  const geometry = await page.evaluate(({ instanceId: currentId, neighborIds: currentNeighborIds }) => {
+    const rectFor = (element: Element | null): Rect | null => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const frame = document.querySelector(`.overview-edit-frame[data-instance-id="${currentId}"]`);
+    const controls = Array.from(frame?.querySelectorAll(
+      ".overview-edit-frame__drag-handle, .overview-edit-frame__actions button, .overview-edit-frame__resize-handle, .overview-edit-frame__menu-toggle, .overview-edit-frame__size"
+    ) ?? []).map((element) => ({
+      className: element.className,
+      rect: rectFor(element),
+      visualRect: element.classList.contains("overview-edit-frame__size") ? rectFor(element) : (() => {
+        const rect = rectFor(element);
+        return rect ? { ...rect, left: rect.left + 8, top: rect.top + 8, right: rect.right - 8, bottom: rect.bottom - 8, width: rect.width - 16, height: rect.height - 16 } : null;
+      })()
+    }));
+    const neighbors = Object.fromEntries(currentNeighborIds.map((neighborId) => [
+      neighborId,
+      rectFor(document.querySelector(`.overview-edit-frame[data-instance-id="${neighborId}"]`))
+    ]));
+    return {
+      frame: rectFor(frame),
+      controls,
+      neighbors,
+      coffeeContent: currentId === "fixture.coffee"
+        ? [
+            ".coffee-panel--overview .coffee-panel__heading h2",
+            ".coffee-panel--overview .coffee-panel__heading .v2-status-text",
+            ".coffee-panel--overview .coffee-panel__state",
+            ".coffee-panel--overview .coffee-authority",
+            ".coffee-panel--overview .coffee-asset",
+            ".coffee-panel--overview .coffee-state-marker"
+          ].map((selector) => rectFor(frame?.querySelector(selector) ?? null)).filter(Boolean)
+        : []
+    };
+  }, { instanceId, neighborIds });
+
+  expect(geometry.frame).not.toBeNull();
+  for (const control of geometry.controls) {
+    if (!control.className.includes("overview-edit-frame__size")) {
+      expect(control.rect?.width ?? 0, control.className).toBeGreaterThanOrEqual(48);
+      expect(control.rect?.height ?? 0, control.className).toBeGreaterThanOrEqual(48);
+    }
+    for (const neighborId of neighborIds) {
+      const neighbor = geometry.neighbors[neighborId as keyof typeof geometry.neighbors];
+      if (control.rect && neighbor) expect(rectIntersects(control.rect, neighbor)).toBe(false);
+    }
+    if (instanceId === "fixture.coffee") {
+      for (const content of geometry.coffeeContent) {
+        if (control.visualRect && content) expect(rectIntersects(control.visualRect, content)).toBe(false);
+      }
+    }
+  }
+}
+
 async function setCoffeeScale(page: Page, value: string): Promise<void> {
   const frame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
   await selectFrame(page, "fixture.coffee");
@@ -308,6 +371,47 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await coffeeMenu.click();
     await page.getByRole("menuitem", { name: "Размер 8 × 5" }).click();
     await captureArtifact(page, testInfo, "overview-edit-resize.png");
+  });
+
+  test("keeps the canonical toolbar compact and selected chrome within widget ownership bounds", async ({ page }, testInfo) => {
+    await installLayoutRoute(page);
+    await openEditor(page);
+
+    const canonicalGeometry = await page.evaluate(() => {
+      const toolbar = document.querySelector("[data-testid=overview-edit-toolbar]");
+      const grid = document.querySelector("[data-testid=overview-grid]");
+      const coffee = document.querySelector('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+      const rectFor = (element: Element | null) => {
+        const rect = element?.getBoundingClientRect();
+        return rect ? { top: rect.top, bottom: rect.bottom, height: rect.height } : null;
+      };
+      const buttonTops = Array.from(toolbar?.querySelectorAll("button") ?? []).map((button) => button.getBoundingClientRect().top);
+      return {
+        toolbar: rectFor(toolbar),
+        grid: rectFor(grid),
+        coffee: rectFor(coffee),
+        buttonTops,
+        horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+      };
+    });
+    expect(canonicalGeometry.toolbar?.height ?? 999).toBeLessThanOrEqual(64);
+    expect(Math.max(...canonicalGeometry.buttonTops) - Math.min(...canonicalGeometry.buttonTops)).toBeLessThanOrEqual(2);
+    expect(canonicalGeometry.grid?.top ?? 999).toBeLessThanOrEqual(200);
+    expect(canonicalGeometry.coffee?.top ?? 999).toBeLessThanOrEqual(300);
+    expect(Math.min(canonicalGeometry.coffee?.bottom ?? 0, 720) - (canonicalGeometry.coffee?.top ?? 720)).toBeGreaterThanOrEqual(240);
+    expect(canonicalGeometry.horizontalOverflow).toBe(false);
+
+    await selectFrame(page, "fixture.coffee");
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await captureArtifact(page, testInfo, "overview-edit-selected-coffee.png");
+
+    await selectFrame(page, "fixture.rog");
+    await assertEditorChromeGeometry(page, "fixture.rog", ["fixture.coffee", "fixture.planning"]);
+    await captureArtifact(page, testInfo, "overview-edit-selected-rog.png");
+
+    await selectFrame(page, "fixture.quick-actions");
+    await assertEditorChromeGeometry(page, "fixture.quick-actions", ["fixture.coffee", "fixture.health"]);
+    await captureArtifact(page, testInfo, "overview-edit-selected-lower-widget.png");
   });
 
   test("adds bounded widgets and sends one complete canonical save", async ({ page }, testInfo) => {
