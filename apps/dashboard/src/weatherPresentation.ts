@@ -1,6 +1,10 @@
+import { localDateForInstant, localDateTimeToUtc } from "./calendarRange";
+
 export type WeatherKind = "clear" | "partly" | "cloudy" | "fog" | "rain" | "snow" | "storm" | "unknown";
 
 export type WeatherCelestialBody = "sun" | "moon" | null;
+
+export type WeatherGlyphPhase = "day" | "night" | "neutral";
 
 export type WeatherStaticLayer =
   | "sun"
@@ -60,7 +64,67 @@ export function weatherKind(code: number): WeatherKind {
 
 /** Keep condition truth visible even when the compositor falls back. */
 export function weatherLabel(code: number): string {
-  return CONDITION_LABELS[code] ?? "Погода меняется";
+  return CONDITION_LABELS[code] ?? "Условия не определены";
+}
+
+export interface WeatherDaylightWindow {
+  date: string;
+  sunrise: string;
+  sunset: string;
+}
+
+function parseTrustedWeatherTimestamp(value: string, timeZone: string): Date | null {
+  const text = value.trim();
+  if (!text) return null;
+
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)) {
+    const absolute = new Date(text);
+    return Number.isNaN(absolute.getTime()) ? null : absolute;
+  }
+
+  const localMatch = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(text);
+  if (!localMatch) return null;
+
+  const hour = Number(localMatch[2]);
+  const minute = Number(localMatch[3]);
+  const second = Number(localMatch[4] ?? 0);
+  if (hour > 23 || minute > 59 || second > 59) return null;
+
+  try {
+    return localDateTimeToUtc(localMatch[1], timeZone, hour, minute, second);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a future provider timestamp against that provider day's trusted
+ * sunrise/sunset window. Local provider timestamps are interpreted in the
+ * forecast IANA timezone; offset-bearing timestamps are compared as instants.
+ */
+export function resolveWeatherHourPhase(
+  hourTime: string,
+  daylight: readonly WeatherDaylightWindow[],
+  timeZone: string
+): WeatherGlyphPhase {
+  const hourInstant = parseTrustedWeatherTimestamp(hourTime, timeZone);
+  if (!hourInstant) return "neutral";
+
+  let localDate: string;
+  try {
+    localDate = localDateForInstant(hourInstant, timeZone);
+  } catch {
+    return "neutral";
+  }
+
+  const window = daylight.find((candidate) => candidate.date === localDate);
+  if (!window) return "neutral";
+
+  const sunrise = parseTrustedWeatherTimestamp(window.sunrise, timeZone);
+  const sunset = parseTrustedWeatherTimestamp(window.sunset, timeZone);
+  if (!sunrise || !sunset || sunset < sunrise) return "neutral";
+
+  return hourInstant >= sunrise && hourInstant <= sunset ? "day" : "night";
 }
 
 export interface WeatherConditionPresentation {

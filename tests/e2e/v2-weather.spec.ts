@@ -44,7 +44,13 @@ const artifactNames = [
   "weather-snow-near-seam-before.png",
   "weather-snow-near-seam-zero.png",
   "weather-snow-far-seam-before.png",
-  "weather-snow-far-seam-zero.png"
+  "weather-snow-far-seam-zero.png",
+  "weather-fog-near-seam-before.png",
+  "weather-fog-near-seam-zero.png",
+  "weather-fog-near-seam-end.png",
+  "weather-fog-far-seam-before.png",
+  "weather-fog-far-seam-zero.png",
+  "weather-fog-far-seam-end.png"
 ] as const;
 
 async function openWeather(page: Page, fixture: WeatherFixture, query = "") {
@@ -72,6 +78,21 @@ async function expectWeatherTouchTargets(page: Page) {
       : [{ text: element.textContent?.trim(), width: rect.width, height: rect.height }];
   }));
   expect(violations, JSON.stringify(violations)).toEqual([]);
+}
+
+async function renderedPlaneCoverage(page: Page, layerName: string) {
+  return page.evaluate((name) => {
+    const hero = document.querySelector<HTMLElement>('[data-testid="weather-hero"]');
+    const layer = document.querySelector<HTMLElement>(`[data-weather-moving-layer="${name}"]`);
+    if (!hero || !layer) throw new Error(`Missing Weather coverage nodes for ${name}`);
+    const heroRect = hero.getBoundingClientRect();
+    const layerRect = layer.getBoundingClientRect();
+    return {
+      hero: { left: heroRect.left, right: heroRect.right, top: heroRect.top, bottom: heroRect.bottom, width: heroRect.width, height: heroRect.height },
+      layer: { left: layerRect.left, right: layerRect.right, top: layerRect.top, bottom: layerRect.bottom, width: layerRect.width, height: layerRect.height },
+      horizontalOverdraw: layerRect.width - heroRect.width
+    };
+  }, layerName);
 }
 
 async function artifactDirectory(testInfo: { outputPath: (name: string) => string }) {
@@ -113,6 +134,26 @@ test.describe("Control Center V2 Weather", () => {
         await expect(page.getByTestId("weather-hero")).toHaveAttribute("data-weather-tone", fixture);
       }
     }
+  });
+
+  test("resolves future glyph phases from each provider daylight window", async ({ page }) => {
+    await openWeather(page, "clear-day");
+    const phases = await page.locator(".weather-hour--v2").evaluateAll((cards) => Object.fromEntries(cards.map((card) => [
+      card.getAttribute("data-weather-time"),
+      card.querySelector<HTMLElement>(".weather-glyph")?.getAttribute("data-weather-phase")
+    ])));
+    expect(phases["2026-08-11T20:00"]).toBe("day");
+    expect(phases["2026-08-11T21:00"]).toBe("night");
+    await expect(page.locator(".weather-hour--v2[data-weather-time='2026-08-11T21:00'] .weather-glyph")).toHaveText("☾");
+
+    const dailyPhases = await page.locator(".weather-day--v2 .weather-glyph").evaluateAll((glyphs) => glyphs.map((glyph) => glyph.getAttribute("data-weather-phase")));
+    expect(dailyPhases.length).toBeGreaterThan(0);
+    expect(dailyPhases.every((phase) => phase === "neutral")).toBeTruthy();
+
+    await openWeather(page, "clear-night");
+    await expect(page.locator(".weather-hero__condition-glyph .weather-glyph")).toHaveAttribute("data-weather-phase", "night");
+    await expect(page.locator(".weather-hour--v2[data-weather-time='2026-08-11T21:00'] .weather-glyph")).toHaveAttribute("data-weather-phase", "night");
+    await expect(page.locator(".weather-hour--v2[data-weather-time='2026-08-11T20:00'] .weather-glyph")).toHaveAttribute("data-weather-phase", "day");
   });
 
   test("uses fixed fixture conditions without arbitrary presentation injection", async ({ page }) => {
@@ -176,12 +217,12 @@ test.describe("Control Center V2 Weather", () => {
 
   test("proves transform-only, tile-exact seam boundaries", async ({ page }) => {
     const cases = [
-      { fixture: "partly-day" as const, layer: "clouds", end: "translate3d(-560px, 0px, 0px)", tile: "560x160" },
-      { fixture: "rain-day" as const, layer: "rain", end: "translate3d(-24px, 72px, 0px)", tile: "24x72" },
-      { fixture: "snow-day" as const, layer: "snow-near", end: "translate3d(-40px, 80px, 0px)", tile: "40x80" },
-      { fixture: "snow-day" as const, layer: "snow-far", end: "translate3d(-64px, 96px, 0px)", tile: "64x96" },
-      { fixture: "fog" as const, layer: "fog-far", end: "translate3d(-420px, 0px, 0px)", tile: "420x160" },
-      { fixture: "fog" as const, layer: "fog-near", end: "translate3d(-520px, 0px, 0px)", tile: "520x180" }
+      { fixture: "partly-day" as const, layer: "clouds", end: "translate3d(-560px, 0px, 0px)", tile: "560x160", tileWidth: 560, fullVerticalCoverage: false },
+      { fixture: "fog" as const, layer: "fog-far", end: "translate3d(-420px, 0px, 0px)", tile: "420x160", tileWidth: 420, fullVerticalCoverage: false },
+      { fixture: "fog" as const, layer: "fog-near", end: "translate3d(-520px, 0px, 0px)", tile: "520x180", tileWidth: 520, fullVerticalCoverage: false },
+      { fixture: "rain-day" as const, layer: "rain", end: "translate3d(-24px, 72px, 0px)", tile: "24x72", tileWidth: 24, fullVerticalCoverage: true },
+      { fixture: "snow-day" as const, layer: "snow-far", end: "translate3d(-64px, 96px, 0px)", tile: "64x96", tileWidth: 64, fullVerticalCoverage: true },
+      { fixture: "snow-day" as const, layer: "snow-near", end: "translate3d(-40px, 80px, 0px)", tile: "40x80", tileWidth: 40, fullVerticalCoverage: true }
     ];
 
     for (const item of cases) {
@@ -193,8 +234,35 @@ test.describe("Control Center V2 Weather", () => {
       expect(before).not.toBe("none");
 
       await openWeather(page, item.fixture, `weatherPhase=end`);
-      const end = await page.locator(`[data-weather-moving-layer='${item.layer}']`).evaluate((element) => getComputedStyle(element).transform);
+      const endLayer = page.locator(`[data-weather-moving-layer='${item.layer}']`);
+      const end = await endLayer.evaluate((element) => getComputedStyle(element).transform);
       expect(end).toMatch(/matrix\(1, 0, 0, 1, -/);
+
+      if (item.layer === "clouds") {
+        const endGroups = await page.locator("[data-weather-cloud-group]").evaluateAll((groups) => groups.map((group) => {
+          const rect = group.getBoundingClientRect();
+          return { left: rect.left, width: rect.width, height: rect.height };
+        }));
+        await openWeather(page, item.fixture, "weatherPhase=zero");
+        const zeroGroups = await page.locator("[data-weather-cloud-group]").evaluateAll((groups) => groups.map((group) => {
+          const rect = group.getBoundingClientRect();
+          return { left: rect.left, width: rect.width, height: rect.height };
+        }));
+        expect(endGroups).toHaveLength(2);
+        expect(zeroGroups).toHaveLength(2);
+        expect(endGroups[0].width).toBeCloseTo(zeroGroups[0].width, 1);
+        expect(endGroups[0].height).toBeCloseTo(zeroGroups[0].height, 1);
+        expect(endGroups[1].left).toBeCloseTo(zeroGroups[0].left, 1);
+      } else {
+        const coverage = await renderedPlaneCoverage(page, item.layer);
+        expect(coverage.layer.left).toBeLessThanOrEqual(coverage.hero.left + 1);
+        expect(coverage.layer.right).toBeGreaterThanOrEqual(coverage.hero.right - 1);
+        expect(coverage.horizontalOverdraw).toBeGreaterThanOrEqual(item.tileWidth - 4);
+        if (item.fullVerticalCoverage) {
+          expect(coverage.layer.top).toBeLessThanOrEqual(coverage.hero.top + 1);
+          expect(coverage.layer.bottom).toBeGreaterThanOrEqual(coverage.hero.bottom - 1);
+        }
+      }
 
       await openWeather(page, item.fixture, `weatherPhase=zero`);
       const zero = await page.locator(`[data-weather-moving-layer='${item.layer}']`).evaluate((element) => getComputedStyle(element).transform);
@@ -300,13 +368,19 @@ test.describe("Control Center V2 Weather", () => {
       ["weather-cloud-seam", "partly-day", "clouds"],
       ["weather-rain-seam", "rain-day", "rain"],
       ["weather-snow-near-seam", "snow-day", "snow-near"],
-      ["weather-snow-far-seam", "snow-day", "snow-far"]
+      ["weather-snow-far-seam", "snow-day", "snow-far"],
+      ["weather-fog-near-seam", "fog", "fog-near"],
+      ["weather-fog-far-seam", "fog", "fog-far"]
     ] as const) {
       await page.setViewportSize({ width: 1280, height: 720 });
       await openWeather(page, seam[1], "weatherPhase=before");
       await page.screenshot({ path: path.join(directory, `${seam[0]}-before.png`), animations: "disabled" });
       await openWeather(page, seam[1], "weatherPhase=zero");
       await page.screenshot({ path: path.join(directory, `${seam[0]}-zero.png`), animations: "disabled" });
+      if (seam[2].startsWith("fog")) {
+        await openWeather(page, seam[1], "weatherPhase=end");
+        await page.screenshot({ path: path.join(directory, `${seam[0]}-end.png`), animations: "disabled" });
+      }
     }
 
     const files = (await readdir(directory)).filter((file) => file.endsWith(".png")).sort();

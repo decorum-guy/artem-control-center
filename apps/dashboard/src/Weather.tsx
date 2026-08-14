@@ -30,7 +30,7 @@ import { v2VisualShellEnabled } from "./visualShellConfig";
 import { composeWeather, phaseTransform, readWeatherPhase, type WeatherPhase } from "./weatherCompositor";
 import { useWeatherMotionState } from "./weatherMotion";
 import { applyWeatherFixture, readWeatherFixtureId } from "./weatherFixtures";
-import { weatherKind, weatherLabel } from "./weatherPresentation";
+import { resolveWeatherHourPhase, weatherKind, weatherLabel, type WeatherGlyphPhase } from "./weatherPresentation";
 
 interface WeatherContextValue {
   locations: WeatherLocation[];
@@ -50,11 +50,11 @@ interface WeatherContextValue {
 const WeatherContext = createContext<WeatherContextValue | null>(null);
 const ACTIVE_LOCATION_KEY = "artem.weather.active-location";
 
-function WeatherGlyph({ code, compact = false, isDay = true }: { code: number; compact?: boolean; isDay?: boolean }) {
+function WeatherGlyph({ code, compact = false, phase }: { code: number; compact?: boolean; phase: WeatherGlyphPhase }) {
   const kind = weatherKind(code);
   const glyph = {
-    clear: isDay ? "☀" : "☾",
-    partly: isDay ? "◒" : "☾",
+    clear: phase === "day" ? "☀" : phase === "night" ? "☾" : "○",
+    partly: phase === "night" ? "☾" : "◒",
     cloudy: "☁",
     fog: "≋",
     rain: "☂",
@@ -62,7 +62,7 @@ function WeatherGlyph({ code, compact = false, isDay = true }: { code: number; c
     storm: "ϟ",
     unknown: "·"
   }[kind];
-  return <span className={`weather-glyph weather-glyph--${kind} ${compact ? "weather-glyph--compact" : ""}`} aria-hidden="true">{glyph}</span>;
+  return <span className={`weather-glyph weather-glyph--${kind} ${compact ? "weather-glyph--compact" : ""}`} data-weather-phase={phase} aria-hidden="true">{glyph}</span>;
 }
 
 function formatTemperature(value: number): string {
@@ -292,7 +292,7 @@ function WeatherHero({ forecast, preview }: { forecast: WeatherForecast; preview
             <strong>{formatTemperature(forecast.current.temperature)}</strong>
             <span>{weatherLabel(forecast.current.weatherCode)}</span>
           </div>
-          <WeatherGlyph code={forecast.current.weatherCode} />
+          <WeatherGlyph code={forecast.current.weatherCode} phase={forecast.current.isDay ? "day" : "night"} />
         </div>
 
         <div className="weather-hero__bottom">
@@ -323,7 +323,7 @@ function HourlyForecast({ forecast }: { forecast: WeatherForecast }) {
           {forecast.hourly.map((hour, index) => (
             <article className={`weather-hour ${index === 0 ? "weather-hour--now" : ""}`} key={`${hour.time}-${index}`} role="listitem">
               <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
-              <WeatherGlyph code={hour.weatherCode} compact />
+              <WeatherGlyph code={hour.weatherCode} compact phase={resolveWeatherHourPhase(hour.time, forecast.daily, forecast.timezone)} />
               <strong>{formatTemperature(hour.temperature)}</strong>
               <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>
                 {hour.precipitationProbability}%
@@ -353,7 +353,7 @@ function DailyForecast({ forecast }: { forecast: WeatherForecast }) {
               <strong>{index === 0 ? "Сегодня" : formatWeekday(day.date)}</strong>
               <span>{new Date(`${day.date}T12:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
             </div>
-            <WeatherGlyph code={day.weatherCode} compact />
+            <WeatherGlyph code={day.weatherCode} compact phase="neutral" />
             <span className="weather-day__condition">{weatherLabel(day.weatherCode)}</span>
             <span className={day.precipitationProbabilityMax >= 40 ? "weather-rain-chance--active" : ""}>{day.precipitationProbabilityMax}%</span>
             <div className="weather-day__temperatures"><strong>{formatTemperature(day.temperatureMax)}</strong><span>{formatTemperature(day.temperatureMin)}</span></div>
@@ -794,7 +794,7 @@ function WeatherHeroV2({
             <span>{model.label}</span>
           </div>
           <div className="weather-hero__condition-glyph" data-weather-celestial={model.celestialBody ?? "none"}>
-            <WeatherGlyph code={forecast.current.weatherCode} isDay={forecast.current.isDay} />
+            <WeatherGlyph code={forecast.current.weatherCode} phase={forecast.current.isDay ? "day" : "night"} />
           </div>
         </div>
 
@@ -832,9 +832,9 @@ function HourlyForecastV2({ forecast }: { forecast: WeatherForecast }) {
       </header>
       <div className="weather-hourly weather-hourly--v2" role="list">
         {hours.map((hour, index) => (
-          <article className={`weather-hour weather-hour--v2 ${index === 0 ? "weather-hour--now" : ""}`} key={`${hour.time}-${index}`} role="listitem" title={`${formatClock(hour.time)} · ${Math.round(hour.windSpeed)} км/ч`}>
+          <article className={`weather-hour weather-hour--v2 ${index === 0 ? "weather-hour--now" : ""}`} key={`${hour.time}-${index}`} data-weather-time={hour.time} role="listitem" title={`${formatClock(hour.time)} · ${Math.round(hour.windSpeed)} км/ч`}>
             <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
-            <WeatherGlyph code={hour.weatherCode} compact isDay={forecast.current.isDay} />
+            <WeatherGlyph code={hour.weatherCode} compact phase={resolveWeatherHourPhase(hour.time, forecast.daily, forecast.timezone)} />
             <strong>{formatTemperature(hour.temperature)}</strong>
             <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>{hour.precipitationProbability}%</span>
           </article>
@@ -892,7 +892,7 @@ function DailyForecastV2({ forecast }: { forecast: WeatherForecast }) {
               <strong>{index === 0 ? "Сегодня" : formatWeekday(day.date)}</strong>
               <span>{new Date(`${day.date}T12:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
             </div>
-            <WeatherGlyph code={day.weatherCode} compact isDay={forecast.current.isDay} />
+            <WeatherGlyph code={day.weatherCode} compact phase="neutral" />
             <span className="weather-day__condition">{weatherLabel(day.weatherCode)}</span>
             <span className={day.precipitationProbabilityMax >= 40 ? "weather-rain-chance--active" : ""}>{day.precipitationProbabilityMax}%</span>
             <div className="weather-day__temperatures"><strong>{formatTemperature(day.temperatureMax)}</strong><span>{formatTemperature(day.temperatureMin)}</span></div>

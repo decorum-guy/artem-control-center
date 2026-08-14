@@ -874,7 +874,6 @@
 .weather-layer--fog-far,
 .weather-layer--fog-near {
   left: 0;
-  width: calc(100% + 420px);
   background-repeat: repeat-x;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
@@ -882,6 +881,7 @@
 
 .weather-layer--fog-far {
   top: 30px;
+  width: calc(100% + 420px);
   height: 58px;
   opacity: .27;
   background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--cc-text) 22%, transparent) 0 160px, transparent 160px 420px);
@@ -891,6 +891,7 @@
 
 .weather-layer--fog-near {
   top: 116px;
+  width: calc(100% + 520px);
   height: 72px;
   opacity: .2;
   background-image: repeating-linear-gradient(90deg, color-mix(in srgb, var(--cc-text) 25%, transparent) 0 210px, transparent 210px 520px);

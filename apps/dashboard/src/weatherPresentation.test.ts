@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { composeWeather } from "./weatherCompositor";
 import {
   presentWeatherCondition,
+  resolveWeatherHourPhase,
   weatherKind,
   weatherLabel,
   type WeatherKind
@@ -30,7 +31,7 @@ describe("weather presentation", () => {
 
   it("uses the safe generic fallback for an unrecognized provider code", () => {
     expect(weatherKind(7)).toBe("unknown");
-    expect(weatherLabel(7)).toBe("Погода меняется");
+    expect(weatherLabel(7)).toBe("Условия не определены");
     const presentation = presentWeatherCondition({ weatherCode: 7, isDay: false, label: "Код провайдера 7" });
     expect(presentation.kind).toBe("unknown");
     expect(presentation.label).toBe("Код провайдера 7");
@@ -80,5 +81,37 @@ describe("weather presentation", () => {
     expect(first).toEqual(second);
     expect(first.label).toBe("Дождь");
     expect(first.movingLayers).toEqual(["rain"]);
+  });
+
+  it("resolves future local provider timestamps across the trusted sunset window", () => {
+    const daylight = [{
+      date: "2026-08-11",
+      sunrise: "2026-08-11T05:03",
+      sunset: "2026-08-11T20:24"
+    }];
+
+    expect(resolveWeatherHourPhase("2026-08-11T04:00", daylight, "Europe/Moscow")).toBe("night");
+    expect(resolveWeatherHourPhase("2026-08-11T06:00", daylight, "Europe/Moscow")).toBe("day");
+    expect(resolveWeatherHourPhase("2026-08-11T20:00", daylight, "Europe/Moscow")).toBe("day");
+    expect(resolveWeatherHourPhase("2026-08-11T21:00", daylight, "Europe/Moscow")).toBe("night");
+  });
+
+  it("compares offset-bearing provider timestamps as absolute instants", () => {
+    const daylight = [{
+      date: "2026-08-11",
+      sunrise: "2026-08-11T05:03",
+      sunset: "2026-08-11T20:24"
+    }];
+
+    expect(resolveWeatherHourPhase("2026-08-11T17:00:00Z", daylight, "Europe/Moscow")).toBe("day");
+    expect(resolveWeatherHourPhase("2026-08-11T18:00:00Z", daylight, "Europe/Moscow")).toBe("night");
+  });
+
+  it("returns the neutral phase when the trusted daylight window cannot be resolved", () => {
+    expect(resolveWeatherHourPhase(
+      "2026-08-12T12:00",
+      [{ date: "2026-08-11", sunrise: "bad", sunset: "bad" }],
+      "Europe/Moscow"
+    )).toBe("neutral");
   });
 });
