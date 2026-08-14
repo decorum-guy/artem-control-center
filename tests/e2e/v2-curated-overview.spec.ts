@@ -435,8 +435,20 @@ test.describe("PR4 curated Overview", () => {
     await setConnectivityFixture(page, "unavailable");
     await page.goto("/overview?scenario=ha-offline-policy-available&theme=night");
     await waitForOverview(page);
-    await expect(page.getByTestId("overview-health-recovery-unavailable")).toHaveText("Восстановление недоступно");
-    await expect(page.getByTestId("overview-health-recovery-slot").locator("button")).toHaveCount(0);
+    const unavailable = page.getByTestId("overview-health-recovery-unavailable");
+    const unavailableSlot = page.getByTestId("overview-health-recovery-slot");
+    await expect(unavailable).toHaveText("Восстановление недоступно");
+    await expect(unavailableSlot.locator("button")).toHaveCount(0);
+    const [unavailableBox, unavailableSlotBox, unavailableLayout] = await Promise.all([
+      unavailable.boundingBox(),
+      unavailableSlot.boundingBox(),
+      unavailable.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }))
+    ]);
+    expect(unavailableBox).not.toBeNull();
+    expect(unavailableSlotBox).not.toBeNull();
+    expect(unavailableBox?.x).toBeGreaterThanOrEqual((unavailableSlotBox?.x ?? 0) - 1);
+    expect((unavailableBox?.x ?? 0) + (unavailableBox?.width ?? 0)).toBeLessThanOrEqual((unavailableSlotBox?.x ?? 0) + (unavailableSlotBox?.width ?? 0) + 1);
+    expect(unavailableLayout.scrollWidth).toBeLessThanOrEqual(unavailableLayout.clientWidth + 1);
     await expectHealthGeometry(page);
     await expectNoOverflow(page);
   });

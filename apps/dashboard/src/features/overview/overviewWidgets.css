@@ -469,10 +469,10 @@
 
 .overview-health-widget__recovery-slot {
   display: flex;
-  flex: 0 0 156px;
+  flex: 0 0 200px;
   align-items: center;
   justify-content: flex-end;
-  min-width: 156px;
+  min-width: 200px;
   min-height: 48px;
 }
 
