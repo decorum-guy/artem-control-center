@@ -111,6 +111,21 @@ jobs:
           path: artifacts/v2-overlays-review
           if-no-files-found: error
 
+      - name: Run focused PR6 Weather compositor and route gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          V2_WEATHER_ARTIFACT_DIR: artifacts/v2-weather-review
+        run: npm run test:e2e -- tests/e2e/v2-weather.spec.ts
+
+      - name: Upload PR6 Weather review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-weather-review-${{ github.sha }}
+          path: artifacts/v2-weather-review
+          if-no-files-found: error
+
       - name: Run focused V2 Overview grid gate
         if: runner.os == 'Linux'
         env:
