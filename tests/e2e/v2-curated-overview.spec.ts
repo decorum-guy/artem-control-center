@@ -383,10 +383,16 @@ test.describe("PR4 curated Overview", () => {
     await waitForOverview(page);
     await expect(page.getByTestId("overview-rog-g703-action")).toHaveText("Включить");
     await page.goto("/system?theme=night");
-    await expect(page.getByTestId("rog-g703-controls")).toBeVisible();
-    await expect(page.getByTestId("rog-g703-controls")).toContainText("Не в сети");
-    await expect(page.getByTestId("rog-g703-wake")).toBeEnabled();
-    await expect(page.getByTestId("rog-g703-hibernate")).toBeDisabled();
+    if (visualShellEnabled) {
+      await expect(page.getByTestId("system-rog-g703")).toBeVisible();
+      await expect(page.getByTestId("system-rog-g703")).toContainText("Не в сети");
+      await expect(page.getByTestId("system-rog-action")).toHaveText("Включить");
+    } else {
+      await expect(page.getByTestId("rog-g703-controls")).toBeVisible();
+      await expect(page.getByTestId("rog-g703-controls")).toContainText("Не в сети");
+      await expect(page.getByTestId("rog-g703-wake")).toBeEnabled();
+      await expect(page.getByTestId("rog-g703-hibernate")).toBeDisabled();
+    }
   });
 
   test("keeps connectivity recovery inside health without changing grid geometry", async ({ page }) => {

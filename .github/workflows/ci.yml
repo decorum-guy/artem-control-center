@@ -126,6 +126,21 @@ jobs:
           path: artifacts/v2-weather-review
           if-no-files-found: error
 
+      - name: Run focused PR7 route-density gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          V2_ROUTE_DENSITY_ARTIFACT_DIR: artifacts/v2-route-density-review
+        run: npm run test:e2e -- tests/e2e/v2-route-density.spec.ts
+
+      - name: Upload PR7 route-density review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-route-density-review-${{ github.sha }}
+          path: artifacts/v2-route-density-review
+          if-no-files-found: error
+
       - name: Run focused V2 Overview grid gate
         if: runner.os == 'Linux'
         env:

@@ -127,3 +127,57 @@ export function RogG703CompactControl({ service, interactive = true }: { service
     </WorkZone>
   );
 }
+
+/** Detailed System presentation backed by the same fixed controller. */
+export function RogG703DetailControl({ service }: { service: ServiceSnapshot }) {
+  const controller = useRogG703Controller(service);
+  const status = controller.displayStatus;
+  const transition = status === "waking" || status === "hibernating";
+  const actionId = status === "online"
+    ? ROG_G703_HIBERNATE_ACTION
+    : status === "offline"
+      ? ROG_G703_WAKE_ACTION
+      : null;
+
+  return (
+    <section className="system-rog-detail" data-testid="system-rog-g703" aria-labelledby="system-rog-g703-title">
+      <header className="system-rog-detail__header">
+        <div className="system-rog-detail__identity">
+          <span className="system-rog-detail__icon" aria-hidden="true"><Icon name="system" /></span>
+          <div>
+            <p className="section-kicker">Хост · ASUS</p>
+            <h2 id="system-rog-g703-title">{service.title}</h2>
+          </div>
+        </div>
+        <StatusText label={controller.display.label} tone={rogG703Tone(status)} />
+      </header>
+
+      <div className="system-rog-detail__state" role="status" aria-live="polite">
+        <strong>{controller.display.label}</strong>
+        <span>{controller.display.detail}</span>
+      </div>
+
+      <div className="system-rog-detail__footer">
+        <span>{service.presentation?.freshnessLabel ?? "Свежесть не указана"}</span>
+        {transition ? (
+          <button type="button" disabled aria-busy="true" data-testid="system-rog-action">
+            {controller.display.label}
+          </button>
+        ) : actionId ? (
+          <button
+            type="button"
+            data-testid="system-rog-action"
+            disabled={!controller.canUse(actionId)}
+            aria-busy={controller.pendingAction === actionId}
+            title={controller.availabilityReason(actionId)}
+            onClick={() => void controller.run(actionId)}
+          >
+            {controller.pendingAction === actionId ? "Проверяем…" : controller.actionTitles[actionId]}
+          </button>
+        ) : (
+          <span className="system-rog-detail__unavailable" data-testid="system-rog-action-unavailable">Недоступен</span>
+        )}
+      </div>
+    </section>
+  );
+}

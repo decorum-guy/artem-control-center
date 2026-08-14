@@ -1,5 +1,13 @@
 export const fixtureScenarios = [
   "ha-healthy",
+  "home-normal",
+  "home-coffee-only",
+  "home-coffee-kettle",
+  "home-no-coffee",
+  "home-no-devices",
+  "home-ha-stale",
+  "home-ha-offline",
+  "home-long-russian",
   "ha-degraded",
   "ha-offline",
   "coffee-off",
