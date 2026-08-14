@@ -573,6 +573,10 @@ test.describe("PR4 curated Overview", () => {
     expect(Math.abs(
       (markerBox!.x + markerBox!.width / 2) - (onlineBox!.x + onlineBox!.width / 2)
     )).toBeLessThanOrEqual(4);
+    expect(spaciousImageBox!.y).toBeGreaterThanOrEqual(onlineBox!.y + onlineBox!.height + 4);
+    const imageToMarkerGap = markerBox!.y - (spaciousImageBox!.y + spaciousImageBox!.height);
+    expect(imageToMarkerGap).toBeGreaterThanOrEqual(0);
+    expect(imageToMarkerGap).toBeLessThanOrEqual(4);
     await expect(coffee).toContainText("Источник: Home Assistant");
     await expect(asset).toHaveCSS("border-left-width", "0px");
     expect(await asset.evaluate((element) => getComputedStyle(element).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
