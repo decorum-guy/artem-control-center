@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { OverviewLayoutItem } from "@artem/contracts";
 import { Icon } from "../../icons";
 import { hasAppearanceControls } from "./appearanceConfig";
@@ -29,6 +29,7 @@ export function EditableWidgetFrame({
   item,
   children,
   selected,
+  hideEditorChrome,
   disabled,
   onSelect,
   onMove,
@@ -40,6 +41,7 @@ export function EditableWidgetFrame({
   item: OverviewLayoutItem;
   children: ReactNode;
   selected: boolean;
+  hideEditorChrome?: boolean;
   disabled: boolean;
   onSelect: () => void;
   onMove: (dx: number, dy: number) => void;
@@ -55,6 +57,10 @@ export function EditableWidgetFrame({
   const [preview, setPreview] = useState<{ dx: number; dy: number; width: number; height: number; invalid: boolean } | null>(null);
   const appearanceAvailable = hasAppearanceControls(item.widgetType);
   const sizes = definition ? Object.entries(definition.sizes).filter(([, size]) => Boolean(size)) as [string, { w: number; h: number }][] : [];
+
+  useEffect(() => {
+    if (!selected || hideEditorChrome) setMenuOpen(false);
+  }, [hideEditorChrome, selected]);
 
   function unitSize(): { x: number; y: number } {
     const frame = frameRef.current?.closest(".overview-v2-grid") as HTMLElement | null;
@@ -138,31 +144,45 @@ export function EditableWidgetFrame({
       data-testid="overview-edit-frame"
       data-instance-id={item.instanceId}
       data-selected={selected}
+      tabIndex={0}
+      role="group"
+      aria-label={`${definition?.title ?? item.widgetType}${selected ? ", выбран" : ""}`}
       style={previewStyle}
       onPointerDown={onSelect}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
     >
-      <button
-        type="button"
-        className="overview-edit-frame__handle overview-edit-frame__drag-handle"
-        aria-label={`Переместить ${definition?.title ?? item.widgetType}`}
-        disabled={disabled}
-        onPointerDown={(event) => onPointerDown(event, "move")}
-        onPointerMove={onPointerMove}
-        onPointerUp={finishPointer}
-        onPointerCancel={finishPointer}
-      >
-        <Icon name="grip" />
-      </button>
-      <div className="overview-edit-frame__actions">
-        {appearanceAvailable && (
-          <button type="button" className="overview-edit-frame__handle" aria-label="Настройки виджета" disabled={disabled} onClick={(event) => { event.stopPropagation(); onSelect(); onOpenAppearance(); }}>
-            <Icon name="settings" />
-          </button>
-        )}
-        <button type="button" className="overview-edit-frame__handle overview-edit-frame__remove" aria-label={`Убрать ${definition?.title ?? item.widgetType}`} disabled={disabled} onClick={(event) => { event.stopPropagation(); onRemove(); }}>
-          <Icon name="close" />
+      {!hideEditorChrome && (
+        <button
+          type="button"
+          className="overview-edit-frame__handle overview-edit-frame__drag-handle"
+          aria-label={`Переместить ${definition?.title ?? item.widgetType}`}
+          disabled={disabled}
+          onPointerDown={(event) => onPointerDown(event, "move")}
+          onPointerMove={onPointerMove}
+          onPointerUp={finishPointer}
+          onPointerCancel={finishPointer}
+        >
+          <Icon name="grip" />
         </button>
-      </div>
+      )}
+      {selected && !hideEditorChrome && (
+        <div className="overview-edit-frame__actions">
+          {appearanceAvailable && (
+            <button type="button" className="overview-edit-frame__handle" aria-label="Настройки виджета" disabled={disabled} onClick={(event) => { event.stopPropagation(); onSelect(); onOpenAppearance(); }}>
+              <Icon name="settings" />
+            </button>
+          )}
+          <button type="button" className="overview-edit-frame__handle overview-edit-frame__remove" aria-label={`Убрать ${definition?.title ?? item.widgetType}`} disabled={disabled} onClick={(event) => { event.stopPropagation(); onRemove(); }}>
+            <Icon name="close" />
+          </button>
+        </div>
+      )}
       <div
         className="overview-edit-frame__body"
         onClickCapture={(event) => {
@@ -179,47 +199,56 @@ export function EditableWidgetFrame({
       >
         {children}
       </div>
-      <button
-        type="button"
-        className="overview-edit-frame__handle overview-edit-frame__menu-toggle"
-        aria-label="Меню перемещения виджета"
-        aria-expanded={menuOpen}
-        disabled={disabled}
-        onClick={(event) => { event.stopPropagation(); setMenuOpen((current) => !current); }}
-      >
-        ⋯
-      </button>
-      {definition && (
-        <span className="overview-edit-frame__size" aria-label={`Размер ${item.placement.w} на ${item.placement.h}`}>
-          {item.placement.w} × {item.placement.h}
-        </span>
-      )}
-      {definition && sizes.length > 1 && (
-        <button
-          type="button"
-          className="overview-edit-frame__resize-handle"
-          aria-label={`Изменить размер ${definition.title}`}
-          disabled={disabled}
-          onPointerDown={(event) => onPointerDown(event, "resize")}
-          onPointerMove={onPointerMove}
-          onPointerUp={finishPointer}
-          onPointerCancel={finishPointer}
-        >
-          <span aria-hidden="true">↘</span>
-        </button>
-      )}
-      {menuOpen && (
-        <div className="overview-edit-frame__menu" role="menu" aria-label="Альтернативное управление виджетом">
-          <button type="button" role="menuitem" onClick={() => { onMove(0, -1); setMenuOpen(false); }}>Вверх</button>
-          <button type="button" role="menuitem" onClick={() => { onMove(0, 1); setMenuOpen(false); }}>Вниз</button>
-          <button type="button" role="menuitem" onClick={() => { onMove(-1, 0); setMenuOpen(false); }}>Влево</button>
-          <button type="button" role="menuitem" onClick={() => { onMove(1, 0); setMenuOpen(false); }}>Вправо</button>
-          {sizes.map(([variant, size]) => (
-            <button key={variant} type="button" role="menuitem" onClick={() => { onResize(variant); setMenuOpen(false); }}>
-              Размер {size.w} × {size.h}
+      {selected && !hideEditorChrome && (
+        <>
+          <button
+            type="button"
+            className="overview-edit-frame__handle overview-edit-frame__menu-toggle"
+            aria-label="Меню перемещения виджета"
+            aria-expanded={menuOpen}
+            disabled={disabled}
+            onClick={(event) => { event.stopPropagation(); setMenuOpen((current) => !current); }}
+          >
+            ⋯
+          </button>
+          {definition && (
+            <span className="overview-edit-frame__size" aria-label={`Размер ${item.placement.w} на ${item.placement.h}`}>
+              {item.placement.w} × {item.placement.h}
+            </span>
+          )}
+          {definition && sizes.length > 1 && (
+            <button
+              type="button"
+              className="overview-edit-frame__resize-handle"
+              aria-label={`Изменить размер ${definition.title}`}
+              disabled={disabled}
+              onPointerDown={(event) => onPointerDown(event, "resize")}
+              onPointerMove={onPointerMove}
+              onPointerUp={finishPointer}
+              onPointerCancel={finishPointer}
+            >
+              <span aria-hidden="true">↘</span>
             </button>
-          ))}
-        </div>
+          )}
+          {menuOpen && (
+            <div className="overview-edit-frame__menu" role="menu" aria-label="Альтернативное управление виджетом">
+              <button type="button" role="menuitem" onClick={() => { onMove(0, -1); setMenuOpen(false); }}>Вверх</button>
+              <button type="button" role="menuitem" onClick={() => { onMove(0, 1); setMenuOpen(false); }}>Вниз</button>
+              <button type="button" role="menuitem" onClick={() => { onMove(-1, 0); setMenuOpen(false); }}>Влево</button>
+              <button type="button" role="menuitem" onClick={() => { onMove(1, 0); setMenuOpen(false); }}>Вправо</button>
+              {sizes.map(([variant, size]) => (
+                <button key={variant} type="button" role="menuitem" onClick={() => { onResize(variant); setMenuOpen(false); }}>
+                  Размер {size.w} × {size.h}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {preview?.invalid && (
+        <span className="overview-edit-frame__invalid-label" role="status" data-testid="overview-invalid-drop-label">
+          Место занято
+        </span>
       )}
     </div>
   );

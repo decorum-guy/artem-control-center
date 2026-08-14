@@ -1,7 +1,12 @@
 import type { OverviewConfigValue, OverviewLayoutItem } from "@artem/contracts";
-import { Icon } from "../../icons";
 import { Sheet } from "../../Sheet";
-import { appearanceControlValueLabel, appearanceControlsFor, type AppearanceControl } from "./appearanceConfig";
+import {
+  appearanceControlLabel,
+  appearanceControlSection,
+  appearanceControlValueLabel,
+  appearanceControlsForPresentation,
+  type AppearanceControl
+} from "./appearanceConfig";
 import { getOverviewWidgetDefinition } from "./overviewRegistry";
 
 function controlDisabled(item: OverviewLayoutItem, control: AppearanceControl): boolean {
@@ -21,29 +26,22 @@ export function WidgetAppearanceSheet({
   onClose: () => void;
 }) {
   const definition = getOverviewWidgetDefinition(item.widgetType);
-  const controls = appearanceControlsFor(item.widgetType);
+  const controls = appearanceControlsForPresentation(item.widgetType);
   const config = item.config ?? {};
   const grouped = controls.reduce<Record<string, AppearanceControl[]>>((result, control) => {
-    (result[control.section] ??= []).push(control);
+    const section = appearanceControlSection(item.widgetType, control);
+    (result[section] ??= []).push(control);
     return result;
   }, {});
 
   return (
     <Sheet
-      title="Настройки виджета"
-      eyebrow={definition?.title}
+      title={definition ? `Настройки: ${definition.title}` : "Настройки виджета"}
       description="Изменения применяются только к текущему черновику до нажатия «Готово»."
       testId="overview-widget-appearance"
       onClose={onClose}
-      footer={<button type="button" className="overview-appearance__reset" onClick={onReset}>Вернуть настройки виджета</button>}
+      footer={<button type="button" className="overview-appearance__reset" onClick={onReset}>Сбросить настройки</button>}
     >
-      <div className="overview-appearance__identity">
-        <span className="overview-appearance__icon" aria-hidden="true"><Icon name={definition?.iconKey ?? "overview"} /></span>
-        <div>
-          <strong>{definition?.title ?? item.widgetType}</strong>
-          <span>{item.placement.w} × {item.placement.h} · {item.sizeVariant}</span>
-        </div>
-      </div>
       {!controls.length ? (
         <p className="overview-appearance__empty">Для этого виджета пока нет дополнительных настроек.</p>
       ) : Object.entries(grouped).map(([section, sectionControls]) => (
@@ -52,15 +50,20 @@ export function WidgetAppearanceSheet({
           {sectionControls.map((control) => {
             const value = config[control.key] ?? control.defaultValue;
             const unavailable = controlDisabled(item, control);
+            const label = appearanceControlLabel(control);
+            const valueLabel = appearanceControlValueLabel(control, value);
+            const controlId = `appearance-${item.instanceId}-${control.key}`;
             return (
               <div className={`overview-appearance__control${unavailable ? " overview-appearance__control--unavailable" : ""}`} key={control.key}>
-                <div className="overview-appearance__control-heading">
-                  <label htmlFor={`appearance-${item.instanceId}-${control.key}`}>{control.label}</label>
-                  <span>{unavailable ? "Недоступно для этого размера" : appearanceControlValueLabel(control, value)}</span>
-                </div>
+                {control.control !== "boolean" && (
+                  <div className="overview-appearance__control-heading">
+                    <label htmlFor={controlId}>{label}</label>
+                    <span>{unavailable ? "Недоступно для этого размера" : valueLabel}</span>
+                  </div>
+                )}
                 {control.control === "integer_range" && (
                   <input
-                    id={`appearance-${item.instanceId}-${control.key}`}
+                    id={controlId}
                     className="overview-appearance__range"
                     type="range"
                     min={control.min}
@@ -69,23 +72,30 @@ export function WidgetAppearanceSheet({
                     value={value as number}
                     disabled={unavailable}
                     onChange={(event) => onChange(control.key, Number(event.target.value))}
-                    aria-label={control.label}
+                    aria-label={label}
+                    aria-valuetext={valueLabel}
                   />
                 )}
                 {control.control === "boolean" && (
-                  <button
-                    id={`appearance-${item.instanceId}-${control.key}`}
-                    type="button"
-                    className={`overview-appearance__toggle${value ? " overview-appearance__toggle--on" : ""}`}
-                    disabled={unavailable}
-                    aria-pressed={Boolean(value)}
-                    onClick={() => onChange(control.key, !value)}
-                  >
-                    {value ? "Показывается" : "Скрыто"}
-                  </button>
+                  <label className="overview-appearance__switch-row" htmlFor={controlId}>
+                    <span>{label}</span>
+                    <span className="overview-appearance__switch-state" aria-hidden="true">{value ? "Вкл." : "Выкл."}</span>
+                    <span className={`overview-appearance__switch${value ? " overview-appearance__switch--on" : ""}`} aria-hidden="true">
+                      <input
+                        id={controlId}
+                        type="checkbox"
+                        role="switch"
+                        checked={Boolean(value)}
+                        disabled={unavailable}
+                        aria-label={label}
+                        onChange={(event) => onChange(control.key, event.target.checked)}
+                      />
+                      <span className="overview-appearance__switch-track"><span /></span>
+                    </span>
+                  </label>
                 )}
                 {control.control === "enum" && (
-                  <div className="overview-appearance__segmented" role="group" aria-label={control.label}>
+                  <div className="overview-appearance__segmented" role="group" aria-label={label}>
                     {control.values.map((option) => (
                       <button
                         type="button"

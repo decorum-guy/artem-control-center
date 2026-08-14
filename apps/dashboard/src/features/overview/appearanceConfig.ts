@@ -182,9 +182,52 @@ export function sourceOwnedCoffeeScale(configured: number, safeMaximum = 120): n
 }
 
 export function appearanceControlValueLabel(control: AppearanceControl, value: OverviewConfigValue): string {
-  if (control.control === "integer_range") return `${value}`;
+  if (control.control === "integer_range") {
+    if (control.key === "imageScalePct") return `${value}%`;
+    if (control.key === "imageXStep") {
+      return {
+        "-3": "Левее",
+        "-2": "Немного левее",
+        "-1": "Слегка левее",
+        "0": "По центру",
+        "1": "Слегка правее",
+        "2": "Немного правее",
+        "3": "Правее"
+      }[String(value)] ?? String(value);
+    }
+    if (control.key === "imageYStep") {
+      return {
+        "-2": "Выше",
+        "-1": "Немного выше",
+        "0": "По центру",
+        "1": "Немного ниже",
+        "2": "Ниже"
+      }[String(value)] ?? String(value);
+    }
+    return `${value}`;
+  }
   if (control.control === "boolean") return value ? "Включено" : "Выключено";
   return control.values.find((entry) => entry.value === value)?.label ?? String(value);
+}
+
+export function appearanceControlLabel(control: AppearanceControl): string {
+  if (control.key === "showStateMarker") return "Показывать состояние";
+  return control.label;
+}
+
+export function appearanceControlSection(widgetType: string, control: AppearanceControl): string {
+  if (widgetType !== "home.coffee-machine") return control.section;
+  if (["showImage", "imageScalePct", "imageXStep", "imageYStep"].includes(control.key)) return "Изображение";
+  if (control.key === "composition") return "Композиция";
+  if (["showStateMarker", "showAuthority"].includes(control.key)) return "Информация";
+  return control.section;
+}
+
+export function appearanceControlsForPresentation(widgetType: string): readonly AppearanceControl[] {
+  const controls = appearanceControlsFor(widgetType);
+  if (widgetType !== "home.coffee-machine") return controls;
+  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "composition", "showStateMarker", "showAuthority"];
+  return [...controls].sort((left, right) => order.indexOf(left.key) - order.indexOf(right.key));
 }
 
 export function appearanceSchemaParityKeys(): Record<OverviewWidgetType | string, string[]> {

@@ -240,6 +240,7 @@ export function OverviewV2Page({
         runtime={runtime}
         editMode={editMode}
         selectedInstanceId={editor.selectedInstanceId}
+        chromeHiddenInstanceId={appearanceInstanceId}
         editingDisabled={saving || uncertain}
         onSelect={(instanceId) => dispatch({ type: "select", instanceId })}
         onMove={(instanceId, dx, dy) => {

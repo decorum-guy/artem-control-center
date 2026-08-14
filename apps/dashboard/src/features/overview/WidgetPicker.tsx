@@ -6,6 +6,20 @@ import { overviewWidgetRegistry, type OverviewWidgetCategory } from "./overviewR
 
 const categories: readonly OverviewWidgetCategory[] = ["Управление", "Планирование", "Дом", "Состояние", "Контекст"];
 
+function purposeCopy(widgetType: string): string {
+  switch (widgetType) {
+    case "home.coffee-machine": return "Состояние и управление кофемашиной";
+    case "system.rog-g703-operational": return "Операционное состояние компьютера";
+    case "planning.summary": return "Ближайшие дела на сегодня";
+    case "home.quick-actions": return "Быстрый доступ к домашним устройствам";
+    case "system.health-summary": return "Состояние сервисов и резервных копий";
+    case "weather.alert": return "Погодное предупреждение";
+    case "planning.calendar-agenda": return "Ближайшие события календаря";
+    case "planning.task-list": return "Список задач";
+    default: return "Виджет панели";
+  }
+}
+
 export function WidgetPicker({
   items,
   onAdd,
@@ -27,10 +41,10 @@ export function WidgetPicker({
   }, [availableDefinitions, query]);
 
   return (
-    <Sheet title="Добавить виджет" description="Только зарегистрированные безопасные виджеты панели." testId="overview-widget-picker" onClose={onClose}>
+    <Sheet title="Добавить виджет" description="Выберите доступный виджет для панели." testId="overview-widget-picker" onClose={onClose}>
       {searchVisible && (
         <label className="overview-picker__search">
-          <span>Поиск по реестру</span>
+          <span>Поиск виджетов</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название виджета" />
         </label>
       )}
@@ -44,16 +58,12 @@ export function WidgetPicker({
               {definitions.map((definition) => {
                 const existing = items.find((item) => item.widgetType === definition.widgetType);
                 const added = definition.singleton && Boolean(existing && existing.visibility !== "hidden");
-                const sizeLabel = Object.entries(definition.sizes)
-                  .map(([variant, size]) => `${variant} ${size?.w}×${size?.h}`)
-                  .join(" · ");
                 return (
                   <div className="overview-picker__row" key={definition.widgetType} data-widget-type={definition.widgetType}>
                     <span className="overview-picker__icon" aria-hidden="true"><Icon name={definition.iconKey} /></span>
                     <div className="overview-picker__copy">
                       <strong>{definition.title}</strong>
-                      <span>{definition.fixtureCopy}</span>
-                      <small>{sizeLabel}</small>
+                      <span>{purposeCopy(definition.widgetType)}</span>
                     </div>
                     <button
                       type="button"
@@ -61,7 +71,7 @@ export function WidgetPicker({
                       disabled={added}
                       onClick={() => onAdd(definition.widgetType)}
                     >
-                      {added ? "Добавлен" : "Добавить"}
+                      {added ? "Уже добавлен" : "Добавить"}
                     </button>
                   </div>
                 );

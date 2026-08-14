@@ -212,8 +212,13 @@ async function openEditor(page: Page): Promise<void> {
   await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
 }
 
+async function selectFrame(page: Page, instanceId: string): Promise<void> {
+  await page.locator(`.overview-edit-frame[data-instance-id="${instanceId}"]`).press("Enter");
+}
+
 async function setCoffeeScale(page: Page, value: string): Promise<void> {
   const frame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+  await selectFrame(page, "fixture.coffee");
   await frame.getByRole("button", { name: "Настройки виджета" }).click();
   const sheet = page.getByTestId("overview-widget-appearance");
   await expect(sheet).toBeVisible();
@@ -230,6 +235,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
   test("keeps widget bodies inert and exposes touch-safe accessible handles", async ({ page }, testInfo) => {
     await installLayoutRoute(page);
     await openEditor(page);
+    await captureArtifact(page, testInfo, "overview-edit-default.png");
 
     const operationalPosts: string[] = [];
     page.on("request", (request) => {
@@ -258,6 +264,24 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await expect(page.locator(".overview-edit-frame--dragging")).toHaveCount(0);
     await page.mouse.up();
 
+    const coffeeFrame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+    const planningFrame = page.locator('.overview-edit-frame[data-instance-id="fixture.planning"]');
+    await selectFrame(page, "fixture.planning");
+    await expect(coffeeFrame.locator(".overview-edit-frame__actions button")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__resize-handle")).toHaveCount(0);
+    await captureArtifact(page, testInfo, "overview-edit-unselected.png");
+    await selectFrame(page, "fixture.coffee");
+    await expect(coffeeFrame).toHaveAttribute("data-selected", "true");
+    await expect(coffeeFrame.getByRole("button", { name: "Настройки виджета" })).toBeVisible();
+    await expect(coffeeFrame.getByRole("button", { name: /Убрать/ })).toBeVisible();
+    await expect(coffeeFrame.locator(".overview-edit-frame__resize-handle")).toBeVisible();
+    await selectFrame(page, "fixture.planning");
+    await expect(planningFrame).toHaveAttribute("data-selected", "true");
+    await expect(coffeeFrame.locator(".overview-edit-frame__actions button")).toHaveCount(0);
+    await expect(planningFrame.locator(".overview-edit-frame__actions button")).toHaveCount(2);
+    await selectFrame(page, "fixture.coffee");
+    await captureArtifact(page, testInfo, "overview-edit-selected.png");
+
     const undersizedHandles = await page.locator(
       ".overview-edit-frame__drag-handle, .overview-edit-frame__actions button, .overview-edit-frame__resize-handle, .overview-edit-frame__menu-toggle"
     ).evaluateAll((elements) => elements.flatMap((element) => {
@@ -265,8 +289,6 @@ test.describe("Overview V2 Edit mode and persistence", () => {
       return rect.width >= 48 && rect.height >= 48 ? [] : [{ width: rect.width, height: rect.height }];
     }));
     expect(undersizedHandles).toEqual([]);
-
-    await captureArtifact(page, testInfo, "overview-edit-default.png");
 
     const dragHandle = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"] .overview-edit-frame__drag-handle');
     const handleBox = await dragHandle.boundingBox();
@@ -277,8 +299,10 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await captureArtifact(page, testInfo, "overview-edit-drag.png");
     await page.mouse.move((handleBox?.x ?? 0) - 180, (handleBox?.y ?? 0) + 24, { steps: 5 });
     await expect(page.locator(".overview-edit-frame--invalid")).toHaveCount(1);
+    await expect(page.getByTestId("overview-invalid-drop-label")).toHaveText("Место занято");
     await captureArtifact(page, testInfo, "overview-edit-invalid-drop.png");
     await page.mouse.up();
+    await expect(page.getByTestId("overview-invalid-drop-label")).toHaveCount(0);
 
     const coffeeMenu = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"] .overview-edit-frame__menu-toggle');
     await coffeeMenu.click();
@@ -291,16 +315,39 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await openEditor(page);
 
     const coffeeFrame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+    await selectFrame(page, "fixture.coffee");
     await coffeeFrame.getByRole("button", { name: "Настройки виджета" }).click();
     const appearance = page.getByTestId("overview-widget-appearance");
     await expect(appearance).toBeVisible();
+    await expect(appearance.getByRole("heading", { name: "Настройки: Кофемашина" })).toBeVisible();
+    await expect(appearance).not.toContainText("standard");
+    await expect(coffeeFrame.locator(".overview-edit-frame__drag-handle")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__actions")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__resize-handle")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__size")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__menu-toggle")).toHaveCount(0);
+    await captureArtifact(page, testInfo, "overview-edit-sheet-preview.png");
     await captureArtifact(page, testInfo, "overview-edit-coffee-settings.png");
     await appearance.getByLabel("Размер изображения").fill("120");
     await appearance.getByLabel("По горизонтали").fill("-2");
     await appearance.getByLabel("По вертикали").fill("1");
+    await expect(appearance.getByText("Немного левее")).toBeVisible();
+    await expect(appearance.getByText("Немного ниже")).toBeVisible();
+    await expect(coffeeFrame.locator(".coffee-panel--overview")).toHaveAttribute("data-image-x", "-2");
+    await expect(coffeeFrame.locator(".coffee-panel--overview")).toHaveAttribute("data-image-y", "1");
+    await expect(appearance.getByLabel("Показывать изображение")).toBeChecked();
+    await expect(appearance.getByLabel("Показывать источник")).toBeChecked();
     await appearance.getByRole("button", { name: "Просторно" }).click();
     await appearance.getByLabel("Показывать источник").click();
+    await expect(appearance.getByLabel("Показывать источник")).not.toBeChecked();
+    const undersizedAppearanceTargets = await appearance.locator("button, input").evaluateAll((elements) => elements.flatMap((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width >= 48 && rect.height >= 48 ? [] : [{ tag: element.tagName, width: rect.width, height: rect.height }];
+    }));
+    expect(undersizedAppearanceTargets).toEqual([]);
     await appearance.getByRole("button", { name: "Закрыть" }).click();
+    await expect(coffeeFrame.locator(".overview-edit-frame__drag-handle")).toBeVisible();
+    await expect(coffeeFrame.locator(".overview-edit-frame__resize-handle")).toBeVisible();
     await captureArtifact(page, testInfo, "overview-edit-coffee-customized.png");
     await captureArtifact(page, testInfo, "overview-edit-dirty.png");
     await page.getByTestId("overview-add-widget").click();
@@ -309,7 +356,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await captureArtifact(page, testInfo, "overview-edit-picker.png");
     const weatherRow = picker.locator('[data-widget-type="weather.alert"]');
     await weatherRow.getByRole("button", { name: "Добавить" }).click();
-    await expect(weatherRow.getByRole("button")).toHaveText("Добавлен");
+    await expect(weatherRow.getByRole("button")).toHaveText("Уже добавлен");
     await picker.getByRole("button", { name: "Закрыть" }).click();
 
     expect(routeState.patchCount).toBe(0);
@@ -318,6 +365,9 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "normal");
     expect(routeState.patchCount).toBe(1);
     expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageScalePct).toBe(120);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageXStep).toBe(-2);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageYStep).toBe(1);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.showAuthority).toBe(false);
     expect(routeState.lastPatch?.some((item) => item.widgetType === "weather.alert")).toBe(true);
 
     await page.reload();
@@ -391,6 +441,9 @@ test.describe("Overview V2 Edit mode and persistence", () => {
 
     await page.getByTestId("overview-save").click();
     await expect(page.getByTestId("overview-load-current")).toBeVisible();
+    await expect(page.getByTestId("overview-edit-toolbar")).toContainText("Конфликт версии");
+    await expect(page.getByTestId("overview-edit-toolbar")).toContainText("Загрузить актуальную");
+    await expect(page.getByTestId("overview-edit-toolbar")).not.toContainText("Панель изменилась в другом окне");
     await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
     expect(routeState.patchCount).toBe(1);
     await captureArtifact(page, testInfo, "overview-edit-conflict.png");
@@ -449,5 +502,14 @@ test.describe("Overview V2 Edit mode and persistence", () => {
       const rect = element.getBoundingClientRect();
       return rect.width >= 48 && rect.height >= 48;
     }))).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await expect(page.getByTestId("overview-add-widget")).toHaveText("Добавить");
+    await expect(page.getByTestId("overview-add-widget")).toBeVisible();
+    await expect(page.getByTestId("overview-reset")).toHaveText("Сбросить");
+    await expect(page.getByTestId("overview-reset")).toBeVisible();
+    await expect(page.getByTestId("overview-cancel")).toHaveText("Отмена");
+    await expect(page.getByTestId("overview-cancel")).toBeVisible();
+    await expect(page.getByTestId("overview-save")).toHaveText("Готово");
+    await expect(page.getByTestId("overview-save")).toBeVisible();
   });
 });

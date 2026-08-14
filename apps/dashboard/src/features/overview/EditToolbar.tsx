@@ -42,11 +42,11 @@ export function EditToolbar({
             data-testid="overview-add-widget"
             title={!canWrite ? "Сохранение панели отключено сервером" : undefined}
           >
-            Добавить виджет
+            Добавить
           </button>
           <button
             type="button"
-            className="overview-v2-toolbar__secondary"
+            className="overview-v2-toolbar__secondary overview-v2-toolbar__reset"
             disabled={disabled}
             onClick={() => setResetOpen(true)}
             data-testid="overview-reset"
@@ -55,8 +55,16 @@ export function EditToolbar({
           </button>
         </div>
         <div className="overview-v2-toolbar__dirty" role="status" aria-live="polite">
-          {saving ? "Сохраняем…" : uncertain ? "Проверяем результат сохранения…" : dirty ? "Есть несохранённые изменения" : "Изменений нет"}
-          {message && <span className="overview-v2-toolbar__message">{message}</span>}
+          {conflict
+            ? "Конфликт версии"
+            : saving
+              ? "Сохраняем…"
+              : uncertain
+                ? "Проверяем результат сохранения…"
+                : dirty
+                  ? "Есть несохранённые изменения"
+                  : "Изменений нет"}
+          {message && !conflict && <span className="overview-v2-toolbar__message">{message}</span>}
         </div>
         <div className="overview-v2-toolbar__edit-actions overview-v2-toolbar__edit-actions--end">
           {uncertain && !saving && !conflict && (
@@ -66,7 +74,7 @@ export function EditToolbar({
           )}
           {conflict && !saving && (
             <button type="button" className="overview-v2-toolbar__secondary" onClick={onLoadCurrent} data-testid="overview-load-current">
-              Загрузить актуальную версию
+              Загрузить актуальную
             </button>
           )}
           <button type="button" className="overview-v2-toolbar__secondary" disabled={saving || uncertain} onClick={onCancel} data-testid="overview-cancel">

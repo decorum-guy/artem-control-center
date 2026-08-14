@@ -57,6 +57,7 @@ export function DashboardGrid({
   runtime,
   editMode = false,
   selectedInstanceId,
+  chromeHiddenInstanceId,
   editingDisabled = false,
   onSelect,
   onMove,
@@ -70,6 +71,7 @@ export function DashboardGrid({
   runtime: OverviewRuntimeContext;
   editMode?: boolean;
   selectedInstanceId?: string | null;
+  chromeHiddenInstanceId?: string | null;
   editingDisabled?: boolean;
   onSelect?: (instanceId: string) => void;
   onMove?: (instanceId: string, dx: number, dy: number) => void;
@@ -127,6 +129,7 @@ export function DashboardGrid({
               <EditableWidgetFrame
                 item={item.item}
                 selected={selectedInstanceId === item.item.instanceId}
+                hideEditorChrome={chromeHiddenInstanceId === item.item.instanceId}
                 disabled={editingDisabled}
                 onSelect={() => onSelect(item.item.instanceId)}
                 onMove={(dx, dy) => onMove(item.item.instanceId, dx, dy)}
