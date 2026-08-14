@@ -60,6 +60,8 @@ class IntegrationSettings:
     coffee_timing_writes_enabled: bool = False
     coffee_notification_writes_enabled: bool = False
     coffee_actions_enabled: bool = False
+    overview_layout_writes_enabled: bool = False
+    overview_layout_path: str = ".cache/overview-layout.json"
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
     panel_planning_enabled: bool = False
@@ -234,6 +236,14 @@ class IntegrationSettings:
                 "PANEL_COFFEE_ACTIONS_ENABLED",
                 False,
             ),
+            overview_layout_writes_enabled=_bool_env(
+                "PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED",
+                False,
+            ),
+            overview_layout_path=os.getenv(
+                "PANEL_OVERVIEW_LAYOUT_PATH",
+                ".cache/overview-layout.json",
+            ).strip(),
             access_temporary_minutes=max(
                 1,
                 int(os.getenv("PANEL_ACCESS_TEMPORARY_MINUTES", "30")),

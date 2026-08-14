@@ -146,6 +146,25 @@ jobs:
           path: artifacts/v2-overview-curated-review
           if-no-files-found: error
 
+      - name: Run focused PR5 Overview editor gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_OVERVIEW_EDITOR_ENABLED: "true"
+          PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED: "true"
+          PANEL_OVERVIEW_LAYOUT_PATH: .cache/overview-editor-e2e.json
+          V2_OVERVIEW_EDITOR_ARTIFACT_DIR: artifacts/v2-overview-editor-review
+        run: npm run test:e2e -- tests/e2e/v2-overview-editor.spec.ts
+
+      - name: Upload PR5 Overview editor review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-overview-editor-review-${{ github.sha }}
+          path: artifacts/v2-overview-editor-review
+          if-no-files-found: error
+
       - name: Run Overview grid gate without V2 visual shell
         if: runner.os == 'Linux'
         env:

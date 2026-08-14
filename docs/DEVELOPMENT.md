@@ -211,6 +211,8 @@ PANEL_WRITES_ENABLED
 PANEL_COFFEE_TIMING_WRITES_ENABLED
 PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED
 PANEL_COFFEE_ACTIONS_ENABLED
+PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED
+PANEL_OVERVIEW_LAYOUT_PATH
 PANEL_SSE_HEARTBEAT_SECONDS
 ```
 
@@ -233,6 +235,17 @@ missed events safe.
 
 The development gallery visibly identifies non-production mode. Ordinary user
 routes do not expose development mode or fixture controls.
+
+Overview V2 layout reads are available independently of editing. The editor is
+opt-in with `VITE_OVERVIEW_EDITOR_ENABLED=false`; persistence is separately
+gated by `PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED=false` and the global
+`PANEL_WRITES_ENABLED` gate. `PANEL_OVERVIEW_LAYOUT_PATH` defaults to
+`.cache/overview-layout.json`. The Panel Agent owns the bounded canonical
+document, ETag/If-Match checks and atomic replacement. Corrupt or legacy data
+is recovered in memory without rewriting the file; use an explicit `Готово` or
+reset save to persist a new document. The config-only backup profile for this
+file is documented in `config/backups.example.yaml`; no generic backup engine
+is implied by the example.
 
 ## 6. Widget development workflow
 

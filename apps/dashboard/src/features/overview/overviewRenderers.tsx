@@ -8,6 +8,7 @@ import { CoffeeWidget } from "../../widgets";
 import { PlanningOverviewCard } from "../../PlanningOverviewCard";
 import { RogG703CompactControl } from "../../RogG703Controls";
 import type { OverviewRuntimeContext } from "./overviewRuntime";
+import { coffeeAppearanceConfig, planningDensityFor } from "./appearanceConfig";
 import type {
   OverviewFallbackReason,
   OverviewProjectionItem
@@ -40,7 +41,7 @@ function OverviewRuntimeUnavailable({
   );
 }
 
-function renderCoffee(runtime: OverviewRuntimeContext): ReactNode {
+function renderCoffee(item: OverviewProjectionItem, runtime: OverviewRuntimeContext): ReactNode {
   const service = findServiceByManifest(runtime.snapshot.services, "home.coffee-machine");
   if (!service) {
     return (
@@ -69,17 +70,20 @@ function renderCoffee(runtime: OverviewRuntimeContext): ReactNode {
       generatedAt={runtime.snapshot.generatedAt}
       manifest={overviewManifest}
       variant="overview"
-      onAction={runtime.onCoffeeAction}
+      onAction={runtime.editMode ? undefined : runtime.onCoffeeAction}
       actionPending={runtime.coffeeActionPending}
+      interactive={!runtime.editMode}
+      appearanceConfig={coffeeAppearanceConfig(item.item)}
     />
   );
 }
 
-function renderPlanning(runtime: OverviewRuntimeContext): ReactNode {
+function renderPlanning(item: OverviewProjectionItem, runtime: OverviewRuntimeContext): ReactNode {
   return (
     <PlanningOverviewCard
       planning={runtime.snapshot.planning}
       onNavigate={runtime.onNavigate}
+      density={planningDensityFor(item.item)}
     />
   );
 }
@@ -212,7 +216,8 @@ function OverviewHealthWidget(runtime: OverviewRuntimeContext): ReactNode {
               type="button"
               className="overview-health-widget__recovery"
               data-testid="overview-health-recovery"
-              onClick={() => void connectivity.run()}
+              onClick={() => { if (!runtime.editMode) void connectivity.run(); }}
+              disabled={runtime.editMode}
               aria-busy="false"
             >
               Восстановить
@@ -266,7 +271,7 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
     case "system.rog-g703-operational": {
       const service = findRogService(runtime.snapshot.services);
       return service
-        ? <RogG703CompactControl service={service} />
+        ? <RogG703CompactControl service={service} interactive={!runtime.editMode} />
         : (
           <WorkZone className="overview-v2-real-widget overview-rog-widget overview-rog-widget--unavailable" data-testid="overview-rog-g703-unavailable">
             <span className="overview-rog-widget__icon" aria-hidden="true"><Icon name="system" /></span>
@@ -280,9 +285,9 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
         );
     }
     case "home.coffee-machine":
-      return renderCoffee(runtime);
+      return renderCoffee(item, runtime);
     case "planning.summary":
-      return renderPlanning(runtime);
+      return renderPlanning(item, runtime);
     case "home.quick-actions":
       return renderHome(runtime);
     case "system.health-summary":

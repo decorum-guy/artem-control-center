@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from .alice_control import AliceControlError
@@ -17,6 +17,8 @@ from .contracts import (
     CoffeeTimingPatch,
     CoffeeTimingSettings,
     DashboardSnapshot,
+    OverviewLayoutPatch,
+    OverviewLayoutResponse,
     PanelMode,
     ServiceSnapshot,
 )
@@ -27,6 +29,12 @@ from .runtime_control import router as runtime_control_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
 from .weather import WeatherService, build_weather_router
+from .overview_layout import (
+    MAX_REQUEST_BYTES,
+    OverviewLayoutStore,
+    OverviewLayoutValidationError,
+    OverviewRevisionConflict,
+)
 
 
 def configured_mode() -> PanelMode:
@@ -47,6 +55,10 @@ snapshot_publisher = SnapshotPublisher(
     heartbeat_seconds=SETTINGS.sse_heartbeat_seconds,
 )
 runtime.set_snapshot_callback(snapshot_publisher.rebuild)
+overview_layout_store = OverviewLayoutStore(
+    SETTINGS.overview_layout_path,
+    writes_enabled=SETTINGS.overview_layout_writes_enabled and SETTINGS.writes_enabled,
+)
 
 
 @asynccontextmanager
@@ -113,6 +125,7 @@ def ready() -> dict:
         "service": "artem-panel-agent",
         "mode": MODE,
         "writesEnabled": SETTINGS.writes_enabled,
+        "overviewLayoutWritesEnabled": _overview_write_allowed(),
         "integrationsConfigured": {
             "homeAssistant": runtime.home_assistant.configured,
             "alice": bool(SETTINGS.alice_health_url),
@@ -198,6 +211,45 @@ async def snapshot(
         services=services,
         planning=runtime.planning_snapshot(),
     )
+
+
+@app.get("/api/v1/overview/layout", response_model=OverviewLayoutResponse)
+def get_overview_layout(response: Response) -> OverviewLayoutResponse:
+    layout = overview_layout_store.read()
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = overview_layout_store.etag(layout.revision)
+    response.headers["X-Overview-Layout-Writes-Enabled"] = str(_overview_write_allowed()).lower()
+    return layout.model_copy(update={"writesEnabled": _overview_write_allowed()})
+
+
+@app.patch("/api/v1/overview/layout", response_model=OverviewLayoutResponse)
+async def patch_overview_layout(
+    patch: OverviewLayoutPatch,
+    request: Request,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> OverviewLayoutResponse:
+    if request.headers.get("content-length"):
+        try:
+            if int(request.headers["content-length"]) > MAX_REQUEST_BYTES:
+                raise HTTPException(status_code=413, detail="overview_layout_request_too_large")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid_content_length")
+    _require_overview_write()
+    expected_revision = OverviewLayoutStore.parse_if_match(if_match)
+    if expected_revision is None:
+        raise HTTPException(status_code=428, detail="if_match_required")
+    try:
+        saved = overview_layout_store.write(patch, expected_revision)
+    except OverviewRevisionConflict:
+        current = overview_layout_store.read()
+        response.headers["ETag"] = overview_layout_store.etag(current.revision)
+        raise HTTPException(status_code=412, detail="revision_conflict")
+    except OverviewLayoutValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = overview_layout_store.etag(saved.revision)
+    return saved.model_copy(update={"writesEnabled": _overview_write_allowed()})
 
 
 @app.get("/api/v1/events")
@@ -408,9 +460,18 @@ def _write_allowed(narrow_gate: bool) -> bool:
     )
 
 
+def _overview_write_allowed() -> bool:
+    return _write_allowed(SETTINGS.overview_layout_writes_enabled)
+
+
 def _require_write(narrow_gate: bool) -> None:
     if not _write_allowed(narrow_gate):
         raise HTTPException(status_code=403, detail="coffee_write_disabled")
+
+
+def _require_overview_write() -> None:
+    if not _overview_write_allowed():
+        raise HTTPException(status_code=403, detail="overview_layout_write_disabled")
 
 
 def _raise_alice_error(exc: AliceControlError) -> None:

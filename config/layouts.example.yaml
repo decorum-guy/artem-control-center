@@ -8,8 +8,8 @@ policies:
   preserve_layout_when_project_disabled: true
   restore_widget_when_project_reenabled: true
   drag_and_resize:
-    enabled_in_mvp: false
-    planned_phase: post_mvp
+    enabled_in_mvp: true
+    planned_phase: PR5
   collision_strategy: move_new_item_below
 
 profiles:
@@ -90,9 +90,15 @@ profiles:
 
 layout_storage:
   backend: panel-agent
+  schema: overview.layout.v2
+  profile_id: samsung-control
+  path_env: PANEL_OVERVIEW_LAYOUT_PATH
+  storage_kind: config_only
+  atomic_same_directory_replace: true
   include_in_config_backup: true
   contains_secrets: false
-  save_debounce_ms: 500
+  commit_mode: explicit_button
+  save_debounce_ms: 0
   revisioned: true
   conflict_policy: latest_local_with_manual_restore
 

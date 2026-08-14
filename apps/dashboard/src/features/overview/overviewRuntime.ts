@@ -7,4 +7,5 @@ export interface OverviewRuntimeContext {
   readonly onNavigate: (path: ShellRoutePath) => void;
   readonly onCoffeeAction: (service: ServiceSnapshot, actionId: string) => void;
   readonly coffeeActionPending: boolean;
+  readonly editMode: boolean;
 }

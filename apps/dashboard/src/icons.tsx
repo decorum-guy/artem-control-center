@@ -10,6 +10,7 @@ export type IconName =
   | "reminder"
   | "system"
   | "settings"
+  | "grip"
   | "shield"
   | "close";
 
@@ -78,6 +79,16 @@ const iconPaths: Record<IconName, ReactNode> = {
       <circle cx="14" cy="6" r="2" />
       <circle cx="9" cy="12" r="2" />
       <circle cx="16" cy="18" r="2" />
+    </>
+  ),
+  grip: (
+    <>
+      <circle cx="8" cy="6" r="1" />
+      <circle cx="16" cy="6" r="1" />
+      <circle cx="8" cy="12" r="1" />
+      <circle cx="16" cy="12" r="1" />
+      <circle cx="8" cy="18" r="1" />
+      <circle cx="16" cy="18" r="1" />
     </>
   ),
   shield: (
