@@ -42,21 +42,22 @@ import {
 } from "./planningRouteLogic";
 import {
   PaginationControls,
-  PlanningRouteHealth,
+  PlanningRouteFrame,
   PlanningRouteState,
   PlanningSheet,
   previewEnvelope
 } from "./PlanningRoutePrimitives";
 import { planningRemindersRouteEnabled } from "./planningRouteConfig";
-import { RouteHeader } from "./ShellPrimitives";
+import { planningModuleForRoute } from "./planningModuleRegistry";
+import { calendarIdentityForEvent, calendarIdentityLabel } from "./planningIdentity";
+
+const tasksModule = planningModuleForRoute("/tasks")!;
+const calendarModule = planningModuleForRoute("/calendar")!;
+const remindersModule = planningModuleForRoute("/reminders")!;
 
 interface PlanningRouteProps {
   snapshot: { revision: number; planning?: PlanningSnapshot | null };
   onNavigate: (path: RoutePath) => void;
-}
-
-function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return <RouteHeader eyebrow={eyebrow} title={title} description={description} />;
 }
 
 function RouteControls({ children }: { children: ReactNode }) {
@@ -208,22 +209,25 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   }, [view, projectId]);
 
   return (
-    <div className="planning-route-page" data-testid="route-tasks">
-      <PageHeading eyebrow="Фокус" title="Задачи" description="Открытые задачи по сроку, приоритету и проекту. Этот экран только наблюдает данные Planning." />
-      <div className="planning-route-heading-row">
-        <TasksSegments view={view} onChange={setView} />
-        <RouteControls>
-          <button type="button" className="planning-secondary-button" onClick={() => setFilterOpen(true)}>{projectFilterLabel === "Все проекты" ? "Проект" : projectFilterLabel}</button>
-          {planningRemindersRouteEnabled && <button type="button" className="planning-secondary-button" onClick={() => onNavigate("/reminders")}>Напоминания</button>}
-        </RouteControls>
-      </div>
-      <PlanningRouteHealth
-        sourceStatus={envelope?.sourceStatus ?? "unavailable"}
-        lastSyncedAt={envelope?.lastSyncedAt ?? null}
-        error={routeRead.error}
-        preview={preview}
-        onRetry={() => setRetry((value) => value + 1)}
-      />
+    <PlanningRouteFrame
+      module={tasksModule}
+      description="Открытые задачи по сроку, приоритету и проекту. Этот экран только наблюдает данные Planning."
+      sourceStatus={envelope?.sourceStatus ?? "unavailable"}
+      lastSyncedAt={envelope?.lastSyncedAt ?? null}
+      error={routeRead.error}
+      preview={preview}
+      onRetry={() => setRetry((value) => value + 1)}
+      controls={(
+        <>
+          <TasksSegments view={view} onChange={setView} />
+          <RouteControls>
+            <button type="button" className="planning-secondary-button" onClick={() => setFilterOpen(true)}>{projectFilterLabel === "Все проекты" ? "Проект" : projectFilterLabel}</button>
+            {planningRemindersRouteEnabled && <button type="button" className="planning-secondary-button" onClick={() => onNavigate("/reminders")}>Напоминания</button>}
+          </RouteControls>
+        </>
+      )}
+      testId="route-tasks"
+    >
       <PlanningRouteState
         loading={routeRead.loading}
         empty={Boolean(envelope && envelope.items.length === 0)}
@@ -272,7 +276,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
           onClose={() => setSelectedTask(null)}
         />
       )}
-    </div>
+    </PlanningRouteFrame>
   );
 }
 
@@ -299,29 +303,41 @@ function syncStateLabel(value: PlanningCalendarEvent["syncState"]): string {
 function CalendarEventRow({ event, overlap, now, onOpen }: { event: PlanningCalendarEvent; overlap: boolean; now: Date; onOpen: () => void }) {
   const state = eventTemporalState(event, now);
   return (
-    <button type="button" className={`planning-route-row calendar-event-row calendar-event-row--${state}`} data-testid="planning-calendar-event-row" onClick={onOpen}>
+    <button
+      type="button"
+      className={`planning-route-row calendar-event-row calendar-event-row--${state}${overlap ? " calendar-event-row--overlap" : ""}`}
+      data-testid="planning-calendar-event-row"
+      data-sync-state={event.syncState}
+      data-overlap={overlap ? "true" : "false"}
+      onClick={onOpen}
+    >
       <span className="planning-route-row__main">
         <span className="planning-route-row__eyebrow">{event.allDay ? "Весь день" : formatEventRange(event)}</span>
         <strong>{event.title}</strong>
-        <span className="planning-route-row__source">{event.sourceLabel} · {syncStateLabel(event.syncState)}</span>
+        <span className="planning-route-row__source planning-calendar-state-line">
+          <span data-testid="planning-calendar-identity">{calendarIdentityLabel(event)}</span>
+          <span data-testid="planning-calendar-sync-state">Синхронизация: {syncStateLabel(event.syncState)}</span>
+        </span>
       </span>
       <span className="calendar-event-row__badges">
         {state === "running" && <span className="calendar-badge calendar-badge--running">Идёт</span>}
         {state === "past" && <span className="calendar-badge">Завершено</span>}
-        {overlap && <span className="calendar-badge calendar-badge--overlap">Пересекается</span>}
+        {overlap && <span className="calendar-badge calendar-badge--overlap">Пересекается по времени</span>}
       </span>
     </button>
   );
 }
 
 function CalendarDetailSheet({ event, overlap, onClose }: { event: PlanningCalendarEvent; overlap: boolean; onClose: () => void }) {
+  const identity = calendarIdentityForEvent(event);
   return (
     <PlanningSheet title={event.title} eyebrow="Календарь · только чтение" onClose={onClose} testId="planning-calendar-detail">
       <dl className="planning-detail-list">
         <ReadOnlyField label="Тип" value={event.allDay ? "Весь день" : "Событие с временем"} />
         <ReadOnlyField label="Начало и конец" value={formatEventRange(event)} />
         <ReadOnlyField label="Часовой пояс" value={event.timezone} />
-        <ReadOnlyField label="Источник" value={event.sourceLabel} />
+        <ReadOnlyField label="Провайдер" value={identity.providerLabel} />
+        <ReadOnlyField label="Календарь" value={identity.calendarLabel} />
         <ReadOnlyField label="Состояние синхронизации" value={syncStateLabel(event.syncState)} />
         {overlap && <ReadOnlyField label="Пересечение" value="Пересекается с другим загруженным событием" />}
       </dl>
@@ -339,18 +355,31 @@ function CalendarSegments({ segment, onChange }: { segment: "today" | "agenda"; 
   );
 }
 
+function CalendarDateNavigation({ segment, onPrevious, onToday, onNext }: { segment: "today" | "agenda"; onPrevious: () => void; onToday: () => void; onNext: () => void }) {
+  return (
+    <div className="planning-calendar-date-nav" role="group" aria-label="Навигация по датам">
+      <button type="button" className="planning-secondary-button" onClick={onPrevious}>{segment === "today" ? "Предыдущий день" : "Предыдущие 7 дней"}</button>
+      <button type="button" className="planning-secondary-button" onClick={onToday}>Сегодня</button>
+      <button type="button" className="planning-secondary-button" onClick={onNext}>{segment === "today" ? "Следующий день" : "Следующие 7 дней"}</button>
+    </div>
+  );
+}
+
 export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const [segment, setSegment] = useState<"today" | "agenda">("today");
-  const [rangeOffset, setRangeOffset] = useState(0);
+  const [periodOffset, setPeriodOffset] = useState(0);
   const [page, setPage] = useState(0);
   const [selectedEvent, setSelectedEvent] = useState<PlanningCalendarEvent | null>(null);
   const [retry, setRetry] = useState(0);
   const [liveNow, setLiveNow] = useState(() => new Date());
-  const requestTodayLocalDate = currentLocalDate(liveNow, DEFAULT_PLANNING_TIME_ZONE);
+  const requestTodayLocalDate = addCalendarDays(
+    currentLocalDate(liveNow, DEFAULT_PLANNING_TIME_ZONE),
+    segment === "today" ? periodOffset : periodOffset * 7
+  );
   const requestRange = useMemo(() => {
     if (segment === "today") return calendarDayRangeUtc(requestTodayLocalDate, DEFAULT_PLANNING_TIME_ZONE);
-    return calendarAgendaRangeUtc(addCalendarDays(requestTodayLocalDate, rangeOffset * 7), 7, DEFAULT_PLANNING_TIME_ZONE);
-  }, [segment, requestTodayLocalDate, rangeOffset]);
+    return calendarAgendaRangeUtc(requestTodayLocalDate, 7, DEFAULT_PLANNING_TIME_ZONE);
+  }, [segment, requestTodayLocalDate]);
   const routeRead = usePlanningRead(
     `events:${requestRange.fromUtc}:${requestRange.toUtc}:${page}:${snapshot.revision}:${retry}`,
     (signal) => readPlanningEvents(requestRange.fromUtc, requestRange.toUtc, 20, page * 20, signal)
@@ -364,11 +393,14 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     liveNow,
     previewCandidate || !routeRead.data
   );
-  const displayTodayLocalDate = currentLocalDate(referenceTime, DEFAULT_PLANNING_TIME_ZONE);
+  const displayTodayLocalDate = addCalendarDays(
+    currentLocalDate(referenceTime, DEFAULT_PLANNING_TIME_ZONE),
+    segment === "today" ? periodOffset : periodOffset * 7
+  );
   const displayRange = useMemo(() => {
     if (segment === "today") return calendarDayRangeUtc(displayTodayLocalDate, DEFAULT_PLANNING_TIME_ZONE);
-    return calendarAgendaRangeUtc(addCalendarDays(displayTodayLocalDate, rangeOffset * 7), 7, DEFAULT_PLANNING_TIME_ZONE);
-  }, [segment, displayTodayLocalDate, rangeOffset]);
+    return calendarAgendaRangeUtc(displayTodayLocalDate, 7, DEFAULT_PLANNING_TIME_ZONE);
+  }, [segment, displayTodayLocalDate]);
   const previewItems = planning
     ? [...planning.calendar.today, ...planning.calendar.upcoming]
     : [];
@@ -387,21 +419,31 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   }, []);
   useEffect(() => {
     setPage(0);
-  }, [segment, rangeOffset]);
+  }, [segment, periodOffset]);
 
   return (
-    <div className="planning-route-page" data-testid="route-calendar">
-      <PageHeading eyebrow="Расписание" title="Календарь" description="Сегодня и ближайшие семь дней — all-day отдельно, события по локальному календарному дню." />
-      <div className="planning-route-heading-row">
-        <CalendarSegments segment={segment} onChange={setSegment} />
-        {segment === "agenda" && (
-          <RouteControls>
-            <button type="button" className="planning-secondary-button" onClick={() => setRangeOffset((value) => value - 1)}>Предыдущие 7 дней</button>
-            <button type="button" className="planning-secondary-button" onClick={() => setRangeOffset((value) => value + 1)}>Следующие 7 дней</button>
-          </RouteControls>
-        )}
-      </div>
-      <PlanningRouteHealth sourceStatus={envelope?.sourceStatus ?? "unavailable"} lastSyncedAt={envelope?.lastSyncedAt ?? null} error={routeRead.error} preview={preview} onRetry={() => setRetry((value) => value + 1)} />
+    <PlanningRouteFrame
+      module={calendarModule}
+      eyebrow="Расписание"
+      description="Сегодня и ближайшие семь дней — весь день отдельно, события по локальному календарному дню."
+      sourceStatus={envelope?.sourceStatus ?? "unavailable"}
+      lastSyncedAt={envelope?.lastSyncedAt ?? null}
+      error={routeRead.error}
+      preview={preview}
+      onRetry={() => setRetry((value) => value + 1)}
+      controls={(
+        <>
+          <CalendarSegments segment={segment} onChange={setSegment} />
+          <CalendarDateNavigation
+            segment={segment}
+            onPrevious={() => setPeriodOffset((value) => value - 1)}
+            onToday={() => setPeriodOffset(0)}
+            onNext={() => setPeriodOffset((value) => value + 1)}
+          />
+        </>
+      )}
+      testId="route-calendar"
+    >
       <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && events.length === 0)} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
         {envelope && (
           <>
@@ -430,7 +472,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         )}
       </PlanningRouteState>
       {selectedEvent && <CalendarDetailSheet event={selectedEvent} overlap={overlapIds.has(selectedEvent.id)} onClose={() => setSelectedEvent(null)} />}
-    </div>
+    </PlanningRouteFrame>
   );
 }
 
@@ -468,11 +510,22 @@ function ReminderDetailSheet({ reminder, onClose }: { reminder: PlanningReminder
 function ReminderRow({ reminder, sourceStatus, now, onOpen }: { reminder: PlanningReminder; sourceStatus: PlanningSnapshot["sourceStatus"] | "unavailable"; now: Date; onOpen: () => void }) {
   const deliveredOpen = reminder.status === "due" && reminder.deliveryState === "delivered";
   return (
-    <button type="button" className={`planning-route-row reminder-route-row ${deliveredOpen ? "reminder-route-row--delivered-open" : ""}`} data-testid="planning-reminder-route-row" onClick={onOpen}>
+    <button
+      type="button"
+      className={`planning-route-row reminder-route-row ${deliveredOpen ? "reminder-route-row--delivered-open" : ""}`}
+      data-testid="planning-reminder-route-row"
+      data-lifecycle-state={reminder.status}
+      data-delivery-state={reminder.deliveryState}
+      onClick={onOpen}
+    >
       <span className="planning-route-row__main">
         <span className="planning-route-row__eyebrow">{formatReminderDueLabel(reminder, sourceStatus === "unavailable" ? "offline" : sourceStatus, now)} · {formatReminderExactDue(reminder)}</span>
         <strong>{reminder.title}</strong>
-        <span className="planning-route-row__source">{lifecycleLabels[reminder.status]} · {deliveryLabels[reminder.deliveryState]} · {reminder.sourceLabel}</span>
+        <span className="planning-route-row__source planning-reminder-state-line">
+          <span data-testid="planning-reminder-lifecycle">Жизненный цикл: {lifecycleLabels[reminder.status]}</span>
+          <span data-testid="planning-reminder-delivery">Доставка: {deliveryLabels[reminder.deliveryState]}</span>
+          <span>Источник: {reminder.sourceLabel}</span>
+        </span>
       </span>
       {deliveredOpen && <span className="reminder-status-badge">Открыто</span>}
     </button>
@@ -523,13 +576,22 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   }, [view]);
 
   return (
-    <div className="planning-route-page" data-testid="route-reminders">
-      <PageHeading eyebrow="Планирование" title="Напоминания" description="Активные сроки и состояние доставки. Напоминание остаётся открытым, пока его жизненный цикл не завершён." />
-      <div className="planning-route-heading-row">
-        <ReminderSegments view={view} onChange={setView} />
-        <span className="planning-route-note">Отдельный monitor-only маршрут</span>
-      </div>
-      <PlanningRouteHealth sourceStatus={envelope?.sourceStatus ?? "unavailable"} lastSyncedAt={envelope?.lastSyncedAt ?? null} error={routeRead.error} preview={preview} onRetry={() => setRetry((value) => value + 1)} />
+    <PlanningRouteFrame
+      module={remindersModule}
+      description="Активные сроки и состояние доставки. Напоминание остаётся открытым, пока его жизненный цикл не завершён."
+      sourceStatus={envelope?.sourceStatus ?? "unavailable"}
+      lastSyncedAt={envelope?.lastSyncedAt ?? null}
+      error={routeRead.error}
+      preview={preview}
+      onRetry={() => setRetry((value) => value + 1)}
+      controls={(
+        <>
+          <ReminderSegments view={view} onChange={setView} />
+          <span className="planning-route-note">Только чтение · доставка и завершение разделены</span>
+        </>
+      )}
+      testId="route-reminders"
+    >
       <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && visibleItems.length === 0)} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
         {envelope && (
           <>
@@ -541,6 +603,6 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         )}
       </PlanningRouteState>
       {selectedReminder && <ReminderDetailSheet reminder={selectedReminder} onClose={() => setSelectedReminder(null)} />}
-    </div>
+    </PlanningRouteFrame>
   );
 }

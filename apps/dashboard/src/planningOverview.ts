@@ -5,6 +5,7 @@ import type {
   PlanningSourceStatus,
   PlanningTask
 } from "@artem/contracts";
+import { planningOverviewModules } from "./planningModuleRegistry";
 
 const reminderActiveStatuses = new Set<PlanningReminder["status"]>(["pending", "due"]);
 const taskPriorityRank: Record<PlanningTask["priority"], number> = {
@@ -347,4 +348,53 @@ export function planningHealthPresentation(
         hasLastGoodData: hasPlanningItems(snapshot)
       };
   }
+}
+
+export interface PlanningOverviewModuleSummary {
+  readonly moduleId: string;
+  readonly status: "available" | "unavailable";
+}
+
+export interface PlanningOverviewSummary {
+  readonly health: PlanningHealthPresentation;
+  readonly reminder: PlanningReminder | null;
+  readonly overdueTask: PlanningTask | null;
+  readonly overdueTaskCount: number;
+  readonly event: PlanningCalendarEvent | null;
+  readonly modules: readonly PlanningOverviewModuleSummary[];
+}
+
+/** Fixed source-owned contribution layer for the compact `Дела` widget. */
+export function planningOverviewSummary(
+  snapshot: PlanningSnapshot | null | undefined,
+  referenceTime: Date
+): PlanningOverviewSummary {
+  const safe = <T,>(read: () => T, fallback: T): T => {
+    try {
+      return read();
+    } catch {
+      return fallback;
+    }
+  };
+  const health = safe(() => planningHealthPresentation(snapshot), planningHealthPresentation(undefined));
+  if (!snapshot) {
+    return {
+      health,
+      reminder: null,
+      overdueTask: null,
+      overdueTaskCount: 0,
+      event: null,
+      modules: planningOverviewModules.map((module) => ({ moduleId: module.id, status: "unavailable" }))
+    };
+  }
+
+  const reminder = safe(() => selectNextReminder(snapshot), null);
+  const overdueTask = safe(() => selectPrimaryOverdueTask(snapshot), null);
+  const overdueTaskCount = safe(() => countOverdueTasks(snapshot), 0);
+  const event = safe(() => selectNextCalendarEvent(snapshot, referenceTime), null);
+  const modules = planningOverviewModules.map((module) => ({
+    moduleId: module.id,
+    status: "available" as const
+  }));
+  return { health, reminder, overdueTask, overdueTaskCount, event, modules };
 }

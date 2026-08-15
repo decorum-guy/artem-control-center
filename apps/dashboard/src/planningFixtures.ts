@@ -92,6 +92,12 @@ function calendarEvent(overrides: Partial<PlanningCalendarEvent> = {}): Planning
     version: 1,
     source: "calendar-provider",
     sourceLabel: "Calendar provider",
+    calendarIdentity: {
+      providerId: "calendar-provider",
+      providerLabel: "Calendar provider",
+      calendarId: "primary",
+      calendarLabel: "Основной календарь"
+    },
     title: "Встреча с командой",
     allDay: false,
     timezone: "Europe/Moscow",
@@ -207,6 +213,36 @@ export const planningFixtures = {
         startDate: "2026-08-12",
         endDateExclusive: "2026-08-13"
       })],
+      upcoming: [],
+      conflicts: []
+    }
+  }),
+  multipleCalendarIdentities: planning({
+    calendar: {
+      today: [
+        calendarEvent({
+          id: ids.timedEvent,
+          title: "Встреча из личного календаря",
+          calendarIdentity: {
+            providerId: "calendar-provider",
+            providerLabel: "Calendar provider",
+            calendarId: "personal",
+            calendarLabel: "Личный"
+          }
+        }),
+        calendarEvent({
+          id: ids.allDayEvent,
+          title: "Встреча из рабочего календаря",
+          calendarIdentity: {
+            providerId: "calendar-provider",
+            providerLabel: "Calendar provider",
+            calendarId: "work",
+            calendarLabel: "Рабочий"
+          },
+          startAtUtc: "2026-08-12T16:00:00Z",
+          endAtUtc: "2026-08-12T17:00:00Z"
+        })
+      ],
       upcoming: [],
       conflicts: []
     }

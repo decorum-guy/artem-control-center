@@ -132,6 +132,25 @@ export type PlanningReminderStatus = "pending" | "due" | "completed" | "cancelle
 export type PlanningDeliveryState = "not_due" | "queued" | "retrying" | "delivered" | "failed";
 export type PlanningTaskPriority = "none" | "low" | "normal" | "high";
 export type PlanningTaskStatus = "open" | "completed" | "archived";
+export type PlanningCapability = "read" | "create" | "update" | "complete" | "cancel" | "delete";
+
+export interface PlanningCapabilitySet {
+  read: boolean;
+  create: boolean;
+  update: boolean;
+  complete: boolean;
+  cancel: boolean;
+  delete: boolean;
+}
+
+/** Frontend-safe calendar identity. Provider transport and credentials never cross this boundary. */
+export interface PlanningCalendarIdentity {
+  providerId: string;
+  providerLabel: string;
+  calendarId: string;
+  calendarLabel: string;
+}
+
 export type PlanningEventSyncState =
   | "local_only"
   | "pending"
@@ -175,6 +194,7 @@ export interface PlanningCalendarEvent {
   version: number;
   source: PlanningSource;
   sourceLabel: string;
+  calendarIdentity?: PlanningCalendarIdentity | null;
   title: string;
   allDay: boolean;
   timezone: string;

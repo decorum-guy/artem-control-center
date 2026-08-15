@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   PlanningCalendarEvent,
+  PlanningCalendarIdentity,
   PlanningProject,
   PlanningReminder,
   PlanningSource,
@@ -172,6 +173,25 @@ function uuidValue(value: unknown, label: string): string {
   return result;
 }
 
+function canonicalIdentityValue(value: unknown, label: string, maxLength = 128): string {
+  const result = stringValue(value, label, 1, maxLength);
+  if (result.includes("://") || [...result].some((character) => character.charCodeAt(0) < 32)) {
+    throw new PlanningReadError(`${label} is not a canonical identity`, "contract");
+  }
+  return result;
+}
+
+function parseCalendarIdentity(value: unknown): PlanningCalendarIdentity {
+  const identity = record(value, "planning.calendar_event.calendarIdentity");
+  exactKeys(identity, ["providerId", "providerLabel", "calendarId", "calendarLabel"], "planning.calendar_event.calendarIdentity");
+  return {
+    providerId: canonicalIdentityValue(identity.providerId, "planning.calendar_event.calendarIdentity.providerId"),
+    providerLabel: stringValue(identity.providerLabel, "planning.calendar_event.calendarIdentity.providerLabel", 1, 128),
+    calendarId: canonicalIdentityValue(identity.calendarId, "planning.calendar_event.calendarIdentity.calendarId"),
+    calendarLabel: stringValue(identity.calendarLabel, "planning.calendar_event.calendarIdentity.calendarLabel", 1, 160)
+  };
+}
+
 function nullableUuid(value: unknown, label: string): string | null {
   return value === null ? null : uuidValue(value, label);
 }
@@ -230,9 +250,11 @@ function parseTask(value: unknown): PlanningTask {
 
 function parseCalendarEvent(value: unknown): PlanningCalendarEvent {
   const item = record(value, "planning.calendar_event");
+  const expectedKeys = ["id", "version", "source", "sourceLabel", "title", "allDay", "timezone", "syncState", "startAtUtc", "endAtUtc", "startDate", "endDateExclusive", "createdAt", "updatedAt"];
+  if ("calendarIdentity" in item) expectedKeys.push("calendarIdentity");
   exactKeys(
     item,
-    ["id", "version", "source", "sourceLabel", "title", "allDay", "timezone", "syncState", "startAtUtc", "endAtUtc", "startDate", "endDateExclusive", "createdAt", "updatedAt"],
+    expectedKeys,
     "planning.calendar_event"
   );
   const allDay = booleanValue(item.allDay, "planning.calendar_event.allDay");
@@ -251,6 +273,9 @@ function parseCalendarEvent(value: unknown): PlanningCalendarEvent {
     version: integerValue(item.version, "planning.calendar_event.version", 1, Number.MAX_SAFE_INTEGER),
     source: enumValue(item.source, sourceValues, "planning.calendar_event.source"),
     sourceLabel: stringValue(item.sourceLabel, "planning.calendar_event.sourceLabel", 1, 64),
+    calendarIdentity: item.calendarIdentity === undefined || item.calendarIdentity === null
+      ? item.calendarIdentity ?? undefined
+      : parseCalendarIdentity(item.calendarIdentity),
     title: stringValue(item.title, "planning.calendar_event.title", 1, 500),
     allDay,
     timezone: timezoneValue(item.timezone, "planning.calendar_event.timezone"),
