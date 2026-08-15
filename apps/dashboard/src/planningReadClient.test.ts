@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PlanningReadError, readPlanningTasks } from "./planningReadClient";
+import { PlanningReadError, planningReadParsers, readPlanningTasks } from "./planningReadClient";
 
 const task = {
   id: "00000000-0000-4000-8000-000000000501",
@@ -38,6 +38,36 @@ function envelope(overrides: Record<string, unknown> = {}) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("fixed Planning read client", () => {
+  it("accepts only bounded frontend-safe calendar identity fields", () => {
+    const event = planningReadParsers.parseCalendarEvent({
+      id: "00000000-0000-4000-8000-000000000601",
+      version: 1,
+      source: "calendar-provider",
+      sourceLabel: "Calendar provider",
+      calendarIdentity: {
+        providerId: "calendar-provider",
+        providerLabel: "Calendar provider",
+        calendarId: "work",
+        calendarLabel: "Рабочий"
+      },
+      title: "Совещание",
+      allDay: false,
+      timezone: "Europe/Moscow",
+      syncState: "synced",
+      startAtUtc: "2026-08-12T10:00:00Z",
+      endAtUtc: "2026-08-12T11:00:00Z",
+      startDate: null,
+      endDateExclusive: null,
+      createdAt: "2026-08-12T09:00:00Z",
+      updatedAt: "2026-08-12T09:00:00Z"
+    });
+    expect(event.calendarIdentity).toEqual(expect.objectContaining({ calendarId: "work", calendarLabel: "Рабочий" }));
+    expect(() => planningReadParsers.parseCalendarEvent({
+      ...event,
+      calendarIdentity: { ...event.calendarIdentity, calendarId: "https://secret.example" }
+    })).toThrowError(PlanningReadError);
+  });
+
   it("uses a fixed same-origin GET path with safely encoded bounded query values", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(envelope()), { status: 200 }));
     const result = await readPlanningTasks("today", "00000000-0000-4000-8000-000000000601", 20, 20);
@@ -81,4 +111,3 @@ describe("fixed Planning read client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
-

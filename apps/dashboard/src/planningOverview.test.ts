@@ -7,6 +7,7 @@ import {
   formatReminderDueLabel,
   formatReminderExactTime,
   planningHealthPresentation,
+  planningOverviewSummary,
   planningReferenceTime,
   selectNextCalendarEvent,
   selectNextReminder,
@@ -167,5 +168,24 @@ describe("Planning Overview selectors and presentation", () => {
       reminders: { ...planningFixtures.sseBefore.reminders, upcoming: [reminder, reminder] }
     };
     expect(selectNextReminder(snapshot)?.id).toBe(reminder.id);
+  });
+
+  it("builds the compact Overview contribution from fixed module summaries", () => {
+    const summary = planningOverviewSummary(planningFixtures.healthy, fixtureNow);
+    expect(summary.modules).toEqual([{ moduleId: "planning.overview-summary", status: "available" }]);
+    expect(summary.reminder?.title).toBe("Позвонить в сервис");
+    expect(summary.overdueTask?.title).toBe("Подготовить отчёт");
+    expect(summary.event?.title).toBe("Встреча с командой");
+  });
+
+  it("keeps the rest of `Дела` available when one summary selector fails", () => {
+    const malformed = {
+      ...planningFixtures.healthy,
+      reminders: undefined as never
+    };
+    const summary = planningOverviewSummary(malformed, fixtureNow);
+    expect(summary.reminder).toBeNull();
+    expect(summary.overdueTask?.title).toBe("Подготовить отчёт");
+    expect(summary.event?.title).toBe("Встреча с командой");
   });
 });

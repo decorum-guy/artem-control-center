@@ -3,6 +3,8 @@ import type { PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
 import type { PlanningReadEnvelope, PlanningReadError } from "./planningReadClient";
 import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
 import { Sheet } from "./Sheet";
+import type { PlanningModuleDefinition } from "./planningModuleRegistry";
+import { RouteHeader } from "./ShellPrimitives";
 
 export function syncTimeLabel(value: string | null): string | null {
   if (!value) return null;
@@ -33,6 +35,58 @@ export function previewEnvelope<T>(
     count: Math.min(items.length, limit),
     hasMore: false
   };
+}
+
+/** Shared touch-first geometry for the three Planning route surfaces. */
+export function PlanningRouteFrame({
+  module,
+  eyebrow = "Планирование",
+  description,
+  sourceStatus,
+  lastSyncedAt,
+  error,
+  preview,
+  onRetry,
+  controls,
+  futureAction,
+  children,
+  testId
+}: {
+  module: PlanningModuleDefinition;
+  eyebrow?: string;
+  description: string;
+  sourceStatus: PlanningSourceStatus | "unavailable";
+  lastSyncedAt: string | null;
+  error?: PlanningReadError | null;
+  preview?: boolean;
+  onRetry: () => void;
+  controls: ReactNode;
+  futureAction?: ReactNode;
+  children: ReactNode;
+  testId: string;
+}) {
+  return (
+    <div
+      className="planning-route-page"
+      data-testid={testId}
+      data-planning-module={module.id}
+      data-planning-domain={module.domain}
+    >
+      <RouteHeader eyebrow={eyebrow} title={module.label} description={description} />
+      <div className="planning-route-heading-row">
+        <div className="planning-route-controls planning-route-controls--primary">{controls}</div>
+        {futureAction && <div className="planning-future-action-slot" data-testid="planning-future-action-slot">{futureAction}</div>}
+      </div>
+      <PlanningRouteHealth
+        sourceStatus={sourceStatus}
+        lastSyncedAt={lastSyncedAt}
+        error={error}
+        preview={preview}
+        onRetry={onRetry}
+      />
+      <div className="planning-route-workzone">{children}</div>
+    </div>
+  );
 }
 
 export function PlanningRouteHealth({

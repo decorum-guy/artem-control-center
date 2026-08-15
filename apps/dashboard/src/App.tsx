@@ -11,10 +11,9 @@ import {
 } from "./pages";
 import { CalendarPage, RemindersPage, TasksPage } from "./PlanningRoutes";
 import {
-  planningCalendarRouteEnabled,
-  planningRemindersRouteEnabled,
-  planningTasksRouteEnabled
+  planningRouteEnabled
 } from "./planningRouteConfig";
+import { planningRoutePaths } from "./planningModuleRegistry";
 import { reconcileLayout, resolveManifest } from "./registry";
 import { ProductShell, type ShellRoutePath } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -41,8 +40,7 @@ const userRoutes: ShellRoutePath[] = [
   "/weather",
   "/home",
   "/services",
-  "/calendar",
-  "/tasks",
+  ...planningRoutePaths,
   "/reminders",
   "/backups",
   "/apps",
@@ -56,7 +54,7 @@ function routeFromLocation(): ShellRoutePath {
     return "/overview";
   }
   const requested = window.location.pathname as ShellRoutePath;
-  if (requested === "/reminders" && !planningRemindersRouteEnabled) {
+  if (requested === "/reminders" && !planningRouteEnabled("/reminders")) {
     window.history.replaceState({}, "", `/overview${window.location.search}`);
     return "/overview";
   }
@@ -377,9 +375,9 @@ export function App() {
             )
           )}
           {route === "/system" && (v2VisualShellEnabled ? <SystemV2Page snapshot={snapshot} /> : <SystemPage snapshot={snapshot} />)}
-          {route === "/tasks" && (planningTasksRouteEnabled ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
-          {route === "/calendar" && (planningCalendarRouteEnabled ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
-          {route === "/reminders" && planningRemindersRouteEnabled && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
+          {route === "/tasks" && (planningRouteEnabled("/tasks") ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
+          {route === "/calendar" && (planningRouteEnabled("/calendar") ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
+          {route === "/reminders" && planningRouteEnabled("/reminders") && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
           {!["/overview", "/weather", "/home", "/services", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
             <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}

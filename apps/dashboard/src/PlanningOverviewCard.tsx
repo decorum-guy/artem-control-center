@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { PlanningSnapshot } from "@artem/contracts";
 import type { RoutePath } from "./Shell";
 import {
-  countOverdueTasks,
   formatCalendarEventDate,
   formatCalendarEventTime,
   formatOverdueTaskCount,
@@ -10,9 +9,7 @@ import {
   formatReminderExactTime,
   formatTaskDueLabel,
   planningHealthPresentation,
-  selectNextCalendarEvent,
-  selectNextReminder,
-  selectPrimaryOverdueTask
+  planningOverviewSummary
 } from "./planningOverview";
 import { planningRemindersRouteEnabled } from "./planningRouteConfig";
 
@@ -105,8 +102,10 @@ export function PlanningOverviewCard({
   onNavigate: (path: PlanningNavigationPath) => void;
   density?: "comfortable" | "compact";
 }) {
-  const health = planningHealthPresentation(planning);
-  const now = usePlanningPresentationNow(health.state);
+  const initialHealth = planningHealthPresentation(planning);
+  const now = usePlanningPresentationNow(initialHealth.state);
+  const summary = planningOverviewSummary(planning, now);
+  const health = summary.health;
 
   if (!planning) {
     return (
@@ -123,10 +122,10 @@ export function PlanningOverviewCard({
     );
   }
 
-  const reminder = selectNextReminder(planning);
-  const overdueTask = selectPrimaryOverdueTask(planning);
-  const event = selectNextCalendarEvent(planning, now);
-  const overdueCount = formatOverdueTaskCount(countOverdueTasks(planning));
+  const reminder = summary.reminder;
+  const overdueTask = summary.overdueTask;
+  const event = summary.event;
+  const overdueCount = formatOverdueTaskCount(summary.overdueTaskCount);
   const currentData = planning.sourceStatus === "current";
   const reminderTitle = reminder?.title ?? unavailableRowTitle(health, "Напоминаний нет");
   const taskTitle = overdueTask?.title ?? unavailableRowTitle(health, "Нет просроченных задач");

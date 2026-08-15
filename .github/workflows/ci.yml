@@ -226,5 +226,24 @@ jobs:
           B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
         run: npm run test:e2e -- tests/e2e/b3-planning-routes.spec.ts
 
+      - name: Run focused PR9 Planning foundation gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          B2_PLANNING_OVERVIEW_ENABLED: "true"
+          B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
+          PR9_ARTIFACT_DIR: artifacts/v2-planning-foundation-review
+        run: npm run test:e2e -- tests/e2e/v2-planning-foundation.spec.ts
+
+      - name: Upload PR9 Planning foundation review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-planning-foundation-review-${{ github.sha }}
+          path: artifacts/v2-planning-foundation-review
+          if-no-files-found: error
+
       - name: Smoke-test production runtime
         run: npm run test:production-smoke

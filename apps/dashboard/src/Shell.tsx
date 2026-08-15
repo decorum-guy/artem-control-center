@@ -6,6 +6,7 @@ import type { AccessStatus } from "./accessApi";
 import { Icon, type IconName } from "./icons";
 import { StatusText } from "./ShellPrimitives";
 import { v2VisualShellEnabled } from "./visualShellConfig";
+import { planningModuleForRoute, planningNavigationModules } from "./planningModuleRegistry";
 
 export type RoutePath =
   | "/overview"
@@ -27,8 +28,8 @@ const primaryNavigation: Array<{ path: ShellRoutePath; label: string; short: str
   { path: "/weather", label: "Погода", short: "П" },
   { path: "/home", label: "Дом", short: "Д" },
   { path: "/services", label: "Сервисы", short: "С" },
-  { path: "/calendar", label: "Календарь", short: "К" },
-  { path: "/tasks", label: "Задачи", short: "З" },
+  { path: planningModuleForRoute("/calendar")!.route as "/calendar", label: planningModuleForRoute("/calendar")!.label, short: "К" },
+  { path: planningModuleForRoute("/tasks")!.route as "/tasks", label: planningModuleForRoute("/tasks")!.label, short: "З" },
   { path: "/backups", label: "Резервные копии", short: "Б" }
 ];
 
@@ -45,11 +46,11 @@ const v2PrimaryNavigation: Array<{ path: ShellRoutePath; label: string; icon: Ic
   { path: "/services", label: "Сервисы", icon: "services" }
 ];
 
-const v2PlanningNavigation: Array<{ path: ShellRoutePath; label: string; icon: IconName }> = [
-  { path: "/calendar", label: "Календарь", icon: "calendar" },
-  { path: "/tasks", label: "Задачи", icon: "tasks" },
-  { path: "/reminders", label: "Напоминания", icon: "reminder" }
-];
+const v2PlanningNavigation: Array<{ path: ShellRoutePath; label: string; icon: IconName }> = planningNavigationModules.map((module) => ({
+  path: module.route,
+  label: module.label,
+  icon: module.icon
+}));
 
 const v2SecondaryNavigation: Array<{ path: ShellRoutePath; label: string; icon: IconName }> = [
   { path: "/system", label: "Система", icon: "system" },
