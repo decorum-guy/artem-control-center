@@ -59,8 +59,7 @@ export function SettingsV2Page({
 
       <section className="settings-v2-appearance" aria-labelledby="settings-v2-appearance-title">
         <div className="settings-v2-appearance__copy">
-          <p className="section-kicker">Внешний вид</p>
-          <h2 id="settings-v2-appearance-title">Appearance</h2>
+          <h2 id="settings-v2-appearance-title">Внешний вид</h2>
           <p>Спокойная тема и предсказуемое движение для этого экрана.</p>
         </div>
         <div className="settings-v2-appearance__controls">
@@ -168,7 +167,7 @@ function SettingsSheet({
         onClose={onClose}
       >
         <div className="settings-v2-sheet-content" data-testid="coffee-settings">
-          <CoffeeTimingEditor settings={coffee} />
+          <CoffeeTimingEditor settings={coffee} showHeading={false} />
           {coffee.notice && <p className="settings-notice" role="status">{coffee.notice}</p>}
         </div>
       </Sheet>
@@ -185,7 +184,7 @@ function SettingsSheet({
         onClose={onClose}
       >
         <div className="settings-v2-sheet-content">
-          <CoffeeNotificationEditor settings={coffee} />
+          <CoffeeNotificationEditor settings={coffee} showHeading={false} />
           {coffee.notice && <p className="settings-notice" role="status">{coffee.notice}</p>}
         </div>
       </Sheet>

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -180,6 +180,21 @@ async function closeSheet(page: Page) {
   await expect(page.locator(".cc-sheet")).toHaveCount(0);
 }
 
+async function expectSwitchGeometry(row: Locator, state: "Вкл" | "Выкл") {
+  await expect(row.locator(".setting-switch-row__state")).toHaveText(state, { exact: true });
+  const geometry = await row.evaluate((element) => {
+    const thumb = element.querySelector<HTMLElement>(".setting-switch-row__thumb")?.getBoundingClientRect();
+    const stateText = element.querySelector<HTMLElement>(".setting-switch-row__state")?.getBoundingClientRect();
+    if (!thumb || !stateText) return null;
+    return {
+      intersects: thumb.left < stateText.right && thumb.right > stateText.left &&
+        thumb.top < stateText.bottom && thumb.bottom > stateText.top
+    };
+  });
+  expect(geometry).not.toBeNull();
+  expect(geometry?.intersects).toBe(false);
+}
+
 test.describe("Control Center V2 PR8 Settings information architecture", () => {
   test.skip(!v2Enabled, "Run with VITE_V2_VISUAL_SHELL=true for the PR8 browser gate.");
 
@@ -188,11 +203,45 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await openSettings(page);
 
     await expect(page.getByRole("heading", { name: "Настройки" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Внешний вид", exact: true })).toBeVisible();
+    await expect(page.getByText("Appearance", { exact: true })).toHaveCount(0);
     await expect(page.getByTestId("settings-summary-coffee")).toBeVisible();
     await expect(page.getByTestId("settings-summary-notifications")).toBeVisible();
     await expect(page.getByTestId("settings-summary-access")).toBeVisible();
     await expect(page.getByTestId("settings-summary-runtime")).toBeVisible();
+
+    const motionLabels = [
+      ["full", "Полное"],
+      ["reduced", "Уменьшенное"],
+      ["low-performance", "Низкая производительность"],
+      ["battery-saving", "Экономия батареи"]
+    ] as const;
+    for (const [value, label] of motionLabels) {
+      const button = page.getByTestId(`settings-motion-${value}`);
+      await expect(button).toHaveText(label, { exact: true });
+      await expect(button).toBeVisible();
+    }
+    const motionMetrics = await page.locator(".settings-v2-motion-grid button").evaluateAll((elements) =>
+      elements.map((element) => {
+        const style = getComputedStyle(element);
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return {
+          overflowWrap: style.overflowWrap,
+          wordBreak: style.wordBreak,
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          lineCount: range.getClientRects().length
+        };
+      })
+    );
+    expect(motionMetrics).toHaveLength(4);
+    for (const metric of motionMetrics) {
+      expect(metric.overflowWrap).toBe("normal");
+      expect(metric.wordBreak).toBe("normal");
+      expect(metric.scrollWidth).toBeLessThanOrEqual(metric.clientWidth + 1);
+      expect(metric.lineCount).toBeLessThanOrEqual(2);
+    }
 
     const appearance = await page.locator(".settings-v2-appearance").boundingBox();
     const columns = await page.locator(".settings-summary-column").evaluateAll((elements) =>
@@ -243,6 +292,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await page.getByTestId("settings-summary-coffee").click();
 
     const sheet = page.getByTestId("settings-coffee-sheet");
+    await expect(sheet.getByRole("heading", { name: "Время", exact: true })).toHaveCount(1);
     await expect(sheet.locator('output[aria-label="Время разогрева"]')).toHaveText("15 мин");
     await sheet.getByTestId("coffee-timing-warmup").getByRole("button", { name: /уменьшить/ }).click();
     await sheet.getByRole("button", { name: "Сохранить", exact: true }).click();
@@ -268,12 +318,18 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await page.getByTestId("settings-summary-notifications").click();
 
     const sheet = page.getByTestId("settings-notifications-sheet");
+    await expect(sheet.getByRole("heading", { name: "Уведомления", exact: true })).toHaveCount(1);
     const warmup = sheet.locator("fieldset").first();
     await expect(warmup.getByText("Разогрев завершён")).toBeVisible();
+    const enabled = warmup.locator(".setting-switch-row").nth(0);
+    const telegramRow = warmup.locator(".setting-switch-row").nth(1);
+    await expectSwitchGeometry(enabled, "Вкл");
+    await expectSwitchGeometry(telegramRow, "Выкл");
     const telegram = warmup.getByLabel("Telegram");
     await expect(telegram).not.toBeChecked();
     await telegram.click();
     await expect(telegram).toBeChecked();
+    await expectSwitchGeometry(telegramRow, "Вкл");
     await expect(sheet.getByRole("status")).toContainText("уведомлений сохранены");
   });
 
@@ -495,4 +551,6 @@ test("shell-off retains the legacy Settings presentation", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.getByTestId("coffee-settings")).toBeVisible();
   await expect(page.getByTestId("settings-summary-coffee")).toHaveCount(0);
+  await expect(page.getByTestId("coffee-settings").getByRole("heading", { name: "Время", exact: true })).toHaveCount(1);
+  await expect(page.getByTestId("coffee-settings").getByRole("heading", { name: "Уведомления", exact: true })).toHaveCount(1);
 });

@@ -14,7 +14,7 @@
   align-items: center;
   min-height: 112px;
   gap: 24px;
-  padding: 16px 20px;
+  padding: 6px 20px;
   border-top: 1px solid var(--cc-border);
   border-bottom: 1px solid var(--cc-border);
   background: var(--cc-surface-1);
@@ -80,7 +80,7 @@
 }
 
 .settings-v2-motion-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .settings-v2-segmented button,
@@ -88,7 +88,9 @@
   min-width: 0;
   min-height: 48px;
   padding: 6px 10px;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
   border: 0;
   border-radius: 0;
   color: var(--cc-text-secondary);
@@ -338,8 +340,7 @@
   position: absolute;
   top: 8px;
   left: 0;
-  display: flex;
-  align-items: center;
+  display: block;
   width: 56px;
   height: 32px;
   padding: 3px;
@@ -354,6 +355,10 @@
 }
 
 .setting-switch-row__thumb {
+  position: absolute;
+  z-index: 1;
+  top: 3px;
+  left: 3px;
   display: block;
   width: 24px;
   height: 24px;
@@ -363,8 +368,17 @@
 }
 
 .setting-switch-row__state {
-  flex: 1;
-  padding: 0 3px;
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 30px;
+  padding: 0;
+  overflow: visible;
+  white-space: nowrap;
   text-align: center;
 }
 
@@ -376,7 +390,13 @@
 
 .setting-switch-row:has(input:checked) .setting-switch-row__thumb {
   background: var(--cc-on-accent);
-  transform: translateX(22px);
+  transform: translateX(24px);
+}
+
+.setting-switch-row:has(input:checked) .setting-switch-row__state {
+  right: auto;
+  left: 3px;
+  color: var(--cc-on-accent);
 }
 
 .setting-switch-row__control input:focus-visible + .setting-switch-row__visual {

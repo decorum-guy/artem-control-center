@@ -245,19 +245,23 @@ export function CoffeeSettingsPanel() {
 }
 
 export function CoffeeTimingEditor({
-  settings
+  settings,
+  showHeading = true
 }: {
   settings: CoffeeSettingsController;
+  showHeading?: boolean;
 }) {
   const { timing } = settings;
   return (
     <div className="coffee-settings__timing" data-testid="coffee-timing-editor">
-      <div>
-        <h3>Время</h3>
-        <p>
-          Эти значения общие для панели и Telegram-бота и хранятся в Home Assistant.
-        </p>
-      </div>
+      {showHeading && (
+        <div>
+          <h3>Время</h3>
+          <p>
+            Эти значения общие для панели и Telegram-бота и хранятся в Home Assistant.
+          </p>
+        </div>
+      )}
       {timing ? (
         <div className="timing-form">
           <TimingStepper
@@ -314,18 +318,22 @@ export function CoffeeTimingEditor({
 }
 
 export function CoffeeNotificationEditor({
-  settings
+  settings,
+  showHeading = true
 }: {
   settings: CoffeeSettingsController;
+  showHeading?: boolean;
 }) {
   const { notifications } = settings;
   if (!notifications) {
     return (
       <div className="coffee-settings__notifications" data-testid="coffee-notifications-editor">
-        <div>
-          <h3>Уведомления</h3>
-          <p>Каналы отключаются намеренно и не считаются ошибкой доставки.</p>
-        </div>
+        {showHeading && (
+          <div>
+            <h3>Уведомления</h3>
+            <p>Каналы отключаются намеренно и не считаются ошибкой доставки.</p>
+          </div>
+        )}
         <p className="muted">
           {settings.loading
             ? "Получаем настройки уведомлений…"
@@ -339,10 +347,12 @@ export function CoffeeNotificationEditor({
 
   return (
     <div className="coffee-settings__notifications" data-testid="coffee-notifications-editor">
-      <div>
-        <h3>Уведомления</h3>
-        <p>Каналы отключаются намеренно и не считаются ошибкой доставки.</p>
-      </div>
+      {showHeading && (
+        <div>
+          <h3>Уведомления</h3>
+          <p>Каналы отключаются намеренно и не считаются ошибкой доставки.</p>
+        </div>
+      )}
       {([
         ["warmup", "Разогрев завершён"],
         ["longRunning", "Работает слишком долго"]
