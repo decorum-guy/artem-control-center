@@ -182,17 +182,13 @@ async function closeSheet(page: Page) {
 
 async function expectSwitchGeometry(row: Locator, state: "Вкл" | "Выкл") {
   await expect(row.locator(".setting-switch-row__state")).toHaveText(state, { exact: true });
-  const geometry = await row.evaluate((element) => {
+  await expect.poll(async () => row.evaluate((element) => {
     const thumb = element.querySelector<HTMLElement>(".setting-switch-row__thumb")?.getBoundingClientRect();
     const stateText = element.querySelector<HTMLElement>(".setting-switch-row__state")?.getBoundingClientRect();
-    if (!thumb || !stateText) return null;
-    return {
-      intersects: thumb.left < stateText.right && thumb.right > stateText.left &&
-        thumb.top < stateText.bottom && thumb.bottom > stateText.top
-    };
-  });
-  expect(geometry).not.toBeNull();
-  expect(geometry?.intersects).toBe(false);
+    if (!thumb || !stateText) return true;
+    return thumb.left < stateText.right && thumb.right > stateText.left &&
+      thumb.top < stateText.bottom && thumb.bottom > stateText.top;
+  }), { timeout: 1500, message: "switch thumb and state text must not intersect after settling" }).toBe(false);
 }
 
 test.describe("Control Center V2 PR8 Settings information architecture", () => {
