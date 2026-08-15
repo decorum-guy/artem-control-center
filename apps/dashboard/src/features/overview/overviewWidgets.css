@@ -258,6 +258,9 @@
   gap: 4px;
   margin: auto 0 var(--cc-space-3);
 }
+.coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-panel__state {
+  max-width: min(260px, 100%);
+}
 
 .coffee-panel--overview .coffee-panel__state strong {
   color: var(--cc-text);
@@ -315,8 +318,24 @@
   background: transparent;
 }
 
+/* Keep the warming activity source-owned by the rendered image. Scaling the
+   visual wrapper moves the machine and its activity together, including the
+   transformed image bounds used by the appearance controls. */
+.coffee-panel--overview .coffee-asset__visual {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  max-width: 100%;
+  max-height: 100%;
+  transform: scale(var(--cc-coffee-image-scale, 1));
+  transform-origin: center bottom;
+}
+
 /* Keep the quiet/default composition centered beneath the service status.
-   Dense copy keeps the asset in its reserved right track so it cannot cover text. */
+   The spacious state copy remains bounded so it cannot reach the image zone. */
 .overview-v2-grid-shell[data-grid-profile="landscape-12"]
   .coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-asset {
   transform: translateX(calc(-1 * clamp(96px, 11.2vw, 143px)));
@@ -324,16 +343,15 @@
 
 .coffee-panel--overview .coffee-asset__image {
   width: auto;
-  height: min(192px, calc((100% - 44px) / var(--cc-coffee-image-scale, 1)));
+  height: 184px;
   max-width: 140px;
-  max-height: calc(100% - 40px);
+  max-height: none;
   object-fit: contain;
-  transform: scale(var(--cc-coffee-image-scale, 1));
-  transform-origin: center bottom;
+  transform: none;
 }
 
 .coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset__image {
-  height: 156px;
+  height: 148px;
   max-width: 104px;
 }
 
@@ -390,7 +408,11 @@
 }
 
 .coffee-panel--overview .coffee-activity {
-  top: 4px;
+  position: static;
+  top: auto;
+  align-items: flex-start;
+  height: 22px;
+  flex: 0 0 22px;
 }
 
 .overview-home-widget {

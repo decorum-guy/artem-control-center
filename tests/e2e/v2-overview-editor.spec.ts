@@ -119,7 +119,11 @@ function makeDocument(revision = 0, items: readonly LayoutItem[] = foundationIte
   };
 }
 
-async function installLayoutRoute(page: Page, initialMode: PatchMode = "success") {
+async function installLayoutRoute(
+  page: Page,
+  initialMode: PatchMode = "success",
+  initialItems: readonly LayoutItem[] = foundationItems
+) {
   const state: {
     document: LayoutDocument;
     mode: PatchMode;
@@ -127,7 +131,7 @@ async function installLayoutRoute(page: Page, initialMode: PatchMode = "success"
     patchCount: number;
     lastPatch: LayoutItem[] | null;
   } = {
-    document: makeDocument(),
+    document: makeDocument(0, initialItems),
     mode: initialMode,
     getCount: 0,
     patchCount: 0,
@@ -203,8 +207,8 @@ async function installLayoutRoute(page: Page, initialMode: PatchMode = "success"
   return state;
 }
 
-async function openEditor(page: Page): Promise<void> {
-  await page.goto("/overview?theme=night");
+async function openEditor(page: Page, url = "/overview?theme=night"): Promise<void> {
+  await page.goto(url);
   await expect(page.getByTestId("route-overview-v2")).toBeVisible();
   await expect(page.getByTestId("overview-configure")).toBeEnabled();
   await page.getByTestId("overview-configure").click();
@@ -212,8 +216,180 @@ async function openEditor(page: Page): Promise<void> {
   await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
 }
 
+async function selectFrame(page: Page, instanceId: string): Promise<void> {
+  await page.locator(`.overview-edit-frame[data-instance-id="${instanceId}"]`).press("Enter");
+}
+
+type Rect = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+
+function rectIntersects(left: Rect, right: Rect): boolean {
+  return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+}
+
+async function assertEditorChromeGeometry(page: Page, instanceId: string, neighborIds: string[]): Promise<void> {
+  const geometry = await page.evaluate(({ instanceId: currentId, neighborIds: currentNeighborIds }) => {
+    const rectFor = (element: Element | null): Rect | null => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const frame = document.querySelector(`.overview-edit-frame[data-instance-id="${currentId}"]`);
+    const controls = Array.from(frame?.querySelectorAll(
+      ".overview-edit-frame__drag-handle, .overview-edit-frame__actions button, .overview-edit-frame__resize-handle, .overview-edit-frame__menu-toggle, .overview-edit-frame__size"
+    ) ?? []).map((element) => ({
+      className: element.className,
+      label: element.getAttribute("aria-label") ?? "",
+      rect: rectFor(element),
+      visualRect: element.classList.contains("overview-edit-frame__size") ? rectFor(element) : (() => {
+        const rect = rectFor(element);
+        return rect ? { ...rect, left: rect.left + 8, top: rect.top + 8, right: rect.right - 8, bottom: rect.bottom - 8, width: rect.width - 16, height: rect.height - 16 } : null;
+      })()
+    }));
+    const neighbors = Object.fromEntries(currentNeighborIds.map((neighborId) => [
+      neighborId,
+      rectFor(document.querySelector(`.overview-edit-frame[data-instance-id="${neighborId}"]`))
+    ]));
+    const semanticSelectors = currentId === "fixture.rog"
+      ? [
+          ".overview-rog-widget__identity",
+          ".overview-rog-widget__status",
+          ".overview-rog-widget__freshness",
+          ".overview-rog-widget__action",
+          ".overview-rog-widget__unavailable"
+        ]
+      : currentId === "fixture.quick-actions"
+        ? [
+            ".overview-home-widget__heading h2",
+            ".overview-home-widget__cell-kicker",
+            ".overview-home-widget__cell strong",
+            ".overview-home-widget__cell-state"
+          ]
+        : currentId === "fixture.health"
+          ? [
+              ".overview-health-widget__heading h2",
+              ".overview-health-widget__aggregate",
+              ".overview-health-widget__incident",
+              ".overview-health-widget__footer",
+              ".overview-health-widget__recovery-slot"
+            ]
+          : [];
+    return {
+      frame: rectFor(frame),
+      controls,
+      neighbors,
+      semanticContent: semanticSelectors
+        .map((selector) => rectFor(frame?.querySelector(selector) ?? null))
+        .filter(Boolean),
+      coffeeContent: currentId === "fixture.coffee"
+        ? [
+            ".coffee-panel--overview .coffee-panel__heading h2",
+            ".coffee-panel--overview .coffee-panel__heading .v2-status-text",
+            ".coffee-panel--overview .coffee-panel__state",
+            ".coffee-panel--overview .coffee-authority",
+            ".coffee-panel--overview .coffee-asset",
+            ".coffee-panel--overview .coffee-state-marker"
+          ].map((selector) => ({ selector, rect: rectFor(frame?.querySelector(selector) ?? null) })).filter(({ rect }) => rect)
+        : []
+    };
+  }, { instanceId, neighborIds });
+
+  expect(geometry.frame).not.toBeNull();
+  for (const control of geometry.controls) {
+    if (!control.className.includes("overview-edit-frame__size")) {
+      expect(control.rect?.width ?? 0, control.className).toBeGreaterThanOrEqual(48);
+      expect(control.rect?.height ?? 0, control.className).toBeGreaterThanOrEqual(48);
+    }
+    for (const neighborId of neighborIds) {
+      const neighbor = geometry.neighbors[neighborId as keyof typeof geometry.neighbors];
+      if (control.rect && neighbor) expect(rectIntersects(control.rect, neighbor)).toBe(false);
+    }
+    if (instanceId === "fixture.coffee") {
+      for (const content of geometry.coffeeContent) {
+        if (control.visualRect && content.rect) expect(rectIntersects(control.visualRect, content.rect), `${control.label} intersects ${content.selector}`).toBe(false);
+      }
+    }
+    if (instanceId === "fixture.rog" || instanceId === "fixture.quick-actions" || instanceId === "fixture.health") {
+      for (const content of geometry.semanticContent) {
+        if (control.visualRect && content) expect(rectIntersects(control.visualRect, content), `${control.label} intersects semantic content`).toBe(false);
+      }
+    }
+  }
+}
+
+async function assertCoffeeContentGeometry(page: Page, scenarioLabel = "current Coffee state"): Promise<void> {
+  const geometry = await page.evaluate(() => {
+    const rectFor = (element: Element | null): Rect | null => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+    };
+    const coffee = document.querySelector(".coffee-panel--overview");
+    const asset = rectFor(coffee?.querySelector(".coffee-asset") ?? null);
+    const image = rectFor(coffee?.querySelector(".coffee-asset__image") ?? null);
+    const activity = rectFor(coffee?.querySelector(".coffee-activity") ?? null);
+    const activityBars = Array.from(coffee?.querySelectorAll(".coffee-activity i") ?? []).map((element) => rectFor(element)).filter(Boolean);
+    const semanticContent = [
+      ".coffee-panel__heading h2",
+      ".coffee-panel__heading .health-mark",
+      ".coffee-panel__state",
+      ".coffee-progress",
+      ".coffee-policy-note",
+      ".coffee-panel__copy .primary-action",
+      ".coffee-authority",
+      ".coffee-state-marker"
+    ].map((selector) => ({ selector, rect: rectFor(coffee?.querySelector(selector) ?? null) })).filter(({ rect }) => rect);
+    return { asset, image, activity, activityBars, semanticContent };
+  });
+
+  expect(geometry.image).not.toBeNull();
+  if (geometry.asset && geometry.activity) {
+    expect(geometry.activity.left).toBeGreaterThanOrEqual(geometry.asset.left - 1);
+    expect(geometry.activity.right).toBeLessThanOrEqual(geometry.asset.right + 1);
+    expect(geometry.activity.top).toBeGreaterThanOrEqual(geometry.asset.top - 1);
+    expect(geometry.activity.bottom).toBeLessThanOrEqual(geometry.asset.bottom + 1);
+    const gap = geometry.image!.top - geometry.activity.bottom;
+    expect(gap, `${scenarioLabel}: activity-to-image gap`).toBeGreaterThanOrEqual(3);
+    expect(gap, `${scenarioLabel}: activity-to-image gap`).toBeLessThanOrEqual(18);
+    expect(rectIntersects(geometry.activity, geometry.image), `${scenarioLabel}: activity intersects image`).toBe(false);
+    const activityVisualBottom = Math.max(...geometry.activityBars.map((bar) => bar!.bottom));
+    const activityVisualGap = geometry.image!.top - activityVisualBottom;
+    expect(activityVisualGap, `${scenarioLabel}: animated activity-to-image gap`).toBeGreaterThanOrEqual(2);
+    expect(activityVisualGap, `${scenarioLabel}: animated activity-to-image gap`).toBeLessThanOrEqual(16);
+    for (const bar of geometry.activityBars) {
+      if (bar) expect(rectIntersects(bar, geometry.image), `${scenarioLabel}: animated activity intersects image`).toBe(false);
+    }
+  }
+  for (const content of geometry.semanticContent) {
+    if (geometry.image) expect(rectIntersects(geometry.image, content.rect), `${scenarioLabel}: image intersects ${content.selector}`).toBe(false);
+    if (geometry.activity) expect(rectIntersects(geometry.activity, content.rect), `${scenarioLabel}: activity intersects ${content.selector}`).toBe(false);
+  }
+  for (const bar of geometry.activityBars) {
+    for (const content of geometry.semanticContent) {
+      if (bar) expect(rectIntersects(bar, content.rect), `${scenarioLabel}: activity intersects ${content.selector}`).toBe(false);
+    }
+  }
+}
+
+async function assertCoffeeActivityHidden(page: Page): Promise<void> {
+  await expect(page.locator(".coffee-panel--overview .coffee-activity")).toHaveCount(0);
+  await expect(page.locator(".coffee-panel--overview .coffee-panel__state strong")).toHaveText("Разогревается");
+}
+
+async function assertCoffeeActivityPhases(page: Page): Promise<void> {
+  for (const phase of [0.1, 0.8, 1.5]) {
+    await page.evaluate((phaseOffset) => {
+      document.querySelectorAll(".coffee-activity i").forEach((element, index) => {
+        (element as HTMLElement).style.animationDelay = `${-(phaseOffset + index * 0.18)}s`;
+      });
+    }, phase);
+    await page.waitForTimeout(20);
+    await assertCoffeeContentGeometry(page);
+  }
+}
+
 async function setCoffeeScale(page: Page, value: string): Promise<void> {
   const frame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+  await selectFrame(page, "fixture.coffee");
   await frame.getByRole("button", { name: "Настройки виджета" }).click();
   const sheet = page.getByTestId("overview-widget-appearance");
   await expect(sheet).toBeVisible();
@@ -230,6 +406,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
   test("keeps widget bodies inert and exposes touch-safe accessible handles", async ({ page }, testInfo) => {
     await installLayoutRoute(page);
     await openEditor(page);
+    await captureArtifact(page, testInfo, "overview-edit-default.png");
 
     const operationalPosts: string[] = [];
     page.on("request", (request) => {
@@ -258,6 +435,24 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await expect(page.locator(".overview-edit-frame--dragging")).toHaveCount(0);
     await page.mouse.up();
 
+    const coffeeFrame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+    const planningFrame = page.locator('.overview-edit-frame[data-instance-id="fixture.planning"]');
+    await selectFrame(page, "fixture.planning");
+    await expect(coffeeFrame.locator(".overview-edit-frame__actions button")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__resize-handle")).toHaveCount(0);
+    await captureArtifact(page, testInfo, "overview-edit-unselected.png");
+    await selectFrame(page, "fixture.coffee");
+    await expect(coffeeFrame).toHaveAttribute("data-selected", "true");
+    await expect(coffeeFrame.getByRole("button", { name: "Настройки виджета" })).toBeVisible();
+    await expect(coffeeFrame.getByRole("button", { name: /Убрать/ })).toBeVisible();
+    await expect(coffeeFrame.locator(".overview-edit-frame__resize-handle")).toBeVisible();
+    await selectFrame(page, "fixture.planning");
+    await expect(planningFrame).toHaveAttribute("data-selected", "true");
+    await expect(coffeeFrame.locator(".overview-edit-frame__actions button")).toHaveCount(0);
+    await expect(planningFrame.locator(".overview-edit-frame__actions button")).toHaveCount(2);
+    await selectFrame(page, "fixture.coffee");
+    await captureArtifact(page, testInfo, "overview-edit-selected.png");
+
     const undersizedHandles = await page.locator(
       ".overview-edit-frame__drag-handle, .overview-edit-frame__actions button, .overview-edit-frame__resize-handle, .overview-edit-frame__menu-toggle"
     ).evaluateAll((elements) => elements.flatMap((element) => {
@@ -265,8 +460,6 @@ test.describe("Overview V2 Edit mode and persistence", () => {
       return rect.width >= 48 && rect.height >= 48 ? [] : [{ width: rect.width, height: rect.height }];
     }));
     expect(undersizedHandles).toEqual([]);
-
-    await captureArtifact(page, testInfo, "overview-edit-default.png");
 
     const dragHandle = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"] .overview-edit-frame__drag-handle');
     const handleBox = await dragHandle.boundingBox();
@@ -277,8 +470,10 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await captureArtifact(page, testInfo, "overview-edit-drag.png");
     await page.mouse.move((handleBox?.x ?? 0) - 180, (handleBox?.y ?? 0) + 24, { steps: 5 });
     await expect(page.locator(".overview-edit-frame--invalid")).toHaveCount(1);
+    await expect(page.getByTestId("overview-invalid-drop-label")).toHaveText("Место занято");
     await captureArtifact(page, testInfo, "overview-edit-invalid-drop.png");
     await page.mouse.up();
+    await expect(page.getByTestId("overview-invalid-drop-label")).toHaveCount(0);
 
     const coffeeMenu = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"] .overview-edit-frame__menu-toggle');
     await coffeeMenu.click();
@@ -286,21 +481,161 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await captureArtifact(page, testInfo, "overview-edit-resize.png");
   });
 
+  test("keeps the canonical toolbar compact and selected chrome within widget ownership bounds", async ({ page }, testInfo) => {
+    await installLayoutRoute(page);
+    await openEditor(page);
+
+    const canonicalGeometry = await page.evaluate(() => {
+      const toolbar = document.querySelector("[data-testid=overview-edit-toolbar]");
+      const grid = document.querySelector("[data-testid=overview-grid]");
+      const coffee = document.querySelector('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+      const rectFor = (element: Element | null) => {
+        const rect = element?.getBoundingClientRect();
+        return rect ? { top: rect.top, bottom: rect.bottom, height: rect.height } : null;
+      };
+      const buttonTops = Array.from(toolbar?.querySelectorAll("button") ?? []).map((button) => button.getBoundingClientRect().top);
+      return {
+        toolbar: rectFor(toolbar),
+        grid: rectFor(grid),
+        coffee: rectFor(coffee),
+        buttonTops,
+        horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+      };
+    });
+    expect(canonicalGeometry.toolbar?.height ?? 999).toBeLessThanOrEqual(64);
+    expect(Math.max(...canonicalGeometry.buttonTops) - Math.min(...canonicalGeometry.buttonTops)).toBeLessThanOrEqual(2);
+    expect(canonicalGeometry.grid?.top ?? 999).toBeLessThanOrEqual(200);
+    expect(canonicalGeometry.coffee?.top ?? 999).toBeLessThanOrEqual(300);
+    expect(Math.min(canonicalGeometry.coffee?.bottom ?? 0, 720) - (canonicalGeometry.coffee?.top ?? 720)).toBeGreaterThanOrEqual(240);
+    expect(canonicalGeometry.horizontalOverflow).toBe(false);
+
+    await selectFrame(page, "fixture.coffee");
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await captureArtifact(page, testInfo, "overview-edit-selected-coffee.png");
+
+    await selectFrame(page, "fixture.rog");
+    await assertEditorChromeGeometry(page, "fixture.rog", ["fixture.coffee", "fixture.planning"]);
+    await captureArtifact(page, testInfo, "overview-edit-selected-rog.png");
+
+    await selectFrame(page, "fixture.quick-actions");
+    await assertEditorChromeGeometry(page, "fixture.quick-actions", ["fixture.coffee", "fixture.health"]);
+    await captureArtifact(page, testInfo, "overview-edit-selected-lower-widget.png");
+
+    await selectFrame(page, "fixture.health");
+    await assertEditorChromeGeometry(page, "fixture.health", ["fixture.coffee", "fixture.quick-actions"]);
+    await captureArtifact(page, testInfo, "overview-edit-selected-health.png");
+  });
+
+  test("keeps Coffee imagery and warming activity in the asset safe zone", async ({ page }, testInfo) => {
+    const routeState = await installLayoutRoute(page);
+    for (const [scale, screenshot] of [
+      [70, "overview-coffee-warming-scale-70.png"],
+      [85, "overview-coffee-warming-scale-85.png"],
+      [100, "overview-coffee-warming-scale-100.png"]
+    ] as const) {
+      routeState.document = makeDocument(0, (() => {
+        const items = cloneItems();
+        const coffee = items.find((item) => item.instanceId === "fixture.coffee");
+        if (coffee) coffee.config.imageScalePct = scale;
+        return items;
+      })());
+      await page.goto("/overview?scenario=coffee-warming&theme=night");
+      await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", "warming");
+      await expect(page.locator(".coffee-panel--overview")).toHaveAttribute("data-image-scale", String(scale));
+      await expect(page.locator(".coffee-panel--overview")).toHaveAttribute("data-image-x", "0");
+      await expect(page.locator(".coffee-panel--overview")).toHaveAttribute("data-image-y", "0");
+      await assertCoffeeContentGeometry(page, `coffee-warming scale ${scale}`);
+      await captureArtifact(page, testInfo, screenshot);
+    }
+
+    routeState.document = makeDocument(0, (() => {
+      const items = cloneItems();
+      const coffee = items.find((item) => item.instanceId === "fixture.coffee");
+      if (coffee) coffee.config.showImage = false;
+      return items;
+    })());
+    await page.goto("/overview?scenario=coffee-warming&theme=night");
+    await assertCoffeeActivityHidden(page);
+
+    routeState.document = makeDocument();
+    for (const [scenario, stage] of [
+      ["coffee-off", "off"],
+      ["coffee-warming", "warming"],
+      ["coffee-ready", "ready"],
+      ["coffee-running-too-long", "running_too_long"],
+      ["coffee-stale", "stale"],
+      ["ha-offline-policy-available", "unavailable"]
+    ] as const) {
+      await page.goto(`/overview?scenario=${scenario}&theme=night`);
+      await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", stage);
+      await assertCoffeeContentGeometry(page, scenario);
+    }
+
+    await openEditor(page, "/overview?scenario=coffee-off&theme=night");
+    await selectFrame(page, "fixture.coffee");
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await assertCoffeeContentGeometry(page, "coffee-off selected");
+    await captureArtifact(page, testInfo, "overview-edit-coffee-off-selected.png");
+
+    await page.goto("/overview?scenario=coffee-warming&theme=night");
+    await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", "warming");
+    await assertCoffeeContentGeometry(page, "coffee-warming");
+    await assertCoffeeActivityPhases(page);
+    await captureArtifact(page, testInfo, "overview-coffee-warming.png");
+
+    await page.getByTestId("overview-configure").click();
+    await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
+    await selectFrame(page, "fixture.coffee");
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await assertCoffeeActivityPhases(page);
+    await captureArtifact(page, testInfo, "overview-edit-coffee-warming-selected.png");
+
+    await setCoffeeScale(page, "70");
+    await assertCoffeeContentGeometry(page, "selected coffee-warming scale 70");
+    await captureArtifact(page, testInfo, "overview-edit-coffee-warming-scale-70-selected.png");
+    await setCoffeeScale(page, "100");
+    await assertCoffeeContentGeometry(page, "selected coffee-warming scale 100");
+    await captureArtifact(page, testInfo, "overview-edit-coffee-warming-scale-100-selected.png");
+  });
+
   test("adds bounded widgets and sends one complete canonical save", async ({ page }, testInfo) => {
     const routeState = await installLayoutRoute(page);
     await openEditor(page);
 
     const coffeeFrame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+    await selectFrame(page, "fixture.coffee");
     await coffeeFrame.getByRole("button", { name: "Настройки виджета" }).click();
     const appearance = page.getByTestId("overview-widget-appearance");
     await expect(appearance).toBeVisible();
+    await expect(appearance.getByRole("heading", { name: "Настройки: Кофемашина" })).toBeVisible();
+    await expect(appearance).not.toContainText("standard");
+    await expect(coffeeFrame.locator(".overview-edit-frame__drag-handle")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__actions")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__resize-handle")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__size")).toHaveCount(0);
+    await expect(coffeeFrame.locator(".overview-edit-frame__menu-toggle")).toHaveCount(0);
+    await captureArtifact(page, testInfo, "overview-edit-sheet-preview.png");
     await captureArtifact(page, testInfo, "overview-edit-coffee-settings.png");
     await appearance.getByLabel("Размер изображения").fill("120");
     await appearance.getByLabel("По горизонтали").fill("-2");
     await appearance.getByLabel("По вертикали").fill("1");
+    await expect(appearance.getByText("Немного левее")).toBeVisible();
+    await expect(appearance.getByText("Немного ниже")).toBeVisible();
+    await expect(coffeeFrame.locator(".coffee-panel--overview")).toHaveAttribute("data-image-x", "-2");
+    await expect(coffeeFrame.locator(".coffee-panel--overview")).toHaveAttribute("data-image-y", "1");
+    await expect(appearance.getByLabel("Показывать изображение")).toBeChecked();
+    await expect(appearance.getByLabel("Показывать источник")).toBeChecked();
     await appearance.getByRole("button", { name: "Просторно" }).click();
     await appearance.getByLabel("Показывать источник").click();
+    await expect(appearance.getByLabel("Показывать источник")).not.toBeChecked();
+    const undersizedAppearanceTargets = await appearance.locator("button, input").evaluateAll((elements) => elements.flatMap((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width >= 48 && rect.height >= 48 ? [] : [{ tag: element.tagName, width: rect.width, height: rect.height }];
+    }));
+    expect(undersizedAppearanceTargets).toEqual([]);
     await appearance.getByRole("button", { name: "Закрыть" }).click();
+    await expect(coffeeFrame.locator(".overview-edit-frame__drag-handle")).toBeVisible();
+    await expect(coffeeFrame.locator(".overview-edit-frame__resize-handle")).toBeVisible();
     await captureArtifact(page, testInfo, "overview-edit-coffee-customized.png");
     await captureArtifact(page, testInfo, "overview-edit-dirty.png");
     await page.getByTestId("overview-add-widget").click();
@@ -309,7 +644,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await captureArtifact(page, testInfo, "overview-edit-picker.png");
     const weatherRow = picker.locator('[data-widget-type="weather.alert"]');
     await weatherRow.getByRole("button", { name: "Добавить" }).click();
-    await expect(weatherRow.getByRole("button")).toHaveText("Добавлен");
+    await expect(weatherRow.getByRole("button")).toHaveText("Уже добавлен");
     await picker.getByRole("button", { name: "Закрыть" }).click();
 
     expect(routeState.patchCount).toBe(0);
@@ -318,6 +653,9 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "normal");
     expect(routeState.patchCount).toBe(1);
     expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageScalePct).toBe(120);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageXStep).toBe(-2);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageYStep).toBe(1);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.showAuthority).toBe(false);
     expect(routeState.lastPatch?.some((item) => item.widgetType === "weather.alert")).toBe(true);
 
     await page.reload();
@@ -391,6 +729,9 @@ test.describe("Overview V2 Edit mode and persistence", () => {
 
     await page.getByTestId("overview-save").click();
     await expect(page.getByTestId("overview-load-current")).toBeVisible();
+    await expect(page.getByTestId("overview-edit-toolbar")).toContainText("Конфликт версии");
+    await expect(page.getByTestId("overview-edit-toolbar")).toContainText("Загрузить актуальную");
+    await expect(page.getByTestId("overview-edit-toolbar")).not.toContainText("Панель изменилась в другом окне");
     await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
     expect(routeState.patchCount).toBe(1);
     await captureArtifact(page, testInfo, "overview-edit-conflict.png");
@@ -449,5 +790,14 @@ test.describe("Overview V2 Edit mode and persistence", () => {
       const rect = element.getBoundingClientRect();
       return rect.width >= 48 && rect.height >= 48;
     }))).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await expect(page.getByTestId("overview-add-widget")).toHaveText("Добавить");
+    await expect(page.getByTestId("overview-add-widget")).toBeVisible();
+    await expect(page.getByTestId("overview-reset")).toHaveText("Сбросить");
+    await expect(page.getByTestId("overview-reset")).toBeVisible();
+    await expect(page.getByTestId("overview-cancel")).toHaveText("Отмена");
+    await expect(page.getByTestId("overview-cancel")).toBeVisible();
+    await expect(page.getByTestId("overview-save")).toHaveText("Готово");
+    await expect(page.getByTestId("overview-save")).toBeVisible();
   });
 });

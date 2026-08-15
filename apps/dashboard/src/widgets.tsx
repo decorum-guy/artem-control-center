@@ -178,6 +178,36 @@ export function CoffeeWidget({
       : overviewCopyDensity;
   const safeMaximum = requestedDensity === "dense" || view.stage === "unavailable" ? 100 : 120;
   const imageScale = sourceOwnedCoffeeScale(appearance.imageScalePct, safeMaximum);
+  const coffeeImage = appearance.showImage
+    ? <CoffeeAsset manifest={manifest} scale={imageScale} />
+    : null;
+  const coffeeActivity = view.stage === "warming" && (variant !== "overview" || appearance.showImage)
+    ? (
+        <span className="coffee-activity" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      )
+    : null;
+  const coffeeVisual = variant === "overview"
+    ? appearance.showImage
+      ? (
+          <div
+            className="coffee-asset__visual"
+            style={{ "--cc-coffee-image-scale": imageScale / 100 } as CSSProperties}
+          >
+            {coffeeActivity}
+            {coffeeImage}
+          </div>
+        )
+      : null
+    : (
+        <>
+          {coffeeImage}
+          {coffeeActivity}
+        </>
+      );
 
   return (
     <article
@@ -237,14 +267,7 @@ export function CoffeeWidget({
       </div>
 
       <div className="coffee-asset" data-fit={manifest.visualAsset?.fit ?? "contain"} data-image-visible={appearance.showImage}>
-        {appearance.showImage && <CoffeeAsset manifest={manifest} scale={imageScale} />}
-        {view.stage === "warming" && (
-          <span className="coffee-activity" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-        )}
+        {coffeeVisual}
         {appearance.showStateMarker && (
           <span className={`coffee-state-marker coffee-state-marker--${view.stage}`}>
             {view.stage === "warming" ? "Разогрев" : view.label}
