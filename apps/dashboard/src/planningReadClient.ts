@@ -637,6 +637,103 @@ function reconciliationMatches(request: PlanningReminderMutationRequest, object:
     && (request.body.timezone === undefined || request.body.timezone === object.timezone);
 }
 
+async function mutationFetchAttempt(
+  path: string,
+  method: "POST" | "PATCH",
+  headers: Record<string, string>,
+  body: string,
+  signal: AbortSignal | undefined,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort();
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  signal?.addEventListener("abort", forwardAbort, { once: true });
+  try {
+    const response = await fetch(path, {
+      method,
+      cache: "no-store",
+      headers,
+      body,
+      signal: controller.signal
+    });
+    if (signal?.aborted) throw new DOMException("Planning mutation was cancelled", "AbortError");
+    return response;
+  } finally {
+    globalThis.clearTimeout(timeout);
+    signal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
+async function mutationResponseDetail(response: Response): Promise<string> {
+  try {
+    const payload = await response.json() as { detail?: unknown };
+    return typeof payload.detail === "string" ? payload.detail : "Planning reminder mutation failed";
+  } catch {
+    return "Planning reminder mutation failed";
+  }
+}
+
+function mutationCodeForResponse(detail: string, status: number): PlanningMutationError["mutationCode"] {
+  if (detail === "planning_mutation_uncertain") return "uncertain";
+  if (status === 409 || detail === "planning_idempotency_conflict") return "conflict";
+  if (status === 404) return "disabled";
+  return "http";
+}
+
+async function replayCreate(
+  request: PlanningReminderMutationRequest,
+  path: string,
+  headers: Record<string, string>,
+  body: string,
+  uncertain: PlanningMutationError
+): Promise<never> {
+  const method = "POST" as const;
+  const lastUncertain = uncertain;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (request.signal?.aborted) {
+      throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    }
+    let response: Response;
+    try {
+      response = await mutationFetchAttempt(path, method, headers, body, request.signal, Math.min(request.timeoutMs ?? 10_000, 3_000));
+    } catch {
+      if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+      if (attempt + 1 < 2) continue;
+      throw lastUncertain;
+    }
+
+    if (response.ok) {
+      try {
+        const canonical = parseObjectEnvelope(await response.json());
+        throw new PlanningMutationError(
+          "Create outcome confirmed by canonical replay",
+          "uncertain",
+          uncertain.status,
+          canonical.object
+        );
+      } catch (reason) {
+        if (reason instanceof PlanningMutationError) throw reason;
+        throw new PlanningMutationError("Planning mutation response is invalid", "contract", response.status);
+      }
+    }
+
+    const detail = await mutationResponseDetail(response);
+    if (detail === "planning_idempotency_conflict") {
+      throw new PlanningMutationError(detail, "conflict", response.status);
+    }
+    if (detail === "planning_idempotency_in_progress" || detail === "planning_mutation_uncertain") {
+      if (attempt + 1 < 2) {
+        await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 50));
+        continue;
+      }
+      throw lastUncertain;
+    }
+    throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
+  }
+  throw lastUncertain;
+}
+
 export async function mutatePlanningReminder(request: PlanningReminderMutationRequest): Promise<PlanningObjectEnvelope<PlanningReminder>> {
   const path = mutationPath(request);
   if (!request.idempotencyKey || request.idempotencyKey.length > 256 || [...request.idempotencyKey].some((character) => character.charCodeAt(0) < 32)) {
@@ -645,16 +742,14 @@ export async function mutatePlanningReminder(request: PlanningReminderMutationRe
   if (request.action !== "create" && (!Number.isInteger(request.expectedVersion) || (request.expectedVersion ?? 0) < 1)) {
     throw new PlanningMutationError("Expected reminder version is invalid", "contract", 422);
   }
-  const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), request.timeoutMs ?? 10_000);
-  const forwardAbort = () => controller.abort();
-  request.signal?.addEventListener("abort", forwardAbort, { once: true });
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Idempotency-Key": request.idempotencyKey
   };
   if (request.action !== "create") headers["If-Match"] = String(request.expectedVersion);
+  const body = JSON.stringify(request.action === "create" || request.action === "edit" ? request.body : {});
   const reconcileUncertain = async (uncertain: PlanningMutationError): Promise<never> => {
+    if (request.action === "create") return replayCreate(request, path, headers, body, uncertain);
     if (request.reminderId) {
       try {
         const reconciled = await readPlanningReminderById(request.reminderId, request.signal);
@@ -673,29 +768,17 @@ export async function mutatePlanningReminder(request: PlanningReminderMutationRe
     throw uncertain;
   };
   try {
-    const response = await fetch(path, {
-      method: request.action === "edit" ? "PATCH" : "POST",
-      cache: "no-store",
+    const response = await mutationFetchAttempt(
+      path,
+      request.action === "edit" ? "PATCH" : "POST",
       headers,
-      body: JSON.stringify(request.action === "create" || request.action === "edit" ? request.body : {}),
-      signal: controller.signal
-    });
+      body,
+      request.signal,
+      request.timeoutMs ?? 10_000
+    );
     if (!response.ok) {
-      let detail = "Planning reminder mutation failed";
-      try {
-        const payload = await response.json() as { detail?: unknown };
-        if (typeof payload.detail === "string") detail = payload.detail;
-      } catch {
-        // Keep the response text out of the UI; the status is enough.
-      }
-      const mutationCode = detail === "planning_mutation_uncertain"
-        ? "uncertain"
-        : response.status === 409
-          ? "conflict"
-          : response.status === 404
-            ? "disabled"
-            : "http";
-      throw new PlanningMutationError(detail, mutationCode, response.status);
+      const detail = await mutationResponseDetail(response);
+      throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
     }
     try {
       return parseObjectEnvelope(await response.json());
@@ -710,9 +793,6 @@ export async function mutatePlanningReminder(request: PlanningReminderMutationRe
     }
     if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
     return reconcileUncertain(new PlanningMutationError("Planning mutation outcome is uncertain", "uncertain"));
-  } finally {
-    globalThis.clearTimeout(timeout);
-    request.signal?.removeEventListener("abort", forwardAbort);
   }
 }
 

@@ -6,7 +6,9 @@ export type ActionConfirmationId =
   | "home.coffee.turn_on"
   | "home.kettle.boil"
   | "system.runtime.shutdown"
-  | "system.rog_g703.hibernate";
+  | "system.rog_g703.hibernate"
+  | "planning.reminders.complete"
+  | "planning.reminders.cancel";
 
 export type ActionConfirmationLevel = "simple" | "strong";
 export type ActionConfirmationTone = "standard" | "production";
@@ -105,5 +107,25 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "Windows S4",
     description: "Отправим только фиксированную команду гибернации Windows и дождёмся, когда ASUS перестанет отвечать.",
     confirmLabel: "Гибернация"
+  },
+  "planning.reminders.complete": {
+    id: "planning.reminders.complete",
+    level: "simple",
+    tone: "standard",
+    title: "Явно завершить напоминание?",
+    target: "Напоминание",
+    environment: "Planning · AliceTG Bot",
+    description: "Это изменит жизненный цикл напоминания на «Завершено». «Доставлено» не означает завершено; доставка и завершение — разные состояния.",
+    confirmLabel: "Завершить напоминание"
+  },
+  "planning.reminders.cancel": {
+    id: "planning.reminders.cancel",
+    level: "simple",
+    tone: "standard",
+    title: "Явно отменить напоминание?",
+    target: "Напоминание",
+    environment: "Planning · AliceTG Bot",
+    description: "Это изменит жизненный цикл напоминания на «Отменено». «Доставлено» не означает завершено; доставка и завершение — разные состояния.",
+    confirmLabel: "Отменить напоминание"
   }
 };

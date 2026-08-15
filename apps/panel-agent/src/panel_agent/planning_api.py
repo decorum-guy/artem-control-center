@@ -178,6 +178,7 @@ def build_planning_router(
         raw_request: Request,
         response: Response,
     ) -> PlanningObjectEnvelope:
+        _canonical_mutation_route(prefix)
         _require_reminder_mutation(adapter, "create")
         _no_store(response)
         try:
@@ -198,6 +199,7 @@ def build_planning_router(
         raw_request: Request,
         response: Response,
     ) -> PlanningObjectEnvelope:
+        _canonical_mutation_route(prefix)
         _require_reminder_mutation(adapter, "update")
         _no_store(response)
         _validate_reminder_id(reminder_id)
@@ -217,6 +219,7 @@ def build_planning_router(
         raw_request: Request,
         response: Response,
     ) -> PlanningObjectEnvelope:
+        _canonical_mutation_route(prefix)
         _require_reminder_mutation(adapter, "complete")
         _no_store(response)
         _validate_reminder_id(reminder_id)
@@ -236,6 +239,7 @@ def build_planning_router(
         raw_request: Request,
         response: Response,
     ) -> PlanningObjectEnvelope:
+        _canonical_mutation_route(prefix)
         _require_reminder_mutation(adapter, "cancel")
         _no_store(response)
         _validate_reminder_id(reminder_id)
@@ -352,6 +356,11 @@ def _mutation_error(error: PlanningUpstreamError) -> HTTPException:
     if error.category in {"validation_error", "reminder_patch_invalid", "idempotency_key_invalid", "expected_version_invalid"}:
         return HTTPException(status_code=422, detail="planning_mutation_invalid")
     return HTTPException(status_code=503, detail="planning_mutation_unavailable")
+
+
+def _canonical_mutation_route(prefix: str) -> None:
+    if prefix != "/api/v1/planning":
+        raise HTTPException(status_code=404, detail="planning_route_not_found")
 
 
 def _no_store(response: Response) -> None:

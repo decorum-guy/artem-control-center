@@ -14,6 +14,30 @@ _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/actions/home/coffee"): "home.coffee.control",
 }
 
+_PLANNING_REMINDERS_PREFIX = "/api/v1/planning/reminders/"
+
+
+def _planning_capability(method: str, path: str) -> str | None:
+    """Return only source-owned Planning capability IDs for known routes."""
+    if method == "POST" and path == "/api/v1/planning/reminders":
+        return "planning.reminders.create"
+    if not path.startswith(_PLANNING_REMINDERS_PREFIX):
+        return None
+
+    segments = path.removeprefix(_PLANNING_REMINDERS_PREFIX).split("/")
+    if method == "PATCH" and len(segments) == 1 and segments[0]:
+        return "planning.reminders.edit"
+    if method == "POST" and len(segments) == 2 and segments[0] and segments[1] == "complete":
+        return "planning.reminders.complete"
+    if method == "POST" and len(segments) == 2 and segments[0] and segments[1] == "cancel":
+        return "planning.reminders.cancel"
+    return None
+
+
+def capability_for_request(method: str, path: str) -> str | None:
+    """Resolve the fixed access capability for a registered mutation route."""
+    return _MUTATION_CAPABILITIES.get((method, path)) or _planning_capability(method, path)
+
 
 class AccessPolicyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, *, store: AccessPolicyStore) -> None:
@@ -21,7 +45,7 @@ class AccessPolicyMiddleware(BaseHTTPMiddleware):
         self.store = store
 
     async def dispatch(self, request: Request, call_next):
-        capability = _MUTATION_CAPABILITIES.get((request.method, request.url.path))
+        capability = capability_for_request(request.method, request.url.path)
         if capability is None:
             return await call_next(request)
 

@@ -39,4 +39,19 @@ describe("action confirmation catalog", () => {
     expect("home.coffee.turn_off" in actionConfirmationCatalog).toBe(false);
     expect("home.kettle.stop" in actionConfirmationCatalog).toBe(false);
   });
+
+  it("uses simple lifecycle confirmation for explicit reminder completion and cancellation", () => {
+    expect(actionConfirmationCatalog["planning.reminders.complete"]).toMatchObject({
+      level: "simple",
+      title: "Явно завершить напоминание?",
+      confirmLabel: "Завершить напоминание"
+    });
+    expect(actionConfirmationCatalog["planning.reminders.cancel"]).toMatchObject({
+      level: "simple",
+      title: "Явно отменить напоминание?",
+      confirmLabel: "Отменить напоминание"
+    });
+    expect(actionConfirmationCatalog["planning.reminders.complete"].description).toContain("«Доставлено» не означает завершено");
+    expect(actionConfirmationCatalog["planning.reminders.cancel"].description).toContain("«Доставлено» не означает завершено");
+  });
 });

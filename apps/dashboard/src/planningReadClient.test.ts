@@ -200,6 +200,79 @@ describe("fixed Planning read client", () => {
     }
   });
 
+  it("replays an uncertain create with the exact same key and body, without green success semantics", async () => {
+    const body = {
+      title: "Позвонить врачу",
+      due_at_utc: "2026-08-13T12:00:00Z",
+      timezone: "Europe/Moscow"
+    };
+    const canonical = {
+      schemaVersion: "planning.panel.v1",
+      kind: "object",
+      domain: "reminder",
+      object: {
+        id: "00000000-0000-4000-8000-000000000099",
+        version: 1,
+        source: "alice",
+        sourceLabel: "AliceTG Bot",
+        title: body.title,
+        dueAtUtc: body.due_at_utc,
+        timezone: body.timezone,
+        status: "pending",
+        deliveryState: "not_due",
+        createdAt: "2026-08-12T09:01:00Z",
+        updatedAt: "2026-08-12T09:01:00Z"
+      },
+      sourceStatus: "current",
+      lastSyncedAt: "2026-08-12T09:01:00Z",
+      staleAfter: "2026-08-12T09:06:00Z"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("response lost after canonical commit"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(canonical), { status: 200 }));
+
+    try {
+      await mutatePlanningReminder({
+        action: "create",
+        idempotencyKey: "b4-create-replay-001",
+        body,
+        timeoutMs: 1000
+      });
+      throw new Error("expected an uncertain reconciled result");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PlanningMutationError);
+      expect((error as PlanningMutationError).mutationCode).toBe("uncertain");
+      expect((error as PlanningMutationError).reconciledObject?.id).toBe("00000000-0000-4000-8000-000000000099");
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = fetchMock.mock.calls[0];
+    const replay = fetchMock.mock.calls[1];
+    expect(String(first[0])).toBe("/api/v1/planning/reminders");
+    expect(String(replay[0])).toBe(String(first[0]));
+    expect(first[1]).toMatchObject({ method: "POST", body: JSON.stringify(body) });
+    expect(replay[1]).toMatchObject({ method: "POST", body: JSON.stringify(body) });
+    expect(first[1]?.signal).not.toBe(replay[1]?.signal);
+    expect((first[1]?.headers as Record<string, string>)["Idempotency-Key"]).toBe("b4-create-replay-001");
+    expect((replay[1]?.headers as Record<string, string>)["Idempotency-Key"]).toBe("b4-create-replay-001");
+  });
+
+  it("keeps a create uncertain when canonical idempotency replay remains in progress", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "planning_idempotency_in_progress" }), { status: 409 }))
+      .mockRejectedValueOnce(new Error("replay still unavailable"));
+
+    await expect(mutatePlanningReminder({
+      action: "create",
+      idempotencyKey: "b4-create-in-progress-001",
+      body: { title: "Проверить статус", due_at_utc: "2026-08-13T12:00:00Z", timezone: "Europe/Moscow" },
+      timeoutMs: 1000
+    })).rejects.toMatchObject({ mutationCode: "uncertain", reconciledObject: null });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const keys = fetchMock.mock.calls.map((call) => (call[1]?.headers as Record<string, string>)["Idempotency-Key"]);
+    expect(keys).toEqual(["b4-create-in-progress-001", "b4-create-in-progress-001", "b4-create-in-progress-001"]);
+  });
+
   it("relays parser preview without exposing a browser secret", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       schemaVersion: "planning.v1",

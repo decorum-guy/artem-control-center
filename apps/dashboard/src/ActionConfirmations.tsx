@@ -22,11 +22,13 @@ export interface ActionConfirmationResult {
 
 interface ActionConfirmationOptions {
   revision?: string;
+  target?: string;
 }
 
 interface PendingConfirmation {
   spec: ActionConfirmationSpec;
   revision?: string;
+  target?: string;
   resolve: (result: ActionConfirmationResult) => void;
 }
 
@@ -73,7 +75,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
       : null;
 
     return new Promise<ActionConfirmationResult>((resolve) => {
-      const next = { spec, revision: options.revision, resolve };
+      const next = { spec, revision: options.revision, target: options.target, resolve };
       pendingRef.current = next;
       setPending(next);
     });
@@ -180,7 +182,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
 
             <div className="action-confirmation__target">
               <span>Цель</span>
-              <strong>{pending.spec.target}</strong>
+              <strong>{pending.target ?? pending.spec.target}</strong>
             </div>
 
             {pending.revision && (

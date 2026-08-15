@@ -715,6 +715,16 @@ def test_read_only_same_origin_routes_are_bounded_and_have_no_writes(monkeypatch
     with TestClient(module.app) as client:
         status_response = client.get("/api/v1/planning/status")
         alias_response = client.get("/api/planning/status")
+        alias_write_response = client.post(
+            "/api/planning/reminders",
+            headers={"Idempotency-Key": "legacy-alias-write"},
+            json={
+                "title": "Legacy alias must not write",
+                "notes": None,
+                "due_at_utc": "2026-08-13T12:00:00Z",
+                "timezone": "Europe/Moscow",
+            },
+        )
         snapshot_response = client.get("/api/v1/snapshot")
         reminders_response = client.get("/api/v1/planning/reminders?limit=1")
         tasks_response = client.get("/api/v1/planning/tasks?view=today&limit=1")
@@ -729,6 +739,7 @@ def test_read_only_same_origin_routes_are_bounded_and_have_no_writes(monkeypatch
 
     assert status_response.status_code == 200
     assert alias_response.status_code == 200
+    assert alias_write_response.status_code == 404
     assert snapshot_response.status_code == 200
     assert snapshot_response.json()["planning"]["capabilities"]["create"] is False
     assert reminders_response.status_code == 200

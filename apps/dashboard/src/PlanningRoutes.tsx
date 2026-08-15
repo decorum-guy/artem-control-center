@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   PlanningCalendarEvent,
   PlanningProject,
@@ -55,6 +55,9 @@ import { planningReminderMutationsEnabled, planningRemindersRouteEnabled } from 
 import { planningModuleForRoute } from "./planningModuleRegistry";
 import { calendarIdentityForEvent, calendarIdentityLabel } from "./planningIdentity";
 import { useNoticeCenter } from "./NoticeCenter";
+import { useAccess } from "./AccessControls";
+import { useActionConfirmation } from "./ActionConfirmations";
+import type { ActionConfirmationId } from "./actionConfirmationCatalog";
 
 const tasksModule = planningModuleForRoute("/tasks")!;
 const calendarModule = planningModuleForRoute("/calendar")!;
@@ -499,6 +502,18 @@ function ReminderSegments({ view, onChange }: { view: "upcoming" | "overdue" | "
 
 type ReminderMutationSheetMode = "create" | "edit";
 
+const planningReminderAccessCapabilities = {
+  create: "planning.reminders.create",
+  edit: "planning.reminders.edit",
+  complete: "planning.reminders.complete",
+  cancel: "planning.reminders.cancel"
+} as const;
+
+const planningReminderConfirmationIds: Record<"complete" | "cancel", ActionConfirmationId> = {
+  complete: "planning.reminders.complete",
+  cancel: "planning.reminders.cancel"
+};
+
 function reminderMutationAllowed(
   planning: PlanningSnapshot | null,
   capability: "create" | "edit" | "complete" | "cancel"
@@ -637,6 +652,7 @@ function ReminderDetailSheet({
   canEdit,
   canComplete,
   canCancel,
+  lifecyclePending,
   onEdit,
   onComplete,
   onCancel
@@ -646,6 +662,7 @@ function ReminderDetailSheet({
   canEdit: boolean;
   canComplete: boolean;
   canCancel: boolean;
+  lifecyclePending: boolean;
   onEdit: () => void;
   onComplete: () => void;
   onCancel: () => void;
@@ -663,8 +680,8 @@ function ReminderDetailSheet({
       {active && (canEdit || canComplete || canCancel) && (
         <div className="planning-sheet-actions planning-sheet-actions--stacked">
           {canEdit && <button type="button" className="planning-secondary-button" onClick={onEdit}>Изменить</button>}
-          {canComplete && <button type="button" className="planning-primary-button" onClick={onComplete}>Завершить явно</button>}
-          {canCancel && <button type="button" className="planning-secondary-button" onClick={onCancel}>Отменить явно</button>}
+          {canComplete && <button type="button" className="planning-primary-button" disabled={lifecyclePending} onClick={onComplete}>Завершить явно</button>}
+          {canCancel && <button type="button" className="planning-secondary-button" disabled={lifecyclePending} onClick={onCancel}>Отменить явно</button>}
         </div>
       )}
       <p className="planning-detail-note">Доставлено не означает завершено. Напоминание остаётся активным до явного завершения или отмены.</p>
@@ -705,6 +722,10 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   const [now, setNow] = useState(() => new Date());
   const [retry, setRetry] = useState(0);
   const { showNotice } = useNoticeCenter();
+  const { status: accessStatus, ensureCapability } = useAccess();
+  const { confirmAction } = useActionConfirmation();
+  const lifecyclePendingRef = useRef(false);
+  const [lifecyclePending, setLifecyclePending] = useState(false);
   const routeRead = usePlanningRead(
     `reminders:${view}:${page}:${snapshot.revision}:${retry}`,
     (signal) => readPlanningReminders(view, 20, page * 20, signal)
@@ -733,17 +754,51 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
     .sort((left, right) => view === "delivery"
       ? deliveryAttentionRank(left.deliveryState) - deliveryAttentionRank(right.deliveryState) || left.dueAtUtc.localeCompare(right.dueAtUtc) || left.id.localeCompare(right.id)
       : left.dueAtUtc.localeCompare(right.dueAtUtc) || left.id.localeCompare(right.id)) ?? [];
-  const canCreate = reminderMutationAllowed(planning, "create");
+  const accessAllows = (action: keyof typeof planningReminderAccessCapabilities): boolean => {
+    if (!accessStatus) return true;
+    return Boolean(accessStatus.capabilities[planningReminderAccessCapabilities[action]]?.allowed);
+  };
+  const canCreate = reminderMutationAllowed(planning, "create") && accessAllows("create");
   const canEdit = reminderMutationAllowed(planning, "edit")
+    && accessAllows("edit")
     && Boolean(selectedReminder && ["pending", "due"].includes(selectedReminder.status));
   const canComplete = reminderMutationAllowed(planning, "complete")
+    && accessAllows("complete")
     && Boolean(selectedReminder && ["pending", "due"].includes(selectedReminder.status));
   const canCancel = reminderMutationAllowed(planning, "cancel")
+    && accessAllows("cancel")
     && Boolean(selectedReminder && ["pending", "due"].includes(selectedReminder.status));
+
+  async function ensurePlanningCapability(
+    action: keyof typeof planningReminderAccessCapabilities,
+    title: string
+  ): Promise<boolean> {
+    const capability = planningReminderAccessCapabilities[action];
+    if (accessStatus && !accessStatus.capabilities[capability]) {
+      showNotice({
+        id: `planning.reminder.access.${action}`,
+        severity: "warning",
+        title: "Действие недоступно",
+        detail: "Текущий профиль не объявляет эту Planning capability. Запрос не отправлен."
+      });
+      return false;
+    }
+    const allowed = await ensureCapability(capability, title);
+    if (!allowed) {
+      showNotice({
+        id: `planning.reminder.access.${action}`,
+        severity: "warning",
+        title: "Действие недоступно",
+        detail: "Текущий профиль Control Center запрещает эту операцию. Запрос не отправлен."
+      });
+    }
+    return allowed;
+  }
 
   async function submitMutation(body: { title: string; due_at_utc: string; timezone: string }): Promise<void> {
     const action = mutationSheet === "create" ? "create" : "edit";
     const target = mutationSheet === "edit" ? selectedReminder : null;
+    if (!await ensurePlanningCapability(action, action === "create" ? "Создать напоминание" : "Изменить напоминание")) return;
     try {
       const result = await mutatePlanningReminder({
         action,
@@ -786,14 +841,23 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   }
 
   async function runAction(action: "complete" | "cancel"): Promise<void> {
-    if (!selectedReminder) return;
-    const reminderId = selectedReminder.id;
+    if (!selectedReminder || lifecyclePendingRef.current) return;
+    const target = selectedReminder;
+    const reminderId = target.id;
+    lifecyclePendingRef.current = true;
+    setLifecyclePending(true);
     try {
+      if (!await ensurePlanningCapability(action, action === "complete" ? "Завершить напоминание" : "Отменить напоминание")) return;
+      const confirmation = await confirmAction(planningReminderConfirmationIds[action], {
+        target: target.title,
+        revision: String(target.version)
+      });
+      if (!confirmation.confirmed) return;
       const result = await mutatePlanningReminder({
         action,
         idempotencyKey: newPlanningIdempotencyKey(),
         reminderId,
-        expectedVersion: selectedReminder.version,
+        expectedVersion: target.version,
         body: {}
       });
       setSelectedReminder(result.object);
@@ -822,6 +886,9 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         title: "Результат не подтверждён",
         detail: "Успех не показан. Перечитайте запись перед повторной попыткой."
       });
+    } finally {
+      lifecyclePendingRef.current = false;
+      setLifecyclePending(false);
     }
   }
 
@@ -868,6 +935,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
           canEdit={canEdit}
           canComplete={canComplete}
           canCancel={canCancel}
+          lifecyclePending={lifecyclePending}
           onEdit={() => setMutationSheet("edit")}
           onComplete={() => void runAction("complete")}
           onCancel={() => void runAction("cancel")}
