@@ -12,7 +12,13 @@ describe("Planning snapshot contract", () => {
       cancel: false,
       delete: false,
       voice: false,
-      providerSync: false
+      providerSync: false,
+      tasks: {
+        create: false,
+        edit: false,
+        complete: false,
+        archive: false
+      }
     });
     expect(emptyPlanningFixture.reminders.upcoming).toHaveLength(0);
     expect(emptyPlanningFixture.tasks.projects).toHaveLength(0);

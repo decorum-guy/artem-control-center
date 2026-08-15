@@ -179,12 +179,17 @@ export interface PlanningTask {
   source: PlanningSource;
   sourceLabel: string;
   title: string;
+  notes: string | null;
   priority: PlanningTaskPriority;
   status: PlanningTaskStatus;
   dueDate: string | null;
   dueTime: string | null;
   timezone: string | null;
   projectId: string | null;
+  sourceRef: string | null;
+  completedAt: string | null;
+  archivedAt: string | null;
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -226,6 +231,13 @@ export interface PlanningConflict {
   endAtUtc: string | null;
 }
 
+export interface PlanningTaskCapabilities {
+  create: boolean;
+  edit: boolean;
+  complete: boolean;
+  archive: boolean;
+}
+
 export interface PlanningCapabilities {
   create: boolean;
   edit: boolean;
@@ -234,6 +246,7 @@ export interface PlanningCapabilities {
   delete: boolean;
   voice: boolean;
   providerSync: boolean;
+  tasks: PlanningTaskCapabilities;
 }
 
 export interface PlanningProviderStatus {

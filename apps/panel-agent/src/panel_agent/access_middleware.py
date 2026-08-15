@@ -15,22 +15,33 @@ _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
 }
 
 _PLANNING_REMINDERS_PREFIX = "/api/v1/planning/reminders/"
+_PLANNING_TASKS_PREFIX = "/api/v1/planning/tasks/"
 
 
 def _planning_capability(method: str, path: str) -> str | None:
     """Return only source-owned Planning capability IDs for known routes."""
     if method == "POST" and path == "/api/v1/planning/reminders":
         return "planning.reminders.create"
-    if not path.startswith(_PLANNING_REMINDERS_PREFIX):
+    if path.startswith(_PLANNING_REMINDERS_PREFIX):
+        segments = path.removeprefix(_PLANNING_REMINDERS_PREFIX).split("/")
+        if method == "PATCH" and len(segments) == 1 and segments[0]:
+            return "planning.reminders.edit"
+        if method == "POST" and len(segments) == 2 and segments[0] and segments[1] == "complete":
+            return "planning.reminders.complete"
+        if method == "POST" and len(segments) == 2 and segments[0] and segments[1] == "cancel":
+            return "planning.reminders.cancel"
         return None
-
-    segments = path.removeprefix(_PLANNING_REMINDERS_PREFIX).split("/")
+    if method == "POST" and path == "/api/v1/planning/tasks":
+        return "planning.tasks.create"
+    if not path.startswith(_PLANNING_TASKS_PREFIX):
+        return None
+    segments = path.removeprefix(_PLANNING_TASKS_PREFIX).split("/")
     if method == "PATCH" and len(segments) == 1 and segments[0]:
-        return "planning.reminders.edit"
+        return "planning.tasks.edit"
     if method == "POST" and len(segments) == 2 and segments[0] and segments[1] == "complete":
-        return "planning.reminders.complete"
-    if method == "POST" and len(segments) == 2 and segments[0] and segments[1] == "cancel":
-        return "planning.reminders.cancel"
+        return "planning.tasks.complete"
+    if method == "DELETE" and len(segments) == 1 and segments[0]:
+        return "planning.tasks.archive"
     return None
 
 

@@ -17,8 +17,10 @@ import {
 } from "./calendarRange";
 import {
   mutatePlanningReminder,
+  mutatePlanningTask,
   newPlanningIdempotencyKey,
   PlanningMutationError,
+  previewPlanningTask,
   previewPlanningReminder,
   readPlanningEvents,
   readPlanningProjects,
@@ -51,13 +53,23 @@ import {
   PlanningSheet,
   previewEnvelope
 } from "./PlanningRoutePrimitives";
-import { planningReminderMutationsEnabled, planningRemindersRouteEnabled } from "./planningRouteConfig";
+import {
+  planningReminderMutationsEnabled,
+  planningRemindersRouteEnabled,
+  planningTaskMutationsEnabled,
+  planningTasksRouteEnabled
+} from "./planningRouteConfig";
 import { planningModuleForRoute } from "./planningModuleRegistry";
 import { calendarIdentityForEvent, calendarIdentityLabel } from "./planningIdentity";
 import { useNoticeCenter } from "./NoticeCenter";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import type { ActionConfirmationId } from "./actionConfirmationCatalog";
+import {
+  taskMutationBodyFromPreview,
+  type TaskMutationBody,
+  type TaskMutationSheetMode
+} from "./taskMutationBody";
 
 const tasksModule = planningModuleForRoute("/tasks")!;
 const calendarModule = planningModuleForRoute("/calendar")!;
@@ -156,17 +168,186 @@ function ProjectFilterSheet({
   );
 }
 
-function TaskDetailSheet({ task, projectName, onClose }: { task: PlanningTask; projectName: string; onClose: () => void }) {
+const planningTaskAccessCapabilities = {
+  create: "planning.tasks.create",
+  edit: "planning.tasks.edit",
+  complete: "planning.tasks.complete",
+  archive: "planning.tasks.archive"
+} as const;
+
+const planningTaskConfirmationIds: Record<"complete" | "archive", ActionConfirmationId> = {
+  complete: "planning.tasks.complete",
+  archive: "planning.tasks.archive"
+};
+
+function taskMutationAllowed(
+  planning: PlanningSnapshot | null,
+  capability: "create" | "edit" | "complete" | "archive"
+): boolean {
+  return planningTasksRouteEnabled
+    && planningTaskMutationsEnabled
+    && planning?.sourceStatus === "current"
+    && Boolean(planning?.capabilities.tasks[capability]);
+}
+
+function TaskMutationSheet({
+  mode,
+  task,
+  onClose,
+  onSubmit
+}: {
+  mode: TaskMutationSheetMode;
+  task: PlanningTask | null;
+  onClose: () => void;
+  onSubmit: (body: TaskMutationBody) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewPlanningTask>> | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setPreview(null);
+      setParsing(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setParsing(true);
+      void previewPlanningTask(
+        trimmed,
+        new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+        DEFAULT_PLANNING_TIME_ZONE,
+        controller.signal
+      )
+        .then(setPreview)
+        .catch(() => setPreview(null))
+        .finally(() => setParsing(false));
+    }, 220);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [text]);
+
+  const candidate = preview?.candidate;
+  const fields = candidate?.fields ?? {};
+  const priority = fields.priority;
+  const canSave = Boolean(
+    candidate?.domain === "task"
+    && candidate.operation === "create"
+    && preview?.confidence === "high"
+    && preview.ambiguities.length === 0
+    && !preview.requires_confirmation
+    && typeof fields.title === "string"
+    && (priority === "none" || priority === "low" || priority === "normal" || priority === "high")
+  );
+
+  async function save(): Promise<void> {
+    if (!canSave || saving) return;
+    setSaving(true);
+    const body = taskMutationBodyFromPreview(mode, fields);
+    try {
+      await onSubmit(body);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <PlanningSheet title={task.title} eyebrow="Задача · только чтение" onClose={onClose} testId="planning-task-detail">
+    <PlanningSheet
+      title={mode === "create" ? "Новая задача" : "Изменить задачу"}
+      eyebrow="Задача · проверка перед сохранением"
+      description="Свободный текст сначала превращается в видимое предложение. Неоднозначная дата или время блокирует сохранение. Примеры: «завтра купить продукты» и «завтра в 18:30 отправить отчёт»."
+      onClose={onClose}
+      testId="planning-task-mutation"
+    >
+      <div className="planning-mutation-form">
+        <label className="planning-mutation-form__label" htmlFor="planning-task-free-text">Фраза</label>
+        <textarea
+          id="planning-task-free-text"
+          className="planning-mutation-form__input"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder="Например: завтра купить продукты или завтра в 18:30 отправить отчёт"
+          rows={3}
+          autoFocus
+        />
+        {parsing && <p className="planning-mutation-form__status">Проверяем формулировку…</p>}
+        {preview && (
+          <section className="planning-mutation-preview" data-testid="planning-task-preview" aria-live="polite">
+            <p className="planning-mutation-preview__eyebrow">Человеческая расшифровка</p>
+            <p className="planning-mutation-preview__restatement">{candidate?.normalized_paraphrase ?? "Предложение пока не сформировано."}</p>
+            {preview.ambiguities.length > 0 && (
+              <div className="planning-mutation-preview__ambiguities" data-testid="planning-task-ambiguities">
+                <strong>Нужно уточнить</strong>
+                {preview.ambiguities.map((ambiguity) => (
+                  <p key={`${ambiguity.field}-${ambiguity.reason}`}>{ambiguity.reason}{ambiguity.candidates.length ? ` Варианты: ${ambiguity.candidates.join(", ")}.` : ""}</p>
+                ))}
+              </div>
+            )}
+            {preview.error_code && <p className="planning-mutation-form__error">Формулировка не подтверждена: {preview.error_code}.</p>}
+          </section>
+        )}
+        <p className="planning-detail-note">
+          {mode === "edit" && task ? `Текущая запись: ${task.title}. Канонические поля заменятся только после ответа сервера.` : "Сохранить можно только однозначное предложение задачи."}
+        </p>
+      </div>
+      <div className="planning-sheet-actions">
+        <button type="button" className="planning-secondary-button" onClick={onClose}>Отмена</button>
+        <button type="button" className="planning-primary-button" disabled={!canSave || parsing || saving} onClick={() => void save()}>
+          {saving ? "Сохраняем…" : "Сохранить"}
+        </button>
+      </div>
+    </PlanningSheet>
+  );
+}
+
+function TaskDetailSheet({
+  task,
+  projectName,
+  onClose,
+  canEdit,
+  canComplete,
+  canArchive,
+  lifecyclePending,
+  onEdit,
+  onComplete,
+  onArchive
+}: {
+  task: PlanningTask;
+  projectName: string;
+  onClose: () => void;
+  canEdit: boolean;
+  canComplete: boolean;
+  canArchive: boolean;
+  lifecyclePending: boolean;
+  onEdit: () => void;
+  onComplete: () => void;
+  onArchive: () => void;
+}) {
+  const active = task.status === "open";
+  return (
+    <PlanningSheet title={task.title} eyebrow="Задача" onClose={onClose} testId="planning-task-detail">
       <dl className="planning-detail-list">
         <ReadOnlyField label="Приоритет" value={priorityLabels[task.priority]} />
         <ReadOnlyField label="Срок" value={formatTaskDueForRoute(task)} />
         <ReadOnlyField label="Проект" value={projectName || "Без проекта"} />
         <ReadOnlyField label="Источник" value={task.sourceLabel} />
+        <ReadOnlyField label="Жизненный цикл" value={task.status === "open" ? "Открыта" : task.status === "completed" ? "Завершена" : "Архивирована"} />
         {task.timezone && <ReadOnlyField label="Часовой пояс" value={task.timezone} />}
+        {task.notes && <ReadOnlyField label="Заметки" value={task.notes} />}
       </dl>
-      <p className="planning-detail-note">Изменение, завершение и архивирование будут добавлены в B4.</p>
+      {active && (canEdit || canComplete || canArchive) && (
+        <div className="planning-sheet-actions planning-sheet-actions--stacked">
+          {canEdit && <button type="button" className="planning-secondary-button" onClick={onEdit}>Изменить</button>}
+          {canComplete && <button type="button" className="planning-primary-button" disabled={lifecyclePending} onClick={onComplete}>Завершить</button>}
+          {canArchive && <button type="button" className="planning-secondary-button" disabled={lifecyclePending} onClick={onArchive}>Архивировать</button>}
+        </div>
+      )}
+      <p className="planning-detail-note">Архивирование — логическое удаление из активных представлений; физическая строка не удаляется.</p>
     </PlanningSheet>
   );
 }
@@ -191,7 +372,13 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   const [projectPage, setProjectPage] = useState(0);
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<PlanningTask | null>(null);
+  const [mutationSheet, setMutationSheet] = useState<TaskMutationSheetMode | null>(null);
   const [retry, setRetry] = useState(0);
+  const { showNotice } = useNoticeCenter();
+  const { status: accessStatus, ensureCapability } = useAccess();
+  const { confirmAction } = useActionConfirmation();
+  const lifecyclePendingRef = useRef(false);
+  const [lifecyclePending, setLifecyclePending] = useState(false);
   const routeRead = usePlanningRead(
     `tasks:${view}:${projectId ?? "all"}:${page}:${snapshot.revision}:${retry}`,
     (signal) => readPlanningTasks(view, projectId, 20, page * 20, signal)
@@ -211,6 +398,142 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   const projects = projectRead.data?.items ?? (planning?.tasks.projects ?? []);
   const projectMap = new Map(projects.map((project) => [project.id, project.name]));
   const projectFilterLabel = projectId ? (projectMap.get(projectId) ?? "Проект недоступен") : "Все проекты";
+  const accessAllows = (action: keyof typeof planningTaskAccessCapabilities): boolean => {
+    if (!accessStatus) return true;
+    return Boolean(accessStatus.capabilities[planningTaskAccessCapabilities[action]]?.allowed);
+  };
+  const canCreate = taskMutationAllowed(planning, "create") && accessAllows("create");
+  const canEdit = taskMutationAllowed(planning, "edit")
+    && accessAllows("edit")
+    && Boolean(selectedTask?.status === "open");
+  const canComplete = taskMutationAllowed(planning, "complete")
+    && accessAllows("complete")
+    && Boolean(selectedTask?.status === "open");
+  const canArchive = taskMutationAllowed(planning, "archive")
+    && accessAllows("archive")
+    && Boolean(selectedTask?.status === "open");
+
+  async function ensureTaskCapability(
+    action: keyof typeof planningTaskAccessCapabilities,
+    title: string
+  ): Promise<boolean> {
+    const capability = planningTaskAccessCapabilities[action];
+    if (accessStatus && !accessStatus.capabilities[capability]) {
+      showNotice({
+        id: `planning.task.access.${action}`,
+        severity: "warning",
+        title: "Действие недоступно",
+        detail: "Текущий профиль не объявляет эту Planning capability. Запрос не отправлен."
+      });
+      return false;
+    }
+    const allowed = await ensureCapability(capability, title);
+    if (!allowed) {
+      showNotice({
+        id: `planning.task.access.${action}`,
+        severity: "warning",
+        title: "Действие недоступно",
+        detail: "Текущий профиль Control Center запрещает эту операцию. Запрос не отправлен."
+      });
+    }
+    return allowed;
+  }
+
+  async function submitMutation(body: TaskMutationBody): Promise<void> {
+    const action = mutationSheet === "create" ? "create" : "edit";
+    const target = mutationSheet === "edit" ? selectedTask : null;
+    if (!await ensureTaskCapability(action, action === "create" ? "Создать задачу" : "Изменить задачу")) return;
+    try {
+      const result = await mutatePlanningTask({
+        action,
+        idempotencyKey: newPlanningIdempotencyKey("panel-task"),
+        taskId: target?.id,
+        expectedVersion: target?.version,
+        body
+      });
+      setSelectedTask(result.object);
+      setMutationSheet(null);
+      setRetry((value) => value + 1);
+      showNotice({
+        id: `planning.task.${action}.${result.object.id}`,
+        severity: "success",
+        title: action === "create" ? "Задача создана" : "Задача изменена",
+        detail: "Канонический ответ сервера заменил локальное состояние."
+      });
+    } catch (error) {
+      if (error instanceof PlanningMutationError && error.reconciledObject) {
+        setSelectedTask(error.reconciledObject as PlanningTask);
+        setRetry((value) => value + 1);
+        setMutationSheet(null);
+        showNotice({
+          id: `planning.task.reconciled.${error.reconciledObject.id}`,
+          severity: "warning",
+          title: "Результат подтверждён чтением",
+          detail: "Транспорт не подтвердил запись вовремя; состояние сверено с каноническим сервером без показа ложного успеха."
+        });
+        return;
+      }
+      showNotice({
+        id: `planning.task.uncertain.${target?.id ?? "create"}`,
+        severity: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "warning" : "error",
+        title: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "Задача изменилась" : "Результат не подтверждён",
+        detail: error instanceof PlanningMutationError && error.mutationCode === "conflict"
+          ? "Канонический сервер отклонил устаревшую версию. Сначала перечитайте запись."
+          : "Успех не показан. Повторите чтение и проверьте каноническое состояние перед новой попыткой."
+      });
+    }
+  }
+
+  async function runAction(action: "complete" | "archive"): Promise<void> {
+    if (!selectedTask || lifecyclePendingRef.current) return;
+    const target = selectedTask;
+    lifecyclePendingRef.current = true;
+    setLifecyclePending(true);
+    try {
+      if (!await ensureTaskCapability(action, action === "complete" ? "Завершить задачу" : "Архивировать задачу")) return;
+      const confirmation = await confirmAction(planningTaskConfirmationIds[action], {
+        target: target.title,
+        revision: String(target.version)
+      });
+      if (!confirmation.confirmed) return;
+      const result = await mutatePlanningTask({
+        action,
+        idempotencyKey: newPlanningIdempotencyKey("panel-task"),
+        taskId: target.id,
+        expectedVersion: target.version,
+        body: {}
+      });
+      setSelectedTask(result.object);
+      setRetry((value) => value + 1);
+      showNotice({
+        id: `planning.task.${action}.${result.object.id}`,
+        severity: "success",
+        title: action === "complete" ? "Задача завершена" : "Задача архивирована",
+        detail: action === "archive" ? "Задача логически удалена из активных представлений; физического удаления нет." : "Это явное изменение жизненного цикла задачи."
+      });
+    } catch (error) {
+      if (error instanceof PlanningMutationError && error.reconciledObject) {
+        setSelectedTask(error.reconciledObject as PlanningTask);
+        setRetry((value) => value + 1);
+        showNotice({
+          id: `planning.task.reconciled.${target.id}`,
+          severity: "warning",
+          title: "Результат подтверждён чтением",
+          detail: "Транспорт не подтвердил запись вовремя; локальное состояние заменено каноническим readback."
+        });
+        return;
+      }
+      showNotice({
+        id: `planning.task.action-uncertain.${target.id}`,
+        severity: "error",
+        title: "Результат не подтверждён",
+        detail: "Успех не показан. Перечитайте задачу перед повторной попыткой."
+      });
+    } finally {
+      lifecyclePendingRef.current = false;
+      setLifecyclePending(false);
+    }
+  }
 
   useEffect(() => {
     setPage(0);
@@ -219,7 +542,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   return (
     <PlanningRouteFrame
       module={tasksModule}
-      description="Открытые задачи по сроку, приоритету и проекту. Этот экран только наблюдает данные Planning."
+      description="Задачи по сроку, приоритету и проекту. Изменения доступны только при совместном разрешении маршрута, rollout, источника и canonical capability."
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       error={routeRead.error}
@@ -234,6 +557,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
           </RouteControls>
         </>
       )}
+      futureAction={canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать задачу</button> : undefined}
       testId="route-tasks"
     >
       <PlanningRouteState
@@ -277,11 +601,26 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
           onClose={() => setFilterOpen(false)}
         />
       )}
-      {selectedTask && (
+      {selectedTask && !mutationSheet && (
         <TaskDetailSheet
           task={selectedTask}
           projectName={projectNameForTask(selectedTask, projects)}
           onClose={() => setSelectedTask(null)}
+          canEdit={canEdit}
+          canComplete={canComplete}
+          canArchive={canArchive}
+          lifecyclePending={lifecyclePending}
+          onEdit={() => setMutationSheet("edit")}
+          onComplete={() => void runAction("complete")}
+          onArchive={() => void runAction("archive")}
+        />
+      )}
+      {mutationSheet && (
+        <TaskMutationSheet
+          mode={mutationSheet}
+          task={selectedTask}
+          onClose={() => setMutationSheet(null)}
+          onSubmit={submitMutation}
         />
       )}
     </PlanningRouteFrame>
@@ -818,7 +1157,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       });
     } catch (error) {
       if (error instanceof PlanningMutationError && error.reconciledObject) {
-        setSelectedReminder(error.reconciledObject);
+        setSelectedReminder(error.reconciledObject as PlanningReminder);
         setRetry((value) => value + 1);
         setMutationSheet(null);
         showNotice({
@@ -870,7 +1209,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       });
     } catch (error) {
       if (error instanceof PlanningMutationError && error.reconciledObject) {
-        setSelectedReminder(error.reconciledObject);
+        setSelectedReminder(error.reconciledObject as PlanningReminder);
         setRetry((value) => value + 1);
         showNotice({
           id: `planning.reminder.reconciled.${reminderId}`,
