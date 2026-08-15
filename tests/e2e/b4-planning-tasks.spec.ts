@@ -14,13 +14,13 @@ const canonicalBase = {
   source: "panel-agent",
   sourceLabel: "Panel Agent",
   title: "Открытая задача",
-  notes: null,
-  priority: "normal",
+  notes: "Не потерять контекст",
+  priority: "high",
   status: "open",
   dueDate: "2026-08-14",
   dueTime: null,
   timezone: null,
-  projectId: null,
+  projectId: "00000000-0000-4000-8000-000000000401",
   sourceRef: null,
   completedAt: null,
   archivedAt: null,
@@ -83,6 +83,21 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
   let canonical = { ...canonicalBase };
   let createAttempts = 0;
 
+  const listEnvelope = () => ({
+    schemaVersion: "planning.panel.v1",
+    kind: "list",
+    domain: "task",
+    generatedAt: "2026-08-12T09:00:00Z",
+    sourceStatus: "current",
+    lastSyncedAt: "2026-08-12T09:00:00Z",
+    staleAfter: "2026-08-12T09:05:00Z",
+    items: [canonical],
+    limit: 20,
+    offset: 0,
+    count: 1,
+    hasMore: false
+  });
+
   await page.route("**/api/v1/planning/parse", async (route) => {
     const body = route.request().postDataJSON() as { text?: string };
     const text = typeof body.text === "string" ? body.text : "";
@@ -99,7 +114,7 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
           operation: "create",
           fields: {
             title: timed ? "Отправить отчёт" : text.includes("купить") ? "Купить продукты" : text,
-            priority: "normal",
+            priority: "none",
             due_date: "2026-08-14",
             due_time: timed ? "18:30" : null,
             timezone: timed ? "Europe/Moscow" : null
@@ -119,6 +134,10 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
   });
 
   await page.route("**/api/v1/planning/tasks", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(listEnvelope()) });
+      return;
+    }
     if (route.request().method() !== "POST") return route.fallback();
     createAttempts += 1;
     const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -230,7 +249,7 @@ test.describe("B4.2 task mutations", () => {
     await openTaskCreator(page);
     await saveTask(page, "завтра купить продукты");
     await expect(page.getByTestId("global-notice-stack")).toContainText("Задача создана");
-    expect(requests[0]).toMatchObject({ due_date: "2026-08-14", due_time: null, timezone: null });
+    expect(requests[0]).toMatchObject({ priority: "none", due_date: "2026-08-14", due_time: null, timezone: null });
     await expect(page.getByTestId("planning-task-detail")).toContainText("14 авг.");
     await expect(page.getByTestId("planning-task-detail")).not.toContainText("00:00");
     await mkdir(artifactDirectory(testInfo), { recursive: true });
@@ -247,10 +266,44 @@ test.describe("B4.2 task mutations", () => {
     });
     await openTaskCreator(page);
     await saveTask(page, "завтра в 18:30 отправить отчёт");
-    expect(requests[0]).toMatchObject({ due_date: "2026-08-14", due_time: "18:30", timezone: "Europe/Moscow" });
+    expect(requests[0]).toMatchObject({ priority: "none", due_date: "2026-08-14", due_time: "18:30", timezone: "Europe/Moscow" });
     await expect(page.getByTestId("planning-task-detail")).toContainText("18:30");
     await mkdir(artifactDirectory(testInfo), { recursive: true });
     await page.screenshot({ path: path.join(artifactDirectory(testInfo), "b4-tasks-timed-create.png"), animations: "disabled" });
+  });
+
+  test("edits owned fields without resetting priority, notes, or project", async ({ page }, testInfo) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page);
+    await page.goto("/tasks?theme=day");
+    await page.getByTestId("planning-task-route-row").first().click();
+    const patchBodies: Array<Record<string, unknown>> = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/tasks/") && request.method() === "PATCH") {
+        patchBodies.push(request.postDataJSON() as Record<string, unknown>);
+      }
+    });
+    const detail = page.getByTestId("planning-task-detail");
+    await expect(detail).toContainText("Высокий");
+    await page.getByRole("button", { name: "Изменить" }).click();
+    await saveTask(page, "завтра в 18:30 отправить отчёт");
+    await expect.poll(() => patchBodies.length).toBe(1);
+    expect(patchBodies[0]).toMatchObject({
+      title: "Отправить отчёт",
+      due_date: "2026-08-14",
+      due_time: "18:30",
+      timezone: "Europe/Moscow"
+    });
+    expect(patchBodies[0]).not.toHaveProperty("priority");
+    expect(patchBodies[0]).not.toHaveProperty("notes");
+    expect(patchBodies[0]).not.toHaveProperty("project_id");
+    await expect(detail).toContainText("Отправить отчёт");
+    await expect(detail).toContainText("Высокий");
+    await expect(detail).toContainText("Не потерять контекст");
+    await expect(detail).toContainText("18:30");
+    await mkdir(artifactDirectory(testInfo), { recursive: true });
+    await page.screenshot({ path: path.join(artifactDirectory(testInfo), "b4-tasks-edit-preserves-priority.png"), animations: "disabled" });
   });
 
   test("keeps Save disabled for a materially ambiguous time", async ({ page }, testInfo) => {

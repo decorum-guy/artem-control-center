@@ -65,6 +65,11 @@ import { useNoticeCenter } from "./NoticeCenter";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import type { ActionConfirmationId } from "./actionConfirmationCatalog";
+import {
+  taskMutationBodyFromPreview,
+  type TaskMutationBody,
+  type TaskMutationSheetMode
+} from "./taskMutationBody";
 
 const tasksModule = planningModuleForRoute("/tasks")!;
 const calendarModule = planningModuleForRoute("/calendar")!;
@@ -163,8 +168,6 @@ function ProjectFilterSheet({
   );
 }
 
-type TaskMutationSheetMode = "create" | "edit";
-
 const planningTaskAccessCapabilities = {
   create: "planning.tasks.create",
   edit: "planning.tasks.edit",
@@ -175,16 +178,6 @@ const planningTaskAccessCapabilities = {
 const planningTaskConfirmationIds: Record<"complete" | "archive", ActionConfirmationId> = {
   complete: "planning.tasks.complete",
   archive: "planning.tasks.archive"
-};
-
-type TaskMutationBody = {
-  title?: string;
-  notes?: string | null;
-  due_date?: string | null;
-  due_time?: string | null;
-  timezone?: string | null;
-  priority?: PlanningTask["priority"];
-  project_id?: string | null;
 };
 
 function taskMutationAllowed(
@@ -255,15 +248,7 @@ function TaskMutationSheet({
   async function save(): Promise<void> {
     if (!canSave || saving) return;
     setSaving(true);
-    const body: Parameters<typeof onSubmit>[0] = {
-      title: fields.title as string,
-      priority: priority as PlanningTask["priority"]
-    };
-    for (const [field, value] of [["notes", fields.notes], ["due_date", fields.due_date], ["due_time", fields.due_time], ["timezone", fields.timezone], ["project_id", fields.project_id]] as const) {
-      if (value === null || typeof value === "string") {
-        (body as Record<string, unknown>)[field] = value;
-      }
-    }
+    const body = taskMutationBodyFromPreview(mode, fields);
     try {
       await onSubmit(body);
     } finally {
