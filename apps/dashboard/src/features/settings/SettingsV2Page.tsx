@@ -50,7 +50,7 @@ export function SettingsV2Page({
   const [openSheet, setOpenSheet] = useState<SettingsSheet | null>(null);
 
   return (
-    <div className="settings-v2-page" data-testid="route-settings-v2">
+    <div className="settings-v2-page" data-testid="route-settings">
       <RouteHeader
         eyebrow="Панель"
         title="Настройки"

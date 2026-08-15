@@ -163,7 +163,7 @@ async function mockCoffeeSettings(
 
 async function openSettings(page: Page) {
   await page.goto("/settings");
-  await expect(page.getByTestId("route-settings-v2")).toBeVisible();
+  await expect(page.getByTestId("route-settings")).toBeVisible();
 }
 
 async function expectNoDocumentOverflow(page: Page) {
