@@ -141,6 +141,21 @@ jobs:
           path: artifacts/v2-route-density-review
           if-no-files-found: error
 
+      - name: Run focused PR8 Settings information architecture gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          V2_SETTINGS_ARTIFACT_DIR: artifacts/v2-settings-review
+        run: npm run test:e2e -- tests/e2e/v2-settings.spec.ts
+
+      - name: Upload PR8 Settings review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-settings-review-${{ github.sha }}
+          path: artifacts/v2-settings-review
+          if-no-files-found: error
+
       - name: Run focused V2 Overview grid gate
         if: runner.os == 'Linux'
         env:
