@@ -8,38 +8,20 @@ import {
 import "./RuntimeControls.css";
 
 type RuntimeAction = "hide" | "shutdown";
-type Availability = "loading" | "available" | "unavailable";
+export type RuntimeAvailability = "loading" | "available" | "unavailable";
 
-interface RuntimeStatus {
+export interface RuntimeStatus {
   enabled: boolean;
   platform: string;
   revision?: string;
 }
 
-function wait(milliseconds: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
-async function runtimeIsStillReachable(delayMs = 1_000) {
-  await wait(delayMs);
-  try {
-    const response = await fetch("/health/live", { cache: "no-store" });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-export function RuntimeControls({
-  variant = "settings"
-}: {
-  variant?: "settings" | "system-v2";
-} = {}) {
-  const { confirmAction } = useActionConfirmation();
-  const [availability, setAvailability] = useState<Availability>("loading");
+export function useRuntimeStatus(): {
+  availability: RuntimeAvailability;
+  runtimeRevision: string | undefined;
+} {
+  const [availability, setAvailability] = useState<RuntimeAvailability>("loading");
   const [runtimeRevision, setRuntimeRevision] = useState<string | undefined>();
-  const [pending, setPending] = useState<RuntimeAction | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -63,6 +45,33 @@ export function RuntimeControls({
       active = false;
     };
   }, []);
+
+  return { availability, runtimeRevision };
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function runtimeIsStillReachable(delayMs = 1_000) {
+  await wait(delayMs);
+  try {
+    const response = await fetch("/health/live", { cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+export function RuntimeControls({
+  variant = "settings"
+}: {
+  variant?: "settings" | "system-v2";
+} = {}) {
+  const { confirmAction } = useActionConfirmation();
+  const { availability, runtimeRevision } = useRuntimeStatus();
+  const [pending, setPending] = useState<RuntimeAction | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function runAction(action: RuntimeAction) {
     if (pending || availability !== "available") return;

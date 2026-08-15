@@ -31,6 +31,7 @@ import { OverviewV2Page } from "./features/overview/OverviewPage";
 import { HomeV2Page } from "./features/home/HomeV2Page";
 import { ServicesV2Page } from "./features/services/ServicesV2Page";
 import { SystemV2Page } from "./features/system/SystemV2Page";
+import { SettingsV2Page } from "./features/settings/SettingsV2Page";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -359,12 +360,21 @@ export function App() {
               : <ServicesPage snapshot={snapshot} onNavigate={navigate} />
           )}
           {route === "/settings" && (
-            <SettingsPage
-              theme={theme}
-              motion={motion}
-              onThemeChange={setTheme}
-              onMotionChange={setMotion}
-            />
+            v2VisualShellEnabled ? (
+              <SettingsV2Page
+                theme={theme}
+                motion={motion}
+                onThemeChange={setTheme}
+                onMotionChange={setMotion}
+              />
+            ) : (
+              <SettingsPage
+                theme={theme}
+                motion={motion}
+                onThemeChange={setTheme}
+                onMotionChange={setMotion}
+              />
+            )
           )}
           {route === "/system" && (v2VisualShellEnabled ? <SystemV2Page snapshot={snapshot} /> : <SystemPage snapshot={snapshot} />)}
           {route === "/tasks" && (planningTasksRouteEnabled ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
