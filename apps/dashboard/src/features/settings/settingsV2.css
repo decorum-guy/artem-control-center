@@ -390,7 +390,7 @@
 
 .setting-switch-row:has(input:checked) .setting-switch-row__thumb {
   background: var(--cc-on-accent);
-  transform: translateX(24px);
+  transform: translateX(26px);
 }
 
 .setting-switch-row:has(input:checked) .setting-switch-row__state {
