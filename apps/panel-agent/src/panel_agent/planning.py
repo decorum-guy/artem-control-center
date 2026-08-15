@@ -478,6 +478,22 @@ class StatusEnvelope(StrictPlanningModel):
     _correlation = field_validator("correlation_id")(validate_uuid4)
 
 
+class ReminderObjectEnvelope(StrictPlanningModel):
+    """The only canonical object response accepted by the reminder writer."""
+
+    schemaVersion: Literal["planning.v1"]
+    kind: Literal["object"]
+    domain: Literal["reminder"]
+    object: UpstreamReminder
+    sourceStatus: Literal["current"]
+    lastSyncedAt: StrictStr
+    staleAfter: StrictStr
+    correlation_id: StrictStr = Field(min_length=36, max_length=36)
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+    _correlation = field_validator("correlation_id")(validate_uuid4)
+
+
 class ReminderProjection(StrictPlanningModel):
     id: StrictStr = Field(min_length=36, max_length=36)
     version: StrictInt = Field(ge=1)
@@ -719,6 +735,36 @@ class PlanningReadEnvelope(StrictPlanningModel):
     hasMore: StrictBool
 
     _timestamps = _timestamp_fields("generatedAt", "lastSyncedAt", "staleAfter")
+
+
+class PlanningObjectEnvelope(StrictPlanningModel):
+    """Browser-safe canonical object readback after a reminder mutation."""
+
+    schemaVersion: Literal["planning.panel.v1"]
+    kind: Literal["object"]
+    domain: Literal["reminder"]
+    object: ReminderProjection
+    sourceStatus: PlanningSourceStatus
+    lastSyncedAt: StrictStr | None = None
+    staleAfter: StrictStr | None = None
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+
+
+class PlanningParsePreview(StrictPlanningModel):
+    """Closed relay for the canonical non-mutating parser preview."""
+
+    schemaVersion: Literal["planning.v1"]
+    kind: Literal["parse_preview"]
+    candidate: dict[str, Any] | None = None
+    confidence: Literal["high", "medium", "low"]
+    ambiguities: list[dict[str, Any]] = Field(max_length=16)
+    requires_confirmation: StrictBool
+    normalized_text: StrictStr = Field(max_length=2000)
+    error_code: StrictStr | None = Field(default=None, max_length=128)
+    correlation_id: StrictStr = Field(min_length=36, max_length=36)
+
+    _correlation = field_validator("correlation_id")(validate_uuid4)
 
 
 def source_label(source: str) -> str:

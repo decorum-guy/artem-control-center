@@ -5,11 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, model_validator
 from starlette.datastructures import QueryParams
 
 from .planning import (
+    PlanningObjectEnvelope,
+    PlanningParsePreview,
     PlanningReadEnvelope,
     PlanningStatusProjection,
+    validate_timezone,
     validate_uuid4,
     validate_utc_timestamp,
 )
@@ -19,6 +23,84 @@ from .planning_adapter import (
     PlanningReadUnavailable,
     PlanningUpstreamError,
 )
+
+
+class ReminderCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: StrictStr = Field(min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
+    due_at_utc: StrictStr
+    timezone: StrictStr = Field(min_length=1, max_length=64)
+
+    @field_validator("due_at_utc")
+    @classmethod
+    def _due(cls, value: str) -> str:
+        validate_utc_timestamp(value, "planning.reminder.due_at_utc")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str) -> str:
+        validate_timezone(value, "planning.reminder.timezone")
+        return value
+
+
+class ReminderPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: StrictStr | None = Field(default=None, min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
+    due_at_utc: StrictStr | None = None
+    timezone: StrictStr | None = Field(default=None, min_length=1, max_length=64)
+
+    @field_validator("due_at_utc")
+    @classmethod
+    def _due(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_utc_timestamp(value, "planning.reminder.due_at_utc")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_timezone(value, "planning.reminder.timezone")
+        return value
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "ReminderPatchRequest":
+        if not self.model_fields_set:
+            raise ValueError("reminder patch must contain at least one field")
+        return self
+
+
+class PlanningParseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    text: StrictStr = Field(min_length=1, max_length=2000)
+    reference_time_utc: StrictStr
+    timezone: StrictStr = Field(min_length=1, max_length=64)
+    locale: StrictStr = Field(default="ru-RU", min_length=1, max_length=16)
+
+    @field_validator("reference_time_utc")
+    @classmethod
+    def _reference(cls, value: str) -> str:
+        validate_utc_timestamp(value, "planning.reference_time_utc")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str) -> str:
+        validate_timezone(value, "planning.timezone")
+        return value
+
+    @field_validator("locale")
+    @classmethod
+    def _locale(cls, value: str) -> str:
+        if value != "ru-RU":
+            raise ValueError("planning parser supports only ru-RU")
+        return value
 
 
 def build_planning_router(
@@ -73,6 +155,103 @@ def build_planning_router(
             raise _read_unavailable(detail=exc.category) from exc
         except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
             raise _read_unavailable() from exc
+
+    @router.post("/parse", response_model=PlanningParsePreview)
+    async def planning_parse_preview(
+        request: PlanningParseRequest,
+        response: Response,
+    ) -> PlanningParsePreview:
+        _enabled(adapter)
+        _no_store(response)
+        try:
+            return await adapter.parse_preview(
+                text=request.text,
+                reference_time_utc=request.reference_time_utc,
+                timezone=request.timezone,
+            )
+        except PlanningUpstreamError as exc:
+            raise _read_unavailable(detail=exc.category) from exc
+
+    @router.post("/reminders", response_model=PlanningObjectEnvelope)
+    async def planning_create_reminder(
+        request: ReminderCreateRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_reminder_mutation(adapter, "create")
+        _no_store(response)
+        try:
+            return await adapter.create_reminder(
+                idempotency_key=_idempotency_key(raw_request),
+                title=request.title,
+                notes=request.notes,
+                due_at_utc=request.due_at_utc,
+                timezone=request.timezone,
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc) from exc
+
+    @router.patch("/reminders/{reminder_id}", response_model=PlanningObjectEnvelope)
+    async def planning_edit_reminder(
+        reminder_id: str,
+        request: ReminderPatchRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_reminder_mutation(adapter, "update")
+        _no_store(response)
+        _validate_reminder_id(reminder_id)
+        try:
+            return await adapter.edit_reminder(
+                reminder_id=reminder_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+                body=request.model_dump(exclude_unset=True),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc) from exc
+
+    @router.post("/reminders/{reminder_id}/complete", response_model=PlanningObjectEnvelope)
+    async def planning_complete_reminder(
+        reminder_id: str,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_reminder_mutation(adapter, "complete")
+        _no_store(response)
+        _validate_reminder_id(reminder_id)
+        await _require_empty_body(raw_request)
+        try:
+            return await adapter.complete_reminder(
+                reminder_id=reminder_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc) from exc
+
+    @router.post("/reminders/{reminder_id}/cancel", response_model=PlanningObjectEnvelope)
+    async def planning_cancel_reminder(
+        reminder_id: str,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_reminder_mutation(adapter, "cancel")
+        _no_store(response)
+        _validate_reminder_id(reminder_id)
+        await _require_empty_body(raw_request)
+        try:
+            return await adapter.cancel_reminder(
+                reminder_id=reminder_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc) from exc
 
     @router.get("/tasks", response_model=PlanningReadEnvelope)
     async def planning_tasks(request: Request, response: Response) -> PlanningReadEnvelope:
@@ -130,6 +309,58 @@ def build_planning_router(
 def _enabled(adapter: PlanningAdapter) -> None:
     if not adapter.enabled:
         raise HTTPException(status_code=404, detail="planning_disabled")
+
+
+def _require_reminder_mutation(adapter: PlanningAdapter, action: str) -> None:
+    _enabled(adapter)
+    if not adapter.reminder_mutations_enabled:
+        raise HTTPException(status_code=404, detail="planning_reminder_mutations_disabled")
+    if action not in {"create", "update", "complete", "cancel"} or not adapter.reminder_mutation_allowed(action):
+        raise HTTPException(status_code=403, detail="planning_reminder_capability_denied")
+
+
+def _idempotency_key(request: Request) -> str:
+    value = request.headers.get("Idempotency-Key", "")
+    if not value or len(value) > 256 or any(ord(char) < 0x20 for char in value):
+        raise HTTPException(status_code=400, detail="planning_idempotency_key_invalid")
+    return value
+
+
+def _if_match(request: Request) -> int:
+    value = request.headers.get("If-Match", "")
+    if not value.isdigit() or int(value) < 1:
+        raise HTTPException(status_code=400, detail="planning_if_match_invalid")
+    return int(value)
+
+
+def _validate_reminder_id(value: str) -> None:
+    try:
+        validate_uuid4(value, "planning.reminder_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="planning_reminder_id_invalid") from exc
+
+
+async def _require_empty_body(request: Request) -> None:
+    body = await request.body()
+    if body.strip() not in {b"", b"{}"}:
+        raise HTTPException(status_code=422, detail="planning_action_body_not_empty")
+
+
+def _mutation_error(error: PlanningUpstreamError) -> HTTPException:
+    if error.category == "mutation_uncertain":
+        return HTTPException(status_code=503, detail="planning_mutation_uncertain")
+    if error.category in {"version_conflict", "idempotency_conflict", "idempotency_in_progress"}:
+        return HTTPException(status_code=409, detail=f"planning_{error.category}")
+    if error.category == "not_found":
+        return HTTPException(status_code=404, detail="planning_reminder_not_found")
+    if error.category in {"validation_error", "reminder_patch_invalid", "idempotency_key_invalid", "expected_version_invalid"}:
+        return HTTPException(status_code=422, detail="planning_mutation_invalid")
+    return HTTPException(status_code=503, detail="planning_mutation_unavailable")
+
+
+def _canonical_mutation_route(prefix: str) -> None:
+    if prefix != "/api/v1/planning":
+        raise HTTPException(status_code=404, detail="planning_route_not_found")
 
 
 def _no_store(response: Response) -> None:

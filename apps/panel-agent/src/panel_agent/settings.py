@@ -65,6 +65,7 @@ class IntegrationSettings:
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
     panel_planning_enabled: bool = False
+    panel_planning_reminder_mutations_enabled: bool = False
     panel_planning_base_url: str = ""
     panel_planning_internal_secret: str = ""
     panel_planning_secret: str = ""
@@ -253,6 +254,10 @@ class IntegrationSettings:
                 int(os.getenv("PANEL_SSE_HEARTBEAT_SECONDS", "20")),
             ),
             panel_planning_enabled=_bool_env("PANEL_PLANNING_ENABLED", False),
+            panel_planning_reminder_mutations_enabled=_bool_env(
+                "PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED",
+                False,
+            ),
             panel_planning_base_url=os.getenv("PANEL_PLANNING_BASE_URL", "").strip().rstrip("/"),
             panel_planning_internal_secret=os.getenv("PANEL_PLANNING_INTERNAL_SECRET", ""),
             panel_planning_secret=os.getenv("PANEL_PLANNING_SECRET", ""),
