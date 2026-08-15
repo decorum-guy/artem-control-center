@@ -119,7 +119,11 @@ function makeDocument(revision = 0, items: readonly LayoutItem[] = foundationIte
   };
 }
 
-async function installLayoutRoute(page: Page, initialMode: PatchMode = "success") {
+async function installLayoutRoute(
+  page: Page,
+  initialMode: PatchMode = "success",
+  initialItems: readonly LayoutItem[] = foundationItems
+) {
   const state: {
     document: LayoutDocument;
     mode: PatchMode;
@@ -127,7 +131,7 @@ async function installLayoutRoute(page: Page, initialMode: PatchMode = "success"
     patchCount: number;
     lastPatch: LayoutItem[] | null;
   } = {
-    document: makeDocument(),
+    document: makeDocument(0, initialItems),
     mode: initialMode,
     getCount: 0,
     patchCount: 0,
@@ -320,8 +324,10 @@ async function assertCoffeeContentGeometry(page: Page, scenarioLabel = "current 
       return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
     };
     const coffee = document.querySelector(".coffee-panel--overview");
+    const asset = rectFor(coffee?.querySelector(".coffee-asset") ?? null);
     const image = rectFor(coffee?.querySelector(".coffee-asset__image") ?? null);
-    const activity = Array.from(coffee?.querySelectorAll(".coffee-activity i") ?? []).map((element) => rectFor(element)).filter(Boolean);
+    const activity = rectFor(coffee?.querySelector(".coffee-activity") ?? null);
+    const activityBars = Array.from(coffee?.querySelectorAll(".coffee-activity i") ?? []).map((element) => rectFor(element)).filter(Boolean);
     const semanticContent = [
       ".coffee-panel__heading h2",
       ".coffee-panel__heading .health-mark",
@@ -332,18 +338,41 @@ async function assertCoffeeContentGeometry(page: Page, scenarioLabel = "current 
       ".coffee-authority",
       ".coffee-state-marker"
     ].map((selector) => ({ selector, rect: rectFor(coffee?.querySelector(selector) ?? null) })).filter(({ rect }) => rect);
-    return { image, activity, semanticContent };
+    return { asset, image, activity, activityBars, semanticContent };
   });
 
   expect(geometry.image).not.toBeNull();
+  if (geometry.asset && geometry.activity) {
+    expect(geometry.activity.left).toBeGreaterThanOrEqual(geometry.asset.left - 1);
+    expect(geometry.activity.right).toBeLessThanOrEqual(geometry.asset.right + 1);
+    expect(geometry.activity.top).toBeGreaterThanOrEqual(geometry.asset.top - 1);
+    expect(geometry.activity.bottom).toBeLessThanOrEqual(geometry.asset.bottom + 1);
+    const gap = geometry.image!.top - geometry.activity.bottom;
+    expect(gap, `${scenarioLabel}: activity-to-image gap`).toBeGreaterThanOrEqual(3);
+    expect(gap, `${scenarioLabel}: activity-to-image gap`).toBeLessThanOrEqual(18);
+    expect(rectIntersects(geometry.activity, geometry.image), `${scenarioLabel}: activity intersects image`).toBe(false);
+    const activityVisualBottom = Math.max(...geometry.activityBars.map((bar) => bar!.bottom));
+    const activityVisualGap = geometry.image!.top - activityVisualBottom;
+    expect(activityVisualGap, `${scenarioLabel}: animated activity-to-image gap`).toBeGreaterThanOrEqual(2);
+    expect(activityVisualGap, `${scenarioLabel}: animated activity-to-image gap`).toBeLessThanOrEqual(16);
+    for (const bar of geometry.activityBars) {
+      if (bar) expect(rectIntersects(bar, geometry.image), `${scenarioLabel}: animated activity intersects image`).toBe(false);
+    }
+  }
   for (const content of geometry.semanticContent) {
     if (geometry.image) expect(rectIntersects(geometry.image, content.rect), `${scenarioLabel}: image intersects ${content.selector}`).toBe(false);
+    if (geometry.activity) expect(rectIntersects(geometry.activity, content.rect), `${scenarioLabel}: activity intersects ${content.selector}`).toBe(false);
   }
-  for (const bar of geometry.activity) {
+  for (const bar of geometry.activityBars) {
     for (const content of geometry.semanticContent) {
       if (bar) expect(rectIntersects(bar, content.rect), `${scenarioLabel}: activity intersects ${content.selector}`).toBe(false);
     }
   }
+}
+
+async function assertCoffeeActivityHidden(page: Page): Promise<void> {
+  await expect(page.locator(".coffee-panel--overview .coffee-activity")).toHaveCount(0);
+  await expect(page.locator(".coffee-panel--overview .coffee-panel__state strong")).toHaveText("Разогревается");
 }
 
 async function assertCoffeeActivityPhases(page: Page): Promise<void> {
@@ -498,7 +527,37 @@ test.describe("Overview V2 Edit mode and persistence", () => {
   });
 
   test("keeps Coffee imagery and warming activity in the asset safe zone", async ({ page }, testInfo) => {
-    await installLayoutRoute(page);
+    const routeState = await installLayoutRoute(page);
+    for (const [scale, screenshot] of [
+      [70, "overview-coffee-warming-scale-70.png"],
+      [85, "overview-coffee-warming-scale-85.png"],
+      [100, "overview-coffee-warming-scale-100.png"]
+    ] as const) {
+      routeState.document = makeDocument(0, (() => {
+        const items = cloneItems();
+        const coffee = items.find((item) => item.instanceId === "fixture.coffee");
+        if (coffee) coffee.config.imageScalePct = scale;
+        return items;
+      })());
+      await page.goto("/overview?scenario=coffee-warming&theme=night");
+      await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", "warming");
+      await expect(page.locator(".coffee-panel--overview")).toHaveAttribute("data-image-scale", String(scale));
+      await expect(page.locator(".coffee-panel--overview")).toHaveAttribute("data-image-x", "0");
+      await expect(page.locator(".coffee-panel--overview")).toHaveAttribute("data-image-y", "0");
+      await assertCoffeeContentGeometry(page, `coffee-warming scale ${scale}`);
+      await captureArtifact(page, testInfo, screenshot);
+    }
+
+    routeState.document = makeDocument(0, (() => {
+      const items = cloneItems();
+      const coffee = items.find((item) => item.instanceId === "fixture.coffee");
+      if (coffee) coffee.config.showImage = false;
+      return items;
+    })());
+    await page.goto("/overview?scenario=coffee-warming&theme=night");
+    await assertCoffeeActivityHidden(page);
+
+    routeState.document = makeDocument();
     for (const [scenario, stage] of [
       ["coffee-off", "off"],
       ["coffee-warming", "warming"],
@@ -530,6 +589,13 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
     await assertCoffeeActivityPhases(page);
     await captureArtifact(page, testInfo, "overview-edit-coffee-warming-selected.png");
+
+    await setCoffeeScale(page, "70");
+    await assertCoffeeContentGeometry(page, "selected coffee-warming scale 70");
+    await captureArtifact(page, testInfo, "overview-edit-coffee-warming-scale-70-selected.png");
+    await setCoffeeScale(page, "100");
+    await assertCoffeeContentGeometry(page, "selected coffee-warming scale 100");
+    await captureArtifact(page, testInfo, "overview-edit-coffee-warming-scale-100-selected.png");
   });
 
   test("adds bounded widgets and sends one complete canonical save", async ({ page }, testInfo) => {
