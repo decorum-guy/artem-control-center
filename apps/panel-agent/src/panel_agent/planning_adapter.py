@@ -21,6 +21,9 @@ from .planning import (
     CalendarEventProjection,
     EventListEnvelope,
     PlanningConflict,
+    PlanningCapabilities,
+    PlanningObjectEnvelope,
+    PlanningParsePreview,
     PlanningProjection,
     PlanningReadEnvelope,
     PlanningListEnvelope,
@@ -28,6 +31,7 @@ from .planning import (
     PlanningStatusProjection,
     ProjectListEnvelope,
     ProjectProjection,
+    ReminderObjectEnvelope,
     ReminderListEnvelope,
     ReminderProjection,
     StatusEnvelope,
@@ -53,10 +57,17 @@ LOGGER = logging.getLogger(__name__)
 
 PLANNING_ROUTES: Mapping[str, str] = {
     "reminders": "/internal/planning/v1/reminders",
+    "parse": "/internal/planning/v1/parse",
     "tasks": "/internal/planning/v1/tasks",
     "events": "/internal/planning/v1/events",
     "projects": "/internal/planning/v1/projects",
     "status": "/internal/planning/v1/status",
+}
+PLANNING_MUTATION_ROUTES: Mapping[str, str] = {
+    "create_reminder": "/internal/planning/v1/reminders",
+    "edit_reminder": "/internal/planning/v1/reminders/{reminder_id}",
+    "complete_reminder": "/internal/planning/v1/reminders/{reminder_id}/complete",
+    "cancel_reminder": "/internal/planning/v1/reminders/{reminder_id}/cancel",
 }
 PLANNING_AUDIENCE = "panel-agent"
 PLANNING_PAGE_LIMIT = 20
@@ -83,6 +94,10 @@ class PlanningUpstreamError(RuntimeError):
         super().__init__(category)
         self.category = category
         self.status_code = status_code
+
+    @property
+    def uncertain(self) -> bool:
+        return self.category == "mutation_uncertain"
 
 
 class PlanningBoundedScanError(PlanningUpstreamError):
@@ -140,7 +155,7 @@ def _duplicate_rejecting_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 class PlanningClient:
-    """Fixed-route, fixed-header GET client; it is not a generic proxy."""
+    """Fixed-route, fixed-header Planning client; it is not a generic proxy."""
 
     def __init__(
         self,
@@ -248,16 +263,178 @@ class PlanningClient:
         payload = await self._get_json("status", {})
         return _validate_envelope(StatusEnvelope, payload)
 
+    async def parse_preview(
+        self,
+        *,
+        text: str,
+        reference_time_utc: str,
+        timezone: str,
+        locale: str = "ru-RU",
+    ) -> PlanningParsePreview:
+        if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+            raise PlanningUpstreamError("parse_input_invalid")
+        validate_utc_timestamp(reference_time_utc, "planning.reference_time_utc")
+        if not isinstance(timezone, str) or len(timezone) > 64:
+            raise PlanningUpstreamError("parse_input_invalid")
+        if locale != "ru-RU":
+            raise PlanningUpstreamError("parse_input_invalid")
+        payload = await self._request_json(
+            "POST",
+            PLANNING_ROUTES["parse"],
+            json_body={
+                "text": text,
+                "reference_time_utc": reference_time_utc,
+                "timezone": timezone,
+                "locale": locale,
+            },
+            expected_status={200},
+        )
+        return _validate_envelope(PlanningParsePreview, payload)
+
+    async def create_reminder(
+        self,
+        *,
+        idempotency_key: str,
+        title: str,
+        notes: str | None,
+        due_at_utc: str,
+        timezone: str,
+    ) -> ReminderObjectEnvelope:
+        body = {
+            "title": title,
+            "notes": notes,
+            "due_at_utc": due_at_utc,
+            "timezone": timezone,
+        }
+        payload = await self._mutation_json(
+            "create_reminder",
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        return _validate_envelope(ReminderObjectEnvelope, payload)
+
+    async def edit_reminder(
+        self,
+        *,
+        reminder_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> ReminderObjectEnvelope:
+        validate_uuid4(reminder_id, "planning.reminder_id")
+        _validate_expected_version(expected_version)
+        _validate_idempotency_key(idempotency_key)
+        _validate_reminder_patch_body(body)
+        payload = await self._mutation_json(
+            "edit_reminder",
+            reminder_id=reminder_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body=dict(body),
+        )
+        return _validate_envelope(ReminderObjectEnvelope, payload)
+
+    async def complete_reminder(
+        self,
+        *,
+        reminder_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> ReminderObjectEnvelope:
+        return await self._action_reminder(
+            "complete_reminder",
+            reminder_id=reminder_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+        )
+
+    async def cancel_reminder(
+        self,
+        *,
+        reminder_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> ReminderObjectEnvelope:
+        return await self._action_reminder(
+            "cancel_reminder",
+            reminder_id=reminder_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+        )
+
+    async def _action_reminder(
+        self,
+        route_name: Literal["complete_reminder", "cancel_reminder"],
+        *,
+        reminder_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> ReminderObjectEnvelope:
+        validate_uuid4(reminder_id, "planning.reminder_id")
+        _validate_expected_version(expected_version)
+        payload = await self._mutation_json(
+            route_name,
+            reminder_id=reminder_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body={},
+        )
+        return _validate_envelope(ReminderObjectEnvelope, payload)
+
+    async def _mutation_json(
+        self,
+        route_name: str,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+        reminder_id: str | None = None,
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        path = PLANNING_MUTATION_ROUTES.get(route_name)
+        if path is None:
+            raise PlanningUpstreamError("route_not_allowlisted")
+        _validate_idempotency_key(idempotency_key)
+        if "{reminder_id}" in path:
+            if reminder_id is None:
+                raise PlanningUpstreamError("mutation_target_missing")
+            path = path.replace("{reminder_id}", reminder_id)
+        headers = {"Idempotency-Key": idempotency_key}
+        if expected_version is not None:
+            headers["If-Match"] = str(expected_version)
+        return await self._request_json(
+            "POST" if route_name in {"create_reminder", "complete_reminder", "cancel_reminder"} else "PATCH",
+            path,
+            json_body=dict(body),
+            headers=headers,
+            expected_status={200, 201},
+            mutation=True,
+        )
+
     async def _get_json(self, route_name: str, params: Mapping[str, str | int]) -> dict[str, Any]:
         path = PLANNING_ROUTES.get(route_name)
         if path is None:
             raise PlanningUpstreamError("route_not_allowlisted")
+        return await self._request_json("GET", path, params=params, expected_status={200})
+
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, str | int] | None = None,
+        json_body: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+        expected_status: set[int],
+        mutation: bool = False,
+    ) -> dict[str, Any]:
+        request_headers = {**self._headers, **(dict(headers) if headers else {})}
         try:
             async with self._client.stream(
-                "GET",
+                method,
                 path,
-                params=dict(params),
-                headers=self._headers,
+                params=dict(params or {}),
+                headers=request_headers,
+                json=dict(json_body) if json_body is not None else None,
             ) as response:
                 content_length = response.headers.get("content-length")
                 if content_length is not None:
@@ -266,11 +443,14 @@ class PlanningClient:
                             raise PlanningUpstreamError("response_too_large")
                     except ValueError as exc:
                         raise PlanningUpstreamError("invalid_content_length") from exc
-                if response.status_code != 200:
-                    raise PlanningUpstreamError(
-                        "http_error",
-                        status_code=response.status_code,
-                    )
+                if response.status_code not in expected_status:
+                    raw_error = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        raw_error.extend(chunk)
+                        if len(raw_error) > self._response_limit_bytes:
+                            break
+                    category = _upstream_error_category(bytes(raw_error), response.status_code, mutation=mutation)
+                    raise PlanningUpstreamError(category, status_code=response.status_code)
                 raw = bytearray()
                 async for chunk in response.aiter_bytes():
                     raw.extend(chunk)
@@ -279,7 +459,7 @@ class PlanningClient:
         except PlanningUpstreamError:
             raise
         except (httpx.HTTPError, asyncio.TimeoutError) as exc:
-            raise PlanningUpstreamError("transport_error") from exc
+            raise PlanningUpstreamError("mutation_uncertain" if mutation else "transport_error") from exc
         try:
             payload = json.loads(
                 bytes(raw).decode("utf-8"),
@@ -305,6 +485,47 @@ def _validate_envelope(model, payload: dict[str, Any]):
                 category = "domain_mismatch"
                 break
         raise PlanningUpstreamError(category) from exc
+
+
+def _upstream_error_category(raw: bytes, status_code: int, *, mutation: bool) -> str:
+    if mutation and status_code in {408, 429, 500, 502, 503, 504}:
+        return "mutation_uncertain"
+    try:
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_duplicate_rejecting_object)
+        code = payload.get("error", {}).get("code") if isinstance(payload, dict) else None
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, AttributeError):
+        code = None
+    if code in {"version_conflict", "idempotency_conflict", "idempotency_in_progress", "not_found", "validation_error"}:
+        return str(code)
+    return "http_error"
+
+
+def _validate_idempotency_key(value: str) -> None:
+    if not isinstance(value, str) or not value or len(value) > 256 or any(ord(char) < 0x20 for char in value):
+        raise PlanningUpstreamError("idempotency_key_invalid")
+
+
+def _validate_expected_version(value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise PlanningUpstreamError("expected_version_invalid")
+
+
+def _validate_reminder_patch_body(body: Mapping[str, Any]) -> None:
+    allowed = {"title", "notes", "due_at_utc", "timezone"}
+    if not body or set(body) - allowed:
+        raise PlanningUpstreamError("reminder_patch_invalid")
+    if "title" in body and (not isinstance(body["title"], str) or not body["title"].strip() or len(body["title"]) > 500):
+        raise PlanningUpstreamError("reminder_patch_invalid")
+    if "notes" in body and (body["notes"] is not None and (not isinstance(body["notes"], str) or len(body["notes"]) > 4000)):
+        raise PlanningUpstreamError("reminder_patch_invalid")
+    if "due_at_utc" in body:
+        try:
+            validate_utc_timestamp(body["due_at_utc"], "planning.reminder.due_at_utc")
+        except ValueError as exc:
+            raise PlanningUpstreamError("reminder_patch_invalid") from exc
+    if "timezone" in body:
+        if not isinstance(body["timezone"], str) or not body["timezone"] or len(body["timezone"]) > 64:
+            raise PlanningUpstreamError("reminder_patch_invalid")
 
 
 def _fixed_list_query(
@@ -341,7 +562,7 @@ def _validate_range(from_utc: str, to_utc: str) -> None:
 
 
 class PlanningAdapter:
-    """One coordinated, read-only polling loop with bounded last-good state."""
+    """One coordinated Planning adapter with bounded last-good read state."""
 
     def __init__(
         self,
@@ -422,6 +643,19 @@ class PlanningAdapter:
         if current is None:
             return None
         return status_projection(current)
+
+    @property
+    def reminder_mutations_enabled(self) -> bool:
+        """The server-side B4 feature gate is deliberately off by default."""
+
+        return bool(getattr(self._settings, "panel_planning_reminder_mutations_enabled", False))
+
+    def reminder_mutation_allowed(self, action: Literal["create", "update", "complete", "cancel"]) -> bool:
+        if not self.reminder_mutations_enabled or self._last_status is None:
+            return False
+        if _status_is_degraded(self._last_status):
+            return False
+        return action in set(self._last_status.capabilities.reminders)
 
     def set_on_change(self, callback: Callable[[], Awaitable[None]] | None) -> None:
         self._on_change = callback
@@ -504,6 +738,7 @@ class PlanningAdapter:
                     update={
                         "generatedAt": self._now_text(),
                         "sourceStatus": source_status,
+                        "capabilities": PlanningCapabilities(**self._effective_capabilities()),
                     },
                     deep=True,
                 )
@@ -627,6 +862,85 @@ class PlanningAdapter:
     def read_status(self) -> PlanningStatusProjection:
         projection = self._read_projection()
         return status_projection(projection)
+
+    async def parse_preview(
+        self,
+        *,
+        text: str,
+        reference_time_utc: str,
+        timezone: str,
+    ) -> PlanningParsePreview:
+        return await self._live_client().parse_preview(
+            text=text,
+            reference_time_utc=reference_time_utc,
+            timezone=timezone,
+        )
+
+    async def create_reminder(
+        self,
+        *,
+        idempotency_key: str,
+        title: str,
+        notes: str | None,
+        due_at_utc: str,
+        timezone: str,
+    ) -> PlanningObjectEnvelope:
+        return self._object_readback(
+            await self._live_client().create_reminder(
+                idempotency_key=idempotency_key,
+                title=title,
+                notes=notes,
+                due_at_utc=due_at_utc,
+                timezone=timezone,
+            )
+        )
+
+    async def edit_reminder(
+        self,
+        *,
+        reminder_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningObjectEnvelope:
+        return self._object_readback(
+            await self._live_client().edit_reminder(
+                reminder_id=reminder_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+                body=body,
+            )
+        )
+
+    async def complete_reminder(
+        self,
+        *,
+        reminder_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> PlanningObjectEnvelope:
+        return self._object_readback(
+            await self._live_client().complete_reminder(
+                reminder_id=reminder_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    async def cancel_reminder(
+        self,
+        *,
+        reminder_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> PlanningObjectEnvelope:
+        return self._object_readback(
+            await self._live_client().cancel_reminder(
+                reminder_id=reminder_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+            )
+        )
 
     async def read_reminders(
         self,
@@ -1153,15 +1467,7 @@ class PlanningAdapter:
             reminders=mapped["reminders"],
             tasks=mapped["tasks"],
             calendar=mapped["calendar"],
-            capabilities={
-                "create": False,
-                "edit": False,
-                "complete": False,
-                "cancel": False,
-                "delete": False,
-                "voice": False,
-                "providerSync": False,
-            },
+            capabilities=PlanningCapabilities(**self._effective_capabilities()),
             providerStatuses=[
                 {
                     "id": "native-planning",
@@ -1177,6 +1483,35 @@ class PlanningAdapter:
         if not self._enabled or self._client is None:
             raise PlanningReadUnavailable("planning_live_read_unavailable")
         return self._client
+
+    def _effective_capabilities(self) -> dict[str, bool]:
+        allowed = {
+            action
+            for action in ("create", "update", "complete", "cancel")
+            if self.reminder_mutation_allowed(action)  # type: ignore[arg-type]
+        }
+        return {
+            "create": "create" in allowed,
+            "edit": "update" in allowed,
+            "complete": "complete" in allowed,
+            "cancel": "cancel" in allowed,
+            "delete": False,
+            "voice": False,
+            "providerSync": False,
+        }
+
+    @staticmethod
+    def _object_readback(envelope: ReminderObjectEnvelope) -> PlanningObjectEnvelope:
+        reminder = PlanningAdapter._map_reminders([envelope.object])[0]
+        return PlanningObjectEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="object",
+            domain="reminder",
+            object=reminder,
+            sourceStatus="current",
+            lastSyncedAt=envelope.lastSyncedAt,
+            staleAfter=envelope.staleAfter,
+        )
 
     def _read_upstream_envelope(
         self,

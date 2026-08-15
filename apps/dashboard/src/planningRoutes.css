@@ -42,6 +42,7 @@
 
 .planning-segmented button,
 .planning-secondary-button,
+.planning-primary-button,
 .planning-pagination button,
 .planning-route-health__retry,
 .planning-route-state button {
@@ -59,8 +60,19 @@
 .planning-segmented button + button { border-left: 1px solid var(--border); border-radius: 0; }
 .planning-segmented button[aria-pressed="true"] { color: var(--text); background: var(--surface-inline); }
 .planning-secondary-button,
+.planning-primary-button,
 .planning-route-health__retry,
 .planning-route-state button { border: 1px solid var(--border); }
+.planning-primary-button {
+  border-color: var(--accent);
+  color: var(--surface-primary);
+  background: var(--accent);
+  font-size: 13px;
+  font-weight: 760;
+}
+.planning-primary-button:hover:not(:disabled) { background: var(--accent-strong); }
+.planning-primary-button:disabled,
+.planning-secondary-button:disabled { cursor: not-allowed; opacity: .52; }
 .planning-secondary-button { max-width: 260px; overflow-wrap: anywhere; }
 .planning-secondary-button:hover,
 .planning-segmented button:hover,
@@ -219,6 +231,46 @@
 .planning-detail-field dt { color: var(--text-muted); font-size: 12px; }
 .planning-detail-field dd { min-width: 0; margin: 0; color: var(--text); font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
 .planning-detail-note { margin: var(--space-5) 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+
+.planning-sheet-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-5);
+}
+.planning-sheet-actions--stacked { display: grid; }
+.planning-sheet-actions > button { flex: 1 1 160px; }
+.planning-mutation-form { display: grid; gap: 9px; }
+.planning-mutation-form__label { color: var(--text-secondary); font-size: 12px; font-weight: 760; }
+.planning-mutation-form__input {
+  width: 100%;
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--surface-secondary);
+  font: inherit;
+  line-height: 1.45;
+  resize: vertical;
+}
+.planning-mutation-form__input:focus { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.planning-mutation-form__status,
+.planning-mutation-form__error { margin: 0; color: var(--text-muted); font-size: 12px; }
+.planning-mutation-form__error { color: var(--danger); }
+.planning-mutation-preview {
+  display: grid;
+  gap: 7px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--surface-secondary);
+}
+.planning-mutation-preview__eyebrow { margin: 0; color: var(--accent-strong); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.planning-mutation-preview__restatement { margin: 0; color: var(--text); font-size: 14px; font-weight: 700; line-height: 1.45; }
+.planning-mutation-preview__ambiguities { display: grid; gap: 4px; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border-soft); color: var(--warning); font-size: 12px; line-height: 1.45; }
+.planning-mutation-preview__ambiguities p { margin: 0; color: var(--text-secondary); }
 
 .calendar-groups { display: grid; gap: var(--space-5); }
 .calendar-day-group > h2 { margin: 0 0 9px; color: var(--text-secondary); font-size: 15px; text-transform: capitalize; }

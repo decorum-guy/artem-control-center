@@ -25,6 +25,33 @@ export interface PlanningReadEnvelope<T> {
   hasMore: boolean;
 }
 
+export interface PlanningObjectEnvelope<T> {
+  schemaVersion: "planning.panel.v1";
+  kind: "object";
+  domain: "reminder";
+  object: T;
+  sourceStatus: PlanningSourceStatus;
+  lastSyncedAt: string | null;
+  staleAfter: string | null;
+}
+
+export interface PlanningParsePreview {
+  schemaVersion: "planning.v1";
+  kind: "parse_preview";
+  candidate: {
+    domain: "reminder" | "task" | "calendar_event";
+    operation: "create" | "query";
+    fields: Record<string, unknown>;
+    normalized_paraphrase: string;
+  } | null;
+  confidence: "high" | "medium" | "low";
+  ambiguities: Array<{ field: string; candidates: string[]; reason: string }>;
+  requires_confirmation: boolean;
+  normalized_text: string;
+  error_code: string | null;
+  correlation_id: string;
+}
+
 export type ReminderMonitorView = "upcoming" | "overdue" | "delivery";
 export type TaskRouteView = "today" | "overdue" | "upcoming";
 
@@ -41,6 +68,23 @@ export class PlanningReadError extends Error {
     this.name = "PlanningReadError";
     this.code = code;
     this.status = status;
+  }
+}
+
+export class PlanningMutationError extends PlanningReadError {
+  readonly mutationCode: "uncertain" | "conflict" | "disabled" | "http" | "network" | "contract";
+  readonly reconciledObject: PlanningReminder | null;
+
+  constructor(
+    message: string,
+    mutationCode: PlanningMutationError["mutationCode"],
+    status: number | null = null,
+    reconciledObject: PlanningReminder | null = null
+  ) {
+    super(message, mutationCode === "uncertain" ? "network" : mutationCode === "contract" ? "contract" : "http", status);
+    this.name = "PlanningMutationError";
+    this.mutationCode = mutationCode;
+    this.reconciledObject = reconciledObject;
   }
 }
 
@@ -339,7 +383,7 @@ function parseEnvelope<T>(
 }
 
 async function getRead<T>(
-  path: "/api/v1/planning/reminders/view" | "/api/v1/planning/tasks" | "/api/v1/planning/events" | "/api/v1/planning/projects",
+  path: "/api/v1/planning/reminders" | "/api/v1/planning/reminders/view" | "/api/v1/planning/tasks" | "/api/v1/planning/events" | "/api/v1/planning/projects",
   params: URLSearchParams,
   domain: PlanningReadEnvelope<T>["domain"],
   parseItem: (value: unknown) => T,
@@ -424,6 +468,254 @@ export function readPlanningReminders(
   return getRead("/api/v1/planning/reminders/view", params, "reminder", parseReminder, signal);
 }
 
+export type PlanningReminderMutationAction = "create" | "edit" | "complete" | "cancel";
+
+export function newPlanningIdempotencyKey(prefix = "panel-reminder"): string {
+  const randomUuid = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}:${randomUuid}`;
+}
+
+export interface PlanningReminderMutationRequest {
+  action: PlanningReminderMutationAction;
+  idempotencyKey: string;
+  reminderId?: string;
+  expectedVersion?: number;
+  body: {
+    title?: string;
+    notes?: string | null;
+    due_at_utc?: string;
+    timezone?: string;
+  };
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+function parseObjectEnvelope(value: unknown): PlanningObjectEnvelope<PlanningReminder> {
+  const envelope = record(value, "planning object envelope");
+  exactKeys(
+    envelope,
+    ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"],
+    "planning object envelope"
+  );
+  if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "object" || envelope.domain !== "reminder") {
+    throw new PlanningReadError("planning object envelope schema is invalid", "contract");
+  }
+  return {
+    schemaVersion: "planning.panel.v1",
+    kind: "object",
+    domain: "reminder",
+    object: parseReminder(envelope.object),
+    sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.object.sourceStatus"),
+    lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.object.lastSyncedAt"),
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.object.staleAfter")
+  };
+}
+
+function parseParsePreview(value: unknown): PlanningParsePreview {
+  const preview = record(value, "planning parse preview");
+  exactKeys(
+    preview,
+    ["schemaVersion", "kind", "candidate", "confidence", "ambiguities", "requires_confirmation", "normalized_text", "error_code", "correlation_id"],
+    "planning parse preview"
+  );
+  if (preview.schemaVersion !== "planning.v1" || preview.kind !== "parse_preview") {
+    throw new PlanningReadError("planning parse preview schema is invalid", "contract");
+  }
+  const rawAmbiguities = preview.ambiguities;
+  if (!Array.isArray(rawAmbiguities) || rawAmbiguities.length > 16) throw new PlanningReadError("planning ambiguities are invalid", "contract");
+  const ambiguities = rawAmbiguities.map((value) => {
+    const ambiguity = record(value, "planning ambiguity");
+    exactKeys(ambiguity, ["field", "candidates", "reason"], "planning ambiguity");
+    if (!Array.isArray(ambiguity.candidates) || ambiguity.candidates.some((candidate) => typeof candidate !== "string")) {
+      throw new PlanningReadError("planning ambiguity candidates are invalid", "contract");
+    }
+    return {
+      field: stringValue(ambiguity.field, "planning ambiguity.field", 1, 64),
+      candidates: ambiguity.candidates.map((candidate) => stringValue(candidate, "planning ambiguity.candidate", 1, 256)),
+      reason: stringValue(ambiguity.reason, "planning ambiguity.reason", 1, 500)
+    };
+  });
+  let candidate: PlanningParsePreview["candidate"] = null;
+  if (preview.candidate !== null) {
+    const rawCandidate = record(preview.candidate, "planning candidate");
+    exactKeys(rawCandidate, ["domain", "operation", "fields", "normalized_paraphrase"], "planning candidate");
+    const fields = record(rawCandidate.fields, "planning candidate.fields");
+    if (!new Set(["reminder", "task", "calendar_event"]).has(String(rawCandidate.domain)) || !new Set(["create", "query"]).has(String(rawCandidate.operation))) {
+      throw new PlanningReadError("planning candidate enum is invalid", "contract");
+    }
+    candidate = {
+      domain: rawCandidate.domain as "reminder" | "task" | "calendar_event",
+      operation: rawCandidate.operation as "create" | "query",
+      fields,
+      normalized_paraphrase: stringValue(rawCandidate.normalized_paraphrase, "planning candidate.normalized_paraphrase", 1, 2000)
+    };
+  }
+  return {
+    schemaVersion: "planning.v1",
+    kind: "parse_preview",
+    candidate,
+    confidence: enumValue(preview.confidence, new Set(["high", "medium", "low"]), "planning confidence") as "high" | "medium" | "low",
+    ambiguities,
+    requires_confirmation: booleanValue(preview.requires_confirmation, "planning requires_confirmation"),
+    normalized_text: stringValue(preview.normalized_text, "planning normalized_text", 0, 2000),
+    error_code: preview.error_code === null ? null : stringValue(preview.error_code, "planning error_code", 1, 128),
+    correlation_id: uuidValue(preview.correlation_id, "planning correlation_id")
+  };
+}
+
+export async function readPlanningRemindersByState(
+  state: PlanningReminder["status"],
+  limit = 100,
+  offset = 0,
+  signal?: AbortSignal
+): Promise<PlanningReadEnvelope<PlanningReminder>> {
+  const params = boundedPage(limit, offset);
+  params.set("state", state);
+  return getRead("/api/v1/planning/reminders", params, "reminder", parseReminder, signal);
+}
+
+export async function readPlanningReminderById(
+  reminderId: string,
+  signal?: AbortSignal,
+  attempts = 3
+): Promise<PlanningReminder | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    for (const state of ["pending", "due", "completed", "cancelled"] as const) {
+      const envelope = await readPlanningRemindersByState(state, 100, 0, signal);
+      const object = envelope.items.find((item) => item.id === reminderId);
+      if (object) return object;
+    }
+    if (attempt + 1 < attempts) await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 250 * (attempt + 1)));
+  }
+  return null;
+}
+
+export async function previewPlanningReminder(
+  text: string,
+  referenceTimeUtc: string,
+  timezone: string,
+  signal?: AbortSignal
+): Promise<PlanningParsePreview> {
+  let response: Response;
+  try {
+    response = await fetch("/api/v1/planning/parse", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, reference_time_utc: referenceTimeUtc, timezone, locale: "ru-RU" }),
+      signal
+    });
+  } catch (reason) {
+    if (signal?.aborted) throw new PlanningReadError("Planning parse aborted", "aborted");
+    throw new PlanningReadError(reason instanceof Error ? reason.message : "Planning parse unavailable", "network");
+  }
+  if (!response.ok) throw new PlanningReadError("Planning parse is unavailable", "http", response.status);
+  try {
+    return parseParsePreview(await response.json());
+  } catch (reason) {
+    if (reason instanceof PlanningReadError) throw reason;
+    throw new PlanningReadError("Planning parse response is invalid", "contract", response.status);
+  }
+}
+
+function mutationPath(request: PlanningReminderMutationRequest): string {
+  if (request.action === "create") return "/api/v1/planning/reminders";
+  if (!request.reminderId || !uuid4Pattern.test(request.reminderId)) throw new PlanningMutationError("Reminder target is invalid", "contract", 422);
+  if (request.action === "edit") return `/api/v1/planning/reminders/${request.reminderId}`;
+  return `/api/v1/planning/reminders/${request.reminderId}/${request.action}`;
+}
+
+function reconciliationMatches(request: PlanningReminderMutationRequest, object: PlanningReminder): boolean {
+  if (request.action === "complete") return object.status === "completed";
+  if (request.action === "cancel") return object.status === "cancelled";
+  if (request.action !== "edit") return false;
+  if (object.version <= (request.expectedVersion ?? 0)) return false;
+  return (request.body.title === undefined || request.body.title === object.title)
+    && (request.body.due_at_utc === undefined || request.body.due_at_utc === object.dueAtUtc)
+    && (request.body.timezone === undefined || request.body.timezone === object.timezone);
+}
+
+export async function mutatePlanningReminder(request: PlanningReminderMutationRequest): Promise<PlanningObjectEnvelope<PlanningReminder>> {
+  const path = mutationPath(request);
+  if (!request.idempotencyKey || request.idempotencyKey.length > 256 || [...request.idempotencyKey].some((character) => character.charCodeAt(0) < 32)) {
+    throw new PlanningMutationError("Idempotency key is invalid", "contract", 422);
+  }
+  if (request.action !== "create" && (!Number.isInteger(request.expectedVersion) || (request.expectedVersion ?? 0) < 1)) {
+    throw new PlanningMutationError("Expected reminder version is invalid", "contract", 422);
+  }
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), request.timeoutMs ?? 10_000);
+  const forwardAbort = () => controller.abort();
+  request.signal?.addEventListener("abort", forwardAbort, { once: true });
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Idempotency-Key": request.idempotencyKey
+  };
+  if (request.action !== "create") headers["If-Match"] = String(request.expectedVersion);
+  const reconcileUncertain = async (uncertain: PlanningMutationError): Promise<never> => {
+    if (request.reminderId) {
+      try {
+        const reconciled = await readPlanningReminderById(request.reminderId, request.signal);
+        if (reconciled && reconciliationMatches(request, reconciled)) {
+          throw new PlanningMutationError(
+            "Mutation outcome confirmed by canonical readback",
+            "uncertain",
+            uncertain.status,
+            reconciled
+          );
+        }
+      } catch (reconcileReason) {
+        if (reconcileReason instanceof PlanningMutationError) throw reconcileReason;
+      }
+    }
+    throw uncertain;
+  };
+  try {
+    const response = await fetch(path, {
+      method: request.action === "edit" ? "PATCH" : "POST",
+      cache: "no-store",
+      headers,
+      body: JSON.stringify(request.action === "create" || request.action === "edit" ? request.body : {}),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      let detail = "Planning reminder mutation failed";
+      try {
+        const payload = await response.json() as { detail?: unknown };
+        if (typeof payload.detail === "string") detail = payload.detail;
+      } catch {
+        // Keep the response text out of the UI; the status is enough.
+      }
+      const mutationCode = detail === "planning_mutation_uncertain"
+        ? "uncertain"
+        : response.status === 409
+          ? "conflict"
+          : response.status === 404
+            ? "disabled"
+            : "http";
+      throw new PlanningMutationError(detail, mutationCode, response.status);
+    }
+    try {
+      return parseObjectEnvelope(await response.json());
+    } catch (reason) {
+      if (reason instanceof PlanningReadError) throw new PlanningMutationError(reason.message, "contract", response.status);
+      throw new PlanningMutationError("Planning mutation response is invalid", "contract", response.status);
+    }
+  } catch (reason) {
+    if (reason instanceof PlanningMutationError) {
+      if (reason.mutationCode === "uncertain") return reconcileUncertain(reason);
+      throw reason;
+    }
+    if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    return reconcileUncertain(new PlanningMutationError("Planning mutation outcome is uncertain", "uncertain"));
+  } finally {
+    globalThis.clearTimeout(timeout);
+    request.signal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
 export interface PlanningReadState<T> {
   loading: boolean;
   data: PlanningReadEnvelope<T> | null;
@@ -475,5 +767,7 @@ export const planningReadParsers = {
   parseTask,
   parseCalendarEvent,
   parseProject,
-  parseEnvelope
+  parseEnvelope,
+  parseObjectEnvelope,
+  parseParsePreview
 };

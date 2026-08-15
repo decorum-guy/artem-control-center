@@ -197,7 +197,7 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
     )
     assert delivered.status == "due"
     assert delivered.deliveryState == "delivered"
-    assert {path for _, path, _, _ in transport.requests} == set(PLANNING_ROUTES.values())
+    assert {path for _, path, _, _ in transport.requests} == set(PLANNING_ROUTES.values()) - {PLANNING_ROUTES["parse"]}
     assert all(method == "GET" for method, _, _, _ in transport.requests)
     assert all(
         headers == {
@@ -305,7 +305,7 @@ def test_wrong_domain_and_duplicate_json_are_rejected(tmp_path):
 def test_fixture_content_is_inert_text_and_client_has_no_proxy_surface(tmp_path):
     assert not hasattr(PlanningClient, "proxy")
     assert not hasattr(PlanningClient, "request")
-    assert set(PLANNING_ROUTES) == {"reminders", "tasks", "events", "projects", "status"}
+    assert set(PLANNING_ROUTES) == {"reminders", "parse", "tasks", "events", "projects", "status"}
     assert "/alice/interpret" not in PLANNING_ROUTES.values()
     projection = empty_planning_projection(
         generated_at="2026-08-12T09:00:00Z",
@@ -739,5 +739,5 @@ def test_read_only_same_origin_routes_are_bounded_and_have_no_writes(monkeypatch
     assert unknown_response.status_code == 422
     assert oversized_limit.status_code == 422
     assert write_response.status_code == 405
-    assert parse_response.status_code == 404
+    assert parse_response.status_code == 422
     assert "synthetic-panel-agent-secret" not in status_response.text

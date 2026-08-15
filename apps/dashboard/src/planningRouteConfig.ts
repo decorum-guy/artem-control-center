@@ -5,6 +5,8 @@ import { planningModuleForRoute, type PlanningModuleDefinition, type PlanningRou
 export const planningTasksRouteEnabled = import.meta.env.VITE_PLANNING_TASKS_ROUTE_ENABLED === "true";
 export const planningCalendarRouteEnabled = import.meta.env.VITE_PLANNING_CALENDAR_ROUTE_ENABLED === "true";
 export const planningRemindersRouteEnabled = import.meta.env.VITE_PLANNING_REMINDERS_ROUTE_ENABLED === "true";
+/** B4 Phase 1 writer gate; false unless explicitly enabled at build time. */
+export const planningReminderMutationsEnabled = import.meta.env.VITE_PLANNING_REMINDER_MUTATIONS_ENABLED === "true";
 
 export const planningRouteLimit = 20;
 
