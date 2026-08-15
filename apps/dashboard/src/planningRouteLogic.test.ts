@@ -20,12 +20,17 @@ const baseTask: PlanningTask = {
   source: "alice",
   sourceLabel: "AliceTG Bot",
   title: "Задача",
+  notes: null,
   priority: "normal",
   status: "open",
   dueDate: "2026-08-12",
   dueTime: null,
   timezone: null,
   projectId: null,
+  sourceRef: null,
+  completedAt: null,
+  archivedAt: null,
+  deletedAt: null,
   createdAt: "2026-08-12T09:00:00Z",
   updatedAt: "2026-08-12T09:00:00Z"
 };

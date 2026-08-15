@@ -494,6 +494,22 @@ class ReminderObjectEnvelope(StrictPlanningModel):
     _correlation = field_validator("correlation_id")(validate_uuid4)
 
 
+class TaskObjectEnvelope(StrictPlanningModel):
+    """The canonical task object returned by create/update/lifecycle routes."""
+
+    schemaVersion: Literal["planning.v1"]
+    kind: Literal["object"]
+    domain: Literal["task"]
+    object: UpstreamTask
+    sourceStatus: Literal["current"]
+    lastSyncedAt: StrictStr
+    staleAfter: StrictStr
+    correlation_id: StrictStr = Field(min_length=36, max_length=36)
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+    _correlation = field_validator("correlation_id")(validate_uuid4)
+
+
 class ReminderProjection(StrictPlanningModel):
     id: StrictStr = Field(min_length=36, max_length=36)
     version: StrictInt = Field(ge=1)
@@ -527,18 +543,29 @@ class TaskProjection(StrictPlanningModel):
     source: PlanningSource
     sourceLabel: StrictStr = Field(min_length=1, max_length=64)
     title: StrictStr = Field(min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
     priority: TaskPriority
     status: TaskStatus
     dueDate: StrictStr | None = None
     dueTime: StrictStr | None = None
     timezone: StrictStr | None = None
     projectId: StrictStr | None = Field(default=None, min_length=36, max_length=36)
+    sourceRef: StrictStr | None = Field(default=None, max_length=256)
+    completedAt: StrictStr | None = None
+    archivedAt: StrictStr | None = None
+    deletedAt: StrictStr | None = None
     createdAt: StrictStr
     updatedAt: StrictStr
 
     _ids = field_validator("id")(validate_uuid4)
     _project_id = field_validator("projectId")(validate_optional_uuid4)
-    _timestamps = _timestamp_fields("createdAt", "updatedAt")
+    _timestamps = _timestamp_fields(
+        "createdAt",
+        "updatedAt",
+        "completedAt",
+        "archivedAt",
+        "deletedAt",
+    )
 
     @field_validator("dueDate")
     @classmethod
@@ -649,6 +676,13 @@ class PlanningConflict(StrictPlanningModel):
         return values
 
 
+class PlanningTaskCapabilities(StrictPlanningModel):
+    create: StrictBool = False
+    edit: StrictBool = False
+    complete: StrictBool = False
+    archive: StrictBool = False
+
+
 class PlanningCapabilities(StrictPlanningModel):
     create: StrictBool = False
     edit: StrictBool = False
@@ -657,6 +691,7 @@ class PlanningCapabilities(StrictPlanningModel):
     delete: StrictBool = False
     voice: StrictBool = False
     providerSync: StrictBool = False
+    tasks: PlanningTaskCapabilities = Field(default_factory=PlanningTaskCapabilities)
 
 
 class PlanningProviderStatus(StrictPlanningModel):
@@ -744,6 +779,20 @@ class PlanningObjectEnvelope(StrictPlanningModel):
     kind: Literal["object"]
     domain: Literal["reminder"]
     object: ReminderProjection
+    sourceStatus: PlanningSourceStatus
+    lastSyncedAt: StrictStr | None = None
+    staleAfter: StrictStr | None = None
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+
+
+class PlanningTaskObjectEnvelope(StrictPlanningModel):
+    """Browser-safe canonical task object readback."""
+
+    schemaVersion: Literal["planning.panel.v1"]
+    kind: Literal["object"]
+    domain: Literal["task"]
+    object: TaskProjection
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None

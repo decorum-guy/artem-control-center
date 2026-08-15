@@ -42,7 +42,13 @@ const capabilities = {
   cancel: false,
   delete: false,
   voice: false,
-  providerSync: false
+  providerSync: false,
+  tasks: {
+    create: false,
+    edit: false,
+    complete: false,
+    archive: false
+  }
 } as const;
 
 function reminder(overrides: Partial<PlanningReminder> = {}): PlanningReminder {
@@ -75,12 +81,17 @@ function task(
     source: "alice",
     sourceLabel: "AliceTG Bot",
     title,
+    notes: null,
     priority,
     status: "open",
     dueDate,
     dueTime,
     timezone: dueTime ? "Europe/Moscow" : null,
     projectId: null,
+    sourceRef: null,
+    completedAt: null,
+    archivedAt: null,
+    deletedAt: null,
     createdAt: FIXTURE_SYNCED_AT,
     updatedAt: FIXTURE_SYNCED_AT
   };

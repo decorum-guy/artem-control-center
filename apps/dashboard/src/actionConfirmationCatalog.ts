@@ -8,7 +8,9 @@ export type ActionConfirmationId =
   | "system.runtime.shutdown"
   | "system.rog_g703.hibernate"
   | "planning.reminders.complete"
-  | "planning.reminders.cancel";
+  | "planning.reminders.cancel"
+  | "planning.tasks.complete"
+  | "planning.tasks.archive";
 
 export type ActionConfirmationLevel = "simple" | "strong";
 export type ActionConfirmationTone = "standard" | "production";
@@ -127,5 +129,25 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "Planning · AliceTG Bot",
     description: "Это изменит жизненный цикл напоминания на «Отменено». «Доставлено» не означает завершено; доставка и завершение — разные состояния.",
     confirmLabel: "Отменить напоминание"
+  },
+  "planning.tasks.complete": {
+    id: "planning.tasks.complete",
+    level: "simple",
+    tone: "standard",
+    title: "Завершить задачу?",
+    target: "Задача",
+    environment: "Planning · AliceTG Bot",
+    description: "Это явно переведёт задачу в состояние «Завершено».",
+    confirmLabel: "Завершить задачу"
+  },
+  "planning.tasks.archive": {
+    id: "planning.tasks.archive",
+    level: "simple",
+    tone: "standard",
+    title: "Архивировать задачу?",
+    target: "Задача",
+    environment: "Planning · AliceTG Bot",
+    description: "Это выполнит логическое архивирование задачи. Физическое удаление строки базы данных не выполняется.",
+    confirmLabel: "Архивировать задачу"
   }
 };

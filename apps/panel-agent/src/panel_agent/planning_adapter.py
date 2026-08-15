@@ -23,6 +23,7 @@ from .planning import (
     PlanningConflict,
     PlanningCapabilities,
     PlanningObjectEnvelope,
+    PlanningTaskObjectEnvelope,
     PlanningParsePreview,
     PlanningProjection,
     PlanningReadEnvelope,
@@ -35,6 +36,7 @@ from .planning import (
     ReminderListEnvelope,
     ReminderProjection,
     StatusEnvelope,
+    TaskObjectEnvelope,
     TaskListEnvelope,
     TaskProjection,
     UpstreamCalendarEvent,
@@ -68,7 +70,22 @@ PLANNING_MUTATION_ROUTES: Mapping[str, str] = {
     "edit_reminder": "/internal/planning/v1/reminders/{reminder_id}",
     "complete_reminder": "/internal/planning/v1/reminders/{reminder_id}/complete",
     "cancel_reminder": "/internal/planning/v1/reminders/{reminder_id}/cancel",
+    "create_task": "/internal/planning/v1/tasks",
+    "edit_task": "/internal/planning/v1/tasks/{task_id}",
+    "complete_task": "/internal/planning/v1/tasks/{task_id}/complete",
+    "archive_task": "/internal/planning/v1/tasks/{task_id}",
 }
+PLANNING_MUTATION_METHODS: Mapping[str, str] = {
+    "create_reminder": "POST",
+    "edit_reminder": "PATCH",
+    "complete_reminder": "POST",
+    "cancel_reminder": "POST",
+    "create_task": "POST",
+    "edit_task": "PATCH",
+    "complete_task": "POST",
+    "archive_task": "DELETE",
+}
+PLANNING_TASK_READ_ROUTE = "/internal/planning/v1/tasks/{task_id}"
 PLANNING_AUDIENCE = "panel-agent"
 PLANNING_PAGE_LIMIT = 20
 PLANNING_MAX_UPSTREAM_PAGE = 100
@@ -362,6 +379,93 @@ class PlanningClient:
             idempotency_key=idempotency_key,
         )
 
+    async def get_task(self, task_id: str) -> TaskObjectEnvelope:
+        validate_uuid4(task_id, "planning.task_id")
+        path = PLANNING_TASK_READ_ROUTE.replace("{task_id}", task_id)
+        payload = await self._request_json("GET", path, expected_status={200})
+        return _validate_envelope(TaskObjectEnvelope, payload)
+
+    async def create_task(
+        self,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> TaskObjectEnvelope:
+        _validate_task_create_body(body)
+        payload = await self._mutation_json(
+            "create_task",
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        return _validate_envelope(TaskObjectEnvelope, payload)
+
+    async def edit_task(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> TaskObjectEnvelope:
+        validate_uuid4(task_id, "planning.task_id")
+        _validate_expected_version(expected_version)
+        _validate_task_patch_body(body)
+        payload = await self._mutation_json(
+            "edit_task",
+            task_id=task_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        return _validate_envelope(TaskObjectEnvelope, payload)
+
+    async def complete_task(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> TaskObjectEnvelope:
+        return await self._action_task(
+            "complete_task",
+            task_id=task_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+        )
+
+    async def archive_task(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> TaskObjectEnvelope:
+        return await self._action_task(
+            "archive_task",
+            task_id=task_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+        )
+
+    async def _action_task(
+        self,
+        route_name: Literal["complete_task", "archive_task"],
+        *,
+        task_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> TaskObjectEnvelope:
+        validate_uuid4(task_id, "planning.task_id")
+        _validate_expected_version(expected_version)
+        payload = await self._mutation_json(
+            route_name,
+            task_id=task_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body={},
+        )
+        return _validate_envelope(TaskObjectEnvelope, payload)
+
     async def _action_reminder(
         self,
         route_name: Literal["complete_reminder", "cancel_reminder"],
@@ -388,6 +492,7 @@ class PlanningClient:
         idempotency_key: str,
         body: Mapping[str, Any],
         reminder_id: str | None = None,
+        task_id: str | None = None,
         expected_version: int | None = None,
     ) -> dict[str, Any]:
         path = PLANNING_MUTATION_ROUTES.get(route_name)
@@ -398,11 +503,18 @@ class PlanningClient:
             if reminder_id is None:
                 raise PlanningUpstreamError("mutation_target_missing")
             path = path.replace("{reminder_id}", reminder_id)
+        if "{task_id}" in path:
+            if task_id is None:
+                raise PlanningUpstreamError("mutation_target_missing")
+            path = path.replace("{task_id}", task_id)
+        method = PLANNING_MUTATION_METHODS.get(route_name)
+        if method is None:
+            raise PlanningUpstreamError("route_not_allowlisted")
         headers = {"Idempotency-Key": idempotency_key}
         if expected_version is not None:
             headers["If-Match"] = str(expected_version)
         return await self._request_json(
-            "POST" if route_name in {"create_reminder", "complete_reminder", "cancel_reminder"} else "PATCH",
+            method,
             path,
             json_body=dict(body),
             headers=headers,
@@ -526,6 +638,66 @@ def _validate_reminder_patch_body(body: Mapping[str, Any]) -> None:
     if "timezone" in body:
         if not isinstance(body["timezone"], str) or not body["timezone"] or len(body["timezone"]) > 64:
             raise PlanningUpstreamError("reminder_patch_invalid")
+
+
+def _validate_task_create_body(body: Mapping[str, Any]) -> None:
+    allowed = {"title", "notes", "due_date", "due_time", "timezone", "priority", "project_id"}
+    if set(body) - allowed or not body:
+        raise PlanningUpstreamError("task_create_invalid")
+    if not isinstance(body.get("title"), str) or not body["title"].strip() or len(body["title"]) > 500:
+        raise PlanningUpstreamError("task_create_invalid")
+    if body.get("priority") not in {"none", "low", "normal", "high"}:
+        raise PlanningUpstreamError("task_create_invalid")
+    _validate_task_optional_fields(body, allow_missing=False)
+
+
+def _validate_task_patch_body(body: Mapping[str, Any]) -> None:
+    allowed = {"title", "notes", "due_date", "due_time", "timezone", "priority", "project_id"}
+    if not body or set(body) - allowed:
+        raise PlanningUpstreamError("task_patch_invalid")
+    if "title" in body and (not isinstance(body["title"], str) or not body["title"].strip() or len(body["title"]) > 500):
+        raise PlanningUpstreamError("task_patch_invalid")
+    if "notes" in body and body["notes"] is not None and (not isinstance(body["notes"], str) or len(body["notes"]) > 4000):
+        raise PlanningUpstreamError("task_patch_invalid")
+    if "priority" in body and body["priority"] not in {"none", "low", "normal", "high"}:
+        raise PlanningUpstreamError("task_patch_invalid")
+    _validate_task_optional_fields(body, allow_missing=True, category="task_patch_invalid")
+
+
+def _validate_task_optional_fields(
+    body: Mapping[str, Any],
+    *,
+    allow_missing: bool,
+    category: str = "task_create_invalid",
+) -> None:
+    if "notes" in body and body["notes"] is not None and (not isinstance(body["notes"], str) or len(body["notes"]) > 4000):
+        raise PlanningUpstreamError(category)
+    if "project_id" in body and body["project_id"] is not None:
+        try:
+            validate_uuid4(body["project_id"], "planning.task.project_id")
+        except ValueError as exc:
+            raise PlanningUpstreamError(category) from exc
+    if "due_date" in body and body["due_date"] is not None:
+        try:
+            validate_date(body["due_date"], "planning.task.due_date")
+        except ValueError as exc:
+            raise PlanningUpstreamError(category) from exc
+    if "due_time" in body and body["due_time"] is not None:
+        from .planning import validate_local_time
+
+        try:
+            validate_local_time(body["due_time"], "planning.task.due_time")
+        except ValueError as exc:
+            raise PlanningUpstreamError(category) from exc
+    if "timezone" in body and body["timezone"] is not None:
+        from .planning import validate_timezone
+
+        try:
+            validate_timezone(body["timezone"], "planning.task.timezone")
+        except ValueError as exc:
+            raise PlanningUpstreamError(category) from exc
+    if not allow_missing and "priority" not in body:
+        raise PlanningUpstreamError(category)
 
 
 def _fixed_list_query(
@@ -656,6 +828,19 @@ class PlanningAdapter:
         if _status_is_degraded(self._last_status):
             return False
         return action in set(self._last_status.capabilities.reminders)
+
+    @property
+    def task_mutations_enabled(self) -> bool:
+        """The server-side B4.2 writer gate is deliberately off by default."""
+
+        return bool(getattr(self._settings, "panel_planning_task_mutations_enabled", False))
+
+    def task_mutation_allowed(self, action: Literal["create", "update", "complete", "archive"]) -> bool:
+        if not self.task_mutations_enabled or self._last_status is None:
+            return False
+        if _status_is_degraded(self._last_status):
+            return False
+        return action in set(self._last_status.capabilities.tasks)
 
     def set_on_change(self, callback: Callable[[], Awaitable[None]] | None) -> None:
         self._on_change = callback
@@ -937,6 +1122,69 @@ class PlanningAdapter:
         return self._object_readback(
             await self._live_client().cancel_reminder(
                 reminder_id=reminder_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    async def read_task_by_id(self, *, task_id: str) -> PlanningTaskObjectEnvelope:
+        return self._task_object_readback(await self._live_client().get_task(task_id))
+
+    async def create_task(
+        self,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningTaskObjectEnvelope:
+        return self._task_object_readback(
+            await self._live_client().create_task(
+                idempotency_key=idempotency_key,
+                body=body,
+            )
+        )
+
+    async def edit_task(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningTaskObjectEnvelope:
+        return self._task_object_readback(
+            await self._live_client().edit_task(
+                task_id=task_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+                body=body,
+            )
+        )
+
+    async def complete_task(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> PlanningTaskObjectEnvelope:
+        return self._task_object_readback(
+            await self._live_client().complete_task(
+                task_id=task_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    async def archive_task(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> PlanningTaskObjectEnvelope:
+        return self._task_object_readback(
+            await self._live_client().archive_task(
+                task_id=task_id,
                 expected_version=expected_version,
                 idempotency_key=idempotency_key,
             )
@@ -1385,12 +1633,17 @@ class PlanningAdapter:
                 source=item.source,
                 sourceLabel=source_label(item.source),
                 title=item.title,
+                notes=item.notes,
                 priority=item.priority,
                 status=item.status,
                 dueDate=item.due_date,
                 dueTime=item.due_time,
                 timezone=item.timezone,
                 projectId=item.project_id,
+                sourceRef=item.source_ref,
+                completedAt=item.completed_at,
+                archivedAt=item.archived_at,
+                deletedAt=item.deleted_at,
                 createdAt=item.created_at,
                 updatedAt=item.updated_at,
             )
@@ -1490,6 +1743,11 @@ class PlanningAdapter:
             for action in ("create", "update", "complete", "cancel")
             if self.reminder_mutation_allowed(action)  # type: ignore[arg-type]
         }
+        task_allowed = {
+            action
+            for action in ("create", "update", "complete", "archive")
+            if self.task_mutation_allowed(action)  # type: ignore[arg-type]
+        }
         return {
             "create": "create" in allowed,
             "edit": "update" in allowed,
@@ -1498,6 +1756,12 @@ class PlanningAdapter:
             "delete": False,
             "voice": False,
             "providerSync": False,
+            "tasks": {
+                "create": "create" in task_allowed,
+                "edit": "update" in task_allowed,
+                "complete": "complete" in task_allowed,
+                "archive": "archive" in task_allowed,
+            },
         }
 
     @staticmethod
@@ -1508,6 +1772,33 @@ class PlanningAdapter:
             kind="object",
             domain="reminder",
             object=reminder,
+            sourceStatus="current",
+            lastSyncedAt=envelope.lastSyncedAt,
+            staleAfter=envelope.staleAfter,
+        )
+
+    @staticmethod
+    def _task_object_readback(envelope: TaskObjectEnvelope) -> PlanningTaskObjectEnvelope:
+        task = PlanningAdapter._map_tasks(
+            TaskListEnvelope(
+                schemaVersion="planning.v1",
+                kind="list",
+                domain="task",
+                generatedAt=envelope.lastSyncedAt,
+                sourceStatus="current",
+                lastSyncedAt=envelope.lastSyncedAt,
+                staleAfter=envelope.staleAfter,
+                pagination={"limit": 1, "offset": 0, "count": 1, "has_more": False, "next_offset": None},
+                correlation_id=envelope.correlation_id,
+                items=[envelope.object],
+            ),
+            [],
+        )[0]
+        return PlanningTaskObjectEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="object",
+            domain="task",
+            object=task,
             sourceStatus="current",
             lastSyncedAt=envelope.lastSyncedAt,
             staleAfter=envelope.staleAfter,

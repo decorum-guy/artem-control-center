@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, model_validator
@@ -10,10 +11,14 @@ from starlette.datastructures import QueryParams
 
 from .planning import (
     PlanningObjectEnvelope,
+    PlanningTaskObjectEnvelope,
     PlanningParsePreview,
     PlanningReadEnvelope,
     PlanningStatusProjection,
     validate_timezone,
+    validate_date,
+    validate_local_datetime,
+    validate_local_time,
     validate_uuid4,
     validate_utc_timestamp,
 )
@@ -72,6 +77,92 @@ class ReminderPatchRequest(BaseModel):
     def _not_empty(self) -> "ReminderPatchRequest":
         if not self.model_fields_set:
             raise ValueError("reminder patch must contain at least one field")
+        return self
+
+
+class TaskCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: StrictStr = Field(min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
+    due_date: StrictStr | None = None
+    due_time: StrictStr | None = None
+    timezone: StrictStr | None = Field(default=None, max_length=64)
+    priority: Literal["none", "low", "normal", "high"]
+    project_id: StrictStr | None = None
+
+    @field_validator("due_date")
+    @classmethod
+    def _date(cls, value: str | None) -> str | None:
+        return None if value is None else validate_date(value, "planning.task.due_date")
+
+    @field_validator("due_time")
+    @classmethod
+    def _time(cls, value: str | None) -> str | None:
+        return None if value is None else validate_local_time(value, "planning.task.due_time")
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str | None) -> str | None:
+        return None if value is None else validate_timezone(value, "planning.task.timezone")
+
+    @field_validator("project_id")
+    @classmethod
+    def _project(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_uuid4(value, "planning.task.project_id")
+        return value
+
+    @model_validator(mode="after")
+    def _shape(self) -> "TaskCreateRequest":
+        if self.due_date is None and (self.due_time is not None or self.timezone is not None):
+            raise ValueError("task due_time/timezone require due_date")
+        if self.due_date is not None and self.due_time is None and self.timezone is not None:
+            raise ValueError("date-only task must not contain timezone")
+        if self.due_time is not None and self.timezone is None:
+            raise ValueError("timed task requires timezone")
+        if self.due_date is not None and self.due_time is not None and self.timezone is not None:
+            validate_local_datetime(self.due_date, self.due_time, self.timezone)
+        return self
+
+
+class TaskPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: StrictStr | None = Field(default=None, min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
+    due_date: StrictStr | None = None
+    due_time: StrictStr | None = None
+    timezone: StrictStr | None = Field(default=None, max_length=64)
+    priority: Literal["none", "low", "normal", "high"] | None = None
+    project_id: StrictStr | None = None
+
+    @field_validator("due_date")
+    @classmethod
+    def _date(cls, value: str | None) -> str | None:
+        return None if value is None else validate_date(value, "planning.task.due_date")
+
+    @field_validator("due_time")
+    @classmethod
+    def _time(cls, value: str | None) -> str | None:
+        return None if value is None else validate_local_time(value, "planning.task.due_time")
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str | None) -> str | None:
+        return None if value is None else validate_timezone(value, "planning.task.timezone")
+
+    @field_validator("project_id")
+    @classmethod
+    def _project(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_uuid4(value, "planning.task.project_id")
+        return value
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "TaskPatchRequest":
+        if not self.model_fields_set:
+            raise ValueError("task patch must contain at least one field")
         return self
 
 
@@ -277,6 +368,101 @@ def build_planning_router(
         except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
             raise _read_unavailable() from exc
 
+    @router.get("/tasks/{task_id}", response_model=PlanningTaskObjectEnvelope)
+    async def planning_task_by_id(
+        task_id: str,
+        request: Request,
+        response: Response,
+    ) -> PlanningTaskObjectEnvelope:
+        _enabled(adapter)
+        _no_store(response)
+        _query(request, allowed=set())
+        _validate_task_id(task_id)
+        try:
+            return await adapter.read_task_by_id(task_id=task_id)
+        except PlanningUpstreamError as exc:
+            raise _task_read_error(exc) from exc
+        except PlanningReadUnavailable as exc:
+            raise _read_unavailable() from exc
+
+    @router.post("/tasks", response_model=PlanningTaskObjectEnvelope)
+    async def planning_create_task(
+        request: TaskCreateRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningTaskObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_task_mutation(adapter, "create")
+        _no_store(response)
+        try:
+            return await adapter.create_task(
+                idempotency_key=_idempotency_key(raw_request),
+                body=request.model_dump(exclude_unset=True),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="task") from exc
+
+    @router.patch("/tasks/{task_id}", response_model=PlanningTaskObjectEnvelope)
+    async def planning_edit_task(
+        task_id: str,
+        request: TaskPatchRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningTaskObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_task_mutation(adapter, "update")
+        _no_store(response)
+        _validate_task_id(task_id)
+        try:
+            return await adapter.edit_task(
+                task_id=task_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+                body=request.model_dump(exclude_unset=True),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="task") from exc
+
+    @router.post("/tasks/{task_id}/complete", response_model=PlanningTaskObjectEnvelope)
+    async def planning_complete_task(
+        task_id: str,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningTaskObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_task_mutation(adapter, "complete")
+        _no_store(response)
+        _validate_task_id(task_id)
+        await _require_empty_body(raw_request)
+        try:
+            return await adapter.complete_task(
+                task_id=task_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="task") from exc
+
+    @router.delete("/tasks/{task_id}", response_model=PlanningTaskObjectEnvelope)
+    async def planning_archive_task(
+        task_id: str,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningTaskObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_task_mutation(adapter, "archive")
+        _no_store(response)
+        _validate_task_id(task_id)
+        await _require_empty_body(raw_request)
+        try:
+            return await adapter.archive_task(
+                task_id=task_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="task") from exc
+
     @router.get("/events", response_model=PlanningReadEnvelope)
     async def planning_events(request: Request, response: Response) -> PlanningReadEnvelope:
         _enabled(adapter)
@@ -319,6 +505,14 @@ def _require_reminder_mutation(adapter: PlanningAdapter, action: str) -> None:
         raise HTTPException(status_code=403, detail="planning_reminder_capability_denied")
 
 
+def _require_task_mutation(adapter: PlanningAdapter, action: str) -> None:
+    _enabled(adapter)
+    if not adapter.task_mutations_enabled:
+        raise HTTPException(status_code=404, detail="planning_task_mutations_disabled")
+    if action not in {"create", "update", "complete", "archive"} or not adapter.task_mutation_allowed(action):
+        raise HTTPException(status_code=403, detail="planning_task_capability_denied")
+
+
 def _idempotency_key(request: Request) -> str:
     value = request.headers.get("Idempotency-Key", "")
     if not value or len(value) > 256 or any(ord(char) < 0x20 for char in value):
@@ -340,22 +534,44 @@ def _validate_reminder_id(value: str) -> None:
         raise HTTPException(status_code=422, detail="planning_reminder_id_invalid") from exc
 
 
+def _validate_task_id(value: str) -> None:
+    try:
+        validate_uuid4(value, "planning.task_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="planning_task_id_invalid") from exc
+
+
 async def _require_empty_body(request: Request) -> None:
     body = await request.body()
     if body.strip() not in {b"", b"{}"}:
         raise HTTPException(status_code=422, detail="planning_action_body_not_empty")
 
 
-def _mutation_error(error: PlanningUpstreamError) -> HTTPException:
+def _mutation_error(error: PlanningUpstreamError, *, domain: Literal["reminder", "task"] = "reminder") -> HTTPException:
     if error.category == "mutation_uncertain":
         return HTTPException(status_code=503, detail="planning_mutation_uncertain")
     if error.category in {"version_conflict", "idempotency_conflict", "idempotency_in_progress"}:
         return HTTPException(status_code=409, detail=f"planning_{error.category}")
     if error.category == "not_found":
-        return HTTPException(status_code=404, detail="planning_reminder_not_found")
-    if error.category in {"validation_error", "reminder_patch_invalid", "idempotency_key_invalid", "expected_version_invalid"}:
+        return HTTPException(status_code=404, detail=f"planning_{domain}_not_found")
+    if error.category in {
+        "validation_error",
+        "reminder_patch_invalid",
+        "task_create_invalid",
+        "task_patch_invalid",
+        "idempotency_key_invalid",
+        "expected_version_invalid",
+    }:
         return HTTPException(status_code=422, detail="planning_mutation_invalid")
     return HTTPException(status_code=503, detail="planning_mutation_unavailable")
+
+
+def _task_read_error(error: PlanningUpstreamError) -> HTTPException:
+    if error.category == "not_found":
+        return HTTPException(status_code=404, detail="planning_task_not_found")
+    if error.category in {"validation_error", "contract_mismatch", "domain_mismatch"}:
+        return HTTPException(status_code=422, detail="planning_task_invalid")
+    return _read_unavailable()
 
 
 def _canonical_mutation_route(prefix: str) -> None:

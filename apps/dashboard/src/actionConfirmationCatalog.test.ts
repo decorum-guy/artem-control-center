@@ -54,4 +54,13 @@ describe("action confirmation catalog", () => {
     expect(actionConfirmationCatalog["planning.reminders.complete"].description).toContain("«Доставлено» не означает завершено");
     expect(actionConfirmationCatalog["planning.reminders.cancel"].description).toContain("«Доставлено» не означает завершено");
   });
+
+  it("uses current shared confirmation for task completion and logical archive", () => {
+    expect(actionConfirmationCatalog["planning.tasks.complete"]).toMatchObject({
+      level: "simple",
+      title: "Завершить задачу?",
+      confirmLabel: "Завершить задачу"
+    });
+    expect(actionConfirmationCatalog["planning.tasks.archive"].description).toContain("Физическое удаление");
+  });
 });

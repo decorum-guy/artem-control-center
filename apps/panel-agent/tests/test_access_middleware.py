@@ -62,6 +62,26 @@ def build_planning_client(tmp_path):
         calls.append(("POST", f"{reminder_id}/cancel"))
         return {"ok": True}
 
+    @app.post("/api/v1/planning/tasks")
+    def create_task():
+        calls.append(("POST", "/api/v1/planning/tasks"))
+        return {"ok": True}
+
+    @app.patch("/api/v1/planning/tasks/{task_id}")
+    def edit_task(task_id: str):
+        calls.append(("PATCH", task_id))
+        return {"ok": True}
+
+    @app.post("/api/v1/planning/tasks/{task_id}/complete")
+    def complete_task(task_id: str):
+        calls.append(("POST", f"{task_id}/complete"))
+        return {"ok": True}
+
+    @app.delete("/api/v1/planning/tasks/{task_id}")
+    def archive_task(task_id: str):
+        calls.append(("DELETE", task_id))
+        return {"ok": True}
+
     return store, calls, TestClient(app)
 
 
@@ -79,6 +99,10 @@ def test_planning_capabilities_are_fixed_standard_catalog_entries():
         "planning.reminders.edit",
         "planning.reminders.complete",
         "planning.reminders.cancel",
+        "planning.tasks.create",
+        "planning.tasks.edit",
+        "planning.tasks.complete",
+        "planning.tasks.archive",
     }
     assert capabilities <= CAPABILITIES.keys()
     assert all(CAPABILITIES[capability] == "standard" for capability in capabilities)
@@ -93,6 +117,55 @@ def test_planning_route_matching_is_fixed_and_unknown_actions_are_unregistered()
     assert capability_for_request("POST", f"/api/v1/planning/reminders/{reminder_id}/snooze") is None
     assert capability_for_request("POST", f"/api/v1/planning/reminders/{reminder_id}/complete/extra") is None
     assert capability_for_request("PATCH", "/api/v1/planning/reminders/a/b") is None
+    assert capability_for_request("POST", "/api/v1/planning/tasks") == "planning.tasks.create"
+    assert capability_for_request("PATCH", f"/api/v1/planning/tasks/{reminder_id}") == "planning.tasks.edit"
+    assert capability_for_request("POST", f"/api/v1/planning/tasks/{reminder_id}/complete") == "planning.tasks.complete"
+    assert capability_for_request("DELETE", f"/api/v1/planning/tasks/{reminder_id}") == "planning.tasks.archive"
+    assert capability_for_request("GET", f"/api/v1/planning/tasks/{reminder_id}") is None
+    assert capability_for_request("POST", f"/api/v1/planning/tasks/{reminder_id}/archive") is None
+
+
+def test_read_only_blocks_every_task_writer_before_handler(tmp_path):
+    store, calls, client = build_planning_client(tmp_path)
+    task_id = "not-a-uuid-but-one-path-segment"
+    responses = [
+        client.post("/api/v1/planning/tasks", json={}),
+        client.patch(f"/api/v1/planning/tasks/{task_id}", json={}),
+        client.post(f"/api/v1/planning/tasks/{task_id}/complete", json={}),
+        client.delete(f"/api/v1/planning/tasks/{task_id}"),
+    ]
+    assert [response.status_code for response in responses] == [403, 403, 403, 403]
+    assert calls == []
+    audited = [record for record in _audit_records(tmp_path) if record["event"] == "capability_execution"]
+    assert {record["capability"] for record in audited} == {
+        "planning.tasks.create",
+        "planning.tasks.edit",
+        "planning.tasks.complete",
+        "planning.tasks.archive",
+    }
+
+
+def test_standard_profile_allows_task_access_layer_without_manufacturing_canonical_capability(tmp_path):
+    store, calls, client = build_planning_client(tmp_path)
+    store.set_profile("standard")
+    task_id = "not-a-uuid-but-one-path-segment"
+    responses = [
+        client.post("/api/v1/planning/tasks", json={}),
+        client.patch(f"/api/v1/planning/tasks/{task_id}", json={}),
+        client.post(f"/api/v1/planning/tasks/{task_id}/complete", json={}),
+        client.delete(f"/api/v1/planning/tasks/{task_id}"),
+    ]
+    assert [response.status_code for response in responses] == [200, 200, 200, 200]
+    assert len(calls) == 4
+    assert all(
+        store.status()["capabilities"][capability]["allowed"]
+        for capability in {
+            "planning.tasks.create",
+            "planning.tasks.edit",
+            "planning.tasks.complete",
+            "planning.tasks.archive",
+        }
+    )
 
 
 def test_read_only_blocks_every_planning_writer_before_handler_and_audits(tmp_path):

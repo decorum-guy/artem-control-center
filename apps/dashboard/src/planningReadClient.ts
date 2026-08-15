@@ -28,7 +28,7 @@ export interface PlanningReadEnvelope<T> {
 export interface PlanningObjectEnvelope<T> {
   schemaVersion: "planning.panel.v1";
   kind: "object";
-  domain: "reminder";
+  domain: "reminder" | "task";
   object: T;
   sourceStatus: PlanningSourceStatus;
   lastSyncedAt: string | null;
@@ -73,13 +73,13 @@ export class PlanningReadError extends Error {
 
 export class PlanningMutationError extends PlanningReadError {
   readonly mutationCode: "uncertain" | "conflict" | "disabled" | "http" | "network" | "contract";
-  readonly reconciledObject: PlanningReminder | null;
+  readonly reconciledObject: PlanningReminder | PlanningTask | null;
 
   constructor(
     message: string,
     mutationCode: PlanningMutationError["mutationCode"],
     status: number | null = null,
-    reconciledObject: PlanningReminder | null = null
+    reconciledObject: PlanningReminder | PlanningTask | null = null
   ) {
     super(message, mutationCode === "uncertain" ? "network" : mutationCode === "contract" ? "contract" : "http", status);
     this.name = "PlanningMutationError";
@@ -266,7 +266,7 @@ function parseTask(value: unknown): PlanningTask {
   const item = record(value, "planning.task");
   exactKeys(
     item,
-    ["id", "version", "source", "sourceLabel", "title", "priority", "status", "dueDate", "dueTime", "timezone", "projectId", "createdAt", "updatedAt"],
+    ["id", "version", "source", "sourceLabel", "title", "notes", "priority", "status", "dueDate", "dueTime", "timezone", "projectId", "sourceRef", "completedAt", "archivedAt", "deletedAt", "createdAt", "updatedAt"],
     "planning.task"
   );
   const dueDate = nullableDate(item.dueDate, "planning.task.dueDate");
@@ -281,12 +281,17 @@ function parseTask(value: unknown): PlanningTask {
     source: enumValue(item.source, sourceValues, "planning.task.source"),
     sourceLabel: stringValue(item.sourceLabel, "planning.task.sourceLabel", 1, 64),
     title: stringValue(item.title, "planning.task.title", 1, 500),
+    notes: item.notes === null ? null : stringValue(item.notes, "planning.task.notes", 0, 4000),
     priority: enumValue(item.priority, priorityValues, "planning.task.priority"),
     status: enumValue(item.status, taskStatusValues, "planning.task.status"),
     dueDate,
     dueTime,
     timezone,
     projectId: nullableUuid(item.projectId, "planning.task.projectId"),
+    sourceRef: item.sourceRef === null ? null : stringValue(item.sourceRef, "planning.task.sourceRef", 1, 256),
+    completedAt: nullableTimestamp(item.completedAt, "planning.task.completedAt"),
+    archivedAt: nullableTimestamp(item.archivedAt, "planning.task.archivedAt"),
+    deletedAt: nullableTimestamp(item.deletedAt, "planning.task.deletedAt"),
     createdAt: timestampValue(item.createdAt, "planning.task.createdAt"),
     updatedAt: timestampValue(item.updatedAt, "planning.task.updatedAt")
   };
@@ -436,6 +441,31 @@ export function readPlanningTasks(
   return getRead("/api/v1/planning/tasks", params, "task", parseTask, signal);
 }
 
+export async function readPlanningTaskById(
+  taskId: string,
+  signal?: AbortSignal
+): Promise<PlanningTask> {
+  if (!uuid4Pattern.test(taskId)) throw new PlanningReadError("Task target is invalid", "contract", 422);
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1/planning/tasks/${taskId}`, {
+      method: "GET",
+      cache: "no-store",
+      signal
+    });
+  } catch (reason) {
+    if (signal?.aborted) throw new PlanningReadError("Planning read aborted", "aborted");
+    throw new PlanningReadError(reason instanceof Error ? reason.message : "Planning read unavailable", "network");
+  }
+  if (!response.ok) throw new PlanningReadError("Planning task read is unavailable", "http", response.status);
+  try {
+    return parseTaskObjectEnvelope(await response.json()).object;
+  } catch (reason) {
+    if (reason instanceof PlanningReadError) throw reason;
+    throw new PlanningReadError("Planning task response is invalid", "contract", response.status);
+  }
+}
+
 export function readPlanningProjects(
   limit = planningRouteLimit,
   offset = 0,
@@ -510,6 +540,27 @@ function parseObjectEnvelope(value: unknown): PlanningObjectEnvelope<PlanningRem
     sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.object.sourceStatus"),
     lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.object.lastSyncedAt"),
     staleAfter: nullableTimestamp(envelope.staleAfter, "planning.object.staleAfter")
+  };
+}
+
+function parseTaskObjectEnvelope(value: unknown): PlanningObjectEnvelope<PlanningTask> {
+  const envelope = record(value, "planning task object envelope");
+  exactKeys(
+    envelope,
+    ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"],
+    "planning task object envelope"
+  );
+  if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "object" || envelope.domain !== "task") {
+    throw new PlanningReadError("planning task object envelope schema is invalid", "contract");
+  }
+  return {
+    schemaVersion: "planning.panel.v1",
+    kind: "object",
+    domain: "task",
+    object: parseTask(envelope.object),
+    sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.task.sourceStatus"),
+    lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.task.lastSyncedAt"),
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.task.staleAfter")
   };
 }
 
@@ -620,6 +671,9 @@ export async function previewPlanningReminder(
   }
 }
 
+/** Shared canonical parser preview for task create/edit; the endpoint remains one fixed read surface. */
+export const previewPlanningTask = previewPlanningReminder;
+
 function mutationPath(request: PlanningReminderMutationRequest): string {
   if (request.action === "create") return "/api/v1/planning/reminders";
   if (!request.reminderId || !uuid4Pattern.test(request.reminderId)) throw new PlanningMutationError("Reminder target is invalid", "contract", 422);
@@ -639,7 +693,7 @@ function reconciliationMatches(request: PlanningReminderMutationRequest, object:
 
 async function mutationFetchAttempt(
   path: string,
-  method: "POST" | "PATCH",
+  method: "POST" | "PATCH" | "DELETE",
   headers: Record<string, string>,
   body: string,
   signal: AbortSignal | undefined,
@@ -668,9 +722,9 @@ async function mutationFetchAttempt(
 async function mutationResponseDetail(response: Response): Promise<string> {
   try {
     const payload = await response.json() as { detail?: unknown };
-    return typeof payload.detail === "string" ? payload.detail : "Planning reminder mutation failed";
+    return typeof payload.detail === "string" ? payload.detail : "Planning task mutation failed";
   } catch {
-    return "Planning reminder mutation failed";
+    return "Planning task mutation failed";
   }
 }
 
@@ -796,6 +850,162 @@ export async function mutatePlanningReminder(request: PlanningReminderMutationRe
   }
 }
 
+export type PlanningTaskMutationAction = "create" | "edit" | "complete" | "archive";
+
+export interface PlanningTaskMutationRequest {
+  action: PlanningTaskMutationAction;
+  idempotencyKey: string;
+  taskId?: string;
+  expectedVersion?: number;
+  body: {
+    title?: string;
+    notes?: string | null;
+    due_date?: string | null;
+    due_time?: string | null;
+    timezone?: string | null;
+    priority?: PlanningTask["priority"];
+    project_id?: string | null;
+  };
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+function taskMutationPath(request: PlanningTaskMutationRequest): string {
+  if (request.action === "create") return "/api/v1/planning/tasks";
+  if (!request.taskId || !uuid4Pattern.test(request.taskId)) {
+    throw new PlanningMutationError("Task target is invalid", "contract", 422);
+  }
+  return `/api/v1/planning/tasks/${request.taskId}${request.action === "complete" ? "/complete" : ""}`;
+}
+
+function taskReconciliationMatches(request: PlanningTaskMutationRequest, object: PlanningTask): boolean {
+  if (request.action === "complete") return object.status === "completed";
+  if (request.action === "archive") return object.status === "archived";
+  if (request.action !== "edit") return false;
+  if (object.version <= (request.expectedVersion ?? 0)) return false;
+  return (request.body.title === undefined || request.body.title === object.title)
+    && (request.body.notes === undefined || request.body.notes === object.notes)
+    && (request.body.due_date === undefined || request.body.due_date === object.dueDate)
+    && (request.body.due_time === undefined || request.body.due_time === object.dueTime)
+    && (request.body.timezone === undefined || request.body.timezone === object.timezone)
+    && (request.body.priority === undefined || request.body.priority === object.priority)
+    && (request.body.project_id === undefined || request.body.project_id === object.projectId);
+}
+
+async function replayTaskCreate(
+  request: PlanningTaskMutationRequest,
+  path: string,
+  headers: Record<string, string>,
+  body: string,
+  uncertain: PlanningMutationError
+): Promise<never> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    let response: Response;
+    try {
+      response = await mutationFetchAttempt(
+        path,
+        "POST",
+        headers,
+        body,
+        request.signal,
+        Math.min(request.timeoutMs ?? 10_000, 3_000)
+      );
+    } catch {
+      if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+      if (attempt + 1 < 2) continue;
+      throw uncertain;
+    }
+    if (response.ok) {
+      try {
+        const canonical = parseTaskObjectEnvelope(await response.json());
+        throw new PlanningMutationError(
+          "Create outcome confirmed by canonical replay",
+          "uncertain",
+          uncertain.status,
+          canonical.object
+        );
+      } catch (reason) {
+        if (reason instanceof PlanningMutationError) throw reason;
+        throw new PlanningMutationError("Planning mutation response is invalid", "contract", response.status);
+      }
+    }
+    const detail = await mutationResponseDetail(response);
+    if (detail === "planning_idempotency_conflict") {
+      throw new PlanningMutationError(detail, "conflict", response.status);
+    }
+    if (detail === "planning_idempotency_in_progress" || detail === "planning_mutation_uncertain") {
+      if (attempt + 1 < 2) {
+        await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 50));
+        continue;
+      }
+      throw uncertain;
+    }
+    throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
+  }
+  throw uncertain;
+}
+
+export async function mutatePlanningTask(request: PlanningTaskMutationRequest): Promise<PlanningObjectEnvelope<PlanningTask>> {
+  const path = taskMutationPath(request);
+  if (!request.idempotencyKey || request.idempotencyKey.length > 256 || [...request.idempotencyKey].some((character) => character.charCodeAt(0) < 32)) {
+    throw new PlanningMutationError("Idempotency key is invalid", "contract", 422);
+  }
+  if (request.action !== "create" && (!Number.isInteger(request.expectedVersion) || (request.expectedVersion ?? 0) < 1)) {
+    throw new PlanningMutationError("Expected task version is invalid", "contract", 422);
+  }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Idempotency-Key": request.idempotencyKey
+  };
+  if (request.action !== "create") headers["If-Match"] = String(request.expectedVersion);
+  const body = JSON.stringify(request.action === "create" || request.action === "edit" ? request.body : {});
+  const method: "POST" | "PATCH" | "DELETE" = request.action === "edit"
+    ? "PATCH"
+    : request.action === "archive"
+      ? "DELETE"
+      : "POST";
+  const reconcileUncertain = async (uncertain: PlanningMutationError): Promise<never> => {
+    if (request.action === "create") return replayTaskCreate(request, path, headers, body, uncertain);
+    if (request.taskId) {
+      try {
+        const reconciled = await readPlanningTaskById(request.taskId, request.signal);
+        if (taskReconciliationMatches(request, reconciled)) {
+          throw new PlanningMutationError(
+            "Mutation outcome confirmed by canonical readback",
+            "uncertain",
+            uncertain.status,
+            reconciled
+          );
+        }
+      } catch (reconcileReason) {
+        if (reconcileReason instanceof PlanningMutationError) throw reconcileReason;
+      }
+    }
+    throw uncertain;
+  };
+  try {
+    const response = await mutationFetchAttempt(path, method, headers, body, request.signal, request.timeoutMs ?? 10_000);
+    if (!response.ok) {
+      const detail = await mutationResponseDetail(response);
+      throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
+    }
+    try {
+      return parseTaskObjectEnvelope(await response.json());
+    } catch (reason) {
+      if (reason instanceof PlanningReadError) throw new PlanningMutationError(reason.message, "contract", response.status);
+      throw new PlanningMutationError("Planning task mutation response is invalid", "contract", response.status);
+    }
+  } catch (reason) {
+    if (reason instanceof PlanningMutationError) {
+      if (reason.mutationCode === "uncertain") return reconcileUncertain(reason);
+      throw reason;
+    }
+    if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    return reconcileUncertain(new PlanningMutationError("Planning mutation outcome is uncertain", "uncertain"));
+  }
+}
+
 export interface PlanningReadState<T> {
   loading: boolean;
   data: PlanningReadEnvelope<T> | null;
@@ -849,5 +1059,6 @@ export const planningReadParsers = {
   parseProject,
   parseEnvelope,
   parseObjectEnvelope,
+  parseTaskObjectEnvelope,
   parseParsePreview
 };

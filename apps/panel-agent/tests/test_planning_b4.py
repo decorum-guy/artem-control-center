@@ -148,6 +148,12 @@ def test_b4_feature_gate_keeps_all_mutations_false_by_default(tmp_path):
         "delete": False,
         "voice": False,
         "providerSync": False,
+        "tasks": {
+            "create": False,
+            "edit": False,
+            "complete": False,
+            "archive": False,
+        },
     }
 
 

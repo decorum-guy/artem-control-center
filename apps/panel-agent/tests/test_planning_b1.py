@@ -177,6 +177,12 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
         "delete": False,
         "voice": False,
         "providerSync": False,
+        "tasks": {
+            "create": False,
+            "edit": False,
+            "complete": False,
+            "archive": False,
+        },
     }
     assert projection.providerStatuses[0].status == "local_only"
     assert all(len(getattr(projection.reminders, field)) <= 20 for field in ("upcoming", "overdue", "deliveryFailures"))
@@ -734,7 +740,11 @@ def test_read_only_same_origin_routes_are_bounded_and_have_no_writes(monkeypatch
         projects_response = client.get("/api/v1/planning/projects?limit=1")
         unknown_response = client.get("/api/v1/planning/reminders?url=https://example.com")
         oversized_limit = client.get("/api/v1/planning/tasks?view=today&limit=101")
-        write_response = client.post("/api/v1/planning/tasks", json={})
+        write_response = client.post(
+            "/api/v1/planning/tasks",
+            headers={"Idempotency-Key": "read-only-task-create"},
+            json={"title": "blocked", "priority": "normal"},
+        )
         parse_response = client.post("/api/v1/planning/parse", json={})
 
     assert status_response.status_code == 200
@@ -749,6 +759,6 @@ def test_read_only_same_origin_routes_are_bounded_and_have_no_writes(monkeypatch
     assert projects_response.status_code == 200
     assert unknown_response.status_code == 422
     assert oversized_limit.status_code == 422
-    assert write_response.status_code == 405
+    assert write_response.status_code == 404
     assert parse_response.status_code == 422
     assert "synthetic-panel-agent-secret" not in status_response.text

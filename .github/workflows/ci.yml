@@ -245,5 +245,29 @@ jobs:
           path: artifacts/v2-planning-foundation-review
           if-no-files-found: error
 
+      - name: Run B4.2 Tasks gate-off browser contract
+        if: runner.os == 'Linux'
+        env:
+          B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
+          VITE_PLANNING_TASK_MUTATIONS_ENABLED: "false"
+          B4_TASK_ARTIFACT_DIR: artifacts/b4-task-mutations-review
+        run: npm run test:e2e -- tests/e2e/b4-planning-tasks.spec.ts --grep "writer gate is off"
+
+      - name: Run B4.2 Tasks writer browser contract
+        if: runner.os == 'Linux'
+        env:
+          B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
+          VITE_PLANNING_TASK_MUTATIONS_ENABLED: "true"
+          B4_TASK_ARTIFACT_DIR: artifacts/b4-task-mutations-review
+        run: npm run test:e2e -- tests/e2e/b4-planning-tasks.spec.ts --grep-invert "writer gate is off"
+
+      - name: Upload B4.2 Tasks exact-head review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: b4-task-mutations-review-${{ github.sha }}
+          path: artifacts/b4-task-mutations-review
+          if-no-files-found: error
+
       - name: Smoke-test production runtime
         run: npm run test:production-smoke
