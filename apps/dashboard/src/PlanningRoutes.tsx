@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   PlanningCalendarEvent,
+  PlanningCalendarSource,
   PlanningProject,
   PlanningReminder,
   PlanningSnapshot,
@@ -53,7 +54,8 @@ import {
   PlanningRouteFrame,
   PlanningRouteState,
   PlanningSheet,
-  previewEnvelope
+  previewEnvelope,
+  syncTimeLabel
 } from "./PlanningRoutePrimitives";
 import {
   planningCalendarRouteEnabled,
@@ -798,7 +800,27 @@ function syncStateLabel(value: PlanningCalendarEvent["syncState"]): string {
   }[value];
 }
 
-function CalendarEventRow({ event, overlap, now, onOpen }: { event: PlanningCalendarEvent; overlap: boolean; now: Date; onOpen: () => void }) {
+function providerSourceForEvent(event: PlanningCalendarEvent, sources: PlanningCalendarSource[]): PlanningCalendarSource | null {
+  const identity = calendarIdentityForEvent(event);
+  return sources.find((source) => source.id === identity.providerId || (source.kind === "native" && identity.providerId === "local-planning")) ?? null;
+}
+
+function providerSourceNeedsStaleCue(source: PlanningCalendarSource | null): boolean {
+  return Boolean(source?.kind === "external" && (source.status === "stale" || source.status === "error"));
+}
+
+function providerStatusLabel(source: PlanningCalendarSource | null): string | null {
+  if (!source || source.kind !== "external") return null;
+  return {
+    current: "Актуально",
+    stale: "Сохранённая копия",
+    error: "Источник недоступен",
+    disabled: "Источник отключён",
+    not_configured: "Источник не настроен"
+  }[source.status];
+}
+
+function CalendarEventRow({ event, overlap, now, onOpen, sourceStale }: { event: PlanningCalendarEvent; overlap: boolean; now: Date; onOpen: () => void; sourceStale: boolean }) {
   const state = eventTemporalState(event, now);
   return (
     <button
@@ -815,6 +837,7 @@ function CalendarEventRow({ event, overlap, now, onOpen }: { event: PlanningCale
         <span className="planning-route-row__source planning-calendar-state-line">
           <span data-testid="planning-calendar-identity">{calendarIdentityLabel(event)}</span>
           <span data-testid="planning-calendar-sync-state">Синхронизация: {syncStateLabel(event.syncState)}</span>
+          {sourceStale && <span data-testid="planning-calendar-stale-cue">Сохранённая копия</span>}
         </span>
       </span>
       <span className="calendar-event-row__badges">
@@ -832,6 +855,7 @@ function CalendarDetailSheet({
   onClose,
   canEdit,
   canDelete,
+  source,
   mutationPending,
   onEdit,
   onDelete
@@ -841,6 +865,7 @@ function CalendarDetailSheet({
   onClose: () => void;
   canEdit: boolean;
   canDelete: boolean;
+  source: PlanningCalendarSource | null;
   mutationPending: boolean;
   onEdit: () => void;
   onDelete: () => void;
@@ -857,6 +882,8 @@ function CalendarDetailSheet({
         <ReadOnlyField label="Провайдер" value={identity.providerLabel} />
         <ReadOnlyField label="Календарь" value={identity.calendarLabel} />
         <ReadOnlyField label="Состояние синхронизации" value={syncStateLabel(event.syncState)} />
+        {source && <ReadOnlyField label="Состояние источника" value={providerStatusLabel(source) ?? "Локально"} />}
+        {source?.kind === "external" && source.lastSyncedAt && <ReadOnlyField label="Последнее обновление" value={syncTimeLabel(source.lastSyncedAt) ?? source.lastSyncedAt} />}
         {event.notes && <ReadOnlyField label="Заметки" value={event.notes} />}
         {event.location && <ReadOnlyField label="Место" value={event.location} />}
         {overlap && <ReadOnlyField label="Пересечение" value="Пересекается с другим загруженным событием" />}
@@ -945,6 +972,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const preview = !routeRead.data && Boolean(fallback) && Boolean(routeRead.error);
   const routeError = Boolean(routeRead.error && !fallback);
   const events = calendarEventsInRange(envelope?.items ?? [], displayRange);
+  const sources = envelope?.sources ?? planning?.providerStatuses ?? [];
   const overlapIds = eventOverlapIds(events);
   const groups = groupCalendarEvents(events, displayRange.fromLocalDate, displayRange.toLocalDateExclusive);
   const accessAllows = (action: "create" | "edit" | "delete"): boolean => {
@@ -1096,6 +1124,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
       description="Сегодня и ближайшие семь дней — весь день отдельно, события по локальному календарному дню."
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
+      sources={sources}
       error={routeRead.error}
       preview={preview}
       onRetry={() => setRetry((value) => value + 1)}
@@ -1124,11 +1153,11 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
                     {group.allDay.length > 0 && (
                       <div className="calendar-band" data-testid="planning-calendar-all-day-band">
                         <p className="calendar-band__label">Весь день</p>
-                        {group.allDay.map((event) => <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} onOpen={() => setSelectedEvent(event)} />)}
+                        {group.allDay.map((event) => <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} sourceStale={providerSourceNeedsStaleCue(providerSourceForEvent(event, sources))} onOpen={() => setSelectedEvent(event)} />)}
                       </div>
                     )}
                     <div className="calendar-timed-list">
-                      {group.timed.map((event) => <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} onOpen={() => setSelectedEvent(event)} />)}
+                      {group.timed.map((event) => <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} sourceStale={providerSourceNeedsStaleCue(providerSourceForEvent(event, sources))} onOpen={() => setSelectedEvent(event)} />)}
                     </div>
                   </section>
                 ))}
@@ -1147,6 +1176,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           onClose={() => setSelectedEvent(null)}
           canEdit={canEdit}
           canDelete={canDelete}
+          source={providerSourceForEvent(selectedEvent, sources)}
           mutationPending={mutationPending}
           onEdit={() => setMutationSheet("edit")}
           onDelete={() => void deleteEvent()}

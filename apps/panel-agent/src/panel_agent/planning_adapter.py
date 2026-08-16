@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -22,6 +23,8 @@ from .planning import (
     EventListEnvelope,
     EventObjectEnvelope,
     PlanningCalendarIdentity,
+    PlanningCalendarSource,
+    PlanningCalendarSourceCalendar,
     PlanningConflict,
     PlanningEventObjectEnvelope,
     PlanningCapabilities,
@@ -43,6 +46,7 @@ from .planning import (
     TaskListEnvelope,
     TaskProjection,
     UpstreamCalendarEvent,
+    UpstreamPlanningSource,
     UpstreamProject,
     UpstreamReminder,
     UpstreamTask,
@@ -840,7 +844,7 @@ def _validate_event_shape(body: Mapping[str, Any], *, category: str, require_sha
 
 
 def _event_identity(event: UpstreamCalendarEvent) -> PlanningCalendarIdentity:
-    """Return display-only identity without relaying provider-owned IDs."""
+    """Legacy-Alice fallback identity when the additive sources field is absent."""
 
     if event.provider_id is None and event.provider_calendar_id is None:
         return PlanningCalendarIdentity(
@@ -855,6 +859,26 @@ def _event_identity(event: UpstreamCalendarEvent) -> PlanningCalendarIdentity:
         calendarId="external",
         calendarLabel="Внешний календарь",
     )
+
+
+def _browser_source_id(source: UpstreamPlanningSource) -> str:
+    if source.sourceType == "native_planning":
+        return "native-planning"
+    digest = hashlib.sha256(
+        f"planning-source\0{source.provider}\0{source.accountId}".encode("utf-8")
+    ).hexdigest()[:24]
+    return f"external-{source.provider}-{digest}"
+
+
+def _browser_calendar_id(source: UpstreamPlanningSource, calendar_id: str) -> str:
+    digest = hashlib.sha256(
+        f"planning-calendar\0{_browser_source_id(source)}\0{calendar_id}".encode("utf-8")
+    ).hexdigest()[:24]
+    return f"calendar-{digest}"
+
+
+def _browser_source_label(source: UpstreamPlanningSource) -> str:
+    return "Local Planning" if source.provider == "local" else "iCloud"
 def _fixed_list_query(
     values: Mapping[str, str | int | None],
     *,
@@ -1086,13 +1110,16 @@ class PlanningAdapter:
             source_status = self._status_source_status(
                 current=self._domains_current
             )
+            updates: dict[str, Any] = {
+                "generatedAt": self._now_text(),
+                "sourceStatus": source_status,
+                "capabilities": PlanningCapabilities(**self._effective_capabilities()),
+            }
+            if status.sources is not None:
+                updates["providerStatuses"] = self._project_sources(status.sources)
             await self._set_projection(
                 self._projection.model_copy(
-                    update={
-                        "generatedAt": self._now_text(),
-                        "sourceStatus": source_status,
-                        "capabilities": PlanningCapabilities(**self._effective_capabilities()),
-                    },
+                    update=updates,
                     deep=True,
                 )
             )
@@ -1166,7 +1193,8 @@ class PlanningAdapter:
             errors = [result for result in results if isinstance(result, Exception)]
             success_count = len(results) - len(errors)
             previous = self._last_good or self._projection
-            mapped = self._mapped_domains(results, previous)
+            upstream_sources = self._sources_from_results(results)
+            mapped = self._mapped_domains(results, previous, upstream_sources)
             all_success = not errors
             if all_success:
                 self._failure_count = 0
@@ -1179,6 +1207,7 @@ class PlanningAdapter:
                     generated_at=self._now_text(now),
                     source_status=source_status,
                     last_synced_at=self._max_synced_at(results),
+                    provider_statuses=self._project_sources(upstream_sources),
                 )
                 self._last_good = projection.model_copy(deep=True)
                 self._upstream_connected = True
@@ -1207,6 +1236,7 @@ class PlanningAdapter:
                         if success_count > 0
                         else self._last_synced_at(previous)
                     ),
+                    provider_statuses=self._failure_provider_statuses(previous),
                 )
                 self._record_domain_errors(errors)
             await self._set_projection(projection)
@@ -1728,13 +1758,96 @@ class PlanningAdapter:
         return empty_planning_projection(
             generated_at=self._now_text(),
             source_status="offline",
-            provider_status="local_only",
         )
+
+    def _sources_from_results(self, results: list[Any]) -> list[UpstreamPlanningSource] | None:
+        for result in results:
+            if not isinstance(result, PlanningListEnvelope):
+                continue
+            if result.sources is not None:
+                return result.sources
+        if self._last_status is not None and self._last_status.sources is not None:
+            return self._last_status.sources
+        return None
+
+    def _project_sources(
+        self,
+        sources: list[UpstreamPlanningSource] | None,
+    ) -> list[PlanningCalendarSource]:
+        if sources is None:
+            observed = self._now_text(self._wall_now())
+            return [
+                PlanningCalendarSource(
+                    id="native-planning",
+                    kind="native",
+                    provider="local",
+                    label="Local Planning",
+                    status="current",
+                    configured=True,
+                    lastSyncedAt=None,
+                    observedAt=observed,
+                    calendars=[],
+                )
+            ]
+        projected: list[PlanningCalendarSource] = []
+        for source in sources:
+            source_id = _browser_source_id(source)
+            display_counts: dict[str, int] = {}
+            for calendar in source.calendars:
+                display_counts[calendar.displayName] = display_counts.get(calendar.displayName, 0) + 1
+            projected_calendars: list[PlanningCalendarSourceCalendar] = []
+            for calendar in source.calendars:
+                browser_calendar_id = _browser_calendar_id(source, calendar.calendarId)
+                label = calendar.displayName
+                if display_counts[calendar.displayName] > 1:
+                    label = f"{label} · #{browser_calendar_id[-6:]}"
+                projected_calendars.append(
+                    PlanningCalendarSourceCalendar(
+                        id=browser_calendar_id,
+                        label=label,
+                        color=calendar.color,
+                        enabled=calendar.enabled,
+                        status=calendar.status,
+                        lastSyncedAt=calendar.lastSyncedAt,
+                        observedAt=calendar.observedAt,
+                    )
+                )
+            projected.append(
+                PlanningCalendarSource(
+                    id=source_id,
+                    kind="native" if source.sourceType == "native_planning" else "external",
+                    provider=source.provider,
+                    label=_browser_source_label(source),
+                    status=source.status,
+                    configured=source.status != "not_configured",
+                    lastSyncedAt=source.lastSyncedAt,
+                    observedAt=source.observedAt,
+                    calendars=projected_calendars,
+                )
+            )
+        return projected
+
+    def _failure_provider_statuses(
+        self,
+        previous: PlanningProjection | None,
+    ) -> list[PlanningCalendarSource]:
+        if previous is None:
+            return self._project_sources(None)
+        statuses: list[PlanningCalendarSource] = []
+        for source in previous.providerStatuses:
+            if source.kind == "external" and source.status == "current":
+                source = source.model_copy(
+                    update={"status": "stale" if source.lastSyncedAt else "error"},
+                    deep=True,
+                )
+            statuses.append(source)
+        return statuses
 
     def _mapped_domains(
         self,
         results: list[Any],
         previous: PlanningProjection | None,
+        upstream_sources: list[UpstreamPlanningSource] | None,
     ) -> dict[str, Any]:
         previous = previous or empty_planning_projection(
             generated_at=self._now_text(),
@@ -1756,8 +1869,8 @@ class PlanningAdapter:
         task_today = self._map_tasks(results[task_index], previous.tasks.today)
         task_overdue = self._map_tasks(results[task_index + 1], previous.tasks.overdue)
         task_upcoming = self._map_tasks(results[task_index + 2], previous.tasks.upcoming)
-        event_today = self._map_events(results[task_index + 3], previous.calendar.today)
-        event_upcoming = self._map_events(results[task_index + 4], previous.calendar.upcoming)
+        event_today = self._map_events(results[task_index + 3], previous.calendar.today, upstream_sources)
+        event_upcoming = self._map_events(results[task_index + 4], previous.calendar.upcoming, upstream_sources)
         projects = self._map_projects(results[task_index + 5], previous.tasks.projects)
         events = [*event_today, *event_upcoming]
         return {
@@ -1863,10 +1976,11 @@ class PlanningAdapter:
             for item in result.items
         ]
 
-    @staticmethod
     def _map_events(
+        self,
         result: Any,
         fallback: list[CalendarEventProjection],
+        upstream_sources: list[UpstreamPlanningSource] | None,
     ) -> list[CalendarEventProjection]:
         if not isinstance(result, EventListEnvelope):
             return list(fallback)
@@ -1876,7 +1990,7 @@ class PlanningAdapter:
                 version=item.version,
                 source=item.source,
                 sourceLabel=source_label(item.source),
-                calendarIdentity=_event_identity(item),
+                calendarIdentity=self._event_identity(item, upstream_sources),
                 title=item.title,
                 notes=item.notes,
                 location=item.location,
@@ -1894,6 +2008,45 @@ class PlanningAdapter:
             )
             for item in result.items
         ]
+
+    def _event_identity(
+        self,
+        event: UpstreamCalendarEvent,
+        upstream_sources: list[UpstreamPlanningSource] | None,
+    ) -> PlanningCalendarIdentity:
+        if event.provider_id is None and event.provider_calendar_id is None:
+            return PlanningCalendarIdentity(
+                providerId="native-planning",
+                providerLabel="Local Planning",
+                calendarId="local",
+                calendarLabel="Локальный",
+            )
+        if upstream_sources is None:
+            return _event_identity(event)
+        if event.provider_calendar_id is None:
+            raise PlanningReadUnavailable("planning_calendar_identity_unmapped")
+        for source in upstream_sources:
+            if source.sourceType != "external_calendar":
+                continue
+            for calendar in source.calendars:
+                if calendar.calendarId != event.provider_calendar_id:
+                    continue
+                source_id = _browser_source_id(source)
+                calendar_id = _browser_calendar_id(source, calendar.calendarId)
+                label_counts = sum(
+                    candidate.displayName == calendar.displayName
+                    for candidate in source.calendars
+                )
+                label = calendar.displayName
+                if label_counts > 1:
+                    label = f"{label} · #{calendar_id[-6:]}"
+                return PlanningCalendarIdentity(
+                    providerId=source_id,
+                    providerLabel=_browser_source_label(source),
+                    calendarId=calendar_id,
+                    calendarLabel=label,
+                )
+        raise PlanningReadUnavailable("planning_calendar_identity_unmapped")
 
     @staticmethod
     def _map_projects(
@@ -1922,6 +2075,7 @@ class PlanningAdapter:
         generated_at: str,
         source_status: PlanningSourceStatus,
         last_synced_at: str | None,
+        provider_statuses: list[PlanningCalendarSource],
     ) -> PlanningProjection:
         stale_after = None
         if last_synced_at is not None:
@@ -1939,15 +2093,7 @@ class PlanningAdapter:
             tasks=mapped["tasks"],
             calendar=mapped["calendar"],
             capabilities=PlanningCapabilities(**self._effective_capabilities()),
-            providerStatuses=[
-                {
-                    "id": "native-planning",
-                    "label": "Local Planning",
-                    "status": "local_only",
-                    "configured": True,
-                    "lastSyncedAt": None,
-                }
-            ],
+            providerStatuses=provider_statuses,
         )
 
     def _live_client(self) -> PlanningClient:
@@ -1987,9 +2133,8 @@ class PlanningAdapter:
             },
         }
 
-    @staticmethod
-    def _object_readback(envelope: ReminderObjectEnvelope) -> PlanningObjectEnvelope:
-        reminder = PlanningAdapter._map_reminders([envelope.object])[0]
+    def _object_readback(self, envelope: ReminderObjectEnvelope) -> PlanningObjectEnvelope:
+        reminder = self._map_reminders([envelope.object])[0]
         return PlanningObjectEnvelope(
             schemaVersion="planning.panel.v1",
             kind="object",
@@ -1998,11 +2143,11 @@ class PlanningAdapter:
             sourceStatus="current",
             lastSyncedAt=envelope.lastSyncedAt,
             staleAfter=envelope.staleAfter,
+            sources=self._project_sources(envelope.sources),
         )
 
-    @staticmethod
-    def _task_object_readback(envelope: TaskObjectEnvelope) -> PlanningTaskObjectEnvelope:
-        task = PlanningAdapter._map_tasks(
+    def _task_object_readback(self, envelope: TaskObjectEnvelope) -> PlanningTaskObjectEnvelope:
+        task = self._map_tasks(
             TaskListEnvelope(
                 schemaVersion="planning.v1",
                 kind="list",
@@ -2025,11 +2170,11 @@ class PlanningAdapter:
             sourceStatus="current",
             lastSyncedAt=envelope.lastSyncedAt,
             staleAfter=envelope.staleAfter,
+            sources=self._project_sources(envelope.sources),
         )
 
-    @staticmethod
-    def _event_object_readback(envelope: EventObjectEnvelope) -> PlanningEventObjectEnvelope:
-        event = PlanningAdapter._map_events(
+    def _event_object_readback(self, envelope: EventObjectEnvelope) -> PlanningEventObjectEnvelope:
+        event = self._map_events(
             EventListEnvelope(
                 schemaVersion="planning.v1",
                 kind="list",
@@ -2038,11 +2183,13 @@ class PlanningAdapter:
                 sourceStatus="current",
                 lastSyncedAt=envelope.lastSyncedAt,
                 staleAfter=envelope.staleAfter,
+                sources=envelope.sources,
                 pagination={"limit": 1, "offset": 0, "count": 1, "has_more": False, "next_offset": None},
                 correlation_id=envelope.correlation_id,
                 items=[envelope.object],
             ),
             [],
+            envelope.sources,
         )[0]
         return PlanningEventObjectEnvelope(
             schemaVersion="planning.panel.v1",
@@ -2052,6 +2199,7 @@ class PlanningAdapter:
             sourceStatus="current",
             lastSyncedAt=envelope.lastSyncedAt,
             staleAfter=envelope.staleAfter,
+            sources=self._project_sources(envelope.sources),
         )
 
     def _read_upstream_envelope(
@@ -2063,7 +2211,7 @@ class PlanningAdapter:
         elif isinstance(envelope, TaskListEnvelope):
             items = self._map_tasks(envelope, [])
         elif isinstance(envelope, EventListEnvelope):
-            items = self._map_events(envelope, [])
+            items = self._map_events(envelope, [], envelope.sources)
         elif isinstance(envelope, ProjectListEnvelope):
             items = self._map_projects(envelope, [])
         else:
@@ -2076,6 +2224,7 @@ class PlanningAdapter:
             sourceStatus=self._status_source_status(current=True),
             lastSyncedAt=envelope.lastSyncedAt,
             staleAfter=envelope.staleAfter,
+            sources=self._project_sources(envelope.sources),
             items=items,
             limit=envelope.pagination.limit,
             offset=envelope.pagination.offset,

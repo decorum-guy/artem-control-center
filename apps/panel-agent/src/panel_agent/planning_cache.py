@@ -7,7 +7,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import field_validator
 
@@ -43,7 +43,8 @@ class PlanningProjectionCache:
                 self._log_rejected("size_or_missing")
                 return None
             raw = self.path.read_bytes()
-            document = PlanningCacheDocument.model_validate_json(raw)
+            decoded = json.loads(raw)
+            document = PlanningCacheDocument.model_validate(_migrate_legacy_projection_cache(decoded))
             return document.projection.model_copy(deep=True)
         except Exception:
             # Cache recovery is intentionally fail-closed.  The adapter will
@@ -95,3 +96,45 @@ class PlanningProjectionCache:
 
     def _log_rejected(self, category: str) -> None:
         LOGGER.warning("planning_cache_rejected category=%s", category)
+
+
+def _migrate_legacy_projection_cache(value: Any) -> Any:
+    """Translate the pre-Phase-B native provider status without accepting arbitrary shapes."""
+
+    if not isinstance(value, dict) or not isinstance(value.get("projection"), dict):
+        return value
+    projection = value["projection"]
+    statuses = projection.get("providerStatuses")
+    if not isinstance(statuses, list) or len(statuses) > 4:
+        return value
+    migrated: list[Any] = []
+    for status in statuses:
+        if not isinstance(status, dict):
+            return value
+        if set(status) == {"id", "label", "status", "configured", "lastSyncedAt"}:
+            if (
+                status.get("id") != "native-planning"
+                or status.get("label") != "Local Planning"
+                or status.get("status") != "local_only"
+                or status.get("configured") is not True
+            ):
+                return value
+            migrated.append(
+                {
+                    "id": "native-planning",
+                    "kind": "native",
+                    "provider": "local",
+                    "label": "Local Planning",
+                    "status": "current",
+                    "configured": True,
+                    "lastSyncedAt": status.get("lastSyncedAt"),
+                    "observedAt": value.get("savedAt"),
+                    "calendars": [],
+                }
+            )
+        else:
+            migrated.append(status)
+    result = dict(value)
+    result["projection"] = dict(projection)
+    result["projection"]["providerStatuses"] = migrated
+    return result

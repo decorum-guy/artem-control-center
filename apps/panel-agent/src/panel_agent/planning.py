@@ -22,6 +22,7 @@ PLANNING_PANEL_SCHEMA = "planning.panel.v1"
 PLANNING_OPERATIONS_SCHEMA = "planning.operations.v1"
 
 PlanningSourceStatus = Literal["current", "stale", "offline", "degraded"]
+PlanningProviderFreshnessStatus = Literal["current", "stale", "error", "not_configured", "disabled"]
 PlanningSource = Literal[
     "alice",
     "telegram",
@@ -39,6 +40,9 @@ EventSyncState = Literal["local_only", "pending", "synced", "stale", "conflict",
 
 _UTC_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$")
 _LOCAL_TIME = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$")
+_OPAQUE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_ERROR_CODE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
+_CALENDAR_COLOR = re.compile(r"^#[0-9A-Fa-f]{6,8}$")
 
 
 class StrictPlanningModel(BaseModel):
@@ -72,6 +76,20 @@ def validate_utc_timestamp(value: str, field: str = "timestamp") -> str:
         raise ValueError(f"{field} must be a valid UTC timestamp") from exc
     if parsed.tzinfo != timezone.utc:
         raise ValueError(f"{field} must be UTC")
+    return value
+
+
+def validate_opaque_identity(value: str, field: str = "identity") -> str:
+    if not isinstance(value, str) or _OPAQUE_ID.fullmatch(value) is None:
+        raise ValueError(f"{field} must be a bounded opaque identity")
+    return value
+
+
+def validate_error_code(value: str | None, field: str = "errorCode") -> str | None:
+    if value is None:
+        return None
+    if _ERROR_CODE.fullmatch(value) is None:
+        raise ValueError(f"{field} must be a sanitized error code")
     return value
 
 
@@ -312,6 +330,56 @@ class UpstreamCalendarEvent(StrictPlanningModel):
         return self
 
 
+class UpstreamSourceCalendar(StrictPlanningModel):
+    """Typed additive Alice source calendar metadata; never browser-facing."""
+
+    calendarId: StrictStr = Field(min_length=1, max_length=128)
+    displayName: StrictStr = Field(min_length=1, max_length=200)
+    color: StrictStr | None = Field(default=None, max_length=9)
+    enabled: StrictBool
+    status: PlanningProviderFreshnessStatus
+    lastSyncedAt: StrictStr | None = None
+    observedAt: StrictStr
+    errorCode: StrictStr | None = Field(default=None, max_length=128)
+
+    _identity = field_validator("calendarId")(validate_opaque_identity)
+    _timestamps = _timestamp_fields("lastSyncedAt", "observedAt")
+    _error = field_validator("errorCode")(validate_error_code)
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str | None) -> str | None:
+        if value is not None and _CALENDAR_COLOR.fullmatch(value) is None:
+            raise ValueError("source calendar color must be a validated hex color")
+        return value
+
+
+class UpstreamPlanningSource(StrictPlanningModel):
+    """The merged Alice source extension, accepted with strict bounded fields."""
+
+    sourceType: Literal["native_planning", "external_calendar"]
+    accountId: StrictStr = Field(min_length=1, max_length=128)
+    provider: Literal["local", "icloud"]
+    status: PlanningProviderFreshnessStatus
+    lastSyncedAt: StrictStr | None = None
+    observedAt: StrictStr
+    errorCode: StrictStr | None = Field(default=None, max_length=128)
+    calendars: list[UpstreamSourceCalendar] = Field(max_length=32)
+
+    _identity = field_validator("accountId")(validate_opaque_identity)
+    _timestamps = _timestamp_fields("lastSyncedAt", "observedAt")
+    _error = field_validator("errorCode")(validate_error_code)
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UpstreamPlanningSource":
+        if self.sourceType == "native_planning":
+            if self.accountId != "local" or self.provider != "local" or self.calendars:
+                raise ValueError("native Planning source shape is invalid")
+        elif self.provider != "icloud":
+            raise ValueError("external source provider is not supported")
+        return self
+
+
 class UpstreamProject(StrictPlanningModel):
     id: StrictStr = Field(min_length=36, max_length=36)
     domain: Literal["project"]
@@ -337,6 +405,7 @@ class PlanningListEnvelope(StrictPlanningModel):
     sourceStatus: Literal["current"]
     lastSyncedAt: StrictStr
     staleAfter: StrictStr
+    sources: list[UpstreamPlanningSource] | None = Field(default=None, max_length=4)
     pagination: PlanningPagination
     correlation_id: StrictStr = Field(min_length=36, max_length=36)
 
@@ -470,6 +539,7 @@ class StatusEnvelope(StrictPlanningModel):
     sourceStatus: Literal["current"]
     lastSyncedAt: StrictStr
     staleAfter: StrictStr
+    sources: list[UpstreamPlanningSource] | None = Field(default=None, max_length=4)
     correlation_id: StrictStr = Field(min_length=36, max_length=36)
     capabilityMetadata: UpstreamCapabilityMetadata
     planningHealth: UpstreamPlanningHealth | None = None
@@ -488,6 +558,7 @@ class ReminderObjectEnvelope(StrictPlanningModel):
     sourceStatus: Literal["current"]
     lastSyncedAt: StrictStr
     staleAfter: StrictStr
+    sources: list[UpstreamPlanningSource] | None = Field(default=None, max_length=4)
     correlation_id: StrictStr = Field(min_length=36, max_length=36)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
@@ -504,6 +575,7 @@ class TaskObjectEnvelope(StrictPlanningModel):
     sourceStatus: Literal["current"]
     lastSyncedAt: StrictStr
     staleAfter: StrictStr
+    sources: list[UpstreamPlanningSource] | None = Field(default=None, max_length=4)
     correlation_id: StrictStr = Field(min_length=36, max_length=36)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
@@ -520,6 +592,7 @@ class EventObjectEnvelope(StrictPlanningModel):
     sourceStatus: Literal["current"]
     lastSyncedAt: StrictStr
     staleAfter: StrictStr
+    sources: list[UpstreamPlanningSource] | None = Field(default=None, max_length=4)
     correlation_id: StrictStr = Field(min_length=36, max_length=36)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
@@ -731,14 +804,45 @@ class PlanningCapabilities(StrictPlanningModel):
     calendar: PlanningCalendarCapabilities = Field(default_factory=PlanningCalendarCapabilities)
 
 
-class PlanningProviderStatus(StrictPlanningModel):
-    id: Literal["native-planning"] = "native-planning"
-    label: Literal["Local Planning"] = "Local Planning"
-    status: Literal["local_only", "not_configured", "degraded", "offline"] = "local_only"
-    configured: StrictBool = True
+class PlanningCalendarSourceCalendar(StrictPlanningModel):
+    id: StrictStr = Field(min_length=1, max_length=128)
+    label: StrictStr = Field(min_length=1, max_length=220)
+    color: StrictStr | None = Field(default=None, max_length=9)
+    enabled: StrictBool
+    status: PlanningProviderFreshnessStatus
     lastSyncedAt: StrictStr | None = None
+    observedAt: StrictStr | None = None
 
-    _timestamps = _timestamp_fields("lastSyncedAt")
+    _identity = field_validator("id")(validate_opaque_identity)
+    _timestamps = _timestamp_fields("lastSyncedAt", "observedAt")
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str | None) -> str | None:
+        if value is not None and _CALENDAR_COLOR.fullmatch(value) is None:
+            raise ValueError("calendar source color must be a validated hex color")
+        return value
+
+
+class PlanningCalendarSource(StrictPlanningModel):
+    id: StrictStr = Field(min_length=1, max_length=128)
+    kind: Literal["native", "external"]
+    provider: Literal["local", "icloud"]
+    label: StrictStr = Field(min_length=1, max_length=128)
+    status: PlanningProviderFreshnessStatus
+    configured: StrictBool
+    lastSyncedAt: StrictStr | None = None
+    observedAt: StrictStr | None = None
+    calendars: list[PlanningCalendarSourceCalendar] = Field(max_length=32)
+
+    _identity = field_validator("id")(validate_opaque_identity)
+    _timestamps = _timestamp_fields("lastSyncedAt", "observedAt")
+
+
+# Compatibility name for callers that imported the pre-Phase-B class. The JSON
+# contract is now provider-neutral while the existing providerStatuses field is
+# retained in the panel snapshot.
+PlanningProviderStatus = PlanningCalendarSource
 
 
 class PlanningReminderLists(StrictPlanningModel):
@@ -770,7 +874,7 @@ class PlanningProjection(StrictPlanningModel):
     tasks: PlanningTaskLists
     calendar: PlanningCalendarLists
     capabilities: PlanningCapabilities
-    providerStatuses: list[PlanningProviderStatus] = Field(max_length=4)
+    providerStatuses: list[PlanningCalendarSource] = Field(max_length=4)
 
     _timestamps = _timestamp_fields("generatedAt", "lastSyncedAt", "staleAfter")
 
@@ -782,7 +886,7 @@ class PlanningStatusProjection(StrictPlanningModel):
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     capabilities: PlanningCapabilities
-    providerStatuses: list[PlanningProviderStatus] = Field(max_length=4)
+    providerStatuses: list[PlanningCalendarSource] = Field(max_length=4)
 
     _timestamps = _timestamp_fields("generatedAt", "lastSyncedAt", "staleAfter")
 
@@ -795,6 +899,7 @@ class PlanningReadEnvelope(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
+    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=4)
     items: list[
         ReminderProjection
         | TaskProjection
@@ -819,6 +924,7 @@ class PlanningObjectEnvelope(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
+    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=4)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
 
@@ -833,6 +939,7 @@ class PlanningTaskObjectEnvelope(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
+    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=4)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
 
@@ -847,6 +954,7 @@ class PlanningEventObjectEnvelope(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
+    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=4)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
 
@@ -890,7 +998,7 @@ def empty_planning_projection(
     source_status: PlanningSourceStatus,
     last_synced_at: str | None = None,
     stale_after: str | None = None,
-    provider_status: Literal["local_only", "not_configured", "degraded", "offline"] = "local_only",
+    provider_status: PlanningProviderFreshnessStatus = "current",
 ) -> PlanningProjection:
     return PlanningProjection(
         schemaVersion=PLANNING_PANEL_SCHEMA,
@@ -902,7 +1010,19 @@ def empty_planning_projection(
         tasks=PlanningTaskLists(today=[], overdue=[], upcoming=[], projects=[]),
         calendar=PlanningCalendarLists(today=[], upcoming=[], conflicts=[]),
         capabilities=PlanningCapabilities(),
-        providerStatuses=[PlanningProviderStatus(status=provider_status)],
+        providerStatuses=[
+            PlanningCalendarSource(
+                id="native-planning",
+                kind="native",
+                provider="local",
+                label="Local Planning",
+                status=provider_status,
+                configured=True,
+                lastSyncedAt=last_synced_at,
+                observedAt=generated_at,
+                calendars=[],
+            )
+        ],
     )
 
 

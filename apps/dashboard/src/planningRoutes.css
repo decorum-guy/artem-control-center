@@ -101,6 +101,32 @@
 .planning-route-health__copy p { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
 .planning-route-health__retry { flex: 0 0 auto; color: var(--accent-strong); }
 
+.planning-source-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.planning-source-strip__label { flex: 0 0 auto; font-weight: 700; }
+.planning-source-strip__items { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.planning-source-strip__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-height: 32px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.planning-source-strip__item--stale { border-style: dashed; background: var(--stale-soft); }
+.planning-source-strip__item--error { background: var(--danger-soft); }
+.planning-source-strip__item--disabled,
+.planning-source-strip__item--not_configured { opacity: .72; }
+
 .planning-route-state {
   display: grid;
   justify-items: start;
@@ -298,6 +324,7 @@
   .planning-secondary-button { flex: 1 1 160px; max-width: none; }
   .planning-route-health { align-items: flex-start; flex-direction: column; }
   .planning-route-health__retry { width: 100%; }
+  .planning-source-strip { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 520px) {

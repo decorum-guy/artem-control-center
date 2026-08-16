@@ -159,10 +159,14 @@ function planning(overrides: Partial<PlanningSnapshot> = {}): PlanningSnapshot {
     providerStatuses: [
       {
         id: "native-planning",
+        kind: "native",
+        provider: "local",
         label: "Local Planning",
-        status: "local_only",
+        status: "current",
         configured: true,
-        lastSyncedAt: FIXTURE_SYNCED_AT
+        lastSyncedAt: FIXTURE_SYNCED_AT,
+        observedAt: FIXTURE_NOW,
+        calendars: []
       }
     ],
     ...overrides
@@ -189,10 +193,14 @@ export const emptyPlanningFixture: PlanningSnapshot = {
     providerStatuses: [
       {
         id: "native-planning",
+        kind: "native",
+        provider: "local",
         label: "Local Planning",
-        status: "local_only",
+        status: "current",
         configured: true,
-        lastSyncedAt: null
+        lastSyncedAt: null,
+        observedAt: FIXTURE_NOW,
+        calendars: []
       }
     ]
   })

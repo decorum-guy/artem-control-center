@@ -16,6 +16,39 @@ from panel_agent.settings import IntegrationSettings
 REFERENCE = "2026-08-12T09:00:00Z"
 LOCAL_ID = "00000000-0000-4000-8000-000000000701"
 EXTERNAL_ID = "00000000-0000-4000-8000-000000000702"
+SOURCE_METADATA = [
+    {
+        "sourceType": "native_planning",
+        "accountId": "local",
+        "provider": "local",
+        "status": "current",
+        "lastSyncedAt": REFERENCE,
+        "observedAt": REFERENCE,
+        "errorCode": None,
+        "calendars": [],
+    },
+    {
+        "sourceType": "external_calendar",
+        "accountId": "account_opaque",
+        "provider": "icloud",
+        "status": "stale",
+        "lastSyncedAt": REFERENCE,
+        "observedAt": REFERENCE,
+        "errorCode": "provider_timeout",
+        "calendars": [
+            {
+                "calendarId": "provider-calendar-secret",
+                "displayName": "Работа",
+                "color": None,
+                "enabled": True,
+                "status": "stale",
+                "lastSyncedAt": REFERENCE,
+                "observedAt": REFERENCE,
+                "errorCode": "provider_timeout",
+            }
+        ],
+    },
+]
 
 
 def _event(event_id: str, *, external: bool = False, deleted_at: str | None = None, version: int = 1) -> dict[str, object]:
@@ -66,6 +99,7 @@ class EventMutationTransport(httpx.AsyncBaseTransport):
                 "sourceStatus": "current",
                 "lastSyncedAt": REFERENCE,
                 "staleAfter": "2026-08-12T09:05:00Z",
+                "sources": SOURCE_METADATA,
                 "correlation_id": "00000000-0000-4000-8000-000000000798",
             },
             request=request,
@@ -198,7 +232,11 @@ def test_b43_event_readback_projection_and_local_only_mutations(tmp_path):
     external_object = external.json()["object"]
     assert external_object["localOnlyMutable"] is False
     assert "provider_id" not in external_object and "provider_calendar_id" not in external_object
-    assert external_object["calendarIdentity"]["calendarLabel"] == "Внешний календарь"
+    assert external_object["calendarIdentity"]["providerLabel"] == "iCloud"
+    assert external_object["calendarIdentity"]["calendarLabel"] == "Работа"
+    assert external.json()["sources"][1]["id"].startswith("external-icloud-")
+    assert "account_opaque" not in external.text
+    assert "provider-calendar-secret" not in external.text
     assert patched.status_code == 200 and patched.json()["object"]["version"] == 2
     assert patched_replay.status_code == patched.status_code and patched_replay.json() == patched.json()
     assert deleted.status_code == 200 and deleted.json()["object"]["deletedAt"] == REFERENCE
