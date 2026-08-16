@@ -462,6 +462,7 @@ def test_last_good_cache_survives_restart_without_current_label(tmp_path):
     assert projection is not None
     assert projection.sourceStatus == "stale"
     assert projection.tasks.today
+    assert all(source.status != "current" for source in projection.providerStatuses)
     contents = cache_path.read_text(encoding="utf-8")
     assert "synthetic-internal-secret" not in contents
     assert "synthetic-panel-agent-secret" not in contents

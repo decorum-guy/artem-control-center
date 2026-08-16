@@ -1196,6 +1196,11 @@ class PlanningAdapter:
             upstream_sources = self._sources_from_results(results)
             mapped = self._mapped_domains(results, previous, upstream_sources)
             all_success = not errors
+            provider_statuses = (
+                self._project_sources(upstream_sources)
+                if all_success or upstream_sources is not None
+                else self._failure_provider_statuses(previous)
+            )
             if all_success:
                 self._failure_count = 0
                 self._last_success_at = self._clock()
@@ -1207,7 +1212,7 @@ class PlanningAdapter:
                     generated_at=self._now_text(now),
                     source_status=source_status,
                     last_synced_at=self._max_synced_at(results),
-                    provider_statuses=self._project_sources(upstream_sources),
+                    provider_statuses=provider_statuses,
                 )
                 self._last_good = projection.model_copy(deep=True)
                 self._upstream_connected = True
@@ -1236,7 +1241,7 @@ class PlanningAdapter:
                         if success_count > 0
                         else self._last_synced_at(previous)
                     ),
-                    provider_statuses=self._failure_provider_statuses(previous),
+                    provider_statuses=provider_statuses,
                 )
                 self._record_domain_errors(errors)
             await self._set_projection(projection)
@@ -1761,13 +1766,13 @@ class PlanningAdapter:
         )
 
     def _sources_from_results(self, results: list[Any]) -> list[UpstreamPlanningSource] | None:
+        """Return only source metadata observed in this domain refresh batch."""
+
         for result in results:
             if not isinstance(result, PlanningListEnvelope):
                 continue
             if result.sources is not None:
                 return result.sources
-        if self._last_status is not None and self._last_status.sources is not None:
-            return self._last_status.sources
         return None
 
     def _project_sources(
@@ -1819,7 +1824,10 @@ class PlanningAdapter:
                     provider=source.provider,
                     label=_browser_source_label(source),
                     status=source.status,
-                    configured=source.status != "not_configured",
+                    configured=(
+                        source.status != "not_configured"
+                        and source.accountId != "not-configured"
+                    ),
                     lastSyncedAt=source.lastSyncedAt,
                     observedAt=source.observedAt,
                     calendars=projected_calendars,
@@ -1832,10 +1840,22 @@ class PlanningAdapter:
         previous: PlanningProjection | None,
     ) -> list[PlanningCalendarSource]:
         if previous is None:
-            return self._project_sources(None)
+            return [
+                PlanningCalendarSource(
+                    id="native-planning",
+                    kind="native",
+                    provider="local",
+                    label="Local Planning",
+                    status="error",
+                    configured=True,
+                    lastSyncedAt=None,
+                    observedAt=self._now_text(self._wall_now()),
+                    calendars=[],
+                )
+            ]
         statuses: list[PlanningCalendarSource] = []
         for source in previous.providerStatuses:
-            if source.kind == "external" and source.status == "current":
+            if source.status == "current":
                 source = source.model_copy(
                     update={"status": "stale" if source.lastSyncedAt else "error"},
                     deep=True,

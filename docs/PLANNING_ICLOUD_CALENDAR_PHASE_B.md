@@ -78,7 +78,20 @@ quietly in the source strip rather than as a route failure.
 
 The generic Planning projection cache may retain a complete normalized
 projection for transport fallback. Its source status is transitioned
-conservatively on failure; it never invents a current iCloud status.
+conservatively on failure; it never invents a current iCloud status. Fresh
+source metadata parsed from the current refresh takes precedence over previous
+cached metadata, even when an unrelated Planning domain in that same refresh
+fails. When the current refresh contains no trustworthy `sources` field,
+previous/cache source freshness is degraded conservatively: a previously
+current source becomes `stale` when successful data exists, otherwise `error`.
+This applies to native Planning as well as iCloud, so cached-only native data
+cannot be presented as current.
+
+Alice's `status` and `accountId` are independent axes. A `not_configured`
+status, or Alice's server-only `accountId = "not-configured"` sentinel, is
+projected as `configured: false`. A real opaque account with `status:
+"disabled"` remains configured but disabled. Neither the sentinel nor any
+account identity is browser-facing.
 
 ## Read-only and mutation boundary
 

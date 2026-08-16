@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import asyncio
 import json
 
 import pytest
@@ -90,6 +91,56 @@ def _payload(path: str, *, sources: bool = True) -> dict[str, object]:
     if sources:
         payload["sources"] = _sources()
     return payload
+
+
+def _source_batch(*, native_status: str = "current", external_status: str = "current") -> list[dict[str, object]]:
+    sources = copy.deepcopy(_sources())
+    sources[0]["status"] = native_status
+    sources[1]["status"] = external_status
+    sources[1]["errorCode"] = None if external_status == "current" else "provider_timeout"
+    for calendar in sources[1]["calendars"]:
+        calendar["status"] = external_status
+        calendar["errorCode"] = None if external_status == "current" else "provider_timeout"
+    return sources
+
+
+class _RefreshClient:
+    """Small fixed-route client double for exercising adapter refresh semantics."""
+
+    def __init__(
+        self,
+        *,
+        sources: list[dict[str, object]] | None,
+        include_sources: bool = True,
+        failures: set[str] | None = None,
+    ) -> None:
+        self.sources = copy.deepcopy(sources) if sources is not None else None
+        self.include_sources = include_sources
+        self.failures = set(failures or ())
+
+    def _list(self, path: str, model, domain: str):
+        if domain in self.failures:
+            raise RuntimeError(f"synthetic {domain} failure")
+        payload = copy.deepcopy(fixture_payload("healthy", path))
+        assert payload is not None
+        if self.include_sources and self.sources is not None:
+            payload["sources"] = copy.deepcopy(self.sources)
+        return _validate_envelope(model, payload)
+
+    async def reminders(self, **_kwargs):
+        return self._list("/internal/planning/v1/reminders", ReminderListEnvelope, "reminders")
+
+    async def tasks(self, **_kwargs):
+        return self._list("/internal/planning/v1/tasks", TaskListEnvelope, "tasks")
+
+    async def events(self, **_kwargs):
+        return self._list("/internal/planning/v1/events", EventListEnvelope, "events")
+
+    async def projects(self, **_kwargs):
+        return self._list("/internal/planning/v1/projects", ProjectListEnvelope, "projects")
+
+    async def close(self):
+        return None
 
 
 def test_old_and_new_alice_sources_are_strictly_accepted_across_list_status_and_objects():
@@ -199,3 +250,120 @@ def test_external_freshness_does_not_replace_global_planning_status(tmp_path):
     ).model_copy(update={"providerStatuses": projected}, deep=True)
     assert projection.sourceStatus == "current"
     assert projection.providerStatuses[1].status == "stale"
+
+
+def test_partial_refresh_uses_fresh_sources_even_when_reminders_fail(tmp_path):
+    client = _RefreshClient(sources=_source_batch(), failures={"reminders"})
+    adapter = PlanningAdapter(_settings(tmp_path), client=client)
+
+    async def exercise():
+        result = await adapter.refresh_domains()
+        projection = adapter.projection
+        await adapter.close()
+        return result, projection
+
+    result, projection = asyncio.run(exercise())
+    assert result is False
+    assert projection is not None
+    assert projection.sourceStatus == "degraded"
+    assert {source.provider: source.status for source in projection.providerStatuses} == {
+        "local": "current",
+        "icloud": "current",
+    }
+
+
+def test_partial_refresh_preserves_fresh_native_and_stale_icloud_sources(tmp_path):
+    client = _RefreshClient(
+        sources=_source_batch(external_status="stale"),
+        failures={"reminders"},
+    )
+    adapter = PlanningAdapter(_settings(tmp_path), client=client)
+
+    async def exercise():
+        result = await adapter.refresh_domains()
+        projection = adapter.projection
+        await adapter.close()
+        return result, projection
+
+    result, projection = asyncio.run(exercise())
+    assert result is False
+    assert projection is not None
+    assert {source.provider: source.status for source in projection.providerStatuses} == {
+        "local": "current",
+        "icloud": "stale",
+    }
+
+
+def test_total_failure_degrades_cached_sources_and_successful_refresh_recovers(tmp_path):
+    client = _RefreshClient(sources=_source_batch())
+    adapter = PlanningAdapter(_settings(tmp_path), client=client)
+
+    async def exercise():
+        assert await adapter.refresh_domains() is True
+        first = adapter.projection
+        client.failures = {"reminders", "tasks", "events", "projects"}
+        assert await adapter.refresh_domains() is False
+        failed = adapter.projection
+        client.failures.clear()
+        client.sources = _source_batch()
+        assert await adapter.refresh_domains() is True
+        recovered = adapter.projection
+        await adapter.close()
+        return first, failed, recovered
+
+    first, failed, recovered = asyncio.run(exercise())
+    assert first is not None and failed is not None and recovered is not None
+    assert failed.sourceStatus != "current"
+    assert failed.tasks.today
+    assert failed.calendar.today
+    assert all(source.status != "current" for source in failed.providerStatuses)
+    assert {source.provider: source.status for source in recovered.providerStatuses} == {
+        "local": "current",
+        "icloud": "current",
+    }
+
+
+def test_old_alice_partial_refresh_degrades_previous_sources_without_fabricating_new_state(tmp_path):
+    client = _RefreshClient(sources=_source_batch())
+    adapter = PlanningAdapter(_settings(tmp_path), client=client)
+
+    async def exercise():
+        assert await adapter.refresh_domains() is True
+        client.include_sources = False
+        client.failures = {"reminders"}
+        result = await adapter.refresh_domains()
+        projection = adapter.projection
+        await adapter.close()
+        return result, projection
+
+    result, projection = asyncio.run(exercise())
+    assert result is False
+    assert projection is not None
+    assert projection.calendar.today
+    assert all(source.status != "current" for source in projection.providerStatuses)
+
+
+def test_disabled_not_configured_sentinel_is_not_browser_configured(tmp_path):
+    source = copy.deepcopy(_sources()[1])
+    source["accountId"] = "not-configured"
+    source["status"] = "disabled"
+    projected = PlanningAdapter(_settings(tmp_path))._project_sources([
+        UpstreamPlanningSource.model_validate(source)
+    ])
+    serialized = json.dumps([item.model_dump() for item in projected])
+    assert projected[0].configured is False
+    assert "accountId" not in serialized
+    assert "not-configured" not in serialized
+
+
+def test_disabled_real_account_remains_configured_without_leaking_identity(tmp_path):
+    source = copy.deepcopy(_sources()[1])
+    source["accountId"] = "opaque-configured-account"
+    source["status"] = "disabled"
+    projected = PlanningAdapter(_settings(tmp_path))._project_sources([
+        UpstreamPlanningSource.model_validate(source)
+    ])
+    serialized = json.dumps([item.model_dump() for item in projected])
+    assert projected[0].configured is True
+    assert "opaque-configured-account" not in serialized
+    assert "accountId" not in serialized
