@@ -324,6 +324,8 @@ test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
     await installCalendarFixtures(page);
     await page.setViewportSize({ width: 960, height: 720 });
     await page.goto("/calendar?theme=day");
+    await expect(page.getByTestId("planning-source-strip")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(3);
     const dimensions = await page.evaluate(() => ({
       documentWidth: document.documentElement.scrollWidth,
       viewportWidth: document.documentElement.clientWidth
