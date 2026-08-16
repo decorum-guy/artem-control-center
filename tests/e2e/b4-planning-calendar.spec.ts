@@ -297,7 +297,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     expect(JSON.parse(createRequests()[0].body)).not.toHaveProperty("proposed_end_local");
     expect(JSON.parse(createRequests()[0].body)).not.toHaveProperty("sync_state");
     expect(fixture.getCurrent().id).toBe(localId);
-    await expect(page.getByText("Результат подтверждён чтением")).toBeVisible();
+    await expect(page.getByTestId("global-notice-stack").getByText("Результат подтверждён чтением").first()).toBeVisible();
     await capture(page, testInfo, "b4-calendar-local-create-timed.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
 
@@ -323,7 +323,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await expect.poll(() => fixture.requests.filter((request) => request.method === "PATCH").length).toBe(1);
     expect(fixture.getCurrent().notes).toBe("Сохранить контекст");
     expect(fixture.getCurrent().location).toBe("Переговорная");
-    await expect(page.getByText("Результат подтверждён чтением")).toBeVisible();
+    await expect(page.getByTestId("global-notice-stack").getByText("Результат подтверждён чтением").first()).toBeVisible();
     await capture(page, testInfo, "b4-calendar-local-edit.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
 
@@ -336,7 +336,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Удалить" }).tap();
     await page.getByTestId("action-confirmation").getByRole("button", { name: "Удалить событие" }).tap();
     await expect.poll(() => fixture.requests.filter((request) => request.method === "DELETE").length).toBe(1);
-    await expect(page.getByText("Удаление подтверждено чтением")).toBeVisible();
+    await expect(page.getByTestId("global-notice-stack").getByText("Удаление подтверждено чтением").first()).toBeVisible();
     await capture(page, testInfo, "b4-calendar-reconciled.png");
 
     await page.evaluate(() => {
