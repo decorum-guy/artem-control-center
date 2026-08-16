@@ -10,7 +10,8 @@ export type ActionConfirmationId =
   | "planning.reminders.complete"
   | "planning.reminders.cancel"
   | "planning.tasks.complete"
-  | "planning.tasks.archive";
+  | "planning.tasks.archive"
+  | "planning.calendar.delete";
 
 export type ActionConfirmationLevel = "simple" | "strong";
 export type ActionConfirmationTone = "standard" | "production";
@@ -149,5 +150,15 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "Planning · AliceTG Bot",
     description: "Это выполнит логическое архивирование задачи. Физическое удаление строки базы данных не выполняется.",
     confirmLabel: "Архивировать задачу"
+  },
+  "planning.calendar.delete": {
+    id: "planning.calendar.delete",
+    level: "simple",
+    tone: "standard",
+    title: "Удалить локальное событие?",
+    target: "Событие календаря",
+    environment: "Planning · AliceTG Bot",
+    description: "Это выполнит логическое удаление native local-only события. Внешний календарь не изменяется.",
+    confirmLabel: "Удалить событие"
   }
 };

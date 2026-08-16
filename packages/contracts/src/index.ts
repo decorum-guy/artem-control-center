@@ -201,13 +201,17 @@ export interface PlanningCalendarEvent {
   sourceLabel: string;
   calendarIdentity?: PlanningCalendarIdentity | null;
   title: string;
+  notes: string | null;
+  location: string | null;
   allDay: boolean;
   timezone: string;
   syncState: PlanningEventSyncState;
+  localOnlyMutable: boolean;
   startAtUtc: string | null;
   endAtUtc: string | null;
   startDate: string | null;
   endDateExclusive: string | null;
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -238,6 +242,12 @@ export interface PlanningTaskCapabilities {
   archive: boolean;
 }
 
+export interface PlanningCalendarCapabilities {
+  create: boolean;
+  edit: boolean;
+  delete: boolean;
+}
+
 export interface PlanningCapabilities {
   create: boolean;
   edit: boolean;
@@ -247,6 +257,7 @@ export interface PlanningCapabilities {
   voice: boolean;
   providerSync: boolean;
   tasks: PlanningTaskCapabilities;
+  calendar: PlanningCalendarCapabilities;
 }
 
 export interface PlanningProviderStatus {

@@ -183,6 +183,11 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
             "complete": False,
             "archive": False,
         },
+        "calendar": {
+            "create": False,
+            "edit": False,
+            "delete": False,
+        },
     }
     assert projection.providerStatuses[0].status == "local_only"
     assert all(len(getattr(projection.reminders, field)) <= 20 for field in ("upcoming", "overdue", "deliveryFailures"))

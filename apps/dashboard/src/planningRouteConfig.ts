@@ -9,6 +9,8 @@ export const planningRemindersRouteEnabled = import.meta.env.VITE_PLANNING_REMIN
 export const planningReminderMutationsEnabled = import.meta.env.VITE_PLANNING_REMINDER_MUTATIONS_ENABLED === "true";
 /** B4.2 task writer gate; false unless explicitly enabled at build time. */
 export const planningTaskMutationsEnabled = import.meta.env.VITE_PLANNING_TASK_MUTATIONS_ENABLED === "true";
+/** B4.3 Calendar writer gate; false unless explicitly enabled at build time. */
+export const planningCalendarMutationsEnabled = import.meta.env.VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED === "true";
 
 export const planningRouteLimit = 20;
 

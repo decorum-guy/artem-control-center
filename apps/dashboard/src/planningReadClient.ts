@@ -35,6 +35,16 @@ export interface PlanningObjectEnvelope<T> {
   staleAfter: string | null;
 }
 
+export interface PlanningEventObjectEnvelope {
+  schemaVersion: "planning.panel.v1";
+  kind: "object";
+  domain: "calendar_event";
+  object: PlanningCalendarEvent;
+  sourceStatus: PlanningSourceStatus;
+  lastSyncedAt: string | null;
+  staleAfter: string | null;
+}
+
 export interface PlanningParsePreview {
   schemaVersion: "planning.v1";
   kind: "parse_preview";
@@ -71,15 +81,15 @@ export class PlanningReadError extends Error {
   }
 }
 
-export class PlanningMutationError extends PlanningReadError {
+export class PlanningMutationError<T = PlanningReminder | PlanningTask> extends PlanningReadError {
   readonly mutationCode: "uncertain" | "conflict" | "disabled" | "http" | "network" | "contract";
-  readonly reconciledObject: PlanningReminder | PlanningTask | null;
+  readonly reconciledObject: T | null;
 
   constructor(
     message: string,
     mutationCode: PlanningMutationError["mutationCode"],
     status: number | null = null,
-    reconciledObject: PlanningReminder | PlanningTask | null = null
+    reconciledObject: T | null = null
   ) {
     super(message, mutationCode === "uncertain" ? "network" : mutationCode === "contract" ? "contract" : "http", status);
     this.name = "PlanningMutationError";
@@ -299,7 +309,7 @@ function parseTask(value: unknown): PlanningTask {
 
 function parseCalendarEvent(value: unknown): PlanningCalendarEvent {
   const item = record(value, "planning.calendar_event");
-  const expectedKeys = ["id", "version", "source", "sourceLabel", "title", "allDay", "timezone", "syncState", "startAtUtc", "endAtUtc", "startDate", "endDateExclusive", "createdAt", "updatedAt"];
+  const expectedKeys = ["id", "version", "source", "sourceLabel", "title", "notes", "location", "allDay", "timezone", "syncState", "localOnlyMutable", "startAtUtc", "endAtUtc", "startDate", "endDateExclusive", "deletedAt", "createdAt", "updatedAt"];
   if ("calendarIdentity" in item) expectedKeys.push("calendarIdentity");
   exactKeys(
     item,
@@ -326,13 +336,17 @@ function parseCalendarEvent(value: unknown): PlanningCalendarEvent {
       ? item.calendarIdentity ?? undefined
       : parseCalendarIdentity(item.calendarIdentity),
     title: stringValue(item.title, "planning.calendar_event.title", 1, 500),
+    notes: item.notes === null ? null : stringValue(item.notes, "planning.calendar_event.notes", 0, 4000),
+    location: item.location === null ? null : stringValue(item.location, "planning.calendar_event.location", 0, 1000),
     allDay,
     timezone: timezoneValue(item.timezone, "planning.calendar_event.timezone"),
     syncState: enumValue(item.syncState, eventSyncValues, "planning.calendar_event.syncState"),
+    localOnlyMutable: booleanValue(item.localOnlyMutable, "planning.calendar_event.localOnlyMutable"),
     startAtUtc,
     endAtUtc,
     startDate,
     endDateExclusive,
+    deletedAt: nullableTimestamp(item.deletedAt, "planning.calendar_event.deletedAt"),
     createdAt: timestampValue(item.createdAt, "planning.calendar_event.createdAt"),
     updatedAt: timestampValue(item.updatedAt, "planning.calendar_event.updatedAt")
   };
@@ -466,6 +480,31 @@ export async function readPlanningTaskById(
   }
 }
 
+export async function readPlanningEventById(
+  eventId: string,
+  signal?: AbortSignal
+): Promise<PlanningCalendarEvent> {
+  if (!uuid4Pattern.test(eventId)) throw new PlanningReadError("Calendar event target is invalid", "contract", 422);
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1/planning/events/${eventId}`, {
+      method: "GET",
+      cache: "no-store",
+      signal
+    });
+  } catch (reason) {
+    if (signal?.aborted) throw new PlanningReadError("Planning read aborted", "aborted");
+    throw new PlanningReadError(reason instanceof Error ? reason.message : "Planning read unavailable", "network");
+  }
+  if (!response.ok) throw new PlanningReadError("Planning event read is unavailable", "http", response.status);
+  try {
+    return parseEventObjectEnvelope(await response.json()).object;
+  } catch (reason) {
+    if (reason instanceof PlanningReadError) throw reason;
+    throw new PlanningReadError("Planning event response is invalid", "contract", response.status);
+  }
+}
+
 export function readPlanningProjects(
   limit = planningRouteLimit,
   offset = 0,
@@ -561,6 +600,27 @@ function parseTaskObjectEnvelope(value: unknown): PlanningObjectEnvelope<Plannin
     sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.task.sourceStatus"),
     lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.task.lastSyncedAt"),
     staleAfter: nullableTimestamp(envelope.staleAfter, "planning.task.staleAfter")
+  };
+}
+
+function parseEventObjectEnvelope(value: unknown): PlanningEventObjectEnvelope {
+  const envelope = record(value, "planning event object envelope");
+  exactKeys(
+    envelope,
+    ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"],
+    "planning event object envelope"
+  );
+  if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "object" || envelope.domain !== "calendar_event") {
+    throw new PlanningReadError("planning event object envelope schema is invalid", "contract");
+  }
+  return {
+    schemaVersion: "planning.panel.v1",
+    kind: "object",
+    domain: "calendar_event",
+    object: parseCalendarEvent(envelope.object),
+    sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.event.sourceStatus"),
+    lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.event.lastSyncedAt"),
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.event.staleAfter")
   };
 }
 
@@ -673,6 +733,8 @@ export async function previewPlanningReminder(
 
 /** Shared canonical parser preview for task create/edit; the endpoint remains one fixed read surface. */
 export const previewPlanningTask = previewPlanningReminder;
+/** Shared canonical parser preview for Calendar event create/edit. */
+export const previewPlanningEvent = previewPlanningReminder;
 
 function mutationPath(request: PlanningReminderMutationRequest): string {
   if (request.action === "create") return "/api/v1/planning/reminders";
@@ -1006,6 +1068,143 @@ export async function mutatePlanningTask(request: PlanningTaskMutationRequest): 
   }
 }
 
+export type PlanningEventMutationAction = "create" | "edit" | "delete";
+
+export interface PlanningEventMutationRequest {
+  action: PlanningEventMutationAction;
+  idempotencyKey: string;
+  eventId?: string;
+  expectedVersion?: number;
+  body: {
+    title?: string;
+    notes?: string | null;
+    location?: string | null;
+    all_day?: boolean;
+    timezone?: string;
+    start_at_utc?: string | null;
+    end_at_utc?: string | null;
+    start_date?: string | null;
+    end_date_exclusive?: string | null;
+  };
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+function eventMutationPath(request: PlanningEventMutationRequest): string {
+  if (request.action === "create") return "/api/v1/planning/events";
+  if (!request.eventId || !uuid4Pattern.test(request.eventId)) {
+    throw new PlanningMutationError("Calendar event target is invalid", "contract", 422);
+  }
+  return `/api/v1/planning/events/${request.eventId}`;
+}
+
+function eventReconciliationMatches(request: PlanningEventMutationRequest, object: PlanningCalendarEvent): boolean {
+  if (request.action === "delete") return Boolean(object.deletedAt) && object.version > (request.expectedVersion ?? 0);
+  if (request.action !== "edit" || object.version <= (request.expectedVersion ?? 0)) return false;
+  return (request.body.title === undefined || request.body.title === object.title)
+    && (request.body.all_day === undefined || request.body.all_day === object.allDay)
+    && (request.body.timezone === undefined || request.body.timezone === object.timezone)
+    && (request.body.start_at_utc === undefined || request.body.start_at_utc === object.startAtUtc)
+    && (request.body.end_at_utc === undefined || request.body.end_at_utc === object.endAtUtc)
+    && (request.body.start_date === undefined || request.body.start_date === object.startDate)
+    && (request.body.end_date_exclusive === undefined || request.body.end_date_exclusive === object.endDateExclusive)
+    && (request.body.notes === undefined || request.body.notes === object.notes)
+    && (request.body.location === undefined || request.body.location === object.location);
+}
+
+async function replayEventCreate(
+  request: PlanningEventMutationRequest,
+  path: string,
+  headers: Record<string, string>,
+  body: string,
+  uncertain: PlanningMutationError
+): Promise<never> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    let response: Response;
+    try {
+      response = await mutationFetchAttempt(path, "POST", headers, body, request.signal, Math.min(request.timeoutMs ?? 10_000, 3_000));
+    } catch {
+      if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+      if (attempt + 1 < 2) continue;
+      throw uncertain;
+    }
+    if (response.ok) {
+      try {
+        const canonical = parseEventObjectEnvelope(await response.json());
+        throw new PlanningMutationError<PlanningCalendarEvent>("Create outcome confirmed by canonical replay", "uncertain", uncertain.status, canonical.object);
+      } catch (reason) {
+        if (reason instanceof PlanningMutationError) throw reason;
+        throw new PlanningMutationError("Planning mutation response is invalid", "contract", response.status);
+      }
+    }
+    const detail = await mutationResponseDetail(response);
+    if (detail === "planning_idempotency_conflict") throw new PlanningMutationError(detail, "conflict", response.status);
+    if (detail === "planning_idempotency_in_progress" || detail === "planning_mutation_uncertain") {
+      if (attempt + 1 < 2) {
+        await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 50));
+        continue;
+      }
+      throw uncertain;
+    }
+    throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
+  }
+  throw uncertain;
+}
+
+export async function mutatePlanningEvent(request: PlanningEventMutationRequest): Promise<PlanningEventObjectEnvelope> {
+  const path = eventMutationPath(request);
+  if (!request.idempotencyKey || request.idempotencyKey.length > 256 || [...request.idempotencyKey].some((character) => character.charCodeAt(0) < 32)) {
+    throw new PlanningMutationError("Idempotency key is invalid", "contract", 422);
+  }
+  if (request.action !== "create" && (!Number.isInteger(request.expectedVersion) || (request.expectedVersion ?? 0) < 1)) {
+    throw new PlanningMutationError("Expected calendar event version is invalid", "contract", 422);
+  }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Idempotency-Key": request.idempotencyKey
+  };
+  if (request.action !== "create") headers["If-Match"] = String(request.expectedVersion);
+  const body = JSON.stringify(request.action === "delete" ? {} : request.body);
+  const method: "POST" | "PATCH" | "DELETE" = request.action === "create"
+    ? "POST"
+    : request.action === "edit" ? "PATCH" : "DELETE";
+  const reconcileUncertain = async (uncertain: PlanningMutationError): Promise<never> => {
+    if (request.action === "create") return replayEventCreate(request, path, headers, body, uncertain);
+    if (request.eventId) {
+      try {
+        const reconciled = await readPlanningEventById(request.eventId, request.signal);
+        if (eventReconciliationMatches(request, reconciled)) {
+          throw new PlanningMutationError<PlanningCalendarEvent>("Mutation outcome confirmed by canonical readback", "uncertain", uncertain.status, reconciled);
+        }
+      } catch (reconcileReason) {
+        if (reconcileReason instanceof PlanningMutationError) throw reconcileReason;
+      }
+    }
+    throw uncertain;
+  };
+  try {
+    const response = await mutationFetchAttempt(path, method, headers, body, request.signal, request.timeoutMs ?? 10_000);
+    if (!response.ok) {
+      const detail = await mutationResponseDetail(response);
+      throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
+    }
+    try {
+      return parseEventObjectEnvelope(await response.json());
+    } catch (reason) {
+      if (reason instanceof PlanningReadError) throw new PlanningMutationError(reason.message, "contract", response.status);
+      throw new PlanningMutationError("Planning event mutation response is invalid", "contract", response.status);
+    }
+  } catch (reason) {
+    if (reason instanceof PlanningMutationError) {
+      if (reason.mutationCode === "uncertain") return reconcileUncertain(reason);
+      throw reason;
+    }
+    if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    return reconcileUncertain(new PlanningMutationError("Planning mutation outcome is uncertain", "uncertain"));
+  }
+}
+
 export interface PlanningReadState<T> {
   loading: boolean;
   data: PlanningReadEnvelope<T> | null;
@@ -1060,5 +1259,6 @@ export const planningReadParsers = {
   parseEnvelope,
   parseObjectEnvelope,
   parseTaskObjectEnvelope,
+  parseEventObjectEnvelope,
   parseParsePreview
 };

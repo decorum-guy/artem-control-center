@@ -20,7 +20,10 @@ from pydantic import ValidationError
 from .planning import (
     CalendarEventProjection,
     EventListEnvelope,
+    EventObjectEnvelope,
+    PlanningCalendarIdentity,
     PlanningConflict,
+    PlanningEventObjectEnvelope,
     PlanningCapabilities,
     PlanningObjectEnvelope,
     PlanningTaskObjectEnvelope,
@@ -74,6 +77,9 @@ PLANNING_MUTATION_ROUTES: Mapping[str, str] = {
     "edit_task": "/internal/planning/v1/tasks/{task_id}",
     "complete_task": "/internal/planning/v1/tasks/{task_id}/complete",
     "archive_task": "/internal/planning/v1/tasks/{task_id}",
+    "create_event": "/internal/planning/v1/events",
+    "edit_event": "/internal/planning/v1/events/{event_id}",
+    "delete_event": "/internal/planning/v1/events/{event_id}",
 }
 PLANNING_MUTATION_METHODS: Mapping[str, str] = {
     "create_reminder": "POST",
@@ -84,8 +90,12 @@ PLANNING_MUTATION_METHODS: Mapping[str, str] = {
     "edit_task": "PATCH",
     "complete_task": "POST",
     "archive_task": "DELETE",
+    "create_event": "POST",
+    "edit_event": "PATCH",
+    "delete_event": "DELETE",
 }
 PLANNING_TASK_READ_ROUTE = "/internal/planning/v1/tasks/{task_id}"
+PLANNING_EVENT_READ_ROUTE = "/internal/planning/v1/events/{event_id}"
 PLANNING_AUDIENCE = "panel-agent"
 PLANNING_PAGE_LIMIT = 20
 PLANNING_MAX_UPSTREAM_PAGE = 100
@@ -262,6 +272,12 @@ class PlanningClient:
         )
         payload = await self._get_json("events", params)
         return _validate_envelope(EventListEnvelope, payload)
+
+    async def get_event(self, event_id: str) -> EventObjectEnvelope:
+        validate_uuid4(event_id, "planning.calendar_event_id")
+        path = PLANNING_EVENT_READ_ROUTE.replace("{event_id}", event_id)
+        payload = await self._request_json("GET", path, expected_status={200})
+        return _validate_envelope(EventObjectEnvelope, payload)
 
     async def projects(
         self,
@@ -447,6 +463,58 @@ class PlanningClient:
             idempotency_key=idempotency_key,
         )
 
+    async def create_event(
+        self,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> EventObjectEnvelope:
+        _validate_event_create_body(body)
+        payload = await self._mutation_json(
+            "create_event",
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        return _validate_envelope(EventObjectEnvelope, payload)
+
+    async def edit_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> EventObjectEnvelope:
+        validate_uuid4(event_id, "planning.calendar_event_id")
+        _validate_expected_version(expected_version)
+        _validate_event_patch_body(body)
+        payload = await self._mutation_json(
+            "edit_event",
+            event_id=event_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        return _validate_envelope(EventObjectEnvelope, payload)
+
+    async def delete_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> EventObjectEnvelope:
+        validate_uuid4(event_id, "planning.calendar_event_id")
+        _validate_expected_version(expected_version)
+        payload = await self._mutation_json(
+            "delete_event",
+            event_id=event_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body={},
+        )
+        return _validate_envelope(EventObjectEnvelope, payload)
+
     async def _action_task(
         self,
         route_name: Literal["complete_task", "archive_task"],
@@ -493,6 +561,7 @@ class PlanningClient:
         body: Mapping[str, Any],
         reminder_id: str | None = None,
         task_id: str | None = None,
+        event_id: str | None = None,
         expected_version: int | None = None,
     ) -> dict[str, Any]:
         path = PLANNING_MUTATION_ROUTES.get(route_name)
@@ -507,6 +576,10 @@ class PlanningClient:
             if task_id is None:
                 raise PlanningUpstreamError("mutation_target_missing")
             path = path.replace("{task_id}", task_id)
+        if "{event_id}" in path:
+            if event_id is None:
+                raise PlanningUpstreamError("mutation_target_missing")
+            path = path.replace("{event_id}", event_id)
         method = PLANNING_MUTATION_METHODS.get(route_name)
         if method is None:
             raise PlanningUpstreamError("route_not_allowlisted")
@@ -607,7 +680,7 @@ def _upstream_error_category(raw: bytes, status_code: int, *, mutation: bool) ->
         code = payload.get("error", {}).get("code") if isinstance(payload, dict) else None
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError, AttributeError):
         code = None
-    if code in {"version_conflict", "idempotency_conflict", "idempotency_in_progress", "not_found", "validation_error"}:
+    if code in {"version_conflict", "idempotency_conflict", "idempotency_in_progress", "not_found", "validation_error", "event_not_local_only"}:
         return str(code)
     return "http_error"
 
@@ -700,6 +773,88 @@ def _validate_task_optional_fields(
         raise PlanningUpstreamError(category)
 
 
+def _validate_event_create_body(body: Mapping[str, Any]) -> None:
+    allowed = {
+        "title", "notes", "location", "all_day", "timezone",
+        "start_at_utc", "end_at_utc", "start_date", "end_date_exclusive",
+    }
+    if not body or set(body) - allowed:
+        raise PlanningUpstreamError("event_create_invalid")
+    if not isinstance(body.get("title"), str) or not body["title"].strip() or len(body["title"]) > 500:
+        raise PlanningUpstreamError("event_create_invalid")
+    if not isinstance(body.get("all_day"), bool) or not isinstance(body.get("timezone"), str):
+        raise PlanningUpstreamError("event_create_invalid")
+    _validate_event_shape(body, category="event_create_invalid", require_shape=True)
+
+
+def _validate_event_patch_body(body: Mapping[str, Any]) -> None:
+    allowed = {
+        "title", "notes", "location", "all_day", "timezone",
+        "start_at_utc", "end_at_utc", "start_date", "end_date_exclusive",
+    }
+    if not body or set(body) - allowed:
+        raise PlanningUpstreamError("event_patch_invalid")
+    if "title" in body and (not isinstance(body["title"], str) or not body["title"].strip() or len(body["title"]) > 500):
+        raise PlanningUpstreamError("event_patch_invalid")
+    if "notes" in body and body["notes"] is not None and (not isinstance(body["notes"], str) or len(body["notes"]) > 4000):
+        raise PlanningUpstreamError("event_patch_invalid")
+    if "location" in body and body["location"] is not None and (not isinstance(body["location"], str) or len(body["location"]) > 1000):
+        raise PlanningUpstreamError("event_patch_invalid")
+    if "all_day" in body and not isinstance(body["all_day"], bool):
+        raise PlanningUpstreamError("event_patch_invalid")
+    if "timezone" in body and (not isinstance(body["timezone"], str) or not body["timezone"] or len(body["timezone"]) > 64):
+        raise PlanningUpstreamError("event_patch_invalid")
+    _validate_event_shape(body, category="event_patch_invalid", require_shape=False)
+
+
+def _validate_event_shape(body: Mapping[str, Any], *, category: str, require_shape: bool) -> None:
+    temporal_fields = {"all_day", "timezone", "start_at_utc", "end_at_utc", "start_date", "end_date_exclusive"}
+    if not require_shape and not temporal_fields.intersection(body):
+        return
+    if require_shape and not temporal_fields <= set(body):
+        raise PlanningUpstreamError(category)
+    if not isinstance(body.get("all_day"), bool) or not isinstance(body.get("timezone"), str):
+        raise PlanningUpstreamError(category)
+    if body["all_day"]:
+        if body.get("start_date") is None or body.get("end_date_exclusive") is None:
+            raise PlanningUpstreamError(category)
+        if body.get("start_at_utc") is not None or body.get("end_at_utc") is not None:
+            raise PlanningUpstreamError(category)
+    else:
+        if body.get("start_at_utc") is None or body.get("end_at_utc") is None:
+            raise PlanningUpstreamError(category)
+        if body.get("start_date") is not None or body.get("end_date_exclusive") is not None:
+            raise PlanningUpstreamError(category)
+    for field in ("start_at_utc", "end_at_utc"):
+        if field in body and body[field] is not None:
+            try:
+                validate_utc_timestamp(body[field], f"planning.calendar_event.{field}")
+            except ValueError as exc:
+                raise PlanningUpstreamError(category) from exc
+    for field in ("start_date", "end_date_exclusive"):
+        if field in body and body[field] is not None:
+            try:
+                validate_date(body[field], f"planning.calendar_event.{field}")
+            except ValueError as exc:
+                raise PlanningUpstreamError(category) from exc
+
+
+def _event_identity(event: UpstreamCalendarEvent) -> PlanningCalendarIdentity:
+    """Return display-only identity without relaying provider-owned IDs."""
+
+    if event.provider_id is None and event.provider_calendar_id is None:
+        return PlanningCalendarIdentity(
+            providerId="local-planning",
+            providerLabel="Local Planning",
+            calendarId="local",
+            calendarLabel="Локальный",
+        )
+    return PlanningCalendarIdentity(
+        providerId=event.source,
+        providerLabel=source_label(event.source),
+        calendarId="external",
+        calendarLabel="Внешний календарь",
+    )
 def _fixed_list_query(
     values: Mapping[str, str | int | None],
     *,
@@ -841,6 +996,19 @@ class PlanningAdapter:
         if _status_is_degraded(self._last_status):
             return False
         return action in set(self._last_status.capabilities.tasks)
+
+    @property
+    def calendar_mutations_enabled(self) -> bool:
+        """The B4.3 writer gate is deliberately false unless explicitly enabled."""
+
+        return bool(getattr(self._settings, "panel_planning_calendar_mutations_enabled", False))
+
+    def calendar_mutation_allowed(self, action: Literal["create", "update", "delete"]) -> bool:
+        if not self.calendar_mutations_enabled or self._last_status is None:
+            return False
+        if _status_is_degraded(self._last_status):
+            return False
+        return action in set(self._last_status.capabilities.events)
 
     def set_on_change(self, callback: Callable[[], Awaitable[None]] | None) -> None:
         self._on_change = callback
@@ -1130,6 +1298,9 @@ class PlanningAdapter:
     async def read_task_by_id(self, *, task_id: str) -> PlanningTaskObjectEnvelope:
         return self._task_object_readback(await self._live_client().get_task(task_id))
 
+    async def read_event_by_id(self, *, event_id: str) -> PlanningEventObjectEnvelope:
+        return self._event_object_readback(await self._live_client().get_event(event_id))
+
     async def create_task(
         self,
         *,
@@ -1185,6 +1356,48 @@ class PlanningAdapter:
         return self._task_object_readback(
             await self._live_client().archive_task(
                 task_id=task_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    async def create_event(
+        self,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningEventObjectEnvelope:
+        return self._event_object_readback(
+            await self._live_client().create_event(idempotency_key=idempotency_key, body=body)
+        )
+
+    async def edit_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningEventObjectEnvelope:
+        return self._event_object_readback(
+            await self._live_client().edit_event(
+                event_id=event_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+                body=body,
+            )
+        )
+
+    async def delete_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> PlanningEventObjectEnvelope:
+        return self._event_object_readback(
+            await self._live_client().delete_event(
+                event_id=event_id,
                 expected_version=expected_version,
                 idempotency_key=idempotency_key,
             )
@@ -1663,14 +1876,19 @@ class PlanningAdapter:
                 version=item.version,
                 source=item.source,
                 sourceLabel=source_label(item.source),
+                calendarIdentity=_event_identity(item),
                 title=item.title,
+                notes=item.notes,
+                location=item.location,
                 allDay=item.all_day,
                 timezone=item.timezone,
                 syncState=item.sync_state,
+                localOnlyMutable=(item.sync_state == "local_only" and item.provider_id is None and item.provider_calendar_id is None),
                 startAtUtc=item.start_at_utc,
                 endAtUtc=item.end_at_utc,
                 startDate=item.start_date,
                 endDateExclusive=item.end_date_exclusive,
+                deletedAt=item.deleted_at,
                 createdAt=item.created_at,
                 updatedAt=item.updated_at,
             )
@@ -1762,6 +1980,11 @@ class PlanningAdapter:
                 "complete": "complete" in task_allowed,
                 "archive": "archive" in task_allowed,
             },
+            "calendar": {
+                "create": self.calendar_mutation_allowed("create"),
+                "edit": self.calendar_mutation_allowed("update"),
+                "delete": self.calendar_mutation_allowed("delete"),
+            },
         }
 
     @staticmethod
@@ -1799,6 +2022,33 @@ class PlanningAdapter:
             kind="object",
             domain="task",
             object=task,
+            sourceStatus="current",
+            lastSyncedAt=envelope.lastSyncedAt,
+            staleAfter=envelope.staleAfter,
+        )
+
+    @staticmethod
+    def _event_object_readback(envelope: EventObjectEnvelope) -> PlanningEventObjectEnvelope:
+        event = PlanningAdapter._map_events(
+            EventListEnvelope(
+                schemaVersion="planning.v1",
+                kind="list",
+                domain="calendar_event",
+                generatedAt=envelope.lastSyncedAt,
+                sourceStatus="current",
+                lastSyncedAt=envelope.lastSyncedAt,
+                staleAfter=envelope.staleAfter,
+                pagination={"limit": 1, "offset": 0, "count": 1, "has_more": False, "next_offset": None},
+                correlation_id=envelope.correlation_id,
+                items=[envelope.object],
+            ),
+            [],
+        )[0]
+        return PlanningEventObjectEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="object",
+            domain="calendar_event",
+            object=event,
             sourceStatus="current",
             lastSyncedAt=envelope.lastSyncedAt,
             staleAfter=envelope.staleAfter,

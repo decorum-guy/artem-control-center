@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  mutatePlanningEvent,
   mutatePlanningReminder,
   mutatePlanningTask,
   PlanningMutationError,
@@ -30,6 +31,45 @@ const task = {
   createdAt: "2026-08-12T09:00:00Z",
   updatedAt: "2026-08-12T09:00:00Z"
 };
+
+const calendarEvent = {
+  id: "00000000-0000-4000-8000-000000000601",
+  version: 2,
+  source: "panel-agent",
+  sourceLabel: "Panel Agent",
+  calendarIdentity: {
+    providerId: "local-planning",
+    providerLabel: "Local Planning",
+    calendarId: "local",
+    calendarLabel: "Локальный"
+  },
+  title: "Встреча",
+  notes: "Контекст",
+  location: "Переговорная",
+  allDay: false,
+  timezone: "Europe/Moscow",
+  syncState: "local_only",
+  localOnlyMutable: true,
+  startAtUtc: "2026-08-12T10:00:00Z",
+  endAtUtc: "2026-08-12T11:00:00Z",
+  startDate: null,
+  endDateExclusive: null,
+  deletedAt: null,
+  createdAt: "2026-08-12T09:00:00Z",
+  updatedAt: "2026-08-12T09:01:00Z"
+};
+
+function eventObjectEnvelope(object: Record<string, unknown> = calendarEvent) {
+  return {
+    schemaVersion: "planning.panel.v1",
+    kind: "object",
+    domain: "calendar_event",
+    object,
+    sourceStatus: "current",
+    lastSyncedAt: "2026-08-12T09:01:00Z",
+    staleAfter: "2026-08-12T09:06:00Z"
+  };
+}
 
 function envelope(overrides: Record<string, unknown> = {}) {
   return {
@@ -65,13 +105,17 @@ describe("fixed Planning read client", () => {
         calendarLabel: "Рабочий"
       },
       title: "Совещание",
+      notes: null,
+      location: null,
       allDay: false,
       timezone: "Europe/Moscow",
       syncState: "synced",
+      localOnlyMutable: false,
       startAtUtc: "2026-08-12T10:00:00Z",
       endAtUtc: "2026-08-12T11:00:00Z",
       startDate: null,
       endDateExclusive: null,
+      deletedAt: null,
       createdAt: "2026-08-12T09:00:00Z",
       updatedAt: "2026-08-12T09:00:00Z"
     });
@@ -445,6 +489,131 @@ describe("fixed Planning read client", () => {
     expect(String(input)).toBe("/api/v1/planning/tasks?limit=20&offset=20&view=today&projectId=00000000-0000-4000-8000-000000000601");
     expect(init).toMatchObject({ method: "GET", cache: "no-store" });
     expect(init).not.toHaveProperty("headers");
+  });
+
+  it("uses fixed Calendar create/edit/delete routes and preserves canonical shapes", async () => {
+    const created = { ...calendarEvent, version: 1 };
+    const edited = { ...calendarEvent, title: "Новая встреча", version: 2 };
+    const deleted = { ...edited, deletedAt: "2026-08-12T09:02:00Z", version: 3 };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(eventObjectEnvelope(created)), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(eventObjectEnvelope(edited)), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(eventObjectEnvelope(deleted)), { status: 200 }));
+
+    await mutatePlanningEvent({
+      action: "create",
+      idempotencyKey: "calendar-create-001",
+      body: {
+        title: "Встреча",
+        all_day: false,
+        timezone: "Europe/Moscow",
+        start_at_utc: "2026-08-12T10:00:00Z",
+        end_at_utc: "2026-08-12T11:00:00Z",
+        start_date: null,
+        end_date_exclusive: null
+      }
+    });
+    await mutatePlanningEvent({
+      action: "edit",
+      idempotencyKey: "calendar-edit-001",
+      eventId: calendarEvent.id,
+      expectedVersion: 1,
+      body: { title: "Новая встреча", all_day: false, timezone: "Europe/Moscow", start_at_utc: calendarEvent.startAtUtc, end_at_utc: calendarEvent.endAtUtc, start_date: null, end_date_exclusive: null }
+    });
+    await mutatePlanningEvent({
+      action: "delete",
+      idempotencyKey: "calendar-delete-001",
+      eventId: calendarEvent.id,
+      expectedVersion: 2,
+      body: {}
+    });
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/v1/planning/events",
+      `/api/v1/planning/events/${calendarEvent.id}`,
+      `/api/v1/planning/events/${calendarEvent.id}`
+    ]);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "PATCH" });
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "DELETE", body: "{}" });
+    expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({ "Idempotency-Key": "calendar-edit-001", "If-Match": "1" });
+    expect(fetchMock.mock.calls[2][1]?.headers).toMatchObject({ "Idempotency-Key": "calendar-delete-001", "If-Match": "2" });
+  });
+
+  it("replays an uncertain Calendar create with the exact same body and key", async () => {
+    const body = {
+      title: "Новая встреча",
+      all_day: false,
+      timezone: "Europe/Moscow",
+      start_at_utc: "2026-08-12T12:00:00Z",
+      end_at_utc: "2026-08-12T13:00:00Z",
+      start_date: null,
+      end_date_exclusive: null
+    };
+    const canonical = eventObjectEnvelope({ ...calendarEvent, title: body.title, version: 3 });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("create response lost"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(canonical), { status: 200 }));
+
+    await expect(mutatePlanningEvent({
+      action: "create",
+      idempotencyKey: "calendar-create-replay",
+      body
+    })).rejects.toMatchObject({
+      mutationCode: "uncertain",
+      reconciledObject: expect.objectContaining({ title: body.title })
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/planning/events");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/v1/planning/events");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST", body: JSON.stringify(body) });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "POST", body: JSON.stringify(body) });
+    expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>)["Idempotency-Key"]).toBe("calendar-create-replay");
+    expect((fetchMock.mock.calls[1][1]?.headers as Record<string, string>)["Idempotency-Key"]).toBe("calendar-create-replay");
+    expect(fetchMock.mock.calls[0][1]?.signal).not.toBe(fetchMock.mock.calls[1][1]?.signal);
+  });
+
+  it("reconciles Calendar edit and delete timeouts through read-by-ID", async () => {
+    const edited = { ...calendarEvent, title: "Moved outside range", version: 3, startAtUtc: "2026-08-20T10:00:00Z", endAtUtc: "2026-08-20T11:00:00Z" };
+    const tombstoned = { ...edited, deletedAt: "2026-08-12T09:03:00Z", version: 4 };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("edit response lost"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(eventObjectEnvelope(edited)), { status: 200 }))
+      .mockRejectedValueOnce(new Error("delete response lost"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(eventObjectEnvelope(tombstoned)), { status: 200 }));
+
+    await expect(mutatePlanningEvent({
+      action: "edit",
+      idempotencyKey: "calendar-edit-timeout",
+      eventId: calendarEvent.id,
+      expectedVersion: 2,
+      body: { title: "Moved outside range", all_day: false, timezone: "Europe/Moscow", start_at_utc: edited.startAtUtc, end_at_utc: edited.endAtUtc, start_date: null, end_date_exclusive: null }
+    })).rejects.toMatchObject({ mutationCode: "uncertain", reconciledObject: expect.objectContaining({ title: "Moved outside range" }) });
+
+    await expect(mutatePlanningEvent({
+      action: "delete",
+      idempotencyKey: "calendar-delete-timeout",
+      eventId: calendarEvent.id,
+      expectedVersion: 3,
+      body: {}
+    })).rejects.toMatchObject({ mutationCode: "uncertain", reconciledObject: expect.objectContaining({ deletedAt: "2026-08-12T09:03:00Z" }) });
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/v1/planning/events/${calendarEvent.id}`);
+    expect(fetchMock.mock.calls[3][0]).toBe(`/api/v1/planning/events/${calendarEvent.id}`);
+  });
+
+  it("keeps event_not_local_only deterministic and does not accept provider fields", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ detail: "event_not_local_only" }), { status: 409 }));
+    await expect(mutatePlanningEvent({
+      action: "edit",
+      idempotencyKey: "calendar-external-edit",
+      eventId: calendarEvent.id,
+      expectedVersion: 2,
+      body: { title: "Forbidden" }
+    })).rejects.toMatchObject({ mutationCode: "conflict", status: 409 });
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).not.toHaveProperty("provider_id");
+    expect(body).not.toHaveProperty("sync_state");
   });
 
   it("rejects wrong schema and unknown fields instead of rendering them", async () => {
