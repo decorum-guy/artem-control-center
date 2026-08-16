@@ -260,13 +260,32 @@ export interface PlanningCapabilities {
   calendar: PlanningCalendarCapabilities;
 }
 
+export type PlanningProviderFreshnessStatus = "current" | "stale" | "error" | "not_configured" | "disabled";
+
+export interface PlanningCalendarSourceCalendar {
+  id: string;
+  label: string;
+  color: string | null;
+  enabled: boolean;
+  status: PlanningProviderFreshnessStatus;
+  lastSyncedAt: string | null;
+  observedAt: string | null;
+}
+
+/** Browser-safe provider source projection; upstream account and transport identities are dropped. */
 export interface PlanningProviderStatus {
-  id: "native-planning";
-  label: "Local Planning";
-  status: "local_only" | "not_configured" | "degraded" | "offline";
+  id: string;
+  kind: "native" | "external";
+  provider: "local" | "icloud";
+  label: string;
+  status: PlanningProviderFreshnessStatus;
   configured: boolean;
   lastSyncedAt: string | null;
+  observedAt: string | null;
+  calendars: PlanningCalendarSourceCalendar[];
 }
+
+export type PlanningCalendarSource = PlanningProviderStatus;
 
 export interface PlanningSnapshot {
   schemaVersion: "planning.panel.v1";

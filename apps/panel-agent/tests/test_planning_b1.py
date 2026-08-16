@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -189,7 +190,17 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
             "delete": False,
         },
     }
-    assert projection.providerStatuses[0].status == "local_only"
+    assert projection.providerStatuses[0].model_dump() == {
+        "id": "native-planning",
+        "kind": "native",
+        "provider": "local",
+        "label": "Local Planning",
+        "status": "current",
+        "configured": True,
+        "lastSyncedAt": None,
+        "observedAt": "2026-08-12T09:00:00Z",
+        "calendars": [],
+    }
     assert all(len(getattr(projection.reminders, field)) <= 20 for field in ("upcoming", "overdue", "deliveryFailures"))
     assert all(len(getattr(projection.tasks, field)) <= 20 for field in ("today", "overdue", "upcoming", "projects"))
     assert all(len(getattr(projection.calendar, field)) <= 20 for field in ("today", "upcoming", "conflicts"))
@@ -451,6 +462,7 @@ def test_last_good_cache_survives_restart_without_current_label(tmp_path):
     assert projection is not None
     assert projection.sourceStatus == "stale"
     assert projection.tasks.today
+    assert all(source.status != "current" for source in projection.providerStatuses)
     contents = cache_path.read_text(encoding="utf-8")
     assert "synthetic-internal-secret" not in contents
     assert "synthetic-panel-agent-secret" not in contents
@@ -468,6 +480,38 @@ def test_cache_corruption_future_schema_and_size_fail_closed(tmp_path):
     assert cache.load() is None
     path.write_bytes(b"x" * (cache.max_bytes + 1))
     assert cache.load() is None
+
+
+def test_phase_b_migrates_legacy_native_provider_cache_shape(tmp_path):
+    path = tmp_path / "legacy-cache.json"
+    adapter = PlanningAdapter(
+        settings(tmp_path),
+        transport=RecordingFixtureTransport(),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+
+    async def exercise():
+        await adapter.start()
+        await adapter.close()
+
+    asyncio.run(exercise())
+    # The adapter wrote a Phase-B cache; replace only the legacy provider status
+    # with the exact pre-Phase-B shape to prove the narrow read migration.
+    source_path = tmp_path / "planning-cache.json"
+    raw = json.loads(source_path.read_text(encoding="utf-8"))
+    raw["projection"]["providerStatuses"] = [{
+        "id": "native-planning",
+        "label": "Local Planning",
+        "status": "local_only",
+        "configured": True,
+        "lastSyncedAt": "2026-08-12T09:00:00Z",
+    }]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    migrated = PlanningProjectionCache(path).load()
+    assert migrated is not None
+    assert migrated.providerStatuses[0].id == "native-planning"
+    assert migrated.providerStatuses[0].status == "current"
+    assert migrated.providerStatuses[0].calendars == []
 
 
 def test_snapshot_fingerprint_ignores_timestamps_but_emits_normal_revision_and_sse():

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type {
   PlanningCalendarEvent,
   PlanningCalendarIdentity,
+  PlanningCalendarSource,
+  PlanningProviderFreshnessStatus,
   PlanningProject,
   PlanningReminder,
   PlanningSource,
@@ -18,6 +20,7 @@ export interface PlanningReadEnvelope<T> {
   sourceStatus: PlanningSourceStatus;
   lastSyncedAt: string | null;
   staleAfter: string | null;
+  sources?: PlanningCalendarSource[];
   items: T[];
   limit: number;
   offset: number;
@@ -33,6 +36,7 @@ export interface PlanningObjectEnvelope<T> {
   sourceStatus: PlanningSourceStatus;
   lastSyncedAt: string | null;
   staleAfter: string | null;
+  sources?: PlanningCalendarSource[];
 }
 
 export interface PlanningEventObjectEnvelope {
@@ -43,6 +47,7 @@ export interface PlanningEventObjectEnvelope {
   sourceStatus: PlanningSourceStatus;
   lastSyncedAt: string | null;
   staleAfter: string | null;
+  sources?: PlanningCalendarSource[];
 }
 
 export interface PlanningParsePreview {
@@ -125,6 +130,13 @@ const eventSyncValues = new Set<PlanningCalendarEvent["syncState"]>([
   "stale",
   "conflict",
   "error"
+]);
+const providerFreshnessValues = new Set<PlanningProviderFreshnessStatus>([
+  "current",
+  "stale",
+  "error",
+  "not_configured",
+  "disabled"
 ]);
 
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
@@ -244,6 +256,79 @@ function parseCalendarIdentity(value: unknown): PlanningCalendarIdentity {
     calendarId: canonicalIdentityValue(identity.calendarId, "planning.calendar_event.calendarIdentity.calendarId"),
     calendarLabel: stringValue(identity.calendarLabel, "planning.calendar_event.calendarIdentity.calendarLabel", 1, 160)
   };
+}
+
+function parsePlanningSourceCalendar(value: unknown, index: number): PlanningCalendarSource["calendars"][number] {
+  const calendar = record(value, `planning.sources[${index}].calendars[]`);
+  exactKeys(
+    calendar,
+    ["id", "label", "color", "enabled", "status", "lastSyncedAt", "observedAt"],
+    `planning.sources[${index}].calendar`
+  );
+  const color = calendar.color === null
+    ? null
+    : stringValue(calendar.color, `planning.sources[${index}].calendar.color`, 7, 9);
+  if (color !== null && !/^#[0-9A-Fa-f]{6,8}$/.test(color)) {
+    throw new PlanningReadError(`planning.sources[${index}].calendar.color is invalid`, "contract");
+  }
+  return {
+    id: canonicalIdentityValue(calendar.id, `planning.sources[${index}].calendar.id`),
+    label: stringValue(calendar.label, `planning.sources[${index}].calendar.label`, 1, 220),
+    color,
+    enabled: booleanValue(calendar.enabled, `planning.sources[${index}].calendar.enabled`),
+    status: enumValue(calendar.status, providerFreshnessValues, `planning.sources[${index}].calendar.status`),
+    lastSyncedAt: nullableTimestamp(calendar.lastSyncedAt, `planning.sources[${index}].calendar.lastSyncedAt`),
+    observedAt: nullableTimestamp(calendar.observedAt, `planning.sources[${index}].calendar.observedAt`)
+  };
+}
+
+function parsePlanningSource(value: unknown, index: number): PlanningCalendarSource {
+  const source = record(value, `planning.sources[${index}]`);
+  exactKeys(
+    source,
+    ["id", "kind", "provider", "label", "status", "configured", "lastSyncedAt", "observedAt", "calendars"],
+    `planning.sources[${index}]`
+  );
+  if (!Array.isArray(source.calendars) || source.calendars.length > 32) {
+    throw new PlanningReadError(`planning.sources[${index}].calendars is invalid`, "contract");
+  }
+  const kind = enumValue(source.kind, new Set<PlanningCalendarSource["kind"]>(["native", "external"]), `planning.sources[${index}].kind`);
+  const provider = enumValue(source.provider, new Set<PlanningCalendarSource["provider"]>(["local", "icloud"]), `planning.sources[${index}].provider`);
+  const parsed: PlanningCalendarSource = {
+    id: canonicalIdentityValue(source.id, `planning.sources[${index}].id`),
+    kind,
+    provider,
+    label: stringValue(source.label, `planning.sources[${index}].label`, 1, 128),
+    status: enumValue(source.status, providerFreshnessValues, `planning.sources[${index}].status`),
+    configured: booleanValue(source.configured, `planning.sources[${index}].configured`),
+    lastSyncedAt: nullableTimestamp(source.lastSyncedAt, `planning.sources[${index}].lastSyncedAt`),
+    observedAt: nullableTimestamp(source.observedAt, `planning.sources[${index}].observedAt`),
+    calendars: source.calendars.map((calendar, calendarIndex) => parsePlanningSourceCalendar(calendar, calendarIndex))
+  };
+  if (parsed.kind === "native" && (parsed.id !== "native-planning" || parsed.provider !== "local" || parsed.calendars.length > 0)) {
+    throw new PlanningReadError(`planning.sources[${index}] native shape is invalid`, "contract");
+  }
+  if (parsed.kind === "external" && parsed.provider !== "icloud") {
+    throw new PlanningReadError(`planning.sources[${index}] external provider is invalid`, "contract");
+  }
+  return parsed;
+}
+
+export function parsePlanningSources(value: unknown): PlanningCalendarSource[] {
+  if (!Array.isArray(value) || value.length > 4) {
+    throw new PlanningReadError("planning.sources is invalid", "contract");
+  }
+  return value.map((source, index) => parsePlanningSource(source, index));
+}
+
+function optionalPlanningSources(value: Record<string, unknown>, label: string): PlanningCalendarSource[] | undefined {
+  if (!Object.prototype.hasOwnProperty.call(value, "sources")) return undefined;
+  try {
+    return parsePlanningSources(value.sources);
+  } catch (reason) {
+    if (reason instanceof PlanningReadError) throw reason;
+    throw new PlanningReadError(`${label}.sources is invalid`, "contract");
+  }
 }
 
 function nullableUuid(value: unknown, label: string): string | null {
@@ -372,9 +457,11 @@ function parseEnvelope<T>(
   parseItem: (value: unknown) => T
 ): PlanningReadEnvelope<T> {
   const envelope = record(value, "planning read envelope");
+  const expectedKeys = ["schemaVersion", "kind", "domain", "generatedAt", "sourceStatus", "lastSyncedAt", "staleAfter", "items", "limit", "offset", "count", "hasMore"];
+  if (Object.prototype.hasOwnProperty.call(envelope, "sources")) expectedKeys.push("sources");
   exactKeys(
     envelope,
-    ["schemaVersion", "kind", "domain", "generatedAt", "sourceStatus", "lastSyncedAt", "staleAfter", "items", "limit", "offset", "count", "hasMore"],
+    expectedKeys,
     "planning read envelope"
   );
   if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "list" || envelope.domain !== domain) {
@@ -391,6 +478,7 @@ function parseEnvelope<T>(
     sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.sourceStatus"),
     lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.lastSyncedAt"),
     staleAfter: nullableTimestamp(envelope.staleAfter, "planning.staleAfter"),
+    sources: optionalPlanningSources(envelope, "planning read envelope"),
     items: parsedItems,
     limit: integerValue(envelope.limit, "planning.limit", 1, 100),
     offset: integerValue(envelope.offset, "planning.offset", 0, 10_000),
@@ -563,9 +651,11 @@ export interface PlanningReminderMutationRequest {
 
 function parseObjectEnvelope(value: unknown): PlanningObjectEnvelope<PlanningReminder> {
   const envelope = record(value, "planning object envelope");
+  const expectedKeys = ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"];
+  if (Object.prototype.hasOwnProperty.call(envelope, "sources")) expectedKeys.push("sources");
   exactKeys(
     envelope,
-    ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"],
+    expectedKeys,
     "planning object envelope"
   );
   if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "object" || envelope.domain !== "reminder") {
@@ -578,15 +668,18 @@ function parseObjectEnvelope(value: unknown): PlanningObjectEnvelope<PlanningRem
     object: parseReminder(envelope.object),
     sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.object.sourceStatus"),
     lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.object.lastSyncedAt"),
-    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.object.staleAfter")
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.object.staleAfter"),
+    sources: optionalPlanningSources(envelope, "planning object envelope")
   };
 }
 
 function parseTaskObjectEnvelope(value: unknown): PlanningObjectEnvelope<PlanningTask> {
   const envelope = record(value, "planning task object envelope");
+  const expectedKeys = ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"];
+  if (Object.prototype.hasOwnProperty.call(envelope, "sources")) expectedKeys.push("sources");
   exactKeys(
     envelope,
-    ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"],
+    expectedKeys,
     "planning task object envelope"
   );
   if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "object" || envelope.domain !== "task") {
@@ -599,15 +692,18 @@ function parseTaskObjectEnvelope(value: unknown): PlanningObjectEnvelope<Plannin
     object: parseTask(envelope.object),
     sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.task.sourceStatus"),
     lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.task.lastSyncedAt"),
-    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.task.staleAfter")
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.task.staleAfter"),
+    sources: optionalPlanningSources(envelope, "planning task object envelope")
   };
 }
 
 function parseEventObjectEnvelope(value: unknown): PlanningEventObjectEnvelope {
   const envelope = record(value, "planning event object envelope");
+  const expectedKeys = ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"];
+  if (Object.prototype.hasOwnProperty.call(envelope, "sources")) expectedKeys.push("sources");
   exactKeys(
     envelope,
-    ["schemaVersion", "kind", "domain", "object", "sourceStatus", "lastSyncedAt", "staleAfter"],
+    expectedKeys,
     "planning event object envelope"
   );
   if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "object" || envelope.domain !== "calendar_event") {
@@ -620,7 +716,8 @@ function parseEventObjectEnvelope(value: unknown): PlanningEventObjectEnvelope {
     object: parseCalendarEvent(envelope.object),
     sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning.event.sourceStatus"),
     lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning.event.lastSyncedAt"),
-    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.event.staleAfter")
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning.event.staleAfter"),
+    sources: optionalPlanningSources(envelope, "planning event object envelope")
   };
 }
 
@@ -1256,6 +1353,7 @@ export const planningReadParsers = {
   parseTask,
   parseCalendarEvent,
   parseProject,
+  parsePlanningSources,
   parseEnvelope,
   parseObjectEnvelope,
   parseTaskObjectEnvelope,

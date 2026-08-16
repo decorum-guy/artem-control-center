@@ -89,9 +89,123 @@ function envelope(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const phaseBSource = {
+  id: "external-icloud-0123456789abcdef01234567",
+  kind: "external",
+  provider: "icloud",
+  label: "iCloud",
+  status: "current",
+  configured: true,
+  lastSyncedAt: "2026-08-12T09:00:00Z",
+  observedAt: "2026-08-12T09:01:00Z",
+  calendars: [
+    {
+      id: "calendar-0123456789abcdef01234567",
+      label: "Работа",
+      color: "#4477AA",
+      enabled: true,
+      status: "current",
+      lastSyncedAt: "2026-08-12T09:00:00Z",
+      observedAt: "2026-08-12T09:01:00Z"
+    }
+  ]
+} as const;
+
+const nativePhaseBSource = {
+  id: "native-planning",
+  kind: "native",
+  provider: "local",
+  label: "Local Planning",
+  status: "current",
+  configured: true,
+  lastSyncedAt: "2026-08-12T09:00:00Z",
+  observedAt: "2026-08-12T09:01:00Z",
+  calendars: []
+} as const;
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("fixed Planning read client", () => {
+  it("keeps old Alice envelopes without sources compatible and accepts strict new sources", () => {
+    expect(planningReadParsers.parseEnvelope(envelope(), "task", (value) => value).sources).toBeUndefined();
+    const parsed = planningReadParsers.parseEnvelope(
+      envelope({
+        domain: "calendar_event",
+        items: [calendarEvent],
+        sources: [nativePhaseBSource, phaseBSource]
+      }),
+      "calendar_event",
+      (value) => value
+    );
+    expect(parsed.sources).toEqual([nativePhaseBSource, phaseBSource]);
+  });
+
+  it("parses source metadata on object responses without exposing upstream identity fields", () => {
+    const sources = [nativePhaseBSource, phaseBSource];
+    const parsed = planningReadParsers.parseObjectEnvelope({
+      schemaVersion: "planning.panel.v1",
+      kind: "object",
+      domain: "reminder",
+      object: {
+        id: "00000000-0000-4000-8000-000000000001",
+        version: 1,
+        source: "alice",
+        sourceLabel: "AliceTG Bot",
+        title: "Напоминание",
+        dueAtUtc: "2026-08-13T12:00:00Z",
+        timezone: "Europe/Moscow",
+        status: "pending",
+        deliveryState: "not_due",
+        createdAt: "2026-08-12T09:00:00Z",
+        updatedAt: "2026-08-12T09:00:00Z"
+      },
+      sourceStatus: "current",
+      lastSyncedAt: "2026-08-12T09:00:00Z",
+      staleAfter: "2026-08-12T09:05:00Z",
+      sources
+    });
+    expect(parsed.sources?.[1]).toEqual(phaseBSource);
+
+    const taskReadback = planningReadParsers.parseTaskObjectEnvelope({
+      ...eventObjectEnvelope(task),
+      domain: "task",
+      object: task,
+      sources
+    });
+    expect(taskReadback.sources?.[1].provider).toBe("icloud");
+
+    const eventReadback = planningReadParsers.parseEventObjectEnvelope({
+      ...eventObjectEnvelope(),
+      sources
+    });
+    expect(eventReadback.sources?.[1].calendars[0].label).toBe("Работа");
+
+    expect(JSON.stringify(parsed)).not.toContain("accountId");
+    expect(JSON.stringify(parsed)).not.toContain("resource_ref");
+    expect(JSON.stringify(parsed)).not.toContain("href");
+  });
+
+  it("fails closed on malformed source metadata and bounds its lists", () => {
+    expect(() => planningReadParsers.parsePlanningSources([{ ...phaseBSource, kind: "provider" }])).toThrowError(PlanningReadError);
+    expect(() => planningReadParsers.parsePlanningSources([{ ...phaseBSource, status: "offline" }])).toThrowError(PlanningReadError);
+    expect(() => planningReadParsers.parsePlanningSources([{ ...phaseBSource, observedAt: "2026-08-12T09:00:00+03:00" }])).toThrowError(PlanningReadError);
+    expect(() => planningReadParsers.parsePlanningSources([{ ...phaseBSource, accountId: "private" }])).toThrowError(PlanningReadError);
+    expect(() => planningReadParsers.parsePlanningSources([{ ...phaseBSource, calendars: [{ ...phaseBSource.calendars[0], href: "/private" }] }])).toThrowError(PlanningReadError);
+    expect(() => planningReadParsers.parsePlanningSources(Array.from({ length: 5 }, () => nativePhaseBSource))).toThrowError(PlanningReadError);
+    expect(() => planningReadParsers.parsePlanningSources([{ ...phaseBSource, calendars: Array.from({ length: 33 }, () => phaseBSource.calendars[0]) }])).toThrowError(PlanningReadError);
+  });
+
+  it("accepts stale, error, disabled and not-configured source states", () => {
+    for (const status of ["stale", "error", "disabled", "not_configured"] as const) {
+      const parsed = planningReadParsers.parsePlanningSources([{
+        ...phaseBSource,
+        status,
+        calendars: [{ ...phaseBSource.calendars[0], status }]
+      }]);
+      expect(parsed[0].status).toBe(status);
+    }
+  });
+
   it("accepts only bounded frontend-safe calendar identity fields", () => {
     const event = planningReadParsers.parseCalendarEvent({
       id: "00000000-0000-4000-8000-000000000601",

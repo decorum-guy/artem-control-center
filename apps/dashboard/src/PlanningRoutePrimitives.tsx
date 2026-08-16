@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import type { PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
+import type { PlanningCalendarSource, PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
 import type { PlanningReadEnvelope, PlanningReadError } from "./planningReadClient";
 import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
 import { Sheet } from "./Sheet";
@@ -29,6 +29,7 @@ export function previewEnvelope<T>(
     sourceStatus: planning.sourceStatus,
     lastSyncedAt: planning.lastSyncedAt,
     staleAfter: planning.staleAfter,
+    sources: planning.providerStatuses,
     items: items.slice(0, limit),
     limit,
     offset: 0,
@@ -44,6 +45,7 @@ export function PlanningRouteFrame({
   description,
   sourceStatus,
   lastSyncedAt,
+  sources,
   error,
   preview,
   onRetry,
@@ -57,6 +59,7 @@ export function PlanningRouteFrame({
   description: string;
   sourceStatus: PlanningSourceStatus | "unavailable";
   lastSyncedAt: string | null;
+  sources?: PlanningCalendarSource[];
   error?: PlanningReadError | null;
   preview?: boolean;
   onRetry: () => void;
@@ -84,8 +87,42 @@ export function PlanningRouteFrame({
         preview={preview}
         onRetry={onRetry}
       />
+      {sources && <PlanningSourceStrip sources={sources} />}
       <div className="planning-route-workzone">{children}</div>
     </div>
+  );
+}
+
+function sourceStatusLabel(status: PlanningCalendarSource["status"]): string {
+  return {
+    current: "актуально",
+    stale: "сохранённая копия",
+    error: "недоступен",
+    disabled: "отключён",
+    not_configured: "не настроен"
+  }[status];
+}
+
+function PlanningSourceStrip({ sources }: { sources: PlanningCalendarSource[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <section className="planning-source-strip" data-testid="planning-source-strip" aria-label="Источники календаря">
+      <span className="planning-source-strip__label">Источники</span>
+      <div className="planning-source-strip__items">
+        {sources.map((source) => (
+          <span
+            className={`planning-source-strip__item planning-source-strip__item--${source.status}`}
+            data-testid="planning-source"
+            data-source-id={source.id}
+            key={source.id}
+          >
+            <strong>{source.label}</strong>
+            <span>{sourceStatusLabel(source.status)}</span>
+            {source.status === "stale" && source.lastSyncedAt && <span>· обновлено {syncTimeLabel(source.lastSyncedAt)}</span>}
+          </span>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -293,6 +293,26 @@ jobs:
           path: artifacts/b4-calendar-mutations-review
           if-no-files-found: error
 
+      - name: Run focused ISSUE #22 iCloud Calendar Phase B gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          B2_PLANNING_OVERVIEW_ENABLED: "true"
+          B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
+          VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED: "true"
+          ICLOUD_CALENDAR_PHASE_B_ARTIFACT_DIR: artifacts/icloud-calendar-phase-b-review
+        run: npm run test:e2e -- tests/e2e/icloud-calendar-phase-b.spec.ts
+
+      - name: Upload ISSUE #22 iCloud Calendar Phase B exact-head screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: icloud-calendar-phase-b-review-${{ github.sha }}
+          path: artifacts/icloud-calendar-phase-b-review
+          if-no-files-found: error
+
       - name: "Run focused #82 Full Access and touch lock gate"
         if: runner.os == 'Linux'
         env:
