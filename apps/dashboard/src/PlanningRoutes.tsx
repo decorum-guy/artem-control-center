@@ -68,6 +68,7 @@ import { calendarIdentityForEvent, calendarIdentityLabel } from "./planningIdent
 import { useNoticeCenter } from "./NoticeCenter";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
+import { useInteractionLock } from "./InteractionLock";
 import type { ActionConfirmationId } from "./actionConfirmationCatalog";
 import {
   taskMutationBodyFromPreview,
@@ -387,6 +388,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   const [retry, setRetry] = useState(0);
   const { showNotice } = useNoticeCenter();
   const { status: accessStatus, ensureCapability } = useAccess();
+  const { guardMutation } = useInteractionLock();
   const { confirmAction } = useActionConfirmation();
   const lifecyclePendingRef = useRef(false);
   const [lifecyclePending, setLifecyclePending] = useState(false);
@@ -451,9 +453,11 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   }
 
   async function submitMutation(body: TaskMutationBody): Promise<void> {
+    if (!guardMutation()) return;
     const action = mutationSheet === "create" ? "create" : "edit";
     const target = mutationSheet === "edit" ? selectedTask : null;
     if (!await ensureTaskCapability(action, action === "create" ? "Создать задачу" : "Изменить задачу")) return;
+    if (!guardMutation()) return;
     try {
       const result = await mutatePlanningTask({
         action,
@@ -496,7 +500,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   }
 
   async function runAction(action: "complete" | "archive"): Promise<void> {
-    if (!selectedTask || lifecyclePendingRef.current) return;
+    if (!guardMutation() || !selectedTask || lifecyclePendingRef.current) return;
     const target = selectedTask;
     lifecyclePendingRef.current = true;
     setLifecyclePending(true);
@@ -507,6 +511,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         revision: String(target.version)
       });
       if (!confirmation.confirmed) return;
+      if (!guardMutation()) return;
       const result = await mutatePlanningTask({
         action,
         idempotencyKey: newPlanningIdempotencyKey("panel-task"),
@@ -898,6 +903,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const [retry, setRetry] = useState(0);
   const [liveNow, setLiveNow] = useState(() => new Date());
   const { status: accessStatus, ensureCapability } = useAccess();
+  const { guardMutation } = useInteractionLock();
   const { confirmAction } = useActionConfirmation();
   const deletePendingRef = useRef(false);
   const { showNotice } = useNoticeCenter();
@@ -973,9 +979,11 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   }
 
   async function submitEventMutation(body: EventMutationBody): Promise<void> {
+    if (!guardMutation()) return;
     const action = mutationSheet === "create" ? "create" : "edit";
     const target = action === "edit" ? selectedEvent : null;
     if (!await ensureCalendarCapability(action, action === "create" ? "Создать событие" : "Изменить событие")) return;
+    if (!guardMutation()) return;
     setMutationPending(true);
     try {
       const result = await mutatePlanningEvent({
@@ -1022,7 +1030,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   }
 
   async function deleteEvent(): Promise<void> {
-    if (!selectedEvent || deletePendingRef.current || !canDelete) return;
+    if (!guardMutation() || !selectedEvent || deletePendingRef.current || !canDelete) return;
     const target = selectedEvent;
     deletePendingRef.current = true;
     setMutationPending(true);
@@ -1033,6 +1041,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         revision: String(target.version)
       });
       if (!confirmation.confirmed) return;
+      if (!guardMutation()) return;
       const result = await mutatePlanningEvent({
         action: "delete",
         idempotencyKey: newPlanningIdempotencyKey("panel-calendar"),
@@ -1394,6 +1403,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   const [retry, setRetry] = useState(0);
   const { showNotice } = useNoticeCenter();
   const { status: accessStatus, ensureCapability } = useAccess();
+  const { guardMutation } = useInteractionLock();
   const { confirmAction } = useActionConfirmation();
   const lifecyclePendingRef = useRef(false);
   const [lifecyclePending, setLifecyclePending] = useState(false);
@@ -1467,9 +1477,11 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   }
 
   async function submitMutation(body: { title: string; due_at_utc: string; timezone: string }): Promise<void> {
+    if (!guardMutation()) return;
     const action = mutationSheet === "create" ? "create" : "edit";
     const target = mutationSheet === "edit" ? selectedReminder : null;
     if (!await ensurePlanningCapability(action, action === "create" ? "Создать напоминание" : "Изменить напоминание")) return;
+    if (!guardMutation()) return;
     try {
       const result = await mutatePlanningReminder({
         action,
@@ -1512,7 +1524,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   }
 
   async function runAction(action: "complete" | "cancel"): Promise<void> {
-    if (!selectedReminder || lifecyclePendingRef.current) return;
+    if (!guardMutation() || !selectedReminder || lifecyclePendingRef.current) return;
     const target = selectedReminder;
     const reminderId = target.id;
     lifecyclePendingRef.current = true;
@@ -1524,6 +1536,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         revision: String(target.version)
       });
       if (!confirmation.confirmed) return;
+      if (!guardMutation()) return;
       const result = await mutatePlanningReminder({
         action,
         idempotencyKey: newPlanningIdempotencyKey(),

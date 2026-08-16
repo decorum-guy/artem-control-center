@@ -12,6 +12,7 @@ import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import type { ActionConfirmationId } from "./actionConfirmationCatalog";
 import { useNoticeCenter } from "./NoticeCenter";
+import { useInteractionLock } from "./InteractionLock";
 import {
   avalarActionTitles,
   fetchAvalarAvailability,
@@ -77,6 +78,7 @@ function confirmationIdFor(actionId: AvalarActionId): ActionConfirmationId | nul
 
 export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   const { ensureCapability, explainAvailability } = useAccess();
+  const { guardMutation } = useInteractionLock();
   const { confirmAction, confirmationOpen } = useActionConfirmation();
   const [availability, setAvailability] = useState<Record<AvalarActionId, AvalarActionAvailability> | null>(null);
   const [available, setAvailable] = useState(false);
@@ -126,6 +128,7 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   );
 
   const run = useCallback(async (service: ServiceSnapshot, actionId: AvalarActionId) => {
+    if (!guardMutation()) return;
     if (pendingAction || confirmationOpen) return;
     const actionTitle = avalarActionTitles[actionId];
     let decision = availability?.[actionId];
@@ -172,6 +175,7 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
       confirmationValue = result.confirmation;
     }
 
+    if (!guardMutation()) return;
     setPendingAction(actionId);
     showNotice({
       title: actionTitle,
@@ -223,6 +227,7 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
     confirmAction,
     ensureCapability,
     explainAvailability,
+    guardMutation,
     refresh,
     showNotice
   ]);

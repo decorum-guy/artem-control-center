@@ -8,6 +8,8 @@ import { WeatherProvider } from "./Weather";
 import { WeatherAutoRefresh } from "./WeatherAutoRefresh";
 import { App } from "./App";
 import { NoticeCenterProvider } from "./NoticeCenter";
+import { InteractionLockProvider } from "./InteractionLock";
+import "./InteractionLock.css";
 import "./ActionConfirmations.css";
 import "./AvalarActions.css";
 import "./ConnectivityActions.css";
@@ -24,18 +26,20 @@ import "./features/system/systemV2.css";
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <NoticeCenterProvider>
-      <ActionConfirmationProvider>
+      <InteractionLockProvider>
         <AccessProvider>
-          <WeatherProvider>
-            <WeatherAutoRefresh />
-            <ConnectivityActionsProvider>
-              <AvalarActionsProvider>
-                <App />
-              </AvalarActionsProvider>
-            </ConnectivityActionsProvider>
-          </WeatherProvider>
+          <ActionConfirmationProvider>
+            <WeatherProvider>
+              <WeatherAutoRefresh />
+              <ConnectivityActionsProvider>
+                <AvalarActionsProvider>
+                  <App />
+                </AvalarActionsProvider>
+              </ConnectivityActionsProvider>
+            </WeatherProvider>
+          </ActionConfirmationProvider>
         </AccessProvider>
-      </ActionConfirmationProvider>
+      </InteractionLockProvider>
     </NoticeCenterProvider>
   </StrictMode>
 );

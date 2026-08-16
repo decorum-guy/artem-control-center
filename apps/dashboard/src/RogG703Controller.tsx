@@ -3,6 +3,7 @@ import type { RogG703Data, ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { useNoticeCenter } from "./NoticeCenter";
+import { useInteractionLock } from "./InteractionLock";
 import {
   fetchRogG703Availability,
   ROG_G703_HIBERNATE_ACTION,
@@ -76,6 +77,7 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
   const { ensureCapability, explainAvailability } = useAccess();
   const { confirmAction, confirmationOpen } = useActionConfirmation();
   const { showNotice } = useNoticeCenter();
+  const { guardMutation } = useInteractionLock();
   const [availability, setAvailability] = useState<AvailabilityMap | null>(null);
   const [apiAvailable, setApiAvailable] = useState(false);
   const [pendingAction, setPendingAction] = useState<RogG703ActionId | null>(null);
@@ -131,6 +133,7 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
   }, [showNotice]);
 
   const run = useCallback(async (actionId: RogG703ActionId) => {
+    if (!guardMutation()) return;
     if (pendingAction || confirmationOpen) return;
 
     let decision = availability?.[actionId] ?? null;
@@ -160,6 +163,7 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
       if (!confirmation.confirmed) return;
     }
 
+    if (!guardMutation()) return;
     setPendingAction(actionId);
     setTransitionStatus(actionId === ROG_G703_WAKE_ACTION ? "waking" : "hibernating");
     showActionNotice(
@@ -216,7 +220,7 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
     } finally {
       setPendingAction(null);
     }
-  }, [actionTitles, availability, confirmAction, confirmationOpen, ensureCapability, explainAvailability, pendingAction, refresh, showActionNotice]);
+  }, [actionTitles, availability, confirmAction, confirmationOpen, ensureCapability, explainAvailability, guardMutation, pendingAction, refresh, showActionNotice]);
 
   const canUse = useCallback((actionId: RogG703ActionId) => {
     const decision = availability?.[actionId];

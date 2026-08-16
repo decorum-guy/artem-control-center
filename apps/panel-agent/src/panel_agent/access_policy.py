@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 AccessProfile = Literal["read_only", "standard", "full"]
+ConfirmationMode = Literal["profile_default", "manual_persistent_full", "temporary_full"]
 Availability = Literal[
     "allowed",
     "elevation_required",
@@ -103,6 +104,25 @@ class CapabilityDecision:
             "effectiveProfile": self.effective_profile,
             "allowed": self.allowed,
             "availability": self.availability,
+        }
+
+
+@dataclass(frozen=True)
+class ConfirmationPolicy:
+    """Server-owned human-confirmation semantics for registered actions.
+
+    This is deliberately separate from capability authorization.  Manual
+    persistent Full represents trusted-owner intent and waives only the
+    redundant UI/phrase ceremony; it does not grant a capability.
+    """
+
+    action_confirmation_required: bool
+    mode: ConfirmationMode
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "actionConfirmationRequired": self.action_confirmation_required,
+            "mode": self.mode,
         }
 
 
@@ -232,10 +252,20 @@ class AccessPolicyStore:
                 return "full"
             return self.base_profile
 
+    def confirmation_policy(self) -> ConfirmationPolicy:
+        """Derive confirmation semantics from trusted persisted policy state."""
+        with self._lock:
+            if self.base_profile == "full":
+                return ConfirmationPolicy(False, "manual_persistent_full")
+            if self.base_profile == "standard" and self._temporary_expiry() is not None:
+                return ConfirmationPolicy(True, "temporary_full")
+            return ConfirmationPolicy(True, "profile_default")
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             expiry = self._temporary_expiry()
             effective = self.effective_profile()
+            confirmation_policy = self.confirmation_policy()
             return {
                 "schemaVersion": 1,
                 "revision": int(self._state.get("revision", 0)),
@@ -245,6 +275,7 @@ class AccessPolicyStore:
                 "temporaryFullExpiresAt": iso(expiry),
                 "pinConfigured": self.pin_configured,
                 "lockoutUntil": iso(self._active_lockout()),
+                "confirmationPolicy": confirmation_policy.as_dict(),
                 "capabilities": {
                     capability: self.authorize(capability).as_dict()
                     for capability in CAPABILITIES

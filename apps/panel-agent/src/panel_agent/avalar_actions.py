@@ -201,9 +201,10 @@ class AvalarActionExecutor:
                 and self.cooldowns[action_id] > _now()
             ),
         )
-        if action_id == "avalar.main.restart" and request.confirmation != "RESTART MAIN":
+        requires_confirmation = self.access.confirmation_policy().action_confirmation_required
+        if requires_confirmation and action_id == "avalar.main.restart" and request.confirmation != "RESTART MAIN":
             raise HTTPException(status_code=409, detail="main_restart_confirmation_required")
-        if action_id == "avalar.main.deploy" and request.confirmation != "DEPLOY MAIN":
+        if requires_confirmation and action_id == "avalar.main.deploy" and request.confirmation != "DEPLOY MAIN":
             raise HTTPException(status_code=409, detail="main_deploy_confirmation_required")
 
         details = self.details_provider.details_for(descriptor["service_id"])

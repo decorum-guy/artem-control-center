@@ -17,6 +17,7 @@ import {
   type ConnectivityActionStatus
 } from "./connectivityApi";
 import { useNoticeCenter } from "./NoticeCenter";
+import { useInteractionLock } from "./InteractionLock";
 
 interface ConnectivityActionsContextValue {
   available: boolean;
@@ -49,6 +50,7 @@ export function ConnectivityActionsProvider({ children }: { children: ReactNode 
   const [availability, setAvailability] = useState<ConnectivityActionAvailability | null>(null);
   const [available, setAvailable] = useState(false);
   const [pending, setPending] = useState(false);
+  const { guardMutation } = useInteractionLock();
   const { showNotice: pushNotice } = useNoticeCenter();
   const showNotice = useCallback((next: ConnectivityNotice, timeoutMs?: number) => {
     pushNotice({
@@ -82,9 +84,11 @@ export function ConnectivityActionsProvider({ children }: { children: ReactNode 
   }, [refresh]);
 
   const run = useCallback(async () => {
+    if (!guardMutation()) return;
     if (pending) return;
     const decision = availability ?? await refresh();
     if (!decision?.allowed) return;
+    if (!guardMutation()) return;
 
     setPending(true);
     showNotice({
@@ -136,7 +140,7 @@ export function ConnectivityActionsProvider({ children }: { children: ReactNode 
       setPending(false);
       await refresh();
     }
-  }, [availability, pending, refresh, showNotice]);
+  }, [availability, guardMutation, pending, refresh, showNotice]);
 
   const value = useMemo<ConnectivityActionsContextValue>(() => ({
     available,

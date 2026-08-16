@@ -112,22 +112,42 @@ def test_full_only_action_requires_elevation_and_keeps_environments_separate(tmp
     asyncio.run(scenario())
 
 
-def test_main_restart_needs_strong_confirmation_and_main_deploy_gate(tmp_path):
+def test_main_restart_confirmation_is_required_for_temporary_full_but_waived_for_manual_full(tmp_path):
     async def scenario() -> None:
         access = AccessPolicyStore(tmp_path / "policy.json")
         access.set_pin("1357")
-        access.set_profile("full", pin="1357")
+        access.set_profile("standard")
 
-        async def unused_runner(_: str):
-            raise AssertionError("disabled action must never reach the runner")
+        async def command_runner(operation: str):
+            return {
+                "ok": True,
+                "operation": operation,
+                "environment": "production",
+                "status": "verified",
+            }
 
         executor = AvalarActionExecutor(
             settings(),
             access,
             details_provider=FakeDetails(),
-            command_runner=unused_runner,
+            command_runner=command_runner,
         )
 
+        async def healthy(_: str) -> None:
+            return None
+
+        executor._verify_public_health = healthy  # type: ignore[method-assign]
+
+        with pytest.raises(HTTPException) as elevation:
+            await executor.start(
+                AvalarActionRequest(
+                    actionId="avalar.main.restart",
+                    expectedRevision="a" * 40,
+                )
+            )
+        assert elevation.value.detail == "elevation_required"
+
+        access.unlock_temporary("1357")
         with pytest.raises(HTTPException) as confirmation:
             await executor.start(
                 AvalarActionRequest(
@@ -136,6 +156,21 @@ def test_main_restart_needs_strong_confirmation_and_main_deploy_gate(tmp_path):
                 )
             )
         assert confirmation.value.detail == "main_restart_confirmation_required"
+
+        access.set_profile("full", pin="1357")
+        execution = await executor.start(
+            AvalarActionRequest(
+                actionId="avalar.main.restart",
+                expectedRevision="a" * 40,
+            )
+        )
+        assert execution.actionId == "avalar.main.restart"
+        for _ in range(50):
+            current = executor.get(execution.correlationId)
+            if current.status in {"success", "failed"}:
+                break
+            await asyncio.sleep(0.01)
+        assert current.status == "success"
 
         assert executor.availability("avalar.main.deploy")["availability"] == "gate_disabled"
         with pytest.raises(HTTPException) as deploy:

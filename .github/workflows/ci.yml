@@ -293,5 +293,22 @@ jobs:
           path: artifacts/b4-calendar-mutations-review
           if-no-files-found: error
 
+      - name: "Run focused #82 Full Access and touch lock gate"
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+          TOUCH_LOCK_ARTIFACT_DIR: artifacts/v2-full-access-touch-lock-review
+        run: npm run test:e2e -- tests/e2e/v2-full-access-touch-lock.spec.ts
+
+      - name: "Upload #82 Full Access and touch lock review screenshots"
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-full-access-touch-lock-review-${{ github.sha }}
+          path: artifacts/v2-full-access-touch-lock-review
+          if-no-files-found: error
+
       - name: Smoke-test production runtime
         run: npm run test:production-smoke

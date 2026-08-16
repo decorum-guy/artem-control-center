@@ -11,6 +11,7 @@ import {
   patchCoffeeTiming
 } from "./coffeeApi";
 import { SettingSwitchRow } from "./features/settings/SettingSwitchRow";
+import { useInteractionLock } from "./InteractionLock";
 
 export type CoffeeNotificationEvent = "warmup" | "longRunning";
 export type CoffeeNotificationField = "enabled" | "telegram" | "iphone";
@@ -42,6 +43,7 @@ export interface CoffeeSettingsController {
  * The API calls and revision handling intentionally stay in this one place.
  */
 export function useCoffeeSettings(): CoffeeSettingsController {
+  const { guardMutation } = useInteractionLock();
   const [timing, setTiming] = useState<CoffeeTimingSettings | null>(null);
   const [notifications, setNotifications] =
     useState<CoffeeNotificationSettings | null>(null);
@@ -97,6 +99,10 @@ export function useCoffeeSettings(): CoffeeSettingsController {
   }, [refresh]);
 
   const saveTiming = useCallback(async () => {
+    if (!guardMutation()) {
+      setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
+      return;
+    }
     if (!timing) return;
     if (!timing.writesEnabled) {
       setNotice("Изменения отключены политикой Panel Agent.");
@@ -114,6 +120,10 @@ export function useCoffeeSettings(): CoffeeSettingsController {
     }
     setPending(true);
     try {
+      if (!guardMutation()) {
+        setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
+        return;
+      }
       const updated = await patchCoffeeTiming({
         expectedRevision: timing.revision,
         warmupMinutes,
@@ -137,7 +147,7 @@ export function useCoffeeSettings(): CoffeeSettingsController {
     } finally {
       setPending(false);
     }
-  }, [longRunning, refresh, serverTimingChanged, timing, warmup]);
+  }, [guardMutation, longRunning, refresh, serverTimingChanged, timing, warmup]);
 
   const stepTiming = useCallback((field: "warmup" | "longRunning", delta: -1 | 1) => {
     const current = field === "warmup" ? warmup : longRunning;
@@ -165,6 +175,10 @@ export function useCoffeeSettings(): CoffeeSettingsController {
     field: CoffeeNotificationField,
     value: boolean
   ) => {
+    if (!guardMutation()) {
+      setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
+      return;
+    }
     if (!notifications) return;
     if (!notifications.writesEnabled) {
       setNotice("Изменения отключены политикой Panel Agent.");
@@ -176,6 +190,10 @@ export function useCoffeeSettings(): CoffeeSettingsController {
         : { channels: { [field]: value } };
     setPending(true);
     try {
+      if (!guardMutation()) {
+        setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
+        return;
+      }
       const updated = await patchCoffeeNotifications({
         expectedRevision: notifications.revision,
         [event]: eventPatch
@@ -191,7 +209,7 @@ export function useCoffeeSettings(): CoffeeSettingsController {
     } finally {
       setPending(false);
     }
-  }, [notifications, refresh]);
+  }, [guardMutation, notifications, refresh]);
 
   return {
     timing,

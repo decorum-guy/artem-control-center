@@ -14,6 +14,8 @@ import {
   type ActionConfirmationId,
   type ActionConfirmationSpec
 } from "./actionConfirmationCatalog";
+import { useAccess } from "./AccessControls";
+import { useInteractionLock } from "./InteractionLock";
 
 export interface ActionConfirmationResult {
   confirmed: boolean;
@@ -49,6 +51,8 @@ function focusableElements(container: HTMLElement): HTMLElement[] {
 }
 
 export function ActionConfirmationProvider({ children }: { children: ReactNode }) {
+  const { refresh } = useAccess();
+  const { locked, guardMutation } = useInteractionLock();
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const [phrase, setPhrase] = useState("");
   const [settling, setSettling] = useState(false);
@@ -58,15 +62,31 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
   const settlingRef = useRef(false);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
-  const confirmAction = useCallback((
+  const confirmAction = useCallback(async (
     actionId: ActionConfirmationId,
     options: ActionConfirmationOptions = {}
-  ) => {
-    if (activeRef.current) return Promise.resolve({ confirmed: false });
+  ): Promise<ActionConfirmationResult> => {
+    if (!guardMutation()) return Promise.resolve({ confirmed: false });
+    if (activeRef.current) return { confirmed: false };
     const spec = actionConfirmationCatalog[actionId];
-    if (!spec) return Promise.resolve({ confirmed: false });
+    if (!spec) return { confirmed: false };
 
     activeRef.current = true;
+    // Confirmation waiver is security-sensitive: never use the normal
+    // cached AccessStatus snapshot for this decision.
+    const currentStatus = await refresh();
+    if (!guardMutation()) {
+      activeRef.current = false;
+      return { confirmed: false };
+    }
+
+    // Only the server-owned policy can waive the ceremony. Missing metadata
+    // fails closed so old fixtures cannot accidentally broaden access.
+    if (currentStatus?.confirmationPolicy?.actionConfirmationRequired === false) {
+      activeRef.current = false;
+      return { confirmed: true };
+    }
+
     settlingRef.current = false;
     setPhrase("");
     setSettling(false);
@@ -79,7 +99,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
       pendingRef.current = next;
       setPending(next);
     });
-  }, []);
+  }, [guardMutation, refresh]);
 
   const finish = useCallback((result: ActionConfirmationResult) => {
     if (!pending || settlingRef.current) return;
@@ -105,6 +125,17 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
       document.body.style.overflow = previousOverflow;
     };
   }, [pending]);
+
+  useEffect(() => {
+    if (!locked || !pendingRef.current) return;
+    const current = pendingRef.current;
+    pendingRef.current = null;
+    activeRef.current = false;
+    setPending(null);
+    setPhrase("");
+    setSettling(false);
+    current.resolve({ confirmed: false });
+  }, [locked]);
 
   useEffect(() => () => {
     pendingRef.current?.resolve({ confirmed: false });
@@ -151,7 +182,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
   return (
     <ActionConfirmationContext.Provider value={value}>
       {children}
-      {pending && (
+      {pending && !locked && (
         <div
           className={`action-confirmation-backdrop action-confirmation-backdrop--${pending.spec.tone}`}
           role="presentation"
