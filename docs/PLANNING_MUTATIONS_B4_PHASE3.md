@@ -44,6 +44,8 @@ current canonical local-only predicate.
 
 The Calendar composer uses the canonical parser preview. Explicit timed ranges
 and supported all-day ranges can be saved when unambiguous. A start-only
-timed event's proposed +60 minute end is displayed and requires an explicit
-“Принять 60 минут” acknowledgement. Vague time such as `вечером` keeps Save
-disabled. Recurrence and provider sync remain disabled.
+timed event's proposed +60 minute end is displayed with Alice's sole
+`end_time` proposal ambiguity and requires an explicit “Принять 60 минут”
+acknowledgement. Any additional ambiguity, including `date`, keeps Save
+disabled. Vague time such as `вечером` also remains blocked. Recurrence and
+provider sync remain disabled.

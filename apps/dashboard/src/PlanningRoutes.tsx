@@ -80,6 +80,7 @@ import {
   type EventMutationBody,
   type EventMutationSheetMode
 } from "./eventMutationBody";
+import { calendarEventPreviewSaveState } from "./calendarEventPreviewPolicy";
 
 const tasksModule = planningModuleForRoute("/tasks")!;
 const calendarModule = planningModuleForRoute("/calendar")!;
@@ -700,20 +701,9 @@ function CalendarMutationSheet({
   const candidate = preview?.candidate;
   const fields = candidate?.fields ?? {};
   const proposedEnd = proposedEventEndLabel(fields);
-  const proposalRequired = Boolean(preview?.requires_confirmation && fields.proposed_end_at_utc);
-  const canSave = Boolean(
-    candidate?.domain === "calendar_event"
-    && candidate.operation === "create"
-    && preview?.confidence === "high"
-    && preview.ambiguities.length === 0
-    && (!proposalRequired || proposalAccepted)
-    && typeof fields.title === "string"
-    && typeof fields.all_day === "boolean"
-    && typeof fields.timezone === "string"
-    && (fields.all_day
-      ? typeof fields.start_date === "string" && typeof fields.end_date_exclusive === "string"
-      : typeof fields.start_at_utc === "string" && (typeof fields.end_at_utc === "string" || typeof fields.proposed_end_at_utc === "string"))
-  );
+  const previewSaveState = calendarEventPreviewSaveState(preview, proposalAccepted);
+  const proposalRequired = previewSaveState.isCanonicalStartOnlyProposal;
+  const canSave = previewSaveState.canSave;
 
   async function save(): Promise<void> {
     if (!canSave || saving) return;

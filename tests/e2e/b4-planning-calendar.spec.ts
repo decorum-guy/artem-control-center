@@ -108,7 +108,13 @@ async function installEventFixtures(page: Page, options: EventFixtureOptions = {
     const text = body.text ?? "";
     const ambiguous = text.includes("вечером");
     const proposal = text.includes("18:30") && !text.includes("19:30");
+    const proposalWithExtraAmbiguity = proposal && text.includes("неоднозначной датой");
     const allDay = text.includes("весь день");
+    const proposalAmbiguity = {
+      field: "end_time",
+      candidates: ["18:30–19:30"],
+      reason: "Для события без конца предложена длительность 60 минут; повторите полную фразу для записи."
+    };
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -123,18 +129,24 @@ async function installEventFixtures(page: Page, options: EventFixtureOptions = {
             all_day: true,
             timezone: "Europe/Moscow",
             start_date: "2026-08-14",
-            end_date_exclusive: "2026-08-15"
+            end_date_exclusive: "2026-08-15",
+            sync_state: "local_only"
           } : {
             title: "Новая встреча",
             all_day: false,
             timezone: "Europe/Moscow",
             start_at_utc: "2026-08-14T15:30:00Z",
-            ...(proposal ? { proposed_end_at_utc: "2026-08-14T16:30:00Z", proposed_end_local: "16:30" } : { end_at_utc: "2026-08-14T16:30:00Z" })
+            sync_state: "local_only",
+            ...(proposal ? { proposed_end_at_utc: "2026-08-14T16:30:00Z", proposed_end_local: "19:30" } : { end_at_utc: "2026-08-14T16:30:00Z" })
           },
-          normalized_paraphrase: allDay ? "Событие «День без времени» на 14 августа, весь день." : "Событие «Новая встреча» на 14 августа с 15:30 до 16:30."
+          normalized_paraphrase: allDay ? "Событие «День без времени» на 14 августа, весь день." : "Событие «Новая встреча» на 14 августа с 18:30 до 19:30."
         },
         confidence: ambiguous ? "medium" : "high",
-        ambiguities: ambiguous ? [{ field: "time", candidates: [], reason: "«Вечером» не задаёт точное время." }] : [],
+        ambiguities: ambiguous
+          ? [{ field: "time", candidates: [], reason: "«Вечером» не задаёт точное время." }]
+          : proposal
+            ? [proposalAmbiguity, ...(proposalWithExtraAmbiguity ? [{ field: "date", candidates: ["конкретная дата"], reason: "Событию нужна конкретная дата." }] : [])]
+            : [],
         requires_confirmation: proposal,
         normalized_text: text,
         error_code: null,
@@ -252,16 +264,39 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await sheet.getByRole("button", { name: "Отмена" }).tap();
 
     await page.getByRole("button", { name: "Создать событие" }).tap();
-    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("завтра в 18:30 встреча");
+    const extraAmbiguitySheet = page.getByTestId("planning-calendar-mutation");
+    const extraAmbiguitySave = extraAmbiguitySheet.getByRole("button", { name: "Сохранить" });
+    await extraAmbiguitySheet.locator("textarea").fill("завтра в 18:30 встреча с неоднозначной датой");
     await expect(page.getByTestId("planning-calendar-proposal")).toContainText("Предлагаемый конец");
-    await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    await expect(extraAmbiguitySave).toBeDisabled();
+    await page.getByTestId("planning-calendar-proposal").getByRole("button", { name: "Принять 60 минут" }).tap();
+    await expect(extraAmbiguitySave).toBeDisabled();
+    expect(fixture.requests.filter((request) => request.method === "POST")).toHaveLength(0);
+    await extraAmbiguitySheet.getByRole("button", { name: "Отмена" }).tap();
+
+    await page.getByRole("button", { name: "Создать событие" }).tap();
+    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("завтра в 18:30 встреча");
+    await expect(page.getByTestId("planning-calendar-proposal")).toContainText("Предлагаемый конец: 19:30");
     await capture(page, testInfo, "b4-calendar-start-only-proposal.png");
+    expect(fixture.requests.filter((request) => request.method === "POST")).toHaveLength(0);
     await page.getByTestId("planning-calendar-proposal").getByRole("button", { name: "Принять 60 минут" }).tap();
     await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeEnabled();
+    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("завтра вечером встреча");
+    await expect(page.getByTestId("planning-calendar-ambiguities")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("завтра в 18:30 встреча");
+    await expect(page.getByTestId("planning-calendar-proposal")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    await page.getByTestId("planning-calendar-proposal").getByRole("button", { name: "Принять 60 минут" }).tap();
     await page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" }).tap();
     const createRequests = () => fixture.requests.filter((request) => request.method === "POST");
     await expect.poll(() => createRequests().length).toBe(2);
     expect(createRequests()[0]).toEqual(createRequests()[1]);
+    expect(JSON.parse(createRequests()[0].body)).toMatchObject({ end_at_utc: "2026-08-14T16:30:00Z" });
+    expect(JSON.parse(createRequests()[0].body)).not.toHaveProperty("proposed_end_at_utc");
+    expect(JSON.parse(createRequests()[0].body)).not.toHaveProperty("proposed_end_local");
+    expect(JSON.parse(createRequests()[0].body)).not.toHaveProperty("sync_state");
+    expect(fixture.getCurrent().id).toBe(localId);
     await expect(page.getByText("Результат подтверждён чтением")).toBeVisible();
     await capture(page, testInfo, "b4-calendar-local-create-timed.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
@@ -304,7 +339,12 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await expect(page.getByText("Удаление подтверждено чтением")).toBeVisible();
     await capture(page, testInfo, "b4-calendar-reconciled.png");
 
-    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+      document.body.style.zoom = "2";
+    });
+    const targetHeights = await page.locator("button, textarea, input").evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().height)).filter((height) => height > 0));
+    expect(Math.min(...targetHeights)).toBeGreaterThanOrEqual(48);
     await capture(page, testInfo, "b4-calendar-200-percent.png");
   });
 });

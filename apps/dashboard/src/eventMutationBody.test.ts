@@ -43,7 +43,11 @@ describe("Calendar event mutation body", () => {
       proposed_end_at_utc: "2026-08-12T11:00:00Z"
     };
     expect(eventMutationBodyFromPreview("create", fields, false).end_at_utc).toBeUndefined();
-    expect(eventMutationBodyFromPreview("create", fields, true).end_at_utc).toBe("2026-08-12T11:00:00Z");
+    const accepted = eventMutationBodyFromPreview("create", fields, true);
+    expect(accepted.end_at_utc).toBe("2026-08-12T11:00:00Z");
+    expect(accepted).not.toHaveProperty("proposed_end_at_utc");
+    expect(accepted).not.toHaveProperty("proposed_end_local");
+    expect(accepted).not.toHaveProperty("sync_state");
   });
 
   it("omits notes and location from parser-driven edit to avoid silent clearing", () => {
