@@ -32,6 +32,10 @@ revision checks, fixed operation mapping, and execution verification remain
 active. The browser reads the explicit `confirmationPolicy` field and fails
 closed when it is absent. It does not infer policy from `baseProfile` or
 `effectiveProfile`, and it never fabricates `RESTART MAIN` or `DEPLOY MAIN`.
+Every registered confirmation call performs a fresh `GET /api/v1/access` via
+the AccessProvider before considering the waiver, even when the normal header
+or Settings cache is populated. A failed or unavailable refresh falls back to
+the existing confirmation ceremony and cannot waive it.
 
 For AVALAR Main restart/deploy, Panel Agent applies the same server-owned
 policy before checking the strong phrase. Temporary Full therefore still
@@ -82,6 +86,9 @@ It has one provider, one hold state, and one mutation guard:
   key release cannot toggle it;
 - visible progress, `Удерживайте…` / `Почти готово…`, lock status, keyboard
   semantics, focus styling, and reduced-motion-safe feedback are provided;
+- under `prefers-reduced-motion: reduce`, the 1000 ms timer remains precise but
+  the continuously changing fill is hidden; the static rail and stepped text
+  are the visible cue;
 - lock/unlock uses the same control and gesture;
 - the overlay is a visual affordance only so reads and navigation remain
   inspectable; `guardMutation()` is the actual no-mutation boundary.

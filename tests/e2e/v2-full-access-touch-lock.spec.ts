@@ -55,11 +55,20 @@ async function installFixtures(page: Page, profile: "standard" | "full") {
   let postCount = 0;
   let lastBody: Record<string, unknown> | null = null;
   let activeAction: typeof actionIds[number] = "avalar.stage.restart";
+  let currentProfile = profile;
+  let accessGetCount = 0;
+  let accessFailuresRemaining = 0;
 
   await page.route("**/api/v1/access**", async (route) => {
     const request = route.request();
     if (request.method() === "GET" && new URL(request.url()).pathname === "/api/v1/access") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accessStatus(profile)) });
+      accessGetCount += 1;
+      if (accessFailuresRemaining > 0) {
+        accessFailuresRemaining -= 1;
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "fixture_access_unavailable" }) });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(accessStatus(currentProfile)) });
       return;
     }
     await route.fallback();
@@ -99,7 +108,13 @@ async function installFixtures(page: Page, profile: "standard" | "full") {
     await route.fallback();
   });
 
-  return { getPostCount: () => postCount, getLastBody: () => lastBody };
+  return {
+    getPostCount: () => postCount,
+    getLastBody: () => lastBody,
+    getAccessGetCount: () => accessGetCount,
+    setAccessProfile: (next: "standard" | "full") => { currentProfile = next; },
+    failNextAccessRefresh: () => { accessFailuresRemaining += 1; }
+  };
 }
 
 async function holdLock(page: Page) {
@@ -108,7 +123,9 @@ async function holdLock(page: Page) {
   await control.hover();
   await page.mouse.down();
   await expect(control.getByRole("progressbar")).toBeVisible();
-  await page.waitForTimeout(1_050);
+  await page.waitForTimeout(300);
+  await captureScreenshot(page, "touch-lock-active-hold.png");
+  await expect(control).toHaveAttribute("aria-pressed", "true", { timeout: 1_000 });
   await page.mouse.up();
 }
 
@@ -136,6 +153,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
     await expect(page.getByTestId("action-confirmation")).toBeVisible();
     expect(api.getPostCount()).toBe(0);
+    await captureScreenshot(page, "touch-lock-standard-confirmation.png");
   });
 
   test("manual persistent Full runs a simple action immediately", async ({ page }) => {
@@ -146,6 +164,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
     await expect.poll(api.getPostCount).toBe(1);
     await expect(page.getByTestId("avalar-action-notice")).toContainText(/Отправляем|Успешно проверено/);
+    await captureScreenshot(page, "touch-lock-full-immediate.png");
   });
 
   test("manual persistent Full strong action has no phrase or fabricated confirmation", async ({ page }) => {
@@ -156,6 +175,45 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
     await expect.poll(api.getPostCount).toBe(1);
     expect(api.getLastBody()).not.toHaveProperty("confirmation");
+  });
+
+  test("fresh policy prevents stale Full from waiving Standard confirmation", async ({ page }) => {
+    const api = await installFixtures(page, "full");
+    await page.goto("/services");
+    await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
+    api.setAccessProfile("standard");
+    await openAvalarServiceDetails(page, "avalar-site-stage");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await expect.poll(api.getAccessGetCount).toBeGreaterThan(1);
+    await expect(page.getByTestId("action-confirmation")).toBeVisible();
+    expect(api.getPostCount()).toBe(0);
+    await page.getByTestId("action-confirmation").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await expect.poll(api.getPostCount).toBe(1);
+  });
+
+  test("fresh policy lets current manual Full bypass cached Standard", async ({ page }) => {
+    const api = await installFixtures(page, "standard");
+    await page.goto("/services");
+    await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
+    api.setAccessProfile("full");
+    await openAvalarServiceDetails(page, "avalar-site-stage");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await expect.poll(api.getAccessGetCount).toBeGreaterThan(1);
+    await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
+    await expect.poll(api.getPostCount).toBe(1);
+  });
+
+  test("access refresh failure fails closed to the existing confirmation ceremony", async ({ page }) => {
+    const api = await installFixtures(page, "full");
+    await page.goto("/services");
+    await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
+    api.failNextAccessRefresh();
+    await openAvalarServiceDetails(page, "avalar-site-stage");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await expect(page.getByTestId("action-confirmation")).toBeVisible();
+    expect(api.getPostCount()).toBe(0);
+    await page.getByTestId("action-confirmation").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await expect.poll(api.getPostCount).toBe(1);
   });
 
   test("hold feedback, locked Full state, zero new mutation, and keyboard unlock", async ({ page }) => {
@@ -184,18 +242,26 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await captureScreenshot(page, "touch-lock-unlocked-restored.png");
   });
 
-  test("short tap cancels and reduced motion keeps visible hold cue", async ({ page }) => {
+  test("short tap cancels and reduced motion keeps a static active hold cue", async ({ page }) => {
     await installFixtures(page, "full");
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/overview");
     const control = page.getByTestId("interaction-lock-control");
     await control.hover();
     await page.mouse.down();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(650);
     await expect(control.getByRole("progressbar")).toBeVisible();
     await expect(page.getByText("Почти готово…")).toBeVisible();
+    await expect(control).toHaveAttribute("data-reduced-motion", "true");
+    await expect(control.getByTestId("interaction-lock-progress-fill")).toBeHidden();
+    await captureScreenshot(page, "touch-lock-reduced-motion-hold.png");
     await page.mouse.up();
     await expect(control).toHaveAttribute("aria-pressed", "false");
-    await captureScreenshot(page, "touch-lock-reduced-motion.png");
+
+    await control.hover();
+    await page.mouse.down();
+    await page.waitForTimeout(1_050);
+    await page.mouse.up();
+    await expect(control).toHaveAttribute("aria-pressed", "true");
   });
 });

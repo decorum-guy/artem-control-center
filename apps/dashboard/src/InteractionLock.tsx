@@ -151,7 +151,16 @@ export function InteractionLockControl() {
     cancelHold
   } = useInteractionLock();
   const [announcement, setAnnouncement] = useState(locked ? "Панель заблокирована" : "Панель разблокирована");
+  const [reducedMotion, setReducedMotion] = useState(false);
   const previousLocked = useRef(locked);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
 
   useEffect(() => {
     if (previousLocked.current !== locked) {
@@ -200,12 +209,16 @@ export function InteractionLockControl() {
 
   const label = locked ? "Удерживайте, чтобы разблокировать панель" : "Удерживайте, чтобы заблокировать панель";
   return (
-    <div className={`interaction-lock-control${holding ? " interaction-lock-control--holding" : ""}${locked ? " interaction-lock-control--locked" : ""}`}>
+    <div
+      className={`interaction-lock-control${holding ? " interaction-lock-control--holding" : ""}${locked ? " interaction-lock-control--locked" : ""}`}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
+    >
       <button
         type="button"
         className="interaction-lock-button"
         aria-label={label}
         aria-pressed={locked}
+        data-reduced-motion={reducedMotion ? "true" : "false"}
         data-testid="interaction-lock-control"
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
@@ -226,7 +239,7 @@ export function InteractionLockControl() {
             aria-valuemax={100}
             aria-valuenow={Math.round(holdProgress * 100)}
           >
-            <span style={{ transform: `scaleX(${holdProgress})` }} />
+            <span data-testid="interaction-lock-progress-fill" style={{ transform: `scaleX(${holdProgress})` }} />
           </span>
         )}
       </button>

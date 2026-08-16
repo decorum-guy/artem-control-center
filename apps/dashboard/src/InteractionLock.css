@@ -86,5 +86,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .interaction-lock-progress > span { transition: none; }
+  /* The timer still measures the exact hold, but no continuously changing
+     fill is visible. The stepped text cue remains the reduced-motion signal. */
+  .interaction-lock-progress > span { display: none; }
 }

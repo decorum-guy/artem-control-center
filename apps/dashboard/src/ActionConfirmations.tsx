@@ -51,7 +51,7 @@ function focusableElements(container: HTMLElement): HTMLElement[] {
 }
 
 export function ActionConfirmationProvider({ children }: { children: ReactNode }) {
-  const { status, refresh } = useAccess();
+  const { refresh } = useAccess();
   const { locked, guardMutation } = useInteractionLock();
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const [phrase, setPhrase] = useState("");
@@ -72,7 +72,9 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
     if (!spec) return { confirmed: false };
 
     activeRef.current = true;
-    const currentStatus = status ?? await refresh();
+    // Confirmation waiver is security-sensitive: never use the normal
+    // cached AccessStatus snapshot for this decision.
+    const currentStatus = await refresh();
     if (!guardMutation()) {
       activeRef.current = false;
       return { confirmed: false };
@@ -97,7 +99,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
       pendingRef.current = next;
       setPending(next);
     });
-  }, [guardMutation, refresh, status]);
+  }, [guardMutation, refresh]);
 
   const finish = useCallback((result: ActionConfirmationResult) => {
     if (!pending || settlingRef.current) return;
