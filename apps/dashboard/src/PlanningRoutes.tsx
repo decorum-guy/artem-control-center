@@ -17,11 +17,13 @@ import {
 } from "./calendarRange";
 import {
   mutatePlanningReminder,
+  mutatePlanningEvent,
   mutatePlanningTask,
   newPlanningIdempotencyKey,
   PlanningMutationError,
   previewPlanningTask,
   previewPlanningReminder,
+  previewPlanningEvent,
   readPlanningEvents,
   readPlanningProjects,
   readPlanningReminders,
@@ -54,7 +56,9 @@ import {
   previewEnvelope
 } from "./PlanningRoutePrimitives";
 import {
+  planningCalendarRouteEnabled,
   planningReminderMutationsEnabled,
+  planningCalendarMutationsEnabled,
   planningRemindersRouteEnabled,
   planningTaskMutationsEnabled,
   planningTasksRouteEnabled
@@ -70,6 +74,12 @@ import {
   type TaskMutationBody,
   type TaskMutationSheetMode
 } from "./taskMutationBody";
+import {
+  eventMutationBodyFromPreview,
+  proposedEventEndLabel,
+  type EventMutationBody,
+  type EventMutationSheetMode
+} from "./eventMutationBody";
 
 const tasksModule = planningModuleForRoute("/tasks")!;
 const calendarModule = planningModuleForRoute("/calendar")!;
@@ -627,6 +637,152 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   );
 }
 
+const planningCalendarAccessCapabilities = {
+  create: "planning.calendar.create",
+  edit: "planning.calendar.edit",
+  delete: "planning.calendar.delete"
+} as const;
+
+function calendarMutationAllowed(
+  planning: PlanningSnapshot | null,
+  capability: "create" | "edit" | "delete"
+): boolean {
+  return planningCalendarRouteEnabled
+    && planningCalendarMutationsEnabled
+    && planning?.sourceStatus === "current"
+    && Boolean(planning?.capabilities.calendar[capability]);
+}
+
+function CalendarMutationSheet({
+  mode,
+  event,
+  onClose,
+  onSubmit
+}: {
+  mode: EventMutationSheetMode;
+  event: PlanningCalendarEvent | null;
+  onClose: () => void;
+  onSubmit: (body: EventMutationBody) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewPlanningEvent>> | null>(null);
+  const [proposalAccepted, setProposalAccepted] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setProposalAccepted(false);
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setPreview(null);
+      setParsing(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setParsing(true);
+      void previewPlanningEvent(
+        trimmed,
+        new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+        DEFAULT_PLANNING_TIME_ZONE,
+        controller.signal
+      )
+        .then(setPreview)
+        .catch(() => setPreview(null))
+        .finally(() => setParsing(false));
+    }, 220);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [text]);
+
+  const candidate = preview?.candidate;
+  const fields = candidate?.fields ?? {};
+  const proposedEnd = proposedEventEndLabel(fields);
+  const proposalRequired = Boolean(preview?.requires_confirmation && fields.proposed_end_at_utc);
+  const canSave = Boolean(
+    candidate?.domain === "calendar_event"
+    && candidate.operation === "create"
+    && preview?.confidence === "high"
+    && preview.ambiguities.length === 0
+    && (!proposalRequired || proposalAccepted)
+    && typeof fields.title === "string"
+    && typeof fields.all_day === "boolean"
+    && typeof fields.timezone === "string"
+    && (fields.all_day
+      ? typeof fields.start_date === "string" && typeof fields.end_date_exclusive === "string"
+      : typeof fields.start_at_utc === "string" && (typeof fields.end_at_utc === "string" || typeof fields.proposed_end_at_utc === "string"))
+  );
+
+  async function save(): Promise<void> {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      await onSubmit(eventMutationBodyFromPreview(mode, fields, proposalAccepted));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <PlanningSheet
+      title={mode === "create" ? "Новое событие" : "Изменить событие"}
+      eyebrow="Календарь · проверка перед сохранением"
+      description="Фраза проходит через канонический Planning parser. Неоднозначное время блокирует сохранение; внешние календари остаются только для чтения."
+      onClose={onClose}
+      testId="planning-calendar-mutation"
+    >
+      <div className="planning-mutation-form">
+        <label className="planning-mutation-form__label" htmlFor="planning-calendar-free-text">Фраза</label>
+        <textarea
+          id="planning-calendar-free-text"
+          className="planning-mutation-form__input"
+          value={text}
+          onChange={(eventChange) => setText(eventChange.target.value)}
+          placeholder="Например: завтра в 18:30–19:30 встреча"
+          rows={3}
+          autoFocus
+        />
+        {parsing && <p className="planning-mutation-form__status">Проверяем формулировку…</p>}
+        {preview && (
+          <section className="planning-mutation-preview" data-testid="planning-calendar-preview" aria-live="polite">
+            <p className="planning-mutation-preview__eyebrow">Человеческая расшифровка</p>
+            <p className="planning-mutation-preview__restatement">{candidate?.normalized_paraphrase ?? "Предложение пока не сформировано."}</p>
+            {proposalRequired && (
+              <div className="planning-mutation-preview__ambiguities" data-testid="planning-calendar-proposal">
+                <strong>Предлагаемый конец: {proposedEnd ?? "60 минут"}</strong>
+                <p>Продолжительность: 60 минут. Это предложение, а не тихое значение по умолчанию.</p>
+                <button type="button" className="planning-secondary-button" aria-pressed={proposalAccepted} onClick={() => setProposalAccepted((value) => !value)}>
+                  {proposalAccepted ? "60 минут приняты" : "Принять 60 минут"}
+                </button>
+              </div>
+            )}
+            {preview.ambiguities.length > 0 && (
+              <div className="planning-mutation-preview__ambiguities" data-testid="planning-calendar-ambiguities">
+                <strong>Нужно уточнить</strong>
+                {preview.ambiguities.map((ambiguity) => (
+                  <p key={`${ambiguity.field}-${ambiguity.reason}`}>{ambiguity.reason}{ambiguity.candidates.length ? ` Варианты: ${ambiguity.candidates.join(", ")}.` : ""}</p>
+                ))}
+              </div>
+            )}
+            {preview.error_code && <p className="planning-mutation-form__error">Формулировка не подтверждена: {preview.error_code}.</p>}
+          </section>
+        )}
+        <p className="planning-detail-note">
+          {mode === "edit" && event ? `Текущая запись: ${event.title}. Заметки и место не меняются этим parser-driven edit.` : "Сохранить можно только однозначное timed или all-day предложение."}
+        </p>
+      </div>
+      <div className="planning-sheet-actions">
+        <button type="button" className="planning-secondary-button" onClick={onClose}>Отмена</button>
+        <button type="button" className="planning-primary-button" disabled={!canSave || parsing || saving} onClick={() => void save()}>
+          {saving ? "Сохраняем…" : "Сохранить"}
+        </button>
+      </div>
+    </PlanningSheet>
+  );
+}
+
 function calendarDayLabel(localDate: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
     weekday: "long",
@@ -675,10 +831,30 @@ function CalendarEventRow({ event, overlap, now, onOpen }: { event: PlanningCale
   );
 }
 
-function CalendarDetailSheet({ event, overlap, onClose }: { event: PlanningCalendarEvent; overlap: boolean; onClose: () => void }) {
+function CalendarDetailSheet({
+  event,
+  overlap,
+  onClose,
+  canEdit,
+  canDelete,
+  mutationPending,
+  onEdit,
+  onDelete
+}: {
+  event: PlanningCalendarEvent;
+  overlap: boolean;
+  onClose: () => void;
+  canEdit: boolean;
+  canDelete: boolean;
+  mutationPending: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const identity = calendarIdentityForEvent(event);
+  const localEvent = event.localOnlyMutable && event.syncState === "local_only";
+  const deleted = Boolean(event.deletedAt);
   return (
-    <PlanningSheet title={event.title} eyebrow="Календарь · только чтение" onClose={onClose} testId="planning-calendar-detail">
+    <PlanningSheet title={event.title} eyebrow={localEvent ? "Календарь · локальное событие" : "Календарь · только чтение"} onClose={onClose} testId="planning-calendar-detail">
       <dl className="planning-detail-list">
         <ReadOnlyField label="Тип" value={event.allDay ? "Весь день" : "Событие с временем"} />
         <ReadOnlyField label="Начало и конец" value={formatEventRange(event)} />
@@ -686,9 +862,19 @@ function CalendarDetailSheet({ event, overlap, onClose }: { event: PlanningCalen
         <ReadOnlyField label="Провайдер" value={identity.providerLabel} />
         <ReadOnlyField label="Календарь" value={identity.calendarLabel} />
         <ReadOnlyField label="Состояние синхронизации" value={syncStateLabel(event.syncState)} />
+        {event.notes && <ReadOnlyField label="Заметки" value={event.notes} />}
+        {event.location && <ReadOnlyField label="Место" value={event.location} />}
         {overlap && <ReadOnlyField label="Пересечение" value="Пересекается с другим загруженным событием" />}
       </dl>
-      <p className="planning-detail-note">Изменение, удаление и выбор провайдера относятся к следующим фазам продукта.</p>
+      {localEvent && !deleted && (canEdit || canDelete) && (
+        <div className="planning-sheet-actions planning-sheet-actions--stacked">
+          {canEdit && <button type="button" className="planning-secondary-button" disabled={mutationPending} onClick={onEdit}>Изменить</button>}
+          {canDelete && <button type="button" className="planning-secondary-button" disabled={mutationPending} onClick={onDelete}>Удалить</button>}
+        </div>
+      )}
+      <p className="planning-detail-note">
+        {deleted ? "Событие логически удалено; каноническая tombstone-запись остаётся доступной по ID." : localEvent ? "Native local-only событие. Провайдеры и внешняя синхронизация не затрагиваются." : "Внешний календарь · только чтение. Редактирование и удаление здесь недоступны."}
+      </p>
     </PlanningSheet>
   );
 }
@@ -717,8 +903,14 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const [periodOffset, setPeriodOffset] = useState(0);
   const [page, setPage] = useState(0);
   const [selectedEvent, setSelectedEvent] = useState<PlanningCalendarEvent | null>(null);
+  const [mutationSheet, setMutationSheet] = useState<EventMutationSheetMode | null>(null);
+  const [mutationPending, setMutationPending] = useState(false);
   const [retry, setRetry] = useState(0);
   const [liveNow, setLiveNow] = useState(() => new Date());
+  const { status: accessStatus, ensureCapability } = useAccess();
+  const { confirmAction } = useActionConfirmation();
+  const deletePendingRef = useRef(false);
+  const { showNotice } = useNoticeCenter();
   const requestTodayLocalDate = addCalendarDays(
     currentLocalDate(liveNow, DEFAULT_PLANNING_TIME_ZONE),
     segment === "today" ? periodOffset : periodOffset * 7
@@ -759,6 +951,136 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const events = calendarEventsInRange(envelope?.items ?? [], displayRange);
   const overlapIds = eventOverlapIds(events);
   const groups = groupCalendarEvents(events, displayRange.fromLocalDate, displayRange.toLocalDateExclusive);
+  const accessAllows = (action: "create" | "edit" | "delete"): boolean => {
+    if (!accessStatus) return true;
+    return Boolean(accessStatus.capabilities[planningCalendarAccessCapabilities[action]]?.allowed);
+  };
+  const canCreate = calendarMutationAllowed(planning, "create") && accessAllows("create");
+  const canEdit = Boolean(selectedEvent?.localOnlyMutable && calendarMutationAllowed(planning, "edit") && accessAllows("edit"));
+  const canDelete = Boolean(selectedEvent?.localOnlyMutable && !selectedEvent?.deletedAt && calendarMutationAllowed(planning, "delete") && accessAllows("delete"));
+
+  async function ensureCalendarCapability(action: "create" | "edit" | "delete", title: string): Promise<boolean> {
+    const capability = planningCalendarAccessCapabilities[action];
+    if (accessStatus && !accessStatus.capabilities[capability]) {
+      showNotice({
+        id: `planning.calendar.access.${action}`,
+        severity: "warning",
+        title: "Действие недоступно",
+        detail: "Текущий профиль не объявляет эту Planning capability. Запрос не отправлен."
+      });
+      return false;
+    }
+    const allowed = await ensureCapability(capability, title);
+    if (!allowed) {
+      showNotice({
+        id: `planning.calendar.access.${action}`,
+        severity: "warning",
+        title: "Действие недоступно",
+        detail: "Текущий профиль Control Center запрещает эту операцию. Запрос не отправлен."
+      });
+    }
+    return allowed;
+  }
+
+  async function submitEventMutation(body: EventMutationBody): Promise<void> {
+    const action = mutationSheet === "create" ? "create" : "edit";
+    const target = action === "edit" ? selectedEvent : null;
+    if (!await ensureCalendarCapability(action, action === "create" ? "Создать событие" : "Изменить событие")) return;
+    setMutationPending(true);
+    try {
+      const result = await mutatePlanningEvent({
+        action,
+        idempotencyKey: newPlanningIdempotencyKey("panel-calendar"),
+        eventId: target?.id,
+        expectedVersion: target?.version,
+        body
+      });
+      setSelectedEvent(result.object);
+      setMutationSheet(null);
+      setRetry((value) => value + 1);
+      showNotice({
+        id: `planning.calendar.${action}.${result.object.id}`,
+        severity: "success",
+        title: action === "create" ? "Событие создано" : "Событие изменено",
+        detail: "Канонический ответ сервера заменил локальное состояние."
+      });
+    } catch (error) {
+      if (error instanceof PlanningMutationError && error.reconciledObject) {
+        setSelectedEvent(error.reconciledObject as PlanningCalendarEvent);
+        setRetry((value) => value + 1);
+        setMutationSheet(null);
+        showNotice({
+          id: `planning.calendar.reconciled.${target?.id ?? "create"}`,
+          severity: "warning",
+          title: "Результат подтверждён чтением",
+          detail: "Транспорт не подтвердил запись вовремя; состояние сверено по canonical event read-by-ID."
+        });
+      } else {
+        const conflict = error instanceof PlanningMutationError && error.mutationCode === "conflict";
+        showNotice({
+          id: `planning.calendar.uncertain.${target?.id ?? "create"}`,
+          severity: conflict ? "warning" : "error",
+          title: conflict ? "Событие изменилось или недоступно для записи" : "Результат не подтверждён",
+          detail: conflict
+            ? "Изменять и удалять можно только native local-only событие с актуальной версией."
+            : "Успех не показан. Перечитайте событие по ID перед новой попыткой."
+        });
+      }
+    } finally {
+      setMutationPending(false);
+    }
+  }
+
+  async function deleteEvent(): Promise<void> {
+    if (!selectedEvent || deletePendingRef.current || !canDelete) return;
+    const target = selectedEvent;
+    deletePendingRef.current = true;
+    setMutationPending(true);
+    try {
+      if (!await ensureCalendarCapability("delete", "Удалить событие")) return;
+      const confirmation = await confirmAction("planning.calendar.delete", {
+        target: target.title,
+        revision: String(target.version)
+      });
+      if (!confirmation.confirmed) return;
+      const result = await mutatePlanningEvent({
+        action: "delete",
+        idempotencyKey: newPlanningIdempotencyKey("panel-calendar"),
+        eventId: target.id,
+        expectedVersion: target.version,
+        body: {}
+      });
+      setSelectedEvent(result.object);
+      setRetry((value) => value + 1);
+      showNotice({
+        id: `planning.calendar.delete.${target.id}`,
+        severity: "success",
+        title: "Событие удалено",
+        detail: "Событие логически tombstoned; физической строки и внешнего календаря это не удаляет."
+      });
+    } catch (error) {
+      if (error instanceof PlanningMutationError && error.reconciledObject) {
+        setSelectedEvent(error.reconciledObject as PlanningCalendarEvent);
+        setRetry((value) => value + 1);
+        showNotice({
+          id: `planning.calendar.delete.reconciled.${target.id}`,
+          severity: "warning",
+          title: "Удаление подтверждено чтением",
+          detail: "Канонический tombstone подтверждён через read-by-ID."
+        });
+      } else {
+        showNotice({
+          id: `planning.calendar.delete.uncertain.${target.id}`,
+          severity: "error",
+          title: "Результат не подтверждён",
+          detail: "Успех не показан. Перечитайте событие по ID перед новой попыткой."
+        });
+      }
+    } finally {
+      deletePendingRef.current = false;
+      setMutationPending(false);
+    }
+  }
 
   useEffect(() => {
     const timer = window.setInterval(() => setLiveNow(new Date()), 30_000);
@@ -789,6 +1111,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           />
         </>
       )}
+      futureAction={canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать событие</button> : undefined}
       testId="route-calendar"
     >
       <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && events.length === 0)} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
@@ -818,7 +1141,26 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           </>
         )}
       </PlanningRouteState>
-      {selectedEvent && <CalendarDetailSheet event={selectedEvent} overlap={overlapIds.has(selectedEvent.id)} onClose={() => setSelectedEvent(null)} />}
+      {selectedEvent && !mutationSheet && (
+        <CalendarDetailSheet
+          event={selectedEvent}
+          overlap={overlapIds.has(selectedEvent.id)}
+          onClose={() => setSelectedEvent(null)}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          mutationPending={mutationPending}
+          onEdit={() => setMutationSheet("edit")}
+          onDelete={() => void deleteEvent()}
+        />
+      )}
+      {mutationSheet && (
+        <CalendarMutationSheet
+          mode={mutationSheet}
+          event={selectedEvent}
+          onClose={() => setMutationSheet(null)}
+          onSubmit={submitEventMutation}
+        />
+      )}
     </PlanningRouteFrame>
   );
 }

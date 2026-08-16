@@ -18,6 +18,11 @@ describe("Planning snapshot contract", () => {
         edit: false,
         complete: false,
         archive: false
+      },
+      calendar: {
+        create: false,
+        edit: false,
+        delete: false
       }
     });
     expect(emptyPlanningFixture.reminders.upcoming).toHaveLength(0);

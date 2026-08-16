@@ -3,7 +3,7 @@
 The upstream models in this module mirror the merged AliceTG_Bot A4 response
 envelopes.  The projection models are deliberately separate: they contain
 only bounded, browser-safe fields and never carry authentication material,
-notes, or the upstream correlation identifiers.
+raw provider identity, or the upstream correlation identifiers.
 """
 
 from __future__ import annotations
@@ -510,6 +510,22 @@ class TaskObjectEnvelope(StrictPlanningModel):
     _correlation = field_validator("correlation_id")(validate_uuid4)
 
 
+class EventObjectEnvelope(StrictPlanningModel):
+    """The canonical event object returned by create/update/delete routes."""
+
+    schemaVersion: Literal["planning.v1"]
+    kind: Literal["object"]
+    domain: Literal["calendar_event"]
+    object: UpstreamCalendarEvent
+    sourceStatus: Literal["current"]
+    lastSyncedAt: StrictStr
+    staleAfter: StrictStr
+    correlation_id: StrictStr = Field(min_length=36, max_length=36)
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+    _correlation = field_validator("correlation_id")(validate_uuid4)
+
+
 class ReminderProjection(StrictPlanningModel):
     id: StrictStr = Field(min_length=36, max_length=36)
     version: StrictInt = Field(ge=1)
@@ -595,24 +611,38 @@ class TaskProjection(StrictPlanningModel):
         return self
 
 
+class PlanningCalendarIdentity(StrictPlanningModel):
+    """Provider-neutral display identity; never carries upstream provider IDs."""
+
+    providerId: StrictStr = Field(min_length=1, max_length=128)
+    providerLabel: StrictStr = Field(min_length=1, max_length=128)
+    calendarId: StrictStr = Field(min_length=1, max_length=128)
+    calendarLabel: StrictStr = Field(min_length=1, max_length=160)
+
+
 class CalendarEventProjection(StrictPlanningModel):
     id: StrictStr = Field(min_length=36, max_length=36)
     version: StrictInt = Field(ge=1)
     source: PlanningSource
     sourceLabel: StrictStr = Field(min_length=1, max_length=64)
+    calendarIdentity: "PlanningCalendarIdentity"
     title: StrictStr = Field(min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
+    location: StrictStr | None = Field(default=None, max_length=1000)
     allDay: StrictBool
     timezone: StrictStr = Field(min_length=1, max_length=64)
     syncState: EventSyncState
+    localOnlyMutable: StrictBool
     startAtUtc: StrictStr | None = None
     endAtUtc: StrictStr | None = None
     startDate: StrictStr | None = None
     endDateExclusive: StrictStr | None = None
+    deletedAt: StrictStr | None = None
     createdAt: StrictStr
     updatedAt: StrictStr
 
     _ids = field_validator("id")(validate_uuid4)
-    _timestamps = _timestamp_fields("startAtUtc", "endAtUtc", "createdAt", "updatedAt")
+    _timestamps = _timestamp_fields("startAtUtc", "endAtUtc", "deletedAt", "createdAt", "updatedAt")
 
     @field_validator("timezone")
     @classmethod
@@ -683,6 +713,12 @@ class PlanningTaskCapabilities(StrictPlanningModel):
     archive: StrictBool = False
 
 
+class PlanningCalendarCapabilities(StrictPlanningModel):
+    create: StrictBool = False
+    edit: StrictBool = False
+    delete: StrictBool = False
+
+
 class PlanningCapabilities(StrictPlanningModel):
     create: StrictBool = False
     edit: StrictBool = False
@@ -692,6 +728,7 @@ class PlanningCapabilities(StrictPlanningModel):
     voice: StrictBool = False
     providerSync: StrictBool = False
     tasks: PlanningTaskCapabilities = Field(default_factory=PlanningTaskCapabilities)
+    calendar: PlanningCalendarCapabilities = Field(default_factory=PlanningCalendarCapabilities)
 
 
 class PlanningProviderStatus(StrictPlanningModel):
@@ -793,6 +830,20 @@ class PlanningTaskObjectEnvelope(StrictPlanningModel):
     kind: Literal["object"]
     domain: Literal["task"]
     object: TaskProjection
+    sourceStatus: PlanningSourceStatus
+    lastSyncedAt: StrictStr | None = None
+    staleAfter: StrictStr | None = None
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+
+
+class PlanningEventObjectEnvelope(StrictPlanningModel):
+    """Browser-safe canonical event object readback."""
+
+    schemaVersion: Literal["planning.panel.v1"]
+    kind: Literal["object"]
+    domain: Literal["calendar_event"]
+    object: CalendarEventProjection
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None

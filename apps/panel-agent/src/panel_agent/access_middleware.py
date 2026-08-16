@@ -16,6 +16,7 @@ _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
 
 _PLANNING_REMINDERS_PREFIX = "/api/v1/planning/reminders/"
 _PLANNING_TASKS_PREFIX = "/api/v1/planning/tasks/"
+_PLANNING_EVENTS_PREFIX = "/api/v1/planning/events/"
 
 
 def _planning_capability(method: str, path: str) -> str | None:
@@ -33,6 +34,15 @@ def _planning_capability(method: str, path: str) -> str | None:
         return None
     if method == "POST" and path == "/api/v1/planning/tasks":
         return "planning.tasks.create"
+    if method == "POST" and path == "/api/v1/planning/events":
+        return "planning.calendar.create"
+    if path.startswith(_PLANNING_EVENTS_PREFIX):
+        segments = path.removeprefix(_PLANNING_EVENTS_PREFIX).split("/")
+        if method == "PATCH" and len(segments) == 1 and segments[0]:
+            return "planning.calendar.edit"
+        if method == "DELETE" and len(segments) == 1 and segments[0]:
+            return "planning.calendar.delete"
+        return None
     if not path.startswith(_PLANNING_TASKS_PREFIX):
         return None
     segments = path.removeprefix(_PLANNING_TASKS_PREFIX).split("/")

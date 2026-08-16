@@ -82,6 +82,21 @@ def build_planning_client(tmp_path):
         calls.append(("DELETE", task_id))
         return {"ok": True}
 
+    @app.post("/api/v1/planning/events")
+    def create_event():
+        calls.append(("POST", "/api/v1/planning/events"))
+        return {"ok": True}
+
+    @app.patch("/api/v1/planning/events/{event_id}")
+    def edit_event(event_id: str):
+        calls.append(("PATCH", event_id))
+        return {"ok": True}
+
+    @app.delete("/api/v1/planning/events/{event_id}")
+    def delete_event(event_id: str):
+        calls.append(("DELETE", event_id))
+        return {"ok": True}
+
     return store, calls, TestClient(app)
 
 
@@ -103,6 +118,9 @@ def test_planning_capabilities_are_fixed_standard_catalog_entries():
         "planning.tasks.edit",
         "planning.tasks.complete",
         "planning.tasks.archive",
+        "planning.calendar.create",
+        "planning.calendar.edit",
+        "planning.calendar.delete",
     }
     assert capabilities <= CAPABILITIES.keys()
     assert all(CAPABILITIES[capability] == "standard" for capability in capabilities)
@@ -118,6 +136,11 @@ def test_planning_route_matching_is_fixed_and_unknown_actions_are_unregistered()
     assert capability_for_request("POST", f"/api/v1/planning/reminders/{reminder_id}/complete/extra") is None
     assert capability_for_request("PATCH", "/api/v1/planning/reminders/a/b") is None
     assert capability_for_request("POST", "/api/v1/planning/tasks") == "planning.tasks.create"
+    assert capability_for_request("POST", "/api/v1/planning/events") == "planning.calendar.create"
+    assert capability_for_request("PATCH", "/api/v1/planning/events/not-a-uuid") == "planning.calendar.edit"
+    assert capability_for_request("DELETE", "/api/v1/planning/events/not-a-uuid") == "planning.calendar.delete"
+    assert capability_for_request("GET", "/api/v1/planning/events/not-a-uuid") is None
+    assert capability_for_request("POST", "/api/v1/planning/events/not-a-uuid/extra") is None
     assert capability_for_request("PATCH", f"/api/v1/planning/tasks/{reminder_id}") == "planning.tasks.edit"
     assert capability_for_request("POST", f"/api/v1/planning/tasks/{reminder_id}/complete") == "planning.tasks.complete"
     assert capability_for_request("DELETE", f"/api/v1/planning/tasks/{reminder_id}") == "planning.tasks.archive"
@@ -220,3 +243,46 @@ def test_standard_allows_registered_planning_capabilities_without_manufacturing_
         "planning.reminders.cancel",
     }
     assert {record["result"] for record in audited} >= {"success"}
+
+
+def test_read_only_blocks_calendar_writers_before_handler_and_keeps_read_by_id_unregistered(tmp_path):
+    store, calls, client = build_planning_client(tmp_path)
+    event_id = "not-a-uuid-but-one-path-segment"
+    responses = [
+        client.post("/api/v1/planning/events", json={}),
+        client.patch(f"/api/v1/planning/events/{event_id}", json={}),
+        client.delete(f"/api/v1/planning/events/{event_id}"),
+    ]
+    read = client.get(f"/api/v1/planning/events/{event_id}")
+
+    assert [response.status_code for response in responses] == [403, 403, 403]
+    assert read.status_code == 405
+    assert calls == []
+    audited = [record for record in _audit_records(tmp_path) if record["event"] == "capability_execution"]
+    assert {record["capability"] for record in audited} == {
+        "planning.calendar.create",
+        "planning.calendar.edit",
+        "planning.calendar.delete",
+    }
+
+
+def test_standard_allows_calendar_access_layer_without_manufacturing_planning_state(tmp_path):
+    store, calls, client = build_planning_client(tmp_path)
+    store.set_profile("standard")
+    event_id = "not-a-uuid-but-one-path-segment"
+    responses = [
+        client.post("/api/v1/planning/events", json={}),
+        client.patch(f"/api/v1/planning/events/{event_id}", json={}),
+        client.delete(f"/api/v1/planning/events/{event_id}"),
+    ]
+
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    assert len(calls) == 3
+    assert all(
+        store.status()["capabilities"][capability]["allowed"]
+        for capability in {
+            "planning.calendar.create",
+            "planning.calendar.edit",
+            "planning.calendar.delete",
+        }
+    )

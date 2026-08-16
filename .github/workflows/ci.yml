@@ -269,5 +269,29 @@ jobs:
           path: artifacts/b4-task-mutations-review
           if-no-files-found: error
 
+      - name: Run B4.3 Calendar gate-off browser contract
+        if: runner.os == 'Linux'
+        env:
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED: "false"
+          B4_CALENDAR_ARTIFACT_DIR: artifacts/b4-calendar-mutations-review
+        run: npm run test:e2e -- tests/e2e/b4-planning-calendar.spec.ts --grep "writer gate is off"
+
+      - name: Run B4.3 Calendar local-only writer browser contract
+        if: runner.os == 'Linux'
+        env:
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED: "true"
+          B4_CALENDAR_ARTIFACT_DIR: artifacts/b4-calendar-mutations-review
+        run: npm run test:e2e -- tests/e2e/b4-planning-calendar.spec.ts --grep-invert "writer gate is off"
+
+      - name: Upload B4.3 Calendar exact-head review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: b4-calendar-mutations-review-${{ github.sha }}
+          path: artifacts/b4-calendar-mutations-review
+          if-no-files-found: error
+
       - name: Smoke-test production runtime
         run: npm run test:production-smoke

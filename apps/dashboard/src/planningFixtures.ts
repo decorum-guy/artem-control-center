@@ -48,6 +48,11 @@ const capabilities = {
     edit: false,
     complete: false,
     archive: false
+  },
+  calendar: {
+    create: false,
+    edit: false,
+    delete: false
   }
 } as const;
 
@@ -110,13 +115,17 @@ function calendarEvent(overrides: Partial<PlanningCalendarEvent> = {}): Planning
       calendarLabel: "Основной календарь"
     },
     title: "Встреча с командой",
+    notes: null,
+    location: null,
     allDay: false,
     timezone: "Europe/Moscow",
     syncState: "local_only",
+    localOnlyMutable: false,
     startAtUtc: "2026-08-12T14:30:00Z",
     endAtUtc: "2026-08-12T15:30:00Z",
     startDate: null,
     endDateExclusive: null,
+    deletedAt: null,
     createdAt: FIXTURE_SYNCED_AT,
     updatedAt: FIXTURE_SYNCED_AT,
     ...overrides

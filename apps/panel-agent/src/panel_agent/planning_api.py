@@ -11,6 +11,7 @@ from starlette.datastructures import QueryParams
 
 from .planning import (
     PlanningObjectEnvelope,
+    PlanningEventObjectEnvelope,
     PlanningTaskObjectEnvelope,
     PlanningParsePreview,
     PlanningReadEnvelope,
@@ -163,6 +164,99 @@ class TaskPatchRequest(BaseModel):
     def _not_empty(self) -> "TaskPatchRequest":
         if not self.model_fields_set:
             raise ValueError("task patch must contain at least one field")
+        return self
+
+
+class EventCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: StrictStr = Field(min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
+    location: StrictStr | None = Field(default=None, max_length=1000)
+    all_day: bool
+    timezone: StrictStr = Field(min_length=1, max_length=64)
+    start_at_utc: StrictStr | None = None
+    end_at_utc: StrictStr | None = None
+    start_date: StrictStr | None = None
+    end_date_exclusive: StrictStr | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str) -> str:
+        return validate_timezone(value, "planning.calendar_event.timezone")
+
+    @field_validator("start_at_utc", "end_at_utc")
+    @classmethod
+    def _timestamp(cls, value: str | None) -> str | None:
+        return None if value is None else validate_utc_timestamp(value, "planning.calendar_event.timestamp")
+
+    @field_validator("start_date", "end_date_exclusive")
+    @classmethod
+    def _date(cls, value: str | None) -> str | None:
+        return None if value is None else validate_date(value, "planning.calendar_event.date")
+
+    @model_validator(mode="after")
+    def _shape(self) -> "EventCreateRequest":
+        if self.all_day:
+            if self.start_date is None or self.end_date_exclusive is None or self.start_at_utc is not None or self.end_at_utc is not None:
+                raise ValueError("all-day event shape is invalid")
+            if self.end_date_exclusive <= self.start_date:
+                raise ValueError("all-day event range is invalid")
+        else:
+            if self.start_at_utc is None or self.end_at_utc is None or self.start_date is not None or self.end_date_exclusive is not None:
+                raise ValueError("timed event shape is invalid")
+            if self.end_at_utc <= self.start_at_utc:
+                raise ValueError("timed event range is invalid")
+        return self
+
+
+class EventPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: StrictStr | None = Field(default=None, min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
+    location: StrictStr | None = Field(default=None, max_length=1000)
+    all_day: bool | None = None
+    timezone: StrictStr | None = Field(default=None, max_length=64)
+    start_at_utc: StrictStr | None = None
+    end_at_utc: StrictStr | None = None
+    start_date: StrictStr | None = None
+    end_date_exclusive: StrictStr | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str | None) -> str | None:
+        return None if value is None else validate_timezone(value, "planning.calendar_event.timezone")
+
+    @field_validator("start_at_utc", "end_at_utc")
+    @classmethod
+    def _timestamp(cls, value: str | None) -> str | None:
+        return None if value is None else validate_utc_timestamp(value, "planning.calendar_event.timestamp")
+
+    @field_validator("start_date", "end_date_exclusive")
+    @classmethod
+    def _date(cls, value: str | None) -> str | None:
+        return None if value is None else validate_date(value, "planning.calendar_event.date")
+
+    @model_validator(mode="after")
+    def _shape(self) -> "EventPatchRequest":
+        if not self.model_fields_set:
+            raise ValueError("event patch must contain at least one field")
+        temporal = {"all_day", "timezone", "start_at_utc", "end_at_utc", "start_date", "end_date_exclusive"}
+        if not temporal.intersection(self.model_fields_set):
+            return self
+        if self.all_day is None or self.timezone is None:
+            raise ValueError("event shape transition requires all_day and timezone")
+        if self.all_day:
+            if self.start_date is None or self.end_date_exclusive is None or self.start_at_utc is not None or self.end_at_utc is not None:
+                raise ValueError("all-day event shape is invalid")
+            if self.end_date_exclusive <= self.start_date:
+                raise ValueError("all-day event range is invalid")
+        else:
+            if self.start_at_utc is None or self.end_at_utc is None or self.start_date is not None or self.end_date_exclusive is not None:
+                raise ValueError("timed event shape is invalid")
+            if self.end_at_utc <= self.start_at_utc:
+                raise ValueError("timed event range is invalid")
         return self
 
 
@@ -479,6 +573,81 @@ def build_planning_router(
         except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
             raise _read_unavailable() from exc
 
+    @router.get("/events/{event_id}", response_model=PlanningEventObjectEnvelope)
+    async def planning_event_by_id(
+        event_id: str,
+        request: Request,
+        response: Response,
+    ) -> PlanningEventObjectEnvelope:
+        _enabled(adapter)
+        _no_store(response)
+        _query(request, allowed=set())
+        _validate_event_id(event_id)
+        try:
+            return await adapter.read_event_by_id(event_id=event_id)
+        except PlanningUpstreamError as exc:
+            raise _event_read_error(exc) from exc
+        except PlanningReadUnavailable as exc:
+            raise _read_unavailable() from exc
+
+    @router.post("/events", response_model=PlanningEventObjectEnvelope)
+    async def planning_create_event(
+        request: EventCreateRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningEventObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_calendar_mutation(adapter, "create")
+        _no_store(response)
+        try:
+            return await adapter.create_event(
+                idempotency_key=_idempotency_key(raw_request),
+                body=request.model_dump(exclude_unset=True),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="event") from exc
+
+    @router.patch("/events/{event_id}", response_model=PlanningEventObjectEnvelope)
+    async def planning_edit_event(
+        event_id: str,
+        request: EventPatchRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningEventObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_calendar_mutation(adapter, "update")
+        _no_store(response)
+        _validate_event_id(event_id)
+        try:
+            return await adapter.edit_event(
+                event_id=event_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+                body=request.model_dump(exclude_unset=True),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="event") from exc
+
+    @router.delete("/events/{event_id}", response_model=PlanningEventObjectEnvelope)
+    async def planning_delete_event(
+        event_id: str,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningEventObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_calendar_mutation(adapter, "delete")
+        _no_store(response)
+        _validate_event_id(event_id)
+        await _require_empty_body(raw_request)
+        try:
+            return await adapter.delete_event(
+                event_id=event_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="event") from exc
+
     @router.get("/projects", response_model=PlanningReadEnvelope)
     async def planning_projects(request: Request, response: Response) -> PlanningReadEnvelope:
         _enabled(adapter)
@@ -513,6 +682,14 @@ def _require_task_mutation(adapter: PlanningAdapter, action: str) -> None:
         raise HTTPException(status_code=403, detail="planning_task_capability_denied")
 
 
+def _require_calendar_mutation(adapter: PlanningAdapter, action: str) -> None:
+    _enabled(adapter)
+    if not adapter.calendar_mutations_enabled:
+        raise HTTPException(status_code=404, detail="planning_calendar_mutations_disabled")
+    if action not in {"create", "update", "delete"} or not adapter.calendar_mutation_allowed(action):
+        raise HTTPException(status_code=403, detail="planning_calendar_capability_denied")
+
+
 def _idempotency_key(request: Request) -> str:
     value = request.headers.get("Idempotency-Key", "")
     if not value or len(value) > 256 or any(ord(char) < 0x20 for char in value):
@@ -541,17 +718,26 @@ def _validate_task_id(value: str) -> None:
         raise HTTPException(status_code=422, detail="planning_task_id_invalid") from exc
 
 
+def _validate_event_id(value: str) -> None:
+    try:
+        validate_uuid4(value, "planning.calendar_event_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="planning_calendar_event_id_invalid") from exc
+
+
 async def _require_empty_body(request: Request) -> None:
     body = await request.body()
     if body.strip() not in {b"", b"{}"}:
         raise HTTPException(status_code=422, detail="planning_action_body_not_empty")
 
 
-def _mutation_error(error: PlanningUpstreamError, *, domain: Literal["reminder", "task"] = "reminder") -> HTTPException:
+def _mutation_error(error: PlanningUpstreamError, *, domain: Literal["reminder", "task", "event"] = "reminder") -> HTTPException:
     if error.category == "mutation_uncertain":
         return HTTPException(status_code=503, detail="planning_mutation_uncertain")
     if error.category in {"version_conflict", "idempotency_conflict", "idempotency_in_progress"}:
         return HTTPException(status_code=409, detail=f"planning_{error.category}")
+    if error.category == "event_not_local_only":
+        return HTTPException(status_code=409, detail="event_not_local_only")
     if error.category == "not_found":
         return HTTPException(status_code=404, detail=f"planning_{domain}_not_found")
     if error.category in {
@@ -559,6 +745,8 @@ def _mutation_error(error: PlanningUpstreamError, *, domain: Literal["reminder",
         "reminder_patch_invalid",
         "task_create_invalid",
         "task_patch_invalid",
+        "event_create_invalid",
+        "event_patch_invalid",
         "idempotency_key_invalid",
         "expected_version_invalid",
     }:
@@ -571,6 +759,14 @@ def _task_read_error(error: PlanningUpstreamError) -> HTTPException:
         return HTTPException(status_code=404, detail="planning_task_not_found")
     if error.category in {"validation_error", "contract_mismatch", "domain_mismatch"}:
         return HTTPException(status_code=422, detail="planning_task_invalid")
+    return _read_unavailable()
+
+
+def _event_read_error(error: PlanningUpstreamError) -> HTTPException:
+    if error.category == "not_found":
+        return HTTPException(status_code=404, detail="planning_calendar_event_not_found")
+    if error.category in {"validation_error", "contract_mismatch", "domain_mismatch"}:
+        return HTTPException(status_code=422, detail="planning_calendar_event_invalid")
     return _read_unavailable()
 
 

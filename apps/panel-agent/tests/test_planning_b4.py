@@ -154,6 +154,11 @@ def test_b4_feature_gate_keeps_all_mutations_false_by_default(tmp_path):
             "complete": False,
             "archive": False,
         },
+        "calendar": {
+            "create": False,
+            "edit": False,
+            "delete": False,
+        },
     }
 
 
