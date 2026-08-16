@@ -89,10 +89,19 @@ function objectEnvelope(object: Record<string, unknown>) {
   };
 }
 
-async function installEventFixtures(page: Page): Promise<{ requests: Array<{ method: string; body: string }>; getCurrent: () => Record<string, unknown> }> {
+type EventFixtureOptions = {
+  loseCreateResponse?: boolean;
+  loseEditResponse?: boolean;
+  loseDeleteResponse?: boolean;
+};
+
+async function installEventFixtures(page: Page, options: EventFixtureOptions = {}): Promise<{ requests: Array<{ method: string; body: string; key: string }>; getCurrent: () => Record<string, unknown> }> {
   let current = { ...localEvent } as Record<string, unknown>;
   let nextVersion = 1;
-  const requests: Array<{ method: string; body: string }> = [];
+  const requests: Array<{ method: string; body: string; key: string }> = [];
+  let createResponseLost = false;
+  let editResponseLost = false;
+  let deleteResponseLost = false;
   const events = () => [current, externalEvent];
   await page.route("**/api/v1/planning/parse", async (route) => {
     const body = route.request().postDataJSON() as { text?: string };
@@ -162,7 +171,7 @@ async function installEventFixtures(page: Page): Promise<{ requests: Array<{ met
       return;
     }
     const body = request.postData() ?? "{}";
-    requests.push({ method: request.method(), body });
+    requests.push({ method: request.method(), body, key: request.headers()["idempotency-key"] ?? "" });
     const input = JSON.parse(body) as Record<string, unknown>;
     const fieldMap: Record<string, string> = {
       all_day: "allDay",
@@ -180,6 +189,21 @@ async function installEventFixtures(page: Page): Promise<{ requests: Array<{ met
     } else if (request.method() === "DELETE") {
       nextVersion += 1;
       current = { ...current, version: nextVersion, deletedAt: "2026-08-12T09:02:00Z" };
+    }
+    if (request.method() === "POST" && options.loseCreateResponse && !createResponseLost) {
+      createResponseLost = true;
+      await route.abort();
+      return;
+    }
+    if (request.method() === "PATCH" && options.loseEditResponse && !editResponseLost) {
+      editResponseLost = true;
+      await route.abort();
+      return;
+    }
+    if (request.method() === "DELETE" && options.loseDeleteResponse && !deleteResponseLost) {
+      deleteResponseLost = true;
+      await route.abort();
+      return;
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(objectEnvelope(current)) });
   });
@@ -215,7 +239,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
   test("standard local event flow keeps parser proposals explicit and external events read-only", async ({ page }, testInfo) => {
     test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
     await installAccess(page, "standard");
-    const fixture = await installEventFixtures(page);
+    const fixture = await installEventFixtures(page, { loseCreateResponse: true, loseEditResponse: true, loseDeleteResponse: true });
     await page.goto("/calendar");
     await expect(page.getByRole("button", { name: "Создать событие" })).toBeVisible();
 
@@ -235,7 +259,10 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByTestId("planning-calendar-proposal").getByRole("button", { name: "Принять 60 минут" }).tap();
     await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeEnabled();
     await page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" }).tap();
-    await expect.poll(() => fixture.requests.filter((request) => request.method === "POST").length).toBe(1);
+    const createRequests = () => fixture.requests.filter((request) => request.method === "POST");
+    await expect.poll(() => createRequests().length).toBe(2);
+    expect(createRequests()[0]).toEqual(createRequests()[1]);
+    await expect(page.getByText("Результат подтверждён чтением")).toBeVisible();
     await capture(page, testInfo, "b4-calendar-local-create-timed.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
 
@@ -261,6 +288,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await expect.poll(() => fixture.requests.filter((request) => request.method === "PATCH").length).toBe(1);
     expect(fixture.getCurrent().notes).toBe("Сохранить контекст");
     expect(fixture.getCurrent().location).toBe("Переговорная");
+    await expect(page.getByText("Результат подтверждён чтением")).toBeVisible();
     await capture(page, testInfo, "b4-calendar-local-edit.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
 
@@ -273,6 +301,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Удалить" }).tap();
     await page.getByTestId("action-confirmation").getByRole("button", { name: "Удалить событие" }).tap();
     await expect.poll(() => fixture.requests.filter((request) => request.method === "DELETE").length).toBe(1);
+    await expect(page.getByText("Удаление подтверждено чтением")).toBeVisible();
     await capture(page, testInfo, "b4-calendar-reconciled.png");
 
     await page.setViewportSize({ width: 1280, height: 720 });
