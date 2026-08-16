@@ -31,6 +31,7 @@ import { composeWeather, phaseTransform, readWeatherPhase, type WeatherPhase } f
 import { useWeatherMotionState } from "./weatherMotion";
 import { applyWeatherFixture, readWeatherFixtureId } from "./weatherFixtures";
 import { resolveWeatherHourPhase, weatherKind, weatherLabel, type WeatherGlyphPhase } from "./weatherPresentation";
+import { useInteractionLock } from "./InteractionLock";
 
 interface WeatherContextValue {
   locations: WeatherLocation[];
@@ -109,6 +110,7 @@ function describeError(error: unknown): string {
 }
 
 export function WeatherProvider({ children }: { children: ReactNode }) {
+  const { guardMutation } = useInteractionLock();
   const [locations, setLocations] = useState<WeatherLocation[]>([]);
   const [activeLocationId, setActiveLocationId] = useState<string | null>(null);
   const [forecast, setForecast] = useState<WeatherForecast | null>(null);
@@ -172,19 +174,22 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addLocation = useCallback(async (candidate: WeatherCandidate) => {
+    if (!guardMutation()) throw new Error("interaction_locked");
     const added = await addWeatherLocation(candidate);
     await reloadLocations();
     await selectLocation(added.id);
     return added;
-  }, [reloadLocations, selectLocation]);
+  }, [guardMutation, reloadLocations, selectLocation]);
 
   const renameLocation = useCallback(async (locationId: string, title: string) => {
+    if (!guardMutation()) throw new Error("interaction_locked");
     await renameWeatherLocation(locationId, title);
     await reloadLocations();
     if (activeLocationId === locationId) await loadForecast(locationId);
-  }, [activeLocationId, loadForecast, reloadLocations]);
+  }, [activeLocationId, guardMutation, loadForecast, reloadLocations]);
 
   const removeLocation = useCallback(async (locationId: string) => {
+    if (!guardMutation()) throw new Error("interaction_locked");
     await deleteWeatherLocation(locationId);
     const next = await reloadLocations();
     if (activeLocationId === locationId) {
@@ -198,21 +203,23 @@ export function WeatherProvider({ children }: { children: ReactNode }) {
         setForecast(null);
       }
     }
-  }, [activeLocationId, loadForecast, reloadLocations]);
+  }, [activeLocationId, guardMutation, loadForecast, reloadLocations]);
 
   const makeDefault = useCallback(async (locationId: string) => {
+    if (!guardMutation()) throw new Error("interaction_locked");
     await setDefaultWeatherLocation(locationId);
     await reloadLocations();
-  }, [reloadLocations]);
+  }, [guardMutation, reloadLocations]);
 
   const moveLocation = useCallback(async (locationId: string, direction: -1 | 1) => {
+    if (!guardMutation()) throw new Error("interaction_locked");
     const index = locations.findIndex((item) => item.id === locationId);
     const target = index + direction;
     if (index < 0 || target < 0 || target >= locations.length) return;
     const ids = locations.map((item) => item.id);
     [ids[index], ids[target]] = [ids[target], ids[index]];
     setLocations(await reorderWeatherLocations(ids));
-  }, [locations]);
+  }, [guardMutation, locations]);
 
   const value = useMemo<WeatherContextValue>(() => ({
     locations,

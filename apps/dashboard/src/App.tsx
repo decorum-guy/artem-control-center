@@ -31,6 +31,7 @@ import { HomeV2Page } from "./features/home/HomeV2Page";
 import { ServicesV2Page } from "./features/services/ServicesV2Page";
 import { SystemV2Page } from "./features/system/SystemV2Page";
 import { SettingsV2Page } from "./features/settings/SettingsV2Page";
+import { useInteractionLock } from "./InteractionLock";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -68,6 +69,7 @@ function querySetting<T extends string>(name: string, allowed: readonly T[], fal
 
 export function App() {
   const { confirmAction, confirmationOpen } = useActionConfirmation();
+  const { guardMutation } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
   const [route, setRoute] = useState<ShellRoutePath>(routeFromLocation);
   const [scenario, setScenario] = useState<string>(() =>
@@ -139,6 +141,7 @@ export function App() {
   }
 
   async function addFixtureService() {
+    if (!guardMutation()) return;
     const service: ServiceSnapshot = {
       id: `discovered-${Date.now()}`,
       title: "Discovered Service",
@@ -160,12 +163,14 @@ export function App() {
   }
 
   async function runCoffeeAction(service: ServiceSnapshot, actionId: string) {
+    if (!guardMutation()) return;
     if (coffeeActionPending || confirmationOpen) return;
     const action = actionId.endsWith("turn_on") ? "turn_on" : "turn_off";
     if (action === "turn_on") {
       const confirmation = await confirmAction("home.coffee.turn_on");
       if (!confirmation.confirmed) return;
     }
+    if (!guardMutation()) return;
     setCoffeeActionPending(true);
     showNotice({
       id: "coffee.action",

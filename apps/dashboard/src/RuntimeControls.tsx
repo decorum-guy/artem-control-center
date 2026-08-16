@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AccessSettingsPanel } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
+import { useInteractionLock } from "./InteractionLock";
 import {
   clearRuntimeShutdownPending,
   markRuntimeShutdownPending
@@ -69,11 +70,13 @@ export function RuntimeControls({
   variant?: "settings" | "system-v2";
 } = {}) {
   const { confirmAction } = useActionConfirmation();
+  const { guardMutation } = useInteractionLock();
   const { availability, runtimeRevision } = useRuntimeStatus();
   const [pending, setPending] = useState<RuntimeAction | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   async function runAction(action: RuntimeAction) {
+    if (!guardMutation()) return;
     if (pending || availability !== "available") return;
 
     if (action === "shutdown") {
@@ -81,6 +84,7 @@ export function RuntimeControls({
       if (!confirmation.confirmed) return;
     }
 
+    if (!guardMutation()) return;
     setPending(action);
     setNotice(action === "hide" ? "Скрываем панель…" : "Завершаем работу платформы…");
 

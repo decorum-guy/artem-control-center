@@ -1,4 +1,11 @@
 export type AccessProfile = "read_only" | "standard" | "full";
+export type ConfirmationMode = "profile_default" | "manual_persistent_full" | "temporary_full";
+
+export interface ConfirmationPolicy {
+  actionConfirmationRequired: boolean;
+  mode: ConfirmationMode;
+}
+
 export type ActionAvailability =
   | "allowed"
   | "elevation_required"
@@ -26,6 +33,7 @@ export interface AccessStatus {
   effectiveProfile: AccessProfile;
   temporaryFull: boolean;
   temporaryFullExpiresAt: string | null;
+  confirmationPolicy: ConfirmationPolicy;
   pinConfigured: boolean;
   lockoutUntil: string | null;
   capabilities: Record<string, CapabilityDecision>;

@@ -11,6 +11,7 @@ import { getOverviewLayout, OverviewLayoutApiError, readBackOverviewLayout, save
 import { overviewFoundationLayout, overviewFixtureModeFromLocation } from "./overviewFixture";
 import { overviewEditorDirty, overviewEditorReducer, createOverviewEditorState, makeShippedOverviewDocument, overviewItemsEqual } from "./overviewEditorReducer";
 import { validateOverviewLayout } from "./layoutValidation";
+import { useInteractionLock } from "../../InteractionLock";
 import "./overviewEditor.css";
 
 export function OverviewV2Page({
@@ -26,6 +27,7 @@ export function OverviewV2Page({
 }): ReactNode {
   const fixtureMode = overviewFixtureModeFromLocation();
   const { showNotice } = useNoticeCenter();
+  const { guardMutation } = useInteractionLock();
   const [editor, dispatch] = useReducer(
     overviewEditorReducer,
     makeShippedOverviewDocument(false),
@@ -110,6 +112,12 @@ export function OverviewV2Page({
   }
 
   async function saveDraft(): Promise<void> {
+    if (!guardMutation()) {
+      const message = "Панель заблокирована. Удерживайте замок для разблокировки.";
+      dispatch({ type: "message", message });
+      setAnnouncement(message);
+      return;
+    }
     const validation = validateOverviewLayout(editor.draft);
     if (!validation.valid) {
       const message = "Черновик содержит недопустимое размещение или настройку. Исправьте его перед сохранением.";
@@ -120,6 +128,12 @@ export function OverviewV2Page({
     const candidate = editor.draft.map((item) => ({ ...item, placement: { ...item.placement }, config: item.config ? { ...item.config } : {} }));
     dispatch({ type: "save-started" });
     try {
+      if (!guardMutation()) {
+        const message = "Панель заблокирована. Удерживайте замок для разблокировки.";
+        dispatch({ type: "save-failed", message });
+        setAnnouncement(message);
+        return;
+      }
       const result = await saveOverviewLayout(candidate, etagRef.current);
       etagRef.current = result.etag;
       dispatch({ type: "save-succeeded", document: result.document });

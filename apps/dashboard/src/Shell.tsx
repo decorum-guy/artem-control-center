@@ -7,6 +7,7 @@ import { Icon, type IconName } from "./icons";
 import { StatusText } from "./ShellPrimitives";
 import { v2VisualShellEnabled } from "./visualShellConfig";
 import { planningModuleForRoute, planningNavigationModules } from "./planningModuleRegistry";
+import { InteractionLockControl, InteractionLockStatus } from "./InteractionLock";
 
 export type RoutePath =
   | "/overview"
@@ -197,6 +198,8 @@ function LegacyProductShell({
               А
             </button>
             <TemporaryAccessIndicator />
+            <InteractionLockControl />
+            <InteractionLockStatus />
           </div>
         </header>
         <div className="route-content">{children}</div>
@@ -261,6 +264,7 @@ function V2AccessHeaderStatus({ onOpen }: { onOpen: () => void }) {
     <button
       type="button"
       className="v2-header-control v2-header-access"
+      data-testid="v2-header-access"
       aria-label={`Открыть уровень доступа: ${label}`}
       onClick={onOpen}
     >
@@ -381,6 +385,8 @@ function V2ProductShell({
               <Icon name="settings" />
             </button>
             <TemporaryAccessIndicator />
+            <InteractionLockControl />
+            <InteractionLockStatus />
           </div>
         </header>
         <div className="route-content v2-route-content">{children}</div>

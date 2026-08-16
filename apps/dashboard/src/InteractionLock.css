@@ -1,0 +1,90 @@
+.interaction-lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  /* Visual affordance only. Navigation/read surfaces remain inspectable; the
+     central guardMutation gate is the actual local action boundary. */
+  pointer-events: none;
+  background: transparent;
+  touch-action: none;
+}
+
+.interaction-lock-control {
+  position: relative;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+}
+
+.interaction-lock-button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--cc-divider, rgba(255, 255, 255, .14));
+  border-radius: 14px;
+  color: var(--cc-text, #fff);
+  background: var(--cc-surface-strong, rgba(255, 255, 255, .08));
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.interaction-lock-button:focus-visible {
+  outline: 3px solid var(--cc-focus, #8dd3ff);
+  outline-offset: 3px;
+}
+
+.interaction-lock-control--locked .interaction-lock-button {
+  border-color: rgba(245, 180, 75, .7);
+  background: rgba(245, 180, 75, .14);
+}
+
+.interaction-lock-icon { font-size: 22px; line-height: 1; }
+
+.interaction-lock-progress {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  left: 5px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .2);
+}
+
+.interaction-lock-progress > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background: currentColor;
+}
+
+.interaction-lock-hint,
+.interaction-lock-status {
+  color: var(--cc-text-secondary, #c4ccd7);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.interaction-lock-status { color: var(--cc-warning, #f5b44b); }
+
+.interaction-lock-sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .interaction-lock-progress > span { transition: none; }
+}

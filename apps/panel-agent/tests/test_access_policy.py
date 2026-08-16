@@ -33,6 +33,10 @@ def test_policy_fails_closed_and_temporary_full_expires(tmp_path):
     store.set_profile("standard")
     assert store.authorize("home.coffee.control").allowed is True
     assert store.authorize("avalar.main.restart").availability == "elevation_required"
+    assert store.status()["confirmationPolicy"] == {
+        "actionConfirmationRequired": True,
+        "mode": "profile_default",
+    }
 
     with pytest.raises(PermissionError, match="invalid_pin"):
         store.unlock_temporary("0000")
@@ -40,6 +44,10 @@ def test_policy_fails_closed_and_temporary_full_expires(tmp_path):
     unlocked = store.unlock_temporary("2468")
     assert unlocked["temporaryFull"] is True
     assert store.authorize("avalar.main.restart").allowed is True
+    assert unlocked["confirmationPolicy"] == {
+        "actionConfirmationRequired": True,
+        "mode": "temporary_full",
+    }
 
     clock.advance(minutes=31)
     assert store.status()["effectiveProfile"] == "standard"
@@ -55,6 +63,10 @@ def test_manual_full_persists_but_corruption_falls_back_to_read_only(tmp_path):
     reloaded = AccessPolicyStore(path)
     assert reloaded.status()["baseProfile"] == "full"
     assert reloaded.status()["temporaryFull"] is False
+    assert reloaded.status()["confirmationPolicy"] == {
+        "actionConfirmationRequired": False,
+        "mode": "manual_persistent_full",
+    }
 
     path.write_text('{"schemaVersion":1,"baseProfile":"full","pin":"plaintext"}', encoding="utf-8")
     recovered = AccessPolicyStore(path)

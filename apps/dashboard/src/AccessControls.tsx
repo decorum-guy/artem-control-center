@@ -24,6 +24,7 @@ import {
   isValidPin,
   type PinKey
 } from "./pinKeypad";
+import { useInteractionLock } from "./InteractionLock";
 import "./AccessControls.css";
 
 interface PinPrompt {
@@ -86,6 +87,7 @@ function pinErrorCopy(error: unknown): string {
 }
 
 export function AccessProvider({ children }: { children: ReactNode }) {
+  const { locked, guardMutation } = useInteractionLock();
   const [status, setStatus] = useState<AccessStatus | null>(null);
   const [available, setAvailable] = useState(true);
   const [prompt, setPrompt] = useState<PinPrompt | null>(null);
@@ -118,6 +120,10 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     const frame = window.requestAnimationFrame(() => dialogRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [prompt]);
+
+  useEffect(() => {
+    if (locked && prompt) closePrompt(false);
+  }, [locked, prompt]);
 
   function requestPin(
     title: string,
@@ -206,6 +212,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
   }
 
   const ensureCapability = useCallback(async (capability: string, title: string) => {
+    if (!guardMutation()) return false;
     const current = status ?? await refresh();
     if (!current) return true; // Fixture/dev runtime has no production access API.
     const decision = current.capabilities[capability];
@@ -216,6 +223,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
       title,
       "Полный доступ включится на 30 минут и будет действовать для следующих защищённых операций.",
       async (entered) => {
+        if (!guardMutation()) return false;
         try {
           const next = await unlockTemporaryFull(entered);
           setStatus(next);
@@ -226,9 +234,10 @@ export function AccessProvider({ children }: { children: ReactNode }) {
         }
       }
     );
-  }, [refresh, status]);
+  }, [guardMutation, refresh, status]);
 
   const changeProfile = useCallback(async (profile: AccessProfile) => {
+    if (!guardMutation()) return false;
     if (profile !== "full") {
       try {
         setStatus(await setAccessProfile(profile));
@@ -242,6 +251,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
       "Включить полный доступ",
       "Ручной полный доступ не имеет таймера и сохранится после перезапуска, пока вы не смените профиль.",
       async (entered) => {
+        if (!guardMutation()) return false;
         try {
           setStatus(await setAccessProfile(profile, entered));
           return true;
@@ -251,11 +261,12 @@ export function AccessProvider({ children }: { children: ReactNode }) {
         }
       }
     );
-  }, []);
+  }, [guardMutation]);
 
   const clearTemporary = useCallback(async () => {
+    if (!guardMutation()) return;
     setStatus(await clearTemporaryFull());
-  }, []);
+  }, [guardMutation]);
 
   const explainAvailability = useCallback(
     (availability: string) => availabilityCopy[availability] ?? "Операция сейчас недоступна",
