@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -209,6 +210,7 @@ async function installLayoutRoute(
 
 async function openEditor(page: Page, url = "/overview?theme=night"): Promise<void> {
   await page.goto(url);
+  await unlockTouchLockIfNeeded(page);
   await expect(page.getByTestId("route-overview-v2")).toBeVisible();
   await expect(page.getByTestId("overview-configure")).toBeEnabled();
   await page.getByTestId("overview-configure").click();

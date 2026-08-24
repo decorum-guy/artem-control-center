@@ -3,6 +3,9 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 const v2Enabled = process.env.VITE_V2_VISUAL_SHELL === "true";
+const overviewRouteTestId = process.env.VITE_OVERVIEW_V2_ENABLED === "true"
+  ? "route-overview-v2"
+  : "route-overview";
 
 type TimingSettings = {
   schemaVersion: 1;
@@ -259,7 +262,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(page.locator(".app")).toHaveClass(/motion-battery-saving/);
 
     await page.locator(".v2-nav-link[data-nav-route='/overview']").click();
-    await expect(page.getByTestId("route-overview")).toBeVisible();
+    await expect(page.getByTestId(overviewRouteTestId)).toBeVisible();
     await page.locator(".v2-nav-link[data-nav-route='/settings']").click();
     await expect(page.getByTestId("settings-theme-day")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("settings-motion-battery-saving")).toHaveAttribute("aria-pressed", "true");

@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 const lockEnabled = process.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true";
+const startsLocked = process.env.VITE_TOUCH_INPUT_LOCK_START_LOCKED === "true";
 const actionIds = [
   "avalar.main.smoke",
   "avalar.stage.smoke",
@@ -129,6 +130,19 @@ async function holdLock(page: Page) {
   await page.mouse.up();
 }
 
+async function unlockWithKeyboard(page: Page) {
+  const control = page.getByTestId("interaction-lock-control");
+  if (await control.getAttribute("aria-pressed") !== "true") {
+    await expect(control).toHaveAttribute("aria-pressed", "false");
+    return;
+  }
+  await control.focus();
+  await page.keyboard.down("Space");
+  await page.waitForTimeout(1_050);
+  await page.keyboard.up("Space");
+  await expect(control).toHaveAttribute("aria-pressed", "false");
+}
+
 async function captureScreenshot(page: Page, filename: string) {
   const directory = process.env.TOUCH_LOCK_ARTIFACT_DIR ?? "artifacts/touch-lock";
   await mkdir(directory, { recursive: true });
@@ -149,6 +163,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
   test("Standard keeps simple confirmation", async ({ page }) => {
     const api = await installFixtures(page, "standard");
     await page.goto("/services");
+    await unlockWithKeyboard(page);
     await openAvalarServiceDetails(page, "avalar-site-stage");
     await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
     await expect(page.getByTestId("action-confirmation")).toBeVisible();
@@ -159,6 +174,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
   test("manual persistent Full runs a simple action immediately", async ({ page }) => {
     const api = await installFixtures(page, "full");
     await page.goto("/services");
+    await unlockWithKeyboard(page);
     await openAvalarServiceDetails(page, "avalar-site-stage");
     await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
     await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
@@ -170,6 +186,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
   test("manual persistent Full strong action has no phrase or fabricated confirmation", async ({ page }) => {
     const api = await installFixtures(page, "full");
     await page.goto("/services");
+    await unlockWithKeyboard(page);
     await openAvalarServiceDetails(page, "avalar-site-main");
     await page.getByTestId("service-details-sheet").getByRole("button", { name: "Обновить Main" }).click();
     await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
@@ -180,6 +197,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
   test("fresh policy prevents stale Full from waiving Standard confirmation", async ({ page }) => {
     const api = await installFixtures(page, "full");
     await page.goto("/services");
+    await unlockWithKeyboard(page);
     await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
     api.setAccessProfile("standard");
     await openAvalarServiceDetails(page, "avalar-site-stage");
@@ -194,6 +212,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
   test("fresh policy lets current manual Full bypass cached Standard", async ({ page }) => {
     const api = await installFixtures(page, "standard");
     await page.goto("/services");
+    await unlockWithKeyboard(page);
     await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
     api.setAccessProfile("full");
     await openAvalarServiceDetails(page, "avalar-site-stage");
@@ -206,6 +225,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
   test("access refresh failure fails closed to the existing confirmation ceremony", async ({ page }) => {
     const api = await installFixtures(page, "full");
     await page.goto("/services");
+    await unlockWithKeyboard(page);
     await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
     api.failNextAccessRefresh();
     await openAvalarServiceDetails(page, "avalar-site-stage");
@@ -219,8 +239,16 @@ test.describe("#82 trusted Full Access and touch lock", () => {
   test("hold feedback, locked Full state, zero new mutation, and keyboard unlock", async ({ page }) => {
     const api = await installFixtures(page, "full");
     await page.goto("/services");
-    await expect(page.getByTestId("interaction-lock-control")).toHaveAttribute("aria-pressed", "false");
-    await captureScreenshot(page, "touch-lock-unlocked.png");
+    const control = page.getByTestId("interaction-lock-control");
+    if (startsLocked) {
+      await expect(control).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByTestId("interaction-lock-status")).toHaveText("Панель заблокирована");
+      await captureScreenshot(page, "touch-lock-start-locked.png");
+      await unlockWithKeyboard(page);
+    } else {
+      await expect(control).toHaveAttribute("aria-pressed", "false");
+    }
+    await expect(page.getByTestId("v2-header-access")).toContainText("Полный доступ");
     await holdLock(page);
     await expect(page.getByTestId("interaction-lock-status")).toHaveText("Панель заблокирована");
     await expect(page.getByTestId("interaction-lock-control")).toHaveAttribute("aria-pressed", "true");
@@ -232,10 +260,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await page.getByTestId("service-details-sheet").getByRole("button", { name: "Закрыть" }).click();
     await page.locator(".v2-nav-link[data-nav-route='/weather']").click();
     await expect(page.getByTestId("route-weather")).toBeVisible();
-    await page.getByTestId("interaction-lock-control").focus();
-    await page.keyboard.down("Space");
-    await page.waitForTimeout(1_050);
-    await page.keyboard.up("Space");
+    await unlockWithKeyboard(page);
     await expect(page.getByTestId("interaction-lock-status")).toHaveCount(0);
     await expect(page.getByTestId("interaction-lock-control")).toHaveAttribute("aria-pressed", "false");
     await expect(page.getByTestId("v2-header-access")).toContainText("Полный доступ");
@@ -246,6 +271,7 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await installFixtures(page, "full");
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/overview");
+    await unlockWithKeyboard(page);
     const control = page.getByTestId("interaction-lock-control");
     await control.hover();
     await page.mouse.down();

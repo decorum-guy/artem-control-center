@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 const viewport = { width: 1280, height: 720 };
+const v2ShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 
 async function assertPlanningTrafficIsReadOnly(page: Page) {
   const writes: string[] = [];
@@ -125,12 +126,12 @@ test.describe("B3 Planning monitoring routes", () => {
     await assertNoWrites();
   });
 
-  test("Overview reaches the hidden reminder monitor without a rail item", async ({ page }) => {
+  test("Overview reaches the reminder monitor with the accepted navigation projection", async ({ page }) => {
     const assertNoWrites = await assertPlanningTrafficIsReadOnly(page);
     await page.goto("/overview");
     await page.getByTestId("planning-reminder-row").tap();
     await expect(page.getByTestId("route-reminders")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Напоминания" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Напоминания" })).toHaveCount(v2ShellEnabled ? 1 : 0);
     await page.locator(".planning-segmented").getByRole("button", { name: "Пропущено" }).tap();
     await expect(page.getByTestId("planning-reminder-list")).toContainText("Доставлено · ждёт завершения");
     await expect(page.getByTestId("planning-reminder-list")).toContainText("Открыто");

@@ -4,6 +4,10 @@ import path from "node:path";
 
 test.describe.configure({ mode: "serial" });
 
+const overviewRouteTestId = process.env.VITE_OVERVIEW_V2_ENABLED === "true"
+  ? "route-overview-v2"
+  : "route-overview";
+
 async function expectNoDocumentOverflow(page: Page) {
   const result = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
@@ -31,7 +35,7 @@ function artifactDirectory(testInfo: { outputPath: (name: string) => string }): 
 
 test("NoticeCenter is a fixed root overlay and does not reflow the route", async ({ page }) => {
   await page.goto("/overview?theme=night");
-  const route = page.getByTestId("route-overview");
+  const route = page.getByTestId(overviewRouteTestId);
   await expect(route).toBeVisible();
   const before = await readBox(route);
 

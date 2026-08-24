@@ -81,6 +81,15 @@ try {
     $installerText = Get-Content `
         -LiteralPath (Join-Path $PSScriptRoot "install-production.ps1") `
         -Raw
+    if ($installerText -notmatch 'npm\.cmd[\s\S]*?build:production') {
+        throw "Production installer must use the deterministic accepted V2 build profile"
+    }
+    $updaterText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "update-production.ps1") `
+        -Raw
+    if ($updaterText -notmatch 'npm\.cmd[\s\S]*?build:production') {
+        throw "Production updater must rebuild the dashboard with the deterministic accepted V2 profile"
+    }
     if ($installerText -match '\$env:USERDOMAIN') {
         throw "Production installer must not derive the Scheduled Task account from USERDOMAIN"
     }

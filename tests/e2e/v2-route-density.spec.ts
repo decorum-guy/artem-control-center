@@ -195,7 +195,7 @@ test.describe("Control Center V2 PR7 route density", () => {
     await coffeeAction.click();
     await expect(page.getByTestId("action-confirmation")).toBeVisible();
     await page.getByTestId("action-confirmation").getByRole("button", { name: "Включить кофемашину" }).click();
-    await expect(page.getByRole("status")).toContainText("Home Assistant подтвердил");
+    await expect(page.getByTestId("global-notice")).toContainText("Home Assistant подтвердил");
   });
 
   test("Services puts attention first, keeps healthy groups collapsed, and uses a safe details Sheet", async ({ page }) => {

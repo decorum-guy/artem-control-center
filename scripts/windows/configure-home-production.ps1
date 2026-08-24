@@ -96,6 +96,23 @@ function Restart-ControlCenterRuntime {
     }
 }
 
+function Test-LivePanelPlanning {
+    try {
+        $planning = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:8787/api/v1/planning/status" `
+            -Method Get `
+            -TimeoutSec 5
+        return (
+            $planning.schemaVersion -eq "planning.panel.v1" -and
+            -not [string]::IsNullOrWhiteSpace([string]$planning.generatedAt) -and
+            $planning.sourceStatus -in @("current", "stale", "offline", "degraded")
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
 function Test-LivePanelIntegrations {
     param([Parameter(Mandatory)]$Paths)
     try {
@@ -105,6 +122,7 @@ function Test-LivePanelIntegrations {
             -TimeoutSec 5
         $ha = $snapshot.services | Where-Object { $_.id -eq "home-assistant" } | Select-Object -First 1
         $alice = $snapshot.services | Where-Object { $_.id -eq "alice-tg-bot" } | Select-Object -First 1
+        $planningReady = Test-LivePanelPlanning
         return (
             $snapshot.mode -eq "production" -and
             $null -ne $ha -and
@@ -113,7 +131,8 @@ function Test-LivePanelIntegrations {
             $ha.data.transport.snapshotConfirmed -eq $true -and
             $null -ne $alice -and
             $alice.source -eq "live" -and
-            $alice.health -eq "healthy"
+            $alice.health -eq "healthy" -and
+            $planningReady
         )
     }
     catch {
@@ -134,6 +153,33 @@ function Wait-LivePanelIntegrations {
     return $false
 }
 
+function Test-AlicePlanningApi {
+    param(
+        [Parameter(Mandatory)][string]$BaseUrl,
+        [Parameter(Mandatory)][string]$InternalSecret,
+        [Parameter(Mandatory)][string]$PanelAgentSecret
+    )
+    try {
+        $status = Invoke-RestMethod `
+            -Uri "$BaseUrl/internal/planning/v1/status" `
+            -Headers @{
+                "X-Internal-Secret" = $InternalSecret
+                "X-Planning-Audience" = "panel-agent"
+                "X-Planning-Secret" = $PanelAgentSecret
+            } `
+            -Method Get `
+            -TimeoutSec 15
+        return (
+            $status.schemaVersion -eq "planning.v1" -and
+            $status.kind -eq "status" -and
+            $status.storageStatus -eq "available"
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
 $runtimePaths = Get-ArtemRuntimePaths
 $connectivityPaths = Get-ArtemConnectivityPaths
 if (-not (Test-Path -LiteralPath $runtimePaths.RuntimeEnv)) {
@@ -148,12 +194,14 @@ $botBaseUrl = "http://127.0.0.1:$BotPort"
 $haToken = $null
 $aliceControlToken = $null
 $aliceDetailsToken = $null
+$planningPanelSecret = $null
 $backupPath = "$($runtimePaths.RuntimeEnv).production-backup"
 
 try {
     $haToken = Read-RequiredSecret -Prompt "Home Assistant long-lived token"
     $aliceControlToken = Read-RequiredSecret -Prompt "AliceTG CONTROL_CENTER_API_TOKEN"
     $aliceDetailsToken = Read-RequiredSecret -Prompt "AliceTG INTERNAL_WEBHOOK_SECRET for health details"
+    $planningPanelSecret = Read-RequiredSecret -Prompt "AliceTG PLANNING_PANEL_AGENT_SECRET"
 
     try {
         $haResponse = Invoke-WebRequest `
@@ -194,6 +242,13 @@ try {
         throw "AliceTG health or Control Center API verification through the private tunnel failed"
     }
 
+    if (-not (Test-AlicePlanningApi `
+        -BaseUrl $botBaseUrl `
+        -InternalSecret $aliceDetailsToken `
+        -PanelAgentSecret $planningPanelSecret)) {
+        throw "AliceTG Planning panel-agent authentication through the private tunnel failed"
+    }
+
     Copy-Item -LiteralPath $runtimePaths.RuntimeEnv -Destination $backupPath -Force
     Protect-RuntimeConfiguration -Path $backupPath
     foreach ($line in (Get-Content -LiteralPath $runtimePaths.RuntimeEnv)) {
@@ -210,6 +265,10 @@ try {
         PANEL_ALICE_DETAILS_TOKEN = $aliceDetailsToken
         PANEL_ALICE_BASE_URL = $botBaseUrl
         PANEL_ALICE_CONTROL_CENTER_TOKEN = $aliceControlToken
+        PANEL_PLANNING_ENABLED = "true"
+        PANEL_PLANNING_BASE_URL = $botBaseUrl
+        PANEL_PLANNING_INTERNAL_SECRET = $aliceDetailsToken
+        PANEL_PLANNING_SECRET = $planningPanelSecret
         PANEL_WRITES_ENABLED = "false"
         PANEL_COFFEE_ACTIONS_ENABLED = "false"
         PANEL_COFFEE_TIMING_WRITES_ENABLED = "false"
@@ -251,6 +310,7 @@ try {
     Write-Host "Panel mode: production"
     Write-Host "Home Assistant: $haBaseUrl"
     Write-Host "AliceTG Bot: $botBaseUrl"
+    Write-Host "Planning: authenticated panel-agent boundary enabled"
     Write-Host "Coffee writes: $(if ($KeepWritesDisabled) { 'disabled' } else { 'enabled behind access policy' })"
     Write-Host "No token was printed or written to Git."
 }
@@ -269,4 +329,5 @@ finally {
     $haToken = $null
     $aliceControlToken = $null
     $aliceDetailsToken = $null
+    $planningPanelSecret = $null
 }

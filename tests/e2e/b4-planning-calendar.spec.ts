@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 
 const calendarRouteEnabled = process.env.B3_PLANNING_CALENDAR_ROUTE_ENABLED === "true";
 const calendarMutationsEnabled = process.env.VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED === "true";
@@ -253,6 +254,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await installAccess(page, "standard");
     const fixture = await installEventFixtures(page, { loseCreateResponse: true, loseEditResponse: true, loseDeleteResponse: true });
     await page.goto("/calendar");
+    await unlockTouchLockIfNeeded(page);
     await expect(page.getByRole("button", { name: "Создать событие" })).toBeVisible();
 
     await page.getByRole("button", { name: "Создать событие" }).tap();
