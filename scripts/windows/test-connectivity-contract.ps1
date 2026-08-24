@@ -152,6 +152,15 @@ foreach ($required in @(
     '/internal/planning/v1/status',
     'X-Planning-Audience',
     'X-Planning-Secret',
+    'Test-LivePanelPlanning',
+    '/api/v1/planning/status',
+    'planning.panel.v1',
+    'generatedAt',
+    'sourceStatus',
+    '"current"',
+    '"stale"',
+    '"offline"',
+    '"degraded"',
     'PANEL_WRITES_ENABLED = "false"',
     'PANEL_COFFEE_ACTIONS_ENABLED = "false"',
     'Wait-LivePanelIntegrations',
@@ -168,6 +177,15 @@ if ($configurator -match 'Write-Host[^\r\n]*(haToken|aliceControlToken|aliceDeta
 }
 if ($configurator -match 'Write-Host[^\r\n]*planningPanelSecret') {
     throw "Production integration configurator must never print the Planning secret variable"
+}
+if ($configurator -notmatch '(?s)function Test-LivePanelIntegrations.*?Test-LivePanelPlanning') {
+    throw "Post-restart live integration verification must include Panel Agent Planning readiness"
+}
+if ($configurator -match '\.sourceStatus\s+-eq\s+"current"') {
+    throw "Panel Agent Planning readiness must not require current provider freshness"
+}
+if ($configurator -match '(?i)providerStatuses|calendarCount|eventCount|icloud') {
+    throw "Panel Agent Planning readiness must not couple production rollout to provider freshness"
 }
 if ($configurator -notmatch 'Read-RequiredSecret\s+-Prompt\s+"AliceTG PLANNING_PANEL_AGENT_SECRET"') {
     throw "Planning panel-agent secret must use the existing SecureString prompt pattern"
@@ -199,6 +217,31 @@ $falseWritePosition = $configurator.IndexOf('PANEL_WRITES_ENABLED = "false"')
 $trueWritePosition = $configurator.IndexOf('Set-RuntimeEnvEntry -Key $key -Value "true"')
 if ($falseWritePosition -lt 0 -or $trueWritePosition -le $falseWritePosition) {
     throw "Production integration must verify read-only connectivity before enabling writes"
+}
+$restartMatches = [regex]::Matches($configurator, 'Restart-ControlCenterRuntime\s+-Paths\s+\$runtimePaths')
+$waitMatches = [regex]::Matches($configurator, 'Wait-LivePanelIntegrations\s+-Paths\s+\$runtimePaths')
+if ($restartMatches.Count -lt 2 -or $waitMatches.Count -lt 2) {
+    throw "Both production runtime restarts must use the bounded live integration wait"
+}
+for ($index = 0; $index -lt $restartMatches.Count; $index++) {
+    $restartEnd = $restartMatches[$index].Index + $restartMatches[$index].Length
+    $nextRestart = if ($index + 1 -lt $restartMatches.Count) {
+        $restartMatches[$index + 1].Index
+    }
+    else {
+        [int]::MaxValue
+    }
+    $waitAfterRestart = $waitMatches | Where-Object {
+        $_.Index -gt $restartEnd -and $_.Index -lt $nextRestart
+    }
+    if ($null -eq $waitAfterRestart) {
+        throw "Each production runtime restart must be followed by bounded live integration verification"
+    }
+}
+$firstBackupDeletionPosition = $configurator.IndexOf('Remove-Item -LiteralPath $backupPath -Force')
+$lastWaitPosition = ($waitMatches | Sort-Object Index | Select-Object -Last 1).Index
+if ($firstBackupDeletionPosition -lt 0 -or $firstBackupDeletionPosition -le $lastWaitPosition) {
+    throw "Protected runtime backup must remain until both restart verifications pass"
 }
 
 foreach ($required in @(

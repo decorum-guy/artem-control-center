@@ -96,6 +96,23 @@ function Restart-ControlCenterRuntime {
     }
 }
 
+function Test-LivePanelPlanning {
+    try {
+        $planning = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:8787/api/v1/planning/status" `
+            -Method Get `
+            -TimeoutSec 5
+        return (
+            $planning.schemaVersion -eq "planning.panel.v1" -and
+            -not [string]::IsNullOrWhiteSpace([string]$planning.generatedAt) -and
+            $planning.sourceStatus -in @("current", "stale", "offline", "degraded")
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
 function Test-LivePanelIntegrations {
     param([Parameter(Mandatory)]$Paths)
     try {
@@ -105,6 +122,7 @@ function Test-LivePanelIntegrations {
             -TimeoutSec 5
         $ha = $snapshot.services | Where-Object { $_.id -eq "home-assistant" } | Select-Object -First 1
         $alice = $snapshot.services | Where-Object { $_.id -eq "alice-tg-bot" } | Select-Object -First 1
+        $planningReady = Test-LivePanelPlanning
         return (
             $snapshot.mode -eq "production" -and
             $null -ne $ha -and
@@ -113,7 +131,8 @@ function Test-LivePanelIntegrations {
             $ha.data.transport.snapshotConfirmed -eq $true -and
             $null -ne $alice -and
             $alice.source -eq "live" -and
-            $alice.health -eq "healthy"
+            $alice.health -eq "healthy" -and
+            $planningReady
         )
     }
     catch {
