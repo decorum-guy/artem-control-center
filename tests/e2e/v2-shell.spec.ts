@@ -3,6 +3,13 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 const v2Enabled = process.env.VITE_V2_VISUAL_SHELL === "true";
+const overviewV2Enabled = process.env.VITE_OVERVIEW_V2_ENABLED === "true";
+const overviewHeadingSelector = overviewV2Enabled
+  ? ".v2-route-content .overview-v2-toolbar"
+  : ".v2-route-content .page-heading";
+const overviewTitleSelector = overviewV2Enabled
+  ? ".overview-v2-toolbar h1"
+  : ".v2-route-header h1";
 
 async function waitForShell(page: Page) {
   await expect(page.getByTestId("v2-shell")).toBeVisible();
@@ -67,7 +74,7 @@ test.describe("Control Center V2 shell", () => {
     const header = await page.getByTestId("product-header").boundingBox();
     const workspace = await page.locator(".v2-workspace").boundingBox();
     const route = await page.locator(".v2-route-content").boundingBox();
-    const pageHeading = await page.locator(".v2-route-content .overview-v2-toolbar").boundingBox();
+    const pageHeading = await page.locator(overviewHeadingSelector).boundingBox();
 
     expect(rail).toMatchObject({ x: 0, y: 0, width: 176, height: 720 });
     expect(header).toMatchObject({ x: 176, y: 0, width: 1104, height: 64 });
@@ -160,7 +167,7 @@ test.describe("Control Center V2 shell", () => {
       return { size: style.fontSize, line: style.lineHeight, weight: style.fontWeight, numerals: style.fontVariantNumeric };
     });
     expect(typography).toEqual({ size: "28px", line: "32px", weight: "700", numerals: "tabular-nums" });
-    await expect(page.locator(".overview-v2-toolbar h1")).toHaveCSS("font-size", "26px");
+    await expect(page.locator(overviewTitleSelector)).toHaveCSS("font-size", "26px");
     await expect(page.locator(".app")).toHaveCSS("font-family", /Segoe UI Variable Text/);
   });
 
