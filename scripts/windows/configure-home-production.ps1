@@ -134,6 +134,33 @@ function Wait-LivePanelIntegrations {
     return $false
 }
 
+function Test-AlicePlanningApi {
+    param(
+        [Parameter(Mandatory)][string]$BaseUrl,
+        [Parameter(Mandatory)][string]$InternalSecret,
+        [Parameter(Mandatory)][string]$PanelAgentSecret
+    )
+    try {
+        $status = Invoke-RestMethod `
+            -Uri "$BaseUrl/internal/planning/v1/status" `
+            -Headers @{
+                "X-Internal-Secret" = $InternalSecret
+                "X-Planning-Audience" = "panel-agent"
+                "X-Planning-Secret" = $PanelAgentSecret
+            } `
+            -Method Get `
+            -TimeoutSec 15
+        return (
+            $status.schemaVersion -eq "planning.v1" -and
+            $status.kind -eq "status" -and
+            $status.storageStatus -eq "available"
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
 $runtimePaths = Get-ArtemRuntimePaths
 $connectivityPaths = Get-ArtemConnectivityPaths
 if (-not (Test-Path -LiteralPath $runtimePaths.RuntimeEnv)) {
@@ -148,12 +175,14 @@ $botBaseUrl = "http://127.0.0.1:$BotPort"
 $haToken = $null
 $aliceControlToken = $null
 $aliceDetailsToken = $null
+$planningPanelSecret = $null
 $backupPath = "$($runtimePaths.RuntimeEnv).production-backup"
 
 try {
     $haToken = Read-RequiredSecret -Prompt "Home Assistant long-lived token"
     $aliceControlToken = Read-RequiredSecret -Prompt "AliceTG CONTROL_CENTER_API_TOKEN"
     $aliceDetailsToken = Read-RequiredSecret -Prompt "AliceTG INTERNAL_WEBHOOK_SECRET for health details"
+    $planningPanelSecret = Read-RequiredSecret -Prompt "AliceTG PLANNING_PANEL_AGENT_SECRET"
 
     try {
         $haResponse = Invoke-WebRequest `
@@ -194,6 +223,13 @@ try {
         throw "AliceTG health or Control Center API verification through the private tunnel failed"
     }
 
+    if (-not (Test-AlicePlanningApi `
+        -BaseUrl $botBaseUrl `
+        -InternalSecret $aliceDetailsToken `
+        -PanelAgentSecret $planningPanelSecret)) {
+        throw "AliceTG Planning panel-agent authentication through the private tunnel failed"
+    }
+
     Copy-Item -LiteralPath $runtimePaths.RuntimeEnv -Destination $backupPath -Force
     Protect-RuntimeConfiguration -Path $backupPath
     foreach ($line in (Get-Content -LiteralPath $runtimePaths.RuntimeEnv)) {
@@ -210,6 +246,10 @@ try {
         PANEL_ALICE_DETAILS_TOKEN = $aliceDetailsToken
         PANEL_ALICE_BASE_URL = $botBaseUrl
         PANEL_ALICE_CONTROL_CENTER_TOKEN = $aliceControlToken
+        PANEL_PLANNING_ENABLED = "true"
+        PANEL_PLANNING_BASE_URL = $botBaseUrl
+        PANEL_PLANNING_INTERNAL_SECRET = $aliceDetailsToken
+        PANEL_PLANNING_SECRET = $planningPanelSecret
         PANEL_WRITES_ENABLED = "false"
         PANEL_COFFEE_ACTIONS_ENABLED = "false"
         PANEL_COFFEE_TIMING_WRITES_ENABLED = "false"
@@ -251,6 +291,7 @@ try {
     Write-Host "Panel mode: production"
     Write-Host "Home Assistant: $haBaseUrl"
     Write-Host "AliceTG Bot: $botBaseUrl"
+    Write-Host "Planning: authenticated panel-agent boundary enabled"
     Write-Host "Coffee writes: $(if ($KeepWritesDisabled) { 'disabled' } else { 'enabled behind access policy' })"
     Write-Host "No token was printed or written to Git."
 }
@@ -269,4 +310,5 @@ finally {
     $haToken = $null
     $aliceControlToken = $null
     $aliceDetailsToken = $null
+    $planningPanelSecret = $null
 }

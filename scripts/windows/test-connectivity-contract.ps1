@@ -144,6 +144,14 @@ foreach ($required in @(
     'PANEL_ALICE_BASE_URL',
     'PANEL_ALICE_DETAILS_TOKEN',
     'PANEL_ALICE_CONTROL_CENTER_TOKEN',
+    'PANEL_PLANNING_ENABLED = "true"',
+    'PANEL_PLANNING_BASE_URL',
+    'PANEL_PLANNING_INTERNAL_SECRET',
+    'PANEL_PLANNING_SECRET',
+    'Test-AlicePlanningApi',
+    '/internal/planning/v1/status',
+    'X-Planning-Audience',
+    'X-Planning-Secret',
     'PANEL_WRITES_ENABLED = "false"',
     'PANEL_COFFEE_ACTIONS_ENABLED = "false"',
     'Wait-LivePanelIntegrations',
@@ -157,6 +165,35 @@ foreach ($required in @(
 }
 if ($configurator -match 'Write-Host[^\r\n]*(haToken|aliceControlToken|aliceDetailsToken)') {
     throw "Production integration configurator must never print secret variables"
+}
+if ($configurator -match 'Write-Host[^\r\n]*planningPanelSecret') {
+    throw "Production integration configurator must never print the Planning secret variable"
+}
+if ($configurator -notmatch 'Read-RequiredSecret\s+-Prompt\s+"AliceTG PLANNING_PANEL_AGENT_SECRET"') {
+    throw "Planning panel-agent secret must use the existing SecureString prompt pattern"
+}
+if ($configurator -notmatch '\$script:RuntimeEnvLines\.RemoveAt\(\$index\)') {
+    throw "Production runtime configuration must remove duplicate environment keys"
+}
+if ($configurator -notmatch 'Copy-Item -LiteralPath \$backupPath -Destination \$runtimePaths\.RuntimeEnv') {
+    throw "Production runtime configuration must restore the protected backup on failure"
+}
+foreach ($forbidden in @(
+    'PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED = "true"',
+    'PANEL_PLANNING_TASK_MUTATIONS_ENABLED = "true"',
+    'PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED = "true"'
+)) {
+    if ($configurator -like "*$forbidden*") {
+        throw "Planning read configuration must not enable unrelated mutation gate: $forbidden"
+    }
+}
+$planningVerificationPosition = $configurator.IndexOf('if (-not (Test-AlicePlanningApi')
+$planningBackupPosition = $configurator.IndexOf('Copy-Item -LiteralPath $runtimePaths.RuntimeEnv -Destination $backupPath')
+$planningWritePosition = $configurator.IndexOf('PANEL_PLANNING_ENABLED = "true"')
+if ($planningVerificationPosition -lt 0 -or
+    $planningBackupPosition -le $planningVerificationPosition -or
+    $planningWritePosition -le $planningVerificationPosition) {
+    throw "Planning runtime enablement must follow authenticated panel-agent verification"
 }
 $falseWritePosition = $configurator.IndexOf('PANEL_WRITES_ENABLED = "false"')
 $trueWritePosition = $configurator.IndexOf('Set-RuntimeEnvEntry -Key $key -Value "true"')

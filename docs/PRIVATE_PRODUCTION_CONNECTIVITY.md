@@ -38,11 +38,13 @@ start the tunnel through `Start Control Center Connectivity.cmd` or
 
 ## Production integration configuration
 
-`configure-home-production.ps1` prompts securely for three values:
+`configure-home-production.ps1` prompts securely for four values:
 
 - a dedicated Home Assistant long-lived token;
 - AliceTG Bot `CONTROL_CENTER_API_TOKEN`;
-- AliceTG Bot `INTERNAL_WEBHOOK_SECRET` for sanitized health details.
+- AliceTG Bot `INTERNAL_WEBHOOK_SECRET` for sanitized health details and the
+  existing A4 `X-Internal-Secret` boundary;
+- AliceTG Bot `PLANNING_PANEL_AGENT_SECRET` for the A4 `panel-agent` audience.
 
 The values are never printed. They are stored only in protected
 `runtime.env`, whose ACL grants Full Control to the panel account and SYSTEM.
@@ -52,12 +54,31 @@ The script first verifies:
 2. AliceTG process and readiness health;
 3. authenticated AliceTG health details;
 4. authenticated canonical coffee timing API.
+5. authenticated AliceTG `GET /internal/planning/v1/status` using the existing
+   `panel-agent` audience and the private loopback origin.
 
-It then switches Panel Agent to `production` with all mutation gates disabled,
-restarts it and waits for a live Home Assistant REST snapshot, an authenticated
-Home Assistant WebSocket subscription and healthy AliceTG monitoring. Only
-after those checks pass does it enable coffee mutation transport gates. Access
-profiles and PIN authorization still apply at the Panel Agent boundary.
+It then switches Panel Agent to `production`, enables the Planning read
+integration, and keeps the three Planning mutation gates independently
+server-configurable. It restarts Panel Agent and waits for a live Home
+Assistant REST snapshot, an authenticated Home Assistant WebSocket subscription
+and healthy AliceTG monitoring. Only after those checks pass does it enable
+coffee mutation transport gates. Access profiles, capabilities, confirmations,
+touch lock and PIN authorization still apply at the Panel Agent boundary.
+
+The Planning runtime mapping is deterministic and private:
+
+```text
+PANEL_PLANNING_BASE_URL       http://127.0.0.1:18088
+PANEL_PLANNING_INTERNAL_SECRET AliceTG INTERNAL_WEBHOOK_SECRET
+PANEL_PLANNING_SECRET          AliceTG PLANNING_PANEL_AGENT_SECRET
+```
+
+The script never prints these values, never writes them to Git, preserves the
+protected `runtime.env` ACL, and restores the previous file if a later runtime
+restart or live-integration verification fails. A failed Planning
+authentication does not enable the runtime integration. Planning API exposure
+does not grant mutation authorization and does not make imported external
+calendar events writable.
 
 A backup of `runtime.env` is restored automatically when verification fails.
 AVALAR and unrelated settings are preserved.
