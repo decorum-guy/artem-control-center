@@ -4,6 +4,7 @@ import path from "node:path";
 
 const overviewV2Enabled = process.env.VITE_OVERVIEW_V2_ENABLED === "true";
 const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
+const overviewLayoutWritesEnabled = process.env.PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED === "true";
 
 type RogStatus = "online" | "offline" | "waking" | "hibernating" | "unavailable";
 type RogAction = "system.rog_g703.wake" | "system.rog_g703.hibernate";
@@ -315,7 +316,11 @@ test.describe("PR4 curated Overview", () => {
     expect(rogFreshness?.height).toBeLessThanOrEqual(18);
     expect(rogAction?.height).toBeGreaterThanOrEqual(48);
 
-    await expect(page.getByTestId("overview-configure")).toBeEnabled();
+    if (overviewLayoutWritesEnabled) {
+      await expect(page.getByTestId("overview-configure")).toBeEnabled();
+    } else {
+      await expect(page.getByTestId("overview-configure")).toBeDisabled();
+    }
     for (const control of [
       page.getByTestId("overview-configure"),
       rog.locator(".overview-rog-widget__action button"),
