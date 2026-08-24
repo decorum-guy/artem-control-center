@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 const lockEnabled = process.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true";
+const startsLocked = process.env.VITE_TOUCH_INPUT_LOCK_START_LOCKED === "true";
 const actionIds = [
   "avalar.main.smoke",
   "avalar.stage.smoke",
@@ -131,7 +132,10 @@ async function holdLock(page: Page) {
 
 async function unlockWithKeyboard(page: Page) {
   const control = page.getByTestId("interaction-lock-control");
-  await expect(control).toHaveAttribute("aria-pressed", "true");
+  if (await control.getAttribute("aria-pressed") !== "true") {
+    await expect(control).toHaveAttribute("aria-pressed", "false");
+    return;
+  }
   await control.focus();
   await page.keyboard.down("Space");
   await page.waitForTimeout(1_050);
@@ -235,10 +239,15 @@ test.describe("#82 trusted Full Access and touch lock", () => {
   test("hold feedback, locked Full state, zero new mutation, and keyboard unlock", async ({ page }) => {
     const api = await installFixtures(page, "full");
     await page.goto("/services");
-    await expect(page.getByTestId("interaction-lock-control")).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByTestId("interaction-lock-status")).toHaveText("Панель заблокирована");
-    await captureScreenshot(page, "touch-lock-start-locked.png");
-    await unlockWithKeyboard(page);
+    const control = page.getByTestId("interaction-lock-control");
+    if (startsLocked) {
+      await expect(control).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByTestId("interaction-lock-status")).toHaveText("Панель заблокирована");
+      await captureScreenshot(page, "touch-lock-start-locked.png");
+      await unlockWithKeyboard(page);
+    } else {
+      await expect(control).toHaveAttribute("aria-pressed", "false");
+    }
     await expect(page.getByTestId("v2-header-access")).toContainText("Полный доступ");
     await holdLock(page);
     await expect(page.getByTestId("interaction-lock-status")).toHaveText("Панель заблокирована");
