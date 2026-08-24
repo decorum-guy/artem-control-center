@@ -218,8 +218,16 @@ $trueWritePosition = $configurator.IndexOf('Set-RuntimeEnvEntry -Key $key -Value
 if ($falseWritePosition -lt 0 -or $trueWritePosition -le $falseWritePosition) {
     throw "Production integration must verify read-only connectivity before enabling writes"
 }
-$restartMatches = [regex]::Matches($configurator, 'Restart-ControlCenterRuntime\s+-Paths\s+\$runtimePaths')
-$waitMatches = [regex]::Matches($configurator, 'Wait-LivePanelIntegrations\s+-Paths\s+\$runtimePaths')
+$successPathEnd = $configurator.IndexOf(
+    'catch {',
+    $configurator.IndexOf('Remove-Item -LiteralPath $backupPath -Force')
+)
+if ($successPathEnd -lt 0) {
+    throw "Production integration rollback catch block is missing"
+}
+$successPath = $configurator.Substring(0, $successPathEnd)
+$restartMatches = [regex]::Matches($successPath, 'Restart-ControlCenterRuntime\s+-Paths\s+\$runtimePaths')
+$waitMatches = [regex]::Matches($successPath, 'Wait-LivePanelIntegrations\s+-Paths\s+\$runtimePaths')
 if ($restartMatches.Count -lt 2 -or $waitMatches.Count -lt 2) {
     throw "Both production runtime restarts must use the bounded live integration wait"
 }
