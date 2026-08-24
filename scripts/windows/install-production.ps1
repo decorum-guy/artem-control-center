@@ -38,8 +38,8 @@ Invoke-CheckedCommand `
     -Description "project setup"
 Invoke-CheckedCommand `
     -FilePath "npm.cmd" `
-    -Arguments @("run", "build") `
-    -Description "dashboard build"
+    -Arguments @("run", "build:production") `
+    -Description "accepted V2 production dashboard build"
 
 if (-not (Test-Path -LiteralPath $paths.RuntimeEnv)) {
     $configuration = @"

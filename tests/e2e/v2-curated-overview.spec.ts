@@ -315,7 +315,7 @@ test.describe("PR4 curated Overview", () => {
     expect(rogFreshness?.height).toBeLessThanOrEqual(18);
     expect(rogAction?.height).toBeGreaterThanOrEqual(48);
 
-    await expect(page.getByTestId("overview-configure")).toBeDisabled();
+    await expect(page.getByTestId("overview-configure")).toBeEnabled();
     for (const control of [
       page.getByTestId("overview-configure"),
       rog.locator(".overview-rog-widget__action button"),

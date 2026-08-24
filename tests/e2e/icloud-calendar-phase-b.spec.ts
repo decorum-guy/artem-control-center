@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 
 const localId = "00000000-0000-4000-8000-000000001001";
 const timedId = "00000000-0000-4000-8000-000000001002";
@@ -290,6 +291,7 @@ test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
     await installAccess(page);
     const fixture = await installCalendarFixtures(page, { sourceStatus: "stale", mutation: true });
     await page.goto("/calendar?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).tap();
     const localDetail = page.getByTestId("planning-calendar-detail");
     await expect(localDetail.getByRole("button", { name: "Изменить" })).toBeVisible();

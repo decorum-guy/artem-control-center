@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 
 const tasksRouteEnabled = process.env.B3_PLANNING_TASKS_ROUTE_ENABLED === "true";
 const taskMutationsEnabled = process.env.VITE_PLANNING_TASK_MUTATIONS_ENABLED === "true";
@@ -188,6 +189,7 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
 
 async function openTaskCreator(page: Page) {
   await page.goto("/tasks?theme=day");
+  await unlockTouchLockIfNeeded(page);
   await page.getByRole("button", { name: "Создать задачу" }).click();
   return page.getByTestId("planning-task-mutation");
 }
@@ -277,6 +279,7 @@ test.describe("B4.2 task mutations", () => {
     await installAccessFixture(page, "standard");
     await installMutationFixtures(page);
     await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.getByTestId("planning-task-route-row").first().click();
     const patchBodies: Array<Record<string, unknown>> = [];
     page.on("request", (request) => {
@@ -324,6 +327,7 @@ test.describe("B4.2 task mutations", () => {
     await installAccessFixture(page, "standard");
     await installMutationFixtures(page);
     await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.getByTestId("planning-task-route-row").first().click();
     const mutations: string[] = [];
     page.on("request", (request) => {
@@ -351,6 +355,7 @@ test.describe("B4.2 task mutations", () => {
     await installAccessFixture(page, "standard");
     await installMutationFixtures(page);
     await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.getByTestId("planning-task-route-row").first().click();
     const methods: string[] = [];
     page.on("request", (request) => {
@@ -386,6 +391,7 @@ test.describe("B4.2 task mutations", () => {
     await installAccessFixture(page, "standard");
     await installMutationFixtures(page);
     await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; document.body.style.zoom = "2"; });
     await page.getByRole("button", { name: "Создать задачу" }).click();
     const input = page.getByTestId("planning-task-mutation").getByLabel("Фраза");

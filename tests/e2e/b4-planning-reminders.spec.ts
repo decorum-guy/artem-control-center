@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 
 const remindersRouteEnabled = process.env.B3_PLANNING_REMINDERS_ROUTE_ENABLED === "true";
 const reminderMutationsEnabled = process.env.VITE_PLANNING_REMINDER_MUTATIONS_ENABLED === "true";
@@ -170,6 +171,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await installAccessFixture(page, "standard");
     await installMutationFixtures(page);
     await page.goto("/reminders?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.getByRole("button", { name: "Создать напоминание" }).click();
     const sheet = page.getByTestId("planning-reminder-mutation");
     const input = sheet.getByLabel("Фраза");
@@ -220,6 +222,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await installAccessFixture(page, "standard");
     await installMutationFixtures(page);
     await page.goto("/reminders?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.getByRole("button", { name: "Пропущено" }).click();
     const delivered = page.getByTestId("planning-reminder-route-row").filter({ hasText: "Доставлено, ждёт завершения" });
     await delivered.click();
@@ -260,6 +263,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
       if (request.url().includes("/api/v1/planning/reminders/") && request.method() === "POST") mutations.push(request.method());
     });
     await page.goto("/reminders?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.getByRole("button", { name: "Пропущено" }).click();
     await page.getByTestId("planning-reminder-route-row").first().click();
     await page.getByRole("button", { name: "Отменить явно" }).click();
@@ -285,6 +289,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
       }
     });
     await page.goto("/reminders?theme=day");
+    await unlockTouchLockIfNeeded(page);
     await page.getByRole("button", { name: "Создать напоминание" }).click();
     await page.getByLabel("Фраза").fill("завтра в 16:00 напомни позвонить врачу");
     await page.getByRole("button", { name: "Сохранить" }).click();

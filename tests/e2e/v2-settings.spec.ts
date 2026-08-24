@@ -259,7 +259,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(page.locator(".app")).toHaveClass(/motion-battery-saving/);
 
     await page.locator(".v2-nav-link[data-nav-route='/overview']").click();
-    await expect(page.getByTestId("route-overview")).toBeVisible();
+    await expect(page.getByTestId("route-overview-v2")).toBeVisible();
     await page.locator(".v2-nav-link[data-nav-route='/settings']").click();
     await expect(page.getByTestId("settings-theme-day")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("settings-motion-battery-saving")).toHaveAttribute("aria-pressed", "true");

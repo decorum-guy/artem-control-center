@@ -47,6 +47,14 @@ function Invoke-IsolatedValidation {
             -FilePath "npm.cmd" `
             -Arguments @("run", "check") `
             -Description "full validation"
+
+        # The normal check intentionally exercises the default/test seams. The
+        # installed artifact must be rebuilt with the one maintained accepted
+        # V2 production profile after that validation completes.
+        Invoke-CheckedCommand `
+            -FilePath "npm.cmd" `
+            -Arguments @("run", "build:production") `
+            -Description "accepted V2 production dashboard build"
     }
     finally {
         $env:TEMP = $previousTemp

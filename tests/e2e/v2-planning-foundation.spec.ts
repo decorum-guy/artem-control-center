@@ -4,6 +4,12 @@ import { expect, test, type Page } from "@playwright/test";
 
 const artifactDirectory = (testInfo: { outputPath: (name: string) => string }) =>
   process.env.PR9_ARTIFACT_DIR ?? testInfo.outputPath("v2-planning-foundation-review");
+const taskMutationsEnabled = process.env.VITE_PLANNING_TASK_MUTATIONS_ENABLED === "true";
+const planningMutationControlsEnabled = [
+  "VITE_PLANNING_TASK_MUTATIONS_ENABLED",
+  "VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED",
+  "VITE_PLANNING_REMINDER_MUTATIONS_ENABLED"
+].some((name) => process.env[name] === "true");
 
 async function mutatePlanningRoute(page: Page, routePath: string, mutate: (payload: Record<string, unknown>) => void) {
   await page.route(`**${routePath}*`, async (route) => {
@@ -47,7 +53,7 @@ test.describe("PR9 Planning visual/module foundation", () => {
     await expect(page.getByRole("heading", { name: "Задачи" })).toBeVisible();
     await expect(page.locator(".planning-segmented button").first()).toHaveCSS("min-height", "48px");
     await expect(page.getByTestId("planning-task-route-row").first()).toBeVisible();
-    await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
+    await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(taskMutationsEnabled ? 1 : 0);
     await expect(page.locator(".planning-task-row input, .planning-task-row [role='checkbox']")).toHaveCount(0);
 
     await page.goto("/calendar?theme=day");
@@ -65,7 +71,7 @@ test.describe("PR9 Planning visual/module foundation", () => {
     await expect(page.locator(".planning-segmented button")).toHaveCount(3);
     await expect(page.getByTestId("planning-reminder-lifecycle").first()).toBeVisible();
     await expect(page.getByTestId("planning-reminder-delivery").first()).toBeVisible();
-    await expect(page.locator("[data-testid='planning-future-action-slot']")).toHaveCount(0);
+    await expect(page.locator("[data-testid='planning-future-action-slot']")).toHaveCount(planningMutationControlsEnabled ? 1 : 0);
   });
 
   test("captures the bounded PR9 review matrix", async ({ page }, testInfo) => {

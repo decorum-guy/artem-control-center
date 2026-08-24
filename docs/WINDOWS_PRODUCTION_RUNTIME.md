@@ -15,6 +15,14 @@ The production runtime:
 - stores runtime configuration and logs outside Git;
 - updates only from `main`, validates the new revision and rolls back automatically on failure.
 
+Every installer/update build invokes `npm run build:production`. That command
+applies the source-controlled `accepted-v2` frontend profile, so the Samsung
+does not need any `VITE_*` variables in its local runtime configuration. The
+profile enables accepted V2 presentation, Planning routes and B4 browser
+writer surfaces, and the reviewed touch lock. Panel Agent `PANEL_*` runtime
+settings remain independent server-side authorization, integration and safety
+controls.
+
 The first installation may use fixture data for hardware acceptance. That is a production-grade host runtime with non-production data. Real integrations are enabled later by changing the local runtime configuration after their own acceptance work.
 
 ## Architecture
@@ -71,7 +79,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\instal
 The installer:
 
 1. stops the legacy fixture launcher if present;
-2. runs repository setup and builds the dashboard;
+2. runs repository setup and builds the accepted V2 production dashboard;
 3. creates a safe local `runtime.env` only when one does not exist;
 4. applies Edge kiosk policies;
 5. registers the `Artem Control Center Runtime` logon task;
@@ -145,6 +153,7 @@ fetch main
 → npm ci
 → setup Python dependencies
 → full read-only validation
+→ accepted V2 production dashboard build
 → production start and health check
 → record last-known-good commit
 ```

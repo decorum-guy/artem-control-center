@@ -1,7 +1,7 @@
 /**
- * The interaction guard is deliberately opt-in at build time.  Production
- * rollout is enabled later, after V2 stabilization; an enabled kiosk build
- * starts locked unless its explicit test/dev build opts out.
+ * The interaction guard remains a small build seam for legacy/test bundles.
+ * The maintained accepted-v2 production profile enables it and starts the
+ * kiosk locked; runtime actions still pass through the server policy.
  */
 export const interactionLockEnabled = import.meta.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true";
 export const interactionLockStartsLocked = interactionLockEnabled
