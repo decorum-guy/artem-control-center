@@ -1,5 +1,5 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import type { ServiceSnapshot } from "@artem/contracts";
+import type { DashboardSnapshot } from "@artem/contracts";
 import { WeatherHeaderSummary } from "./Weather";
 import { TemporaryAccessIndicator, useAccess } from "./AccessControls";
 import type { AccessStatus } from "./accessApi";
@@ -8,6 +8,7 @@ import { StatusText } from "./ShellPrimitives";
 import { v2VisualShellEnabled } from "./visualShellConfig";
 import { planningModuleForRoute, planningNavigationModules } from "./planningModuleRegistry";
 import { InteractionLockControl, InteractionLockStatus } from "./InteractionLock";
+import { currentProblemsForSnapshot, problemTone } from "./problemModel";
 
 export type RoutePath =
   | "/overview"
@@ -91,25 +92,25 @@ function NavigationLink({
 
 export function ProductShell({
   route,
-  services,
+  snapshot,
   onNavigate,
   children
 }: {
   route: ShellRoutePath;
-  services: ServiceSnapshot[];
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
   onNavigate: (path: ShellRoutePath) => void;
   children: ReactNode;
 }) {
   if (v2VisualShellEnabled) {
     return (
-      <V2ProductShell route={route} services={services} onNavigate={onNavigate}>
+      <V2ProductShell route={route} snapshot={snapshot} onNavigate={onNavigate}>
         {children}
       </V2ProductShell>
     );
   }
 
   return (
-    <LegacyProductShell route={route} services={services} onNavigate={onNavigate}>
+    <LegacyProductShell route={route} snapshot={snapshot} onNavigate={onNavigate}>
       {children}
     </LegacyProductShell>
   );
@@ -117,19 +118,18 @@ export function ProductShell({
 
 function LegacyProductShell({
   route,
-  services,
+  snapshot,
   onNavigate,
   children
 }: {
   route: ShellRoutePath;
-  services: ServiceSnapshot[];
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
   onNavigate: (path: ShellRoutePath) => void;
   children: ReactNode;
 }) {
   const [now, setNow] = useState(() => new Date());
-  const attentionCount = services.filter(
-    (service) => service.enabled && service.health !== "healthy"
-  ).length;
+  const currentProblems = currentProblemsForSnapshot(snapshot);
+  const attentionCount = currentProblems.length;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000);
@@ -276,19 +276,18 @@ function V2AccessHeaderStatus({ onOpen }: { onOpen: () => void }) {
 
 function V2ProductShell({
   route,
-  services,
+  snapshot,
   onNavigate,
   children
 }: {
   route: ShellRoutePath;
-  services: ServiceSnapshot[];
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
   onNavigate: (path: ShellRoutePath) => void;
   children: ReactNode;
 }) {
   const [now, setNow] = useState(() => new Date());
-  const attentionCount = services.filter(
-    (service) => service.enabled && service.health !== "healthy"
-  ).length;
+  const currentProblems = currentProblemsForSnapshot(snapshot);
+  const attentionCount = currentProblems.length;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000);
@@ -373,7 +372,7 @@ function V2ProductShell({
               type="button"
               onClick={() => onNavigate("/system")}
             >
-              <StatusText label={systemLabel} tone={attentionCount ? "warning" : "success"} />
+              <StatusText label={systemLabel} tone={attentionCount ? problemTone(currentProblems[0].state) : "success"} />
             </button>
             <V2AccessHeaderStatus onOpen={() => onNavigate("/settings")} />
             <button

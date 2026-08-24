@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
+import { useEffect, useMemo, useState } from "react";
+import type { DashboardSnapshot, DiagnosticsProblem, DiagnosticsReport, ServiceSnapshot } from "@artem/contracts";
 import { ConnectivityRecoverySurface } from "../../ConnectivityActions";
 import { ErrorBoundary } from "../../ErrorBoundary";
 import { Icon } from "../../icons";
@@ -7,6 +7,13 @@ import { RuntimeControls } from "../../RuntimeControls";
 import { Sheet } from "../../Sheet";
 import { StatusText, WorkZone } from "../../ShellPrimitives";
 import { RogG703DetailControl } from "../../RogG703Controls";
+import {
+  copyDiagnosticsText,
+  currentProblemsForSnapshot,
+  diagnosticsSupportText,
+  problemStateLabel,
+  problemTone
+} from "../../problemModel";
 import {
   countHealth,
   healthLabel,
@@ -80,12 +87,35 @@ function SystemDiagnosticRow({ service }: { service: ServiceSnapshot }) {
   );
 }
 
+function ProblemRow({ problem }: { problem: DiagnosticsProblem }) {
+  return (
+    <article
+      className={`system-problem-row system-problem-row--${problem.state}`}
+      data-testid={`system-problem-${problem.id.replace(/[^a-z0-9]+/gi, "-")}`}
+    >
+      <div className="system-problem-row__copy">
+        <strong>{problem.subsystem}</strong>
+        <span>{problem.summary}</span>
+      </div>
+      <div className="system-problem-row__meta">
+        <StatusText label={problemStateLabel(problem.state)} tone={problemTone(problem.state)} />
+        <span>{problem.freshness ?? `Наблюдалось ${problem.lastObservedAt}`}</span>
+      </div>
+    </article>
+  );
+}
+
 export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [report, setReport] = useState<DiagnosticsReport | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "fallback" | "failed">("idle");
+  const [fallbackText, setFallbackText] = useState("");
+  const currentProblems = useMemo(() => currentProblemsForSnapshot(snapshot), [snapshot]);
   const subjects = selectSystemServiceSubjects(snapshot.services);
   const { rog, runtime, update, backup, diagnostics } = subjects;
   const relevant = visibleSystemServices(subjects);
-  const attention = relevant.filter((service) => service.health !== "healthy");
+  const attention = currentProblems;
   const counts = countHealth(relevant);
   const aggregateLabel = !relevant.length
     ? "Состояние недоступно"
@@ -95,8 +125,51 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const aggregateTone = !relevant.length
     ? "unavailable"
     : attention.length
-      ? healthTone(attention[0].health)
+      ? problemTone(attention[0].state)
       : "success";
+
+  useEffect(() => {
+    let active = true;
+    setReportError(null);
+    void fetch("/api/v1/diagnostics?scenario=ha-healthy", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`diagnostics_${response.status}`);
+        return await response.json() as DiagnosticsReport;
+      })
+      .then((next) => {
+        if (active) setReport(next);
+      })
+      .catch(() => {
+        if (active) setReportError("Диагностика пока недоступна");
+      });
+    return () => { active = false; };
+  }, [snapshot.revision]);
+
+  async function ensureReport(): Promise<DiagnosticsReport | null> {
+    if (report) return report;
+    try {
+      const response = await fetch("/api/v1/diagnostics?scenario=ha-healthy", { cache: "no-store" });
+      if (!response.ok) throw new Error("diagnostics_unavailable");
+      const next = await response.json() as DiagnosticsReport;
+      setReport(next);
+      return next;
+    } catch {
+      setReportError("Диагностика пока недоступна");
+      return null;
+    }
+  }
+
+  async function copyReport(): Promise<void> {
+    const next = await ensureReport();
+    if (!next) {
+      setCopyState("failed");
+      return;
+    }
+    const text = diagnosticsSupportText(next);
+    const copied = await copyDiagnosticsText(text, navigator.clipboard);
+    setCopyState(copied ? "copied" : "fallback");
+    setFallbackText(text);
+  }
 
   return (
     <div className="system-v2-page" data-testid="route-system" data-route-variant="v2">
@@ -112,9 +185,55 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
         </div>
         <span>
           {relevant.length
-            ? `${counts.healthy} в норме · ${counts.degraded + counts.stale} требуют внимания · ${counts.offline} недоступны`
-            : "Нет подтверждённых системных сервисов"}
+            ? `${attention.length} текущих проблем · ${counts.healthy} системных сервисов в норме`
+            : attention.length
+              ? `${attention.length} текущих проблем`
+              : "Нет подтверждённых системных сервисов"}
         </span>
+      </section>
+
+      <section
+        className={`system-problem-surface${attention.length ? " system-problem-surface--attention" : ""}`}
+        data-testid="system-problem-details"
+        aria-label="Текущие проблемы"
+      >
+        <header className="system-problem-surface__header">
+          <div>
+            <p className="section-kicker">Проблемы и диагностика</p>
+            <h2>{attention.length ? `Требуют внимания · ${attention.length}` : "Все системы в норме"}</h2>
+          </div>
+          <button type="button" onClick={() => void copyReport()} data-testid="copy-diagnostics">
+            Скопировать диагностику
+          </button>
+        </header>
+        {attention.length ? (
+          <div className="system-problem-list">
+            {attention.map((item) => <ProblemRow key={item.id} problem={item} />)}
+          </div>
+        ) : (
+          <p className="system-problem-empty">Текущих проблем не обнаружено.</p>
+        )}
+        {report?.recentTransitions.some((item) => !item.current) && (
+          <div className="system-problem-history" data-testid="system-problem-history">
+            <p className="section-kicker">Недавние восстановления</p>
+            {report.recentTransitions.filter((item) => !item.current).slice(-4).reverse().map((item, index) => (
+              <div className="system-problem-history__row" key={`${item.problemId}-${item.observedAt}-${index}`}>
+                <span>{item.subsystem}</span>
+                <StatusText label="Восстановлено" tone="success" />
+                <time dateTime={item.observedAt}>{item.observedAt}</time>
+              </div>
+            ))}
+          </div>
+        )}
+        {copyState === "copied" && <p className="system-problem-feedback" role="status">Диагностика скопирована.</p>}
+        {copyState === "fallback" && (
+          <div className="system-problem-fallback" data-testid="diagnostics-fallback">
+            <p role="status">Буфер обмена недоступен. Отчёт можно выделить или скачать.</p>
+            <textarea aria-label="Текст диагностики" readOnly value={fallbackText} onFocus={(event) => event.currentTarget.select()} />
+          </div>
+        )}
+        {copyState === "failed" && <p className="system-problem-feedback" role="status">Не удалось подготовить диагностику.</p>}
+        {reportError && <p className="system-problem-feedback">{reportError}</p>}
       </section>
 
       <section className="system-v2-zone-grid" data-testid="system-primary-zones" aria-label="Основные системные зоны">
@@ -166,6 +285,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
             <div><dt>Диагностика</dt><dd>{diagnostics.length || "нет"}</dd></div>
             <div><dt>Обновления</dt><dd>{update ? healthLabel(update.health) : "источник не подключён"}</dd></div>
             <div><dt>Backup</dt><dd>{backup ? healthLabel(backup.health) : "источник не подключён"}</dd></div>
+            <div><dt>Проблемы</dt><dd>{attention.length}</dd></div>
           </dl>
         </Sheet>
       )}

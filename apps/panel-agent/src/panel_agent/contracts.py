@@ -60,6 +60,129 @@ class ServiceSnapshot(BaseModel):
     presentation: Optional[ServicePresentation] = None
 
 
+DiagnosticsProblemState = Literal[
+    "offline",
+    "degraded",
+    "stale",
+    "error",
+    "recovered",
+]
+DiagnosticsSeverity = Literal["info", "warning", "error"]
+
+
+class DiagnosticsProblem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=120, pattern=r"^[a-z0-9][a-z0-9._:-]+$")
+    subsystem: str = Field(min_length=1, max_length=80)
+    severity: DiagnosticsSeverity
+    state: DiagnosticsProblemState
+    current: bool
+    summary: str = Field(min_length=1, max_length=240)
+    firstObservedAt: Optional[str] = None
+    lastObservedAt: str
+    lastHealthyAt: Optional[str] = None
+    freshness: Optional[str] = Field(default=None, max_length=120)
+    correlationCode: Optional[str] = Field(default=None, max_length=120)
+
+
+class DiagnosticsTransition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    problemId: str = Field(min_length=1, max_length=120)
+    subsystem: str = Field(min_length=1, max_length=80)
+    fromState: Optional[DiagnosticsProblemState] = None
+    toState: DiagnosticsProblemState
+    current: bool
+    observedAt: str
+    summary: str = Field(min_length=1, max_length=240)
+
+
+class DiagnosticsCollectorStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collector: str = Field(min_length=1, max_length=80)
+    status: Literal["ok", "error"]
+    code: Optional[str] = Field(default=None, max_length=120)
+
+
+class DiagnosticsCalendarQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fromDate: str
+    toDate: str
+    resultStatus: Literal[
+        "ok_nonempty",
+        "ok_empty",
+        "degraded",
+        "error",
+        "unavailable",
+    ]
+    itemCount: int = Field(ge=0)
+    sourceCount: int = Field(ge=0)
+    calendarCount: int = Field(ge=0)
+    sourceStatus: Optional[str] = Field(default=None, max_length=32)
+    cacheUsed: bool = False
+    fallbackUsed: bool = False
+    projectionStatus: Literal["current", "cached", "empty", "unavailable"]
+
+
+class DiagnosticsProviderSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=128)
+    kind: Literal["native", "external"]
+    provider: Literal["local", "icloud"]
+    label: str = Field(min_length=1, max_length=128)
+    status: str = Field(min_length=1, max_length=32)
+    configured: bool
+    lastSyncedAt: Optional[str] = None
+    observedAt: Optional[str] = None
+    calendarCount: int = Field(ge=0)
+
+
+class DiagnosticsPlanningSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Optional[str] = None
+    sourceStatus: Optional[str] = Field(default=None, max_length=32)
+    lastSyncedAt: Optional[str] = None
+    staleAfter: Optional[str] = None
+    remindersCount: int = Field(ge=0)
+    tasksCount: int = Field(ge=0)
+    calendarCount: int = Field(ge=0)
+    cacheUsed: bool = False
+    providers: List[DiagnosticsProviderSummary] = Field(default_factory=list)
+
+
+class DiagnosticsMutationGates(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    writesEnabled: bool
+    coffeeActionsEnabled: bool
+    coffeeTimingWritesEnabled: bool
+    coffeeNotificationWritesEnabled: bool
+    planningReminderMutationsEnabled: bool
+    planningTaskMutationsEnabled: bool
+    planningCalendarMutationsEnabled: bool
+
+
+class DiagnosticsReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Literal["diagnostics.v1"]
+    generatedAt: str
+    buildRevision: str = Field(min_length=1, max_length=80)
+    mode: PanelMode
+    snapshotRevision: int = Field(ge=0)
+    problems: List[DiagnosticsProblem] = Field(default_factory=list, max_length=64)
+    recentTransitions: List[DiagnosticsTransition] = Field(default_factory=list, max_length=32)
+    collectorStatus: List[DiagnosticsCollectorStatus] = Field(default_factory=list, max_length=16)
+    planning: DiagnosticsPlanningSummary
+    calendar: DiagnosticsCalendarQuery
+    mutationGates: DiagnosticsMutationGates
+
+
 class DashboardSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

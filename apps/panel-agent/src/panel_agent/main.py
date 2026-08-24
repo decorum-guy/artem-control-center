@@ -19,12 +19,14 @@ from .contracts import (
     CoffeeTimingPatch,
     CoffeeTimingSettings,
     DashboardSnapshot,
+    DiagnosticsReport,
     OverviewLayoutPatch,
     OverviewLayoutResponse,
     PanelMode,
     ServiceSnapshot,
 )
 from .fixtures import load_fixture_document, services_for_scenario
+from .diagnostics import DiagnosticsCollector
 from .integrations import IntegrationRuntime
 from .planning_api import build_planning_router
 from .runtime_control import router as runtime_control_router
@@ -50,11 +52,13 @@ MODE = configured_mode()
 SETTINGS = IntegrationSettings.from_env()
 runtime = IntegrationRuntime(SETTINGS, mode=MODE)
 weather_service = WeatherService(mode=MODE)
+diagnostics_collector = DiagnosticsCollector(SETTINGS)
 snapshot_publisher = SnapshotPublisher(
     mode=MODE,
     services_builder=runtime.services,
     planning_builder=runtime.planning_snapshot,
     heartbeat_seconds=SETTINGS.sse_heartbeat_seconds,
+    on_snapshot=diagnostics_collector.observe,
 )
 runtime.set_snapshot_callback(snapshot_publisher.rebuild)
 overview_layout_store = OverviewLayoutStore(
@@ -213,6 +217,21 @@ async def snapshot(
         services=services,
         planning=runtime.planning_snapshot(),
     )
+
+
+@app.get("/api/v1/diagnostics", response_model=DiagnosticsReport)
+async def diagnostics(
+    response: Response,
+    scenario: str = Query(default="ha-healthy"),
+) -> DiagnosticsReport:
+    response.headers["Cache-Control"] = "no-store"
+    if MODE in {"fixtures", "integration_test"}:
+        current = await snapshot(Response(), scenario)
+    else:
+        current = snapshot_publisher.snapshot
+        if current is None:
+            current = await snapshot_publisher.rebuild()
+    return diagnostics_collector.report(current)
 
 
 @app.get("/api/v1/overview/layout", response_model=OverviewLayoutResponse)

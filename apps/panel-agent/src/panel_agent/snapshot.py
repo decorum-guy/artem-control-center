@@ -20,11 +20,13 @@ class SnapshotPublisher:
         services_builder: Callable[[], Iterable[ServiceSnapshot]],
         planning_builder: Callable[[], PlanningProjection | None] | None = None,
         heartbeat_seconds: float = 20,
+        on_snapshot: Callable[[DashboardSnapshot], None] | None = None,
     ) -> None:
         self._mode = mode
         self._services_builder = services_builder
         self._planning_builder = planning_builder
         self._heartbeat_seconds = max(0.01, heartbeat_seconds)
+        self._on_snapshot = on_snapshot
         self._snapshot: DashboardSnapshot | None = None
         self._fingerprint: str | None = None
         self._revision = 0
@@ -83,6 +85,13 @@ class SnapshotPublisher:
                 try:
                     queue.put_nowait(revision)
                 except asyncio.QueueFull:
+                    pass
+            if self._on_snapshot is not None:
+                try:
+                    self._on_snapshot(self._snapshot)
+                except Exception:
+                    # Diagnostics must never make the authoritative snapshot
+                    # unavailable.  The collector is deliberately best-effort.
                     pass
             return self._snapshot.model_copy(deep=True)
 
