@@ -6,6 +6,8 @@ import type {
 } from "@artem/contracts";
 import type { StatusTone } from "./ShellPrimitives";
 
+export const diagnosticsFallbackCopyText = "Буфер обмена недоступен. Выделите отчёт и скопируйте его вручную.";
+
 const serviceLabels: Record<string, string> = {
   "home-assistant": "Home Assistant",
   "coffee-machine": "Кофемашина",
@@ -118,6 +120,9 @@ export function problemTone(state: DiagnosticsProblemState): StatusTone {
 }
 
 export function diagnosticsSupportText(report: import("@artem/contracts").DiagnosticsReport): string {
+  const calendarScope = report.calendar.scopeType === "ACTUAL_REQUEST_RANGE"
+    ? `${report.calendar.fromDate}..${report.calendar.toDate} | request=${report.calendar.requestFromUtc ?? "unknown"}..${report.calendar.requestToUtc ?? "unknown"}`
+    : `projection=${report.calendar.projectionScope ?? "unknown"}`;
   const lines = [
     "Artem Control Center diagnostics.v1",
     `generatedAt: ${report.generatedAt}`,
@@ -127,7 +132,8 @@ export function diagnosticsSupportText(report: import("@artem/contracts").Diagno
     `currentProblems: ${report.problems.length}`,
     ...report.problems.map((item) => `problem: ${item.subsystem} | ${item.state} | ${item.summary}`),
     `planning: ${report.planning.sourceStatus ?? "unavailable"} | schema=${report.planning.schemaVersion ?? "unavailable"} | reminders=${report.planning.remindersCount} | tasks=${report.planning.tasksCount} | calendar=${report.planning.calendarCount}`,
-    `calendarQuery: ${report.calendar.fromDate}..${report.calendar.toDate} | ${report.calendar.resultStatus} | items=${report.calendar.itemCount} | sources=${report.calendar.sourceCount} | calendars=${report.calendar.calendarCount} | cache=${report.calendar.cacheUsed}`,
+    `calendarQuery: ${calendarScope} | scope=${report.calendar.scopeType} | view=${report.calendar.view ?? "unknown"} | timezone=${report.calendar.timezone} | observedAt=${report.calendar.observedAt} | lastSyncedAt=${report.calendar.lastSyncedAt ?? "unknown"} | ${report.calendar.resultStatus} | items=${report.calendar.itemCount} | sources=${report.calendar.sourceCount} | calendars=${report.calendar.calendarCount} | sourceStatus=${report.calendar.sourceStatus ?? "unknown"} | cache=${report.calendar.cacheUsed} | fallback=${report.calendar.fallbackUsed}`,
+    ...report.calendarReads.map((item) => `calendarRead: ${item.scopeType} | ${item.fromDate}..${item.toDate} | ${item.view ?? "unknown"} | ${item.resultStatus} | items=${item.itemCount} | observedAt=${item.observedAt}`),
     `mutationGates: writes=${report.mutationGates.writesEnabled} | coffee=${report.mutationGates.coffeeActionsEnabled} | planningReminders=${report.mutationGates.planningReminderMutationsEnabled} | planningTasks=${report.mutationGates.planningTaskMutationsEnabled} | planningCalendar=${report.mutationGates.planningCalendarMutationsEnabled}`,
     `recentTransitions: ${report.recentTransitions.length}`,
     ...report.recentTransitions.map((item) => `transition: ${item.subsystem} | ${item.fromState ?? "none"}->${item.toState} | current=${item.current}`),

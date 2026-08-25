@@ -128,6 +128,27 @@ function currentRevision(root) {
   return result.status === 0 ? result.stdout.trim() : "unknown";
 }
 
+export function buildAgentEnvironment({
+  baseEnv = {},
+  fileEnv = {},
+  mode,
+  commandPath,
+  dashboardDist,
+  stateCachePath,
+  buildRevision = "unknown"
+}) {
+  return {
+    ...baseEnv,
+    ...fileEnv,
+    PANEL_AGENT_MODE: mode,
+    PANEL_AGENT_BUILD_REVISION: buildRevision,
+    PANEL_KIOSK_CONTROLS_ENABLED: "true",
+    PANEL_RUNTIME_COMMAND_PATH: commandPath,
+    PANEL_DASHBOARD_DIST: dashboardDist,
+    PANEL_STATE_CACHE_PATH: stateCachePath
+  };
+}
+
 function stopProcessTree(child, log) {
   if (!child?.pid || child.killed) return;
   if (process.platform === "win32") {
@@ -213,21 +234,20 @@ export async function runProductionRuntime() {
     throw new Error(`Unsupported PANEL_AGENT_MODE in runtime.env: ${mode}`);
   }
 
-  const agentEnv = {
-    ...process.env,
-    ...fileEnv,
-    PANEL_AGENT_MODE: mode,
-    PANEL_KIOSK_CONTROLS_ENABLED: "true",
-    PANEL_RUNTIME_COMMAND_PATH: commandPath,
-    PANEL_DASHBOARD_DIST: dashboardDist,
-    PANEL_STATE_CACHE_PATH:
-      fileEnv.PANEL_STATE_CACHE_PATH || join(runtimeDir, "panel-state-cache.json")
-  };
+  const revision = currentRevision(root);
+  const agentEnv = buildAgentEnvironment({
+    baseEnv: process.env,
+    fileEnv,
+    mode,
+    buildRevision: revision,
+    commandPath,
+    dashboardDist,
+    stateCachePath: fileEnv.PANEL_STATE_CACHE_PATH || join(runtimeDir, "panel-state-cache.json")
+  });
 
   process.title = "artem-control-center-runtime";
   rmSync(commandPath, { force: true });
 
-  const revision = currentRevision(root);
   const restartBudget = new RestartBudget();
   const expectedExitPids = new Set();
   let agent = null;

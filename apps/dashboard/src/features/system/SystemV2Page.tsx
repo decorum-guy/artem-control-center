@@ -10,6 +10,7 @@ import { RogG703DetailControl } from "../../RogG703Controls";
 import {
   copyDiagnosticsText,
   currentProblemsForSnapshot,
+  diagnosticsFallbackCopyText,
   diagnosticsSupportText,
   problemStateLabel,
   problemTone
@@ -228,7 +229,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
         {copyState === "copied" && <p className="system-problem-feedback" role="status">Диагностика скопирована.</p>}
         {copyState === "fallback" && (
           <div className="system-problem-fallback" data-testid="diagnostics-fallback">
-            <p role="status">Буфер обмена недоступен. Отчёт можно выделить или скачать.</p>
+            <p role="status">{diagnosticsFallbackCopyText}</p>
             <textarea aria-label="Текст диагностики" readOnly value={fallbackText} onFocus={(event) => event.currentTarget.select()} />
           </div>
         )}

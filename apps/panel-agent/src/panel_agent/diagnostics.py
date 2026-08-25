@@ -11,8 +11,9 @@ from __future__ import annotations
 import os
 import re
 from collections import deque
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Deque, Dict, Iterable, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .contracts import (
     DashboardSnapshot,
@@ -72,6 +73,27 @@ def _safe_timestamp(value: object) -> Optional[str]:
     if parsed.tzinfo is None:
         return None
     return parsed.astimezone(timezone.utc).isoformat()
+
+
+def _configured_timezone(settings: IntegrationSettings) -> str:
+    value = str(getattr(settings, "panel_planning_timezone", "")).strip()
+    if not value:
+        return "unknown"
+    try:
+        ZoneInfo(value)
+    except ZoneInfoNotFoundError:
+        return "unknown"
+    return value
+
+
+def _local_date_for_timestamp(value: object, time_zone: str) -> str:
+    normalized = _safe_timestamp(value)
+    if normalized is None or time_zone == "unknown":
+        return "unknown"
+    try:
+        return datetime.fromisoformat(normalized).astimezone(ZoneInfo(time_zone)).date().isoformat()
+    except (ValueError, ZoneInfoNotFoundError):
+        return "unknown"
 
 
 def _service_label(service_id: str) -> str:
@@ -148,13 +170,14 @@ def _problems_for_snapshot(
     result: dict[str, DiagnosticsProblem] = {}
     for service in snapshot.services:
         problem_id = f"service:{service.id}"
-        first_observed.setdefault(problem_id, observed_at)
         problem = _problem_from_service(
             service,
             observed_at=observed_at,
-            first_observed_at=first_observed[problem_id],
+            first_observed_at=first_observed.get(problem_id, observed_at),
         )
         if problem is not None:
+            first_observed.setdefault(problem_id, observed_at)
+            problem = problem.model_copy(update={"firstObservedAt": first_observed[problem_id]})
             result[problem.id] = problem
 
     planning = snapshot.planning
@@ -197,8 +220,14 @@ def _problems_for_snapshot(
                 freshness=_safe_timestamp(provider.lastSyncedAt),
                 correlationCode=f"provider_{provider_state}",
             )
+    for problem_id in list(first_observed):
+        if (
+            problem_id.startswith("service:")
+            or problem_id == "planning:source"
+            or problem_id.startswith("calendar-provider:")
+        ) and problem_id not in result:
+            first_observed.pop(problem_id, None)
     return result
-
 
 def _problem_state(problem: DiagnosticsProblem | None) -> str | None:
     return problem.state if problem is not None else None
@@ -211,7 +240,7 @@ def _transition_summary(subsystem: str, state: str, current: bool) -> str:
 
 
 class DiagnosticsCollector:
-    """Collects only allow-listed state and keeps a small transition ring."""
+    """Collects only allow-listed state and keeps bounded problem/read history."""
 
     def __init__(
         self,
@@ -222,8 +251,11 @@ class DiagnosticsCollector:
     ) -> None:
         self._settings = settings
         self._history: Deque[DiagnosticsTransition] = deque(maxlen=max(1, history_size))
+        self._calendar_reads: Deque[DiagnosticsCalendarQuery] = deque(maxlen=max(1, history_size))
         self._first_observed: dict[str, str] = {}
         self._current: dict[str, DiagnosticsProblem] = {}
+        self._latest_source_status: str | None = None
+        self._latest_provider_summaries: list[DiagnosticsProviderSummary] = []
         self._build_revision = build_revision or _safe_revision()
 
     @property
@@ -232,6 +264,11 @@ class DiagnosticsCollector:
 
     def observe(self, snapshot: DashboardSnapshot) -> None:
         next_problems = _problems_for_snapshot(snapshot, self._first_observed)
+        planning = snapshot.planning
+        self._latest_source_status = planning.sourceStatus if planning is not None else None
+        self._latest_provider_summaries = self._provider_summaries(
+            planning.providerStatuses if planning is not None else []
+        )
         previous = self._current
         for problem_id, problem in next_problems.items():
             previous_problem = previous.get(problem_id)
@@ -263,6 +300,80 @@ class DiagnosticsCollector:
             )
         self._current = next_problems
 
+    def observe_calendar_read(
+        self,
+        *,
+        from_utc: str,
+        to_utc: str,
+        view: str | None = None,
+        result_status: str | None = None,
+        item_count: int = 0,
+        source_status: str | None = None,
+        last_synced_at: str | None = None,
+        providers: Iterable[object] | None = None,
+        cache_used: bool = False,
+        fallback_used: bool = False,
+        projection_status: str | None = None,
+        observed_at: str | None = None,
+    ) -> None:
+        """Record one real browser calendar read without retaining event content."""
+
+        safe_items = max(0, min(100, int(item_count)))
+        provider_summaries = (
+            self._provider_summaries(providers)
+            if providers is not None
+            else list(self._latest_provider_summaries)
+        )
+        effective_source_status = source_status or self._latest_source_status
+        provider_error = any(provider.status == "error" for provider in provider_summaries)
+        provider_degraded = any(
+            provider.status not in {"current", "not_configured", "disabled"}
+            for provider in provider_summaries
+        )
+        if result_status is None:
+            if provider_error:
+                result_status = "error"
+            elif effective_source_status not in {None, "current"} or provider_degraded:
+                result_status = "degraded"
+            elif safe_items:
+                result_status = "success_nonempty"
+            else:
+                result_status = "success_empty"
+        if result_status not in {"success_nonempty", "success_empty", "degraded", "error", "unavailable"}:
+            result_status = "unavailable"
+        if projection_status not in {"current", "cached", "empty", "unavailable"}:
+            projection_status = (
+                "unavailable"
+                if result_status == "unavailable"
+                else "cached"
+                if effective_source_status in {"stale", "offline", "degraded"}
+                else "current"
+                if safe_items
+                else "empty"
+            )
+        time_zone = _configured_timezone(self._settings)
+        observation = DiagnosticsCalendarQuery(
+            scopeType="ACTUAL_REQUEST_RANGE",
+            fromDate=_local_date_for_timestamp(from_utc, time_zone),
+            toDate=_local_date_for_timestamp(to_utc, time_zone),
+            requestFromUtc=_safe_timestamp(from_utc),
+            requestToUtc=_safe_timestamp(to_utc),
+            view=view if view in {"today", "agenda"} else None,
+            timezone=time_zone,
+            observedAt=_safe_timestamp(observed_at) or _now(),
+            lastSyncedAt=_safe_timestamp(last_synced_at),
+            resultStatus=result_status,
+            itemCount=safe_items,
+            sourceCount=len(provider_summaries),
+            calendarCount=sum(provider.calendarCount for provider in provider_summaries),
+            sourceStatus=effective_source_status,
+            cacheUsed=bool(cache_used),
+            fallbackUsed=bool(fallback_used),
+            projectionStatus=projection_status,
+            providers=provider_summaries,
+        )
+        self._calendar_reads.append(observation)
+
     def report(self, snapshot: DashboardSnapshot) -> DiagnosticsReport:
         # The endpoint can be called before a lifespan rebuild in tests or in a
         # just-started process.  Observing here also makes fixture scenarios
@@ -287,16 +398,33 @@ class DiagnosticsCollector:
             )
         try:
             calendar = self._calendar_query(snapshot)
-            collector_status.append(DiagnosticsCollectorStatus(collector="calendar", status="ok"))
+            collector_status.append(
+                DiagnosticsCollectorStatus(
+                    collector="calendar",
+                    status="error" if calendar.resultStatus in {"error", "unavailable"} else "ok",
+                    code=(
+                        "calendar_read_unavailable"
+                        if calendar.resultStatus == "unavailable"
+                        else "calendar_read_error"
+                        if calendar.resultStatus == "error"
+                        else None
+                    ),
+                )
+            )
         except Exception:
             calendar = DiagnosticsCalendarQuery(
-                fromDate=_date_text(date.today()),
-                toDate=_date_text(date.today() + timedelta(days=7)),
+                scopeType="PROJECTION_SCOPE",
+                fromDate="unknown",
+                toDate="unknown",
+                timezone=_configured_timezone(self._settings),
+                observedAt=_now(),
+                lastSyncedAt=None,
                 resultStatus="unavailable",
                 itemCount=0,
                 sourceCount=0,
                 calendarCount=0,
                 projectionStatus="unavailable",
+                projectionScope="unknown",
             )
             collector_status.append(
                 DiagnosticsCollectorStatus(
@@ -318,6 +446,7 @@ class DiagnosticsCollector:
             collectorStatus=collector_status,
             planning=planning,
             calendar=calendar,
+            calendarReads=list(self._calendar_reads),
             mutationGates=DiagnosticsMutationGates(
                 writesEnabled=self._settings.writes_enabled,
                 coffeeActionsEnabled=self._settings.coffee_actions_enabled,
@@ -373,13 +502,49 @@ class DiagnosticsCollector:
             providers=providers,
         )
 
+    @staticmethod
+    def _provider_summaries(providers: Iterable[object]) -> list[DiagnosticsProviderSummary]:
+        result: list[DiagnosticsProviderSummary] = []
+        for provider in list(providers)[:4]:
+            provider_name = getattr(provider, "provider", None)
+            if provider_name not in {"local", "icloud"}:
+                continue
+            calendars = getattr(provider, "calendars", [])
+            result.append(
+                DiagnosticsProviderSummary(
+                    id=_provider_id(getattr(provider, "id", None)),
+                    kind=(
+                        getattr(provider, "kind", None)
+                        if getattr(provider, "kind", None) in {"native", "external"}
+                        else "external"
+                    ),
+                    provider=provider_name,
+                    label=_provider_label(provider_name),
+                    status=str(getattr(provider, "status", "unknown"))[:32] or "unknown",
+                    configured=bool(getattr(provider, "configured", False)),
+                    lastSyncedAt=_safe_timestamp(getattr(provider, "lastSyncedAt", None)),
+                    observedAt=_safe_timestamp(getattr(provider, "observedAt", None)),
+                    calendarCount=max(0, min(32, len(calendars))),
+                )
+            )
+        return result
+
     def _calendar_query(self, snapshot: DashboardSnapshot) -> DiagnosticsCalendarQuery:
-        today = datetime.now(timezone.utc).date()
+        if self._calendar_reads:
+            return self._calendar_reads[-1]
+
         events = _unique_events(snapshot)
         planning = snapshot.planning
         provider_error = bool(
             planning
             and any(provider.status == "error" for provider in planning.providerStatuses)
+        )
+        provider_degraded = bool(
+            planning
+            and any(
+                provider.status not in {"current", "not_configured", "disabled"}
+                for provider in planning.providerStatuses
+            )
         )
         source_status = planning.sourceStatus if planning is not None else None
         if planning is None:
@@ -388,14 +553,14 @@ class DiagnosticsCollector:
         elif provider_error:
             result_status = "error"
             projection_status = "cached" if planning.sourceStatus in {"stale", "offline"} else "current"
-        elif planning.sourceStatus != "current":
+        elif planning.sourceStatus != "current" or provider_degraded:
             result_status = "degraded"
-            projection_status = "cached" if planning.sourceStatus in {"stale", "offline"} else "empty"
+            projection_status = "cached" if events else "empty"
         elif events:
-            result_status = "ok_nonempty"
+            result_status = "success_nonempty"
             projection_status = "current"
         else:
-            result_status = "ok_empty"
+            result_status = "success_empty"
             projection_status = "empty"
         source_ids = {
             _provider_id(event.calendarIdentity.providerId)
@@ -410,8 +575,12 @@ class DiagnosticsCollector:
         }
         cache_used = bool(planning and planning.sourceStatus in {"stale", "offline"})
         return DiagnosticsCalendarQuery(
-            fromDate=_date_text(today),
-            toDate=_date_text(today + timedelta(days=7)),
+            scopeType="PROJECTION_SCOPE",
+            fromDate="unknown",
+            toDate="unknown",
+            timezone=_configured_timezone(self._settings),
+            observedAt=_safe_timestamp(snapshot.generatedAt) or _now(),
+            lastSyncedAt=_safe_timestamp(planning.lastSyncedAt) if planning is not None else None,
             resultStatus=result_status,
             itemCount=len(events),
             sourceCount=len(source_ids),
@@ -420,6 +589,10 @@ class DiagnosticsCollector:
             cacheUsed=cache_used,
             fallbackUsed=cache_used,
             projectionStatus=projection_status,
+            projectionScope="planning_snapshot_calendar_today_upcoming",
+            providers=self._provider_summaries(
+                planning.providerStatuses if planning is not None else []
+            ),
         )
 
 
@@ -434,7 +607,3 @@ def _unique_events(snapshot: DashboardSnapshot) -> list:
         seen.add(event.id)
         result.append(event)
     return result
-
-
-def _date_text(value: date) -> str:
-    return value.isoformat()

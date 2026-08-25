@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Callable, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, model_validator
@@ -292,6 +292,7 @@ def build_planning_router(
     adapter: PlanningAdapter,
     *,
     prefix: str = "/api/v1/planning",
+    calendar_read_observer: Callable[..., None] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["planning"])
 
@@ -561,16 +562,38 @@ def build_planning_router(
     async def planning_events(request: Request, response: Response) -> PlanningReadEnvelope:
         _enabled(adapter)
         _no_store(response)
-        query = _query(request, allowed={"from", "to", "limit", "offset"})
+        query = _query(request, allowed={"from", "to", "limit", "offset", "view"})
         from_utc, to_utc = _required_range(query)
+        view = query.get("view")
+        if view is not None and view not in {"today", "agenda"}:
+            raise HTTPException(status_code=422, detail="planning_calendar_view_invalid")
         try:
-            return await adapter.read_events(
+            envelope = await adapter.read_events(
                 from_utc=from_utc,
                 to_utc=to_utc,
                 limit=_limit(query),
                 offset=_offset(query),
             )
+            _record_calendar_read(
+                calendar_read_observer,
+                from_utc=from_utc,
+                to_utc=to_utc,
+                view=view,
+                item_count=envelope.count,
+                source_status=envelope.sourceStatus,
+                last_synced_at=envelope.lastSyncedAt,
+                providers=envelope.sources,
+            )
+            return envelope
         except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
+            _record_calendar_read(
+                calendar_read_observer,
+                from_utc=from_utc,
+                to_utc=to_utc,
+                view=view,
+                result_status="error" if isinstance(exc, PlanningUpstreamError) else "unavailable",
+                projection_status="unavailable",
+            )
             raise _read_unavailable() from exc
 
     @router.get("/events/{event_id}", response_model=PlanningEventObjectEnvelope)
@@ -664,6 +687,17 @@ def build_planning_router(
 def _enabled(adapter: PlanningAdapter) -> None:
     if not adapter.enabled:
         raise HTTPException(status_code=404, detail="planning_disabled")
+
+
+def _record_calendar_read(observer: Callable[..., None] | None, **values: object) -> None:
+    """Diagnostics are best-effort and can never change the read response."""
+
+    if observer is None:
+        return
+    try:
+        observer(**values)
+    except Exception:
+        return
 
 
 def _require_reminder_mutation(adapter: PlanningAdapter, action: str) -> None:

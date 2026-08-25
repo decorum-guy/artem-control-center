@@ -106,27 +106,6 @@ class DiagnosticsCollectorStatus(BaseModel):
     code: Optional[str] = Field(default=None, max_length=120)
 
 
-class DiagnosticsCalendarQuery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    fromDate: str
-    toDate: str
-    resultStatus: Literal[
-        "ok_nonempty",
-        "ok_empty",
-        "degraded",
-        "error",
-        "unavailable",
-    ]
-    itemCount: int = Field(ge=0)
-    sourceCount: int = Field(ge=0)
-    calendarCount: int = Field(ge=0)
-    sourceStatus: Optional[str] = Field(default=None, max_length=32)
-    cacheUsed: bool = False
-    fallbackUsed: bool = False
-    projectionStatus: Literal["current", "cached", "empty", "unavailable"]
-
-
 class DiagnosticsProviderSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -139,6 +118,30 @@ class DiagnosticsProviderSummary(BaseModel):
     lastSyncedAt: Optional[str] = None
     observedAt: Optional[str] = None
     calendarCount: int = Field(ge=0)
+
+
+class DiagnosticsCalendarQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scopeType: Literal["ACTUAL_REQUEST_RANGE", "PROJECTION_SCOPE"]
+    fromDate: str
+    toDate: str
+    requestFromUtc: Optional[str] = None
+    requestToUtc: Optional[str] = None
+    view: Optional[Literal["today", "agenda"]] = None
+    timezone: str = Field(min_length=1, max_length=64)
+    observedAt: str
+    lastSyncedAt: Optional[str] = None
+    resultStatus: Literal["success_nonempty", "success_empty", "degraded", "error", "unavailable"]
+    itemCount: int = Field(ge=0)
+    sourceCount: int = Field(ge=0)
+    calendarCount: int = Field(ge=0)
+    sourceStatus: Optional[str] = Field(default=None, max_length=32)
+    cacheUsed: bool = False
+    fallbackUsed: bool = False
+    projectionStatus: Literal["current", "cached", "empty", "unavailable"]
+    projectionScope: Optional[str] = Field(default=None, max_length=64)
+    providers: List[DiagnosticsProviderSummary] = Field(default_factory=list, max_length=4)
 
 
 class DiagnosticsPlanningSummary(BaseModel):
@@ -180,6 +183,7 @@ class DiagnosticsReport(BaseModel):
     collectorStatus: List[DiagnosticsCollectorStatus] = Field(default_factory=list, max_length=16)
     planning: DiagnosticsPlanningSummary
     calendar: DiagnosticsCalendarQuery
+    calendarReads: List[DiagnosticsCalendarQuery] = Field(default_factory=list, max_length=32)
     mutationGates: DiagnosticsMutationGates
 
 

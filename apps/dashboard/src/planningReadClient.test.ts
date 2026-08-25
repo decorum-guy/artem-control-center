@@ -7,6 +7,7 @@ import {
   PlanningReadError,
   planningReadParsers,
   previewPlanningReminder,
+  readPlanningEvents,
   readPlanningTaskById,
   readPlanningTasks
 } from "./planningReadClient";
@@ -126,6 +127,26 @@ const nativePhaseBSource = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("fixed Planning read client", () => {
+  it("forwards the real Calendar view alongside the bounded UTC range", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      ...envelope({ domain: "calendar_event", items: [calendarEvent] }),
+      sources: [nativePhaseBSource]
+    }), { status: 200 }));
+
+    await readPlanningEvents(
+      "2026-08-24T21:00:00Z",
+      "2026-08-25T21:00:00Z",
+      20,
+      0,
+      undefined,
+      "today"
+    );
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/v1/planning/events?limit=20&offset=0&from=2026-08-24T21%3A00%3A00Z&to=2026-08-25T21%3A00%3A00Z&view=today"
+    );
+  });
+
   it("keeps old Alice envelopes without sources compatible and accepts strict new sources", () => {
     expect(planningReadParsers.parseEnvelope(envelope(), "task", (value) => value).sources).toBeUndefined();
     const parsed = planningReadParsers.parseEnvelope(

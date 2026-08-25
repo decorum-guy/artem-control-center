@@ -89,8 +89,19 @@ app = FastAPI(
 )
 app.include_router(runtime_control_router)
 app.include_router(build_weather_router(weather_service))
-app.include_router(build_planning_router(runtime.planning))
-app.include_router(build_planning_router(runtime.planning, prefix="/api/planning"))
+app.include_router(
+    build_planning_router(
+        runtime.planning,
+        calendar_read_observer=diagnostics_collector.observe_calendar_read,
+    )
+)
+app.include_router(
+    build_planning_router(
+        runtime.planning,
+        prefix="/api/planning",
+        calendar_read_observer=diagnostics_collector.observe_calendar_read,
+    )
+)
 fixture_services: List[ServiceSnapshot] = []
 revision = 1
 fixture_coffee_state_override: str | None = None

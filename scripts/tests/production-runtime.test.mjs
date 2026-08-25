@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import {
   parseEnvText,
   RestartBudget,
-  shouldCreateManualStop
+  shouldCreateManualStop,
+  buildAgentEnvironment
 } from "../production-runtime.mjs";
 
 test("parseEnvText accepts comments, export and quoted values", () => {
@@ -43,4 +44,33 @@ test("only a manual shutdown creates a persistent stop marker", () => {
   assert.equal(shouldCreateManualStop({ action: "shutdown", manual: true }), true);
   assert.equal(shouldCreateManualStop({ action: "shutdown", manual: false }), false);
   assert.equal(shouldCreateManualStop({ action: "hide" }), false);
+});
+
+test("production runtime injects only its safe configured revision into Panel Agent", () => {
+  const environment = buildAgentEnvironment({
+    baseEnv: { NODE_ENV: "production", ARBITRARY_SECRET: "must-not-be-reported" },
+    fileEnv: { PANEL_AGENT_MODE: "fixtures", PANEL_AGENT_BUILD_REVISION: "stale-file-value" },
+    mode: "production",
+    buildRevision: "59d376c02d26",
+    commandPath: "runtime-command.json",
+    dashboardDist: "dist",
+    stateCachePath: "panel-state-cache.json"
+  });
+
+  assert.equal(environment.PANEL_AGENT_MODE, "production");
+  assert.equal(environment.PANEL_AGENT_BUILD_REVISION, "59d376c02d26");
+  assert.equal(environment.PANEL_STATE_CACHE_PATH, "panel-state-cache.json");
+});
+
+test("production runtime uses an honest unknown revision when Git cannot provide one", () => {
+  const environment = buildAgentEnvironment({
+    baseEnv: {},
+    fileEnv: {},
+    mode: "production",
+    commandPath: "runtime-command.json",
+    dashboardDist: "dist",
+    stateCachePath: "panel-state-cache.json"
+  });
+
+  assert.equal(environment.PANEL_AGENT_BUILD_REVISION, "unknown");
 });

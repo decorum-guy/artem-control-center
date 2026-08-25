@@ -4,6 +4,7 @@ import { emptyPlanningFixture, planningFixtures } from "./planningFixtures";
 import {
   copyDiagnosticsText,
   currentProblemsForSnapshot,
+  diagnosticsFallbackCopyText,
   diagnosticsSupportText
 } from "./problemModel";
 
@@ -41,17 +42,27 @@ function report(overrides: Partial<DiagnosticsReport> = {}): DiagnosticsReport {
       providers: []
     },
     calendar: {
-      fromDate: "2026-08-25",
-      toDate: "2026-09-01",
-      resultStatus: "ok_empty",
+      scopeType: "PROJECTION_SCOPE",
+      fromDate: "unknown",
+      toDate: "unknown",
+      requestFromUtc: null,
+      requestToUtc: null,
+      view: null,
+      timezone: "Europe/Moscow",
+      observedAt: "2026-08-25T12:00:00Z",
+      lastSyncedAt: "2026-08-25T11:59:00Z",
+      resultStatus: "success_empty",
       itemCount: 0,
       sourceCount: 0,
       calendarCount: 0,
       sourceStatus: "current",
       cacheUsed: false,
       fallbackUsed: false,
-      projectionStatus: "empty"
+      projectionStatus: "empty",
+      projectionScope: "planning_snapshot_calendar_today_upcoming",
+      providers: []
     },
+    calendarReads: [],
     mutationGates: {
       writesEnabled: false,
       coffeeActionsEnabled: false,
@@ -138,6 +149,12 @@ describe("owner diagnostics problem model", () => {
     expect(await copyDiagnosticsText("safe-report", clipboard)).toBe(true);
     expect(await copyDiagnosticsText("safe-report", { writeText: async () => { throw new Error("denied"); } })).toBe(false);
     expect(await copyDiagnosticsText("safe-report", null)).toBe(false);
+  });
+
+  it("describes the fallback action without promising a download", () => {
+    expect(diagnosticsFallbackCopyText).toContain("Выделите отчёт");
+    expect(diagnosticsFallbackCopyText).toContain("скопируйте его вручную");
+    expect(diagnosticsFallbackCopyText).not.toContain("скачать");
   });
 
   it("does not treat an empty Planning projection as an error", () => {

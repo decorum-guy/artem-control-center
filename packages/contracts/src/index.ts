@@ -158,9 +158,16 @@ export interface DiagnosticsCollectorStatus {
 }
 
 export interface DiagnosticsCalendarQuery {
+  scopeType: "ACTUAL_REQUEST_RANGE" | "PROJECTION_SCOPE";
   fromDate: string;
   toDate: string;
-  resultStatus: "ok_nonempty" | "ok_empty" | "degraded" | "error" | "unavailable";
+  requestFromUtc: string | null;
+  requestToUtc: string | null;
+  view: "today" | "agenda" | null;
+  timezone: string;
+  observedAt: string;
+  lastSyncedAt: string | null;
+  resultStatus: "success_nonempty" | "success_empty" | "degraded" | "error" | "unavailable";
   itemCount: number;
   sourceCount: number;
   calendarCount: number;
@@ -168,6 +175,8 @@ export interface DiagnosticsCalendarQuery {
   cacheUsed: boolean;
   fallbackUsed: boolean;
   projectionStatus: "current" | "cached" | "empty" | "unavailable";
+  projectionScope: string | null;
+  providers: DiagnosticsProviderSummary[];
 }
 
 export interface DiagnosticsProviderSummary {
@@ -215,6 +224,7 @@ export interface DiagnosticsReport {
   collectorStatus: DiagnosticsCollectorStatus[];
   planning: DiagnosticsPlanningSummary;
   calendar: DiagnosticsCalendarQuery;
+  calendarReads: DiagnosticsCalendarQuery[];
   mutationGates: DiagnosticsMutationGates;
 }
 
