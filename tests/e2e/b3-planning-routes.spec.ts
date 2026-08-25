@@ -54,6 +54,31 @@ async function setEmptyPlanningPreview(page: Page, domain: "tasks" | "calendar" 
   });
 }
 
+async function expectReminderViewResponse(
+  page: Page,
+  view: "upcoming" | "overdue" | "delivery",
+  action: () => Promise<unknown>,
+) {
+  const responsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v1/planning/reminders/view"
+      && url.searchParams.get("view") === view;
+  });
+  await action();
+  const response = await responsePromise;
+  const payload = await response.json() as Record<string, unknown>;
+  expect(response.status()).toBe(200);
+  expect(payload.schemaVersion).toBe("planning.panel.v1");
+  expect(payload.kind).toBe("list");
+  expect(payload.domain).toBe("reminder");
+  expect(payload.sourceStatus).toBe("current");
+  expect(payload.lastSyncedAt).toBeTruthy();
+  expect(Array.isArray(payload.sources)).toBeTruthy();
+  expect(payload.sources).not.toBeNull();
+  expect(JSON.stringify(payload)).not.toContain("accountId");
+  expect(JSON.stringify(payload)).not.toContain("correlation_id");
+}
+
 test.describe("B3 Planning monitoring routes", () => {
   test.beforeEach(async ({ page }) => {
     await page.clock.install({ time: "2026-08-12T09:00:00Z" });
@@ -129,13 +154,21 @@ test.describe("B3 Planning monitoring routes", () => {
   test("Overview reaches the reminder monitor with the accepted navigation projection", async ({ page }) => {
     const assertNoWrites = await assertPlanningTrafficIsReadOnly(page);
     await page.goto("/overview");
-    await page.getByTestId("planning-reminder-row").tap();
+    await expectReminderViewResponse(page, "upcoming", () => page.getByTestId("planning-reminder-row").tap());
     await expect(page.getByTestId("route-reminders")).toBeVisible();
     await expect(page.getByRole("link", { name: "Напоминания" })).toHaveCount(v2ShellEnabled ? 1 : 0);
-    await page.locator(".planning-segmented").getByRole("button", { name: "Пропущено" }).tap();
+    await expectReminderViewResponse(
+      page,
+      "overdue",
+      () => page.locator(".planning-segmented").getByRole("button", { name: "Пропущено" }).tap(),
+    );
     await expect(page.getByTestId("planning-reminder-list")).toContainText("Доставлено · ждёт завершения");
     await expect(page.getByTestId("planning-reminder-list")).toContainText("Открыто");
-    await page.locator(".planning-segmented").getByRole("button", { name: "Доставка" }).tap();
+    await expectReminderViewResponse(
+      page,
+      "delivery",
+      () => page.locator(".planning-segmented").getByRole("button", { name: "Доставка" }).tap(),
+    );
     await expect(page.getByTestId("planning-reminder-list")).toContainText("Повторная попытка");
     await expect(page.getByTestId("planning-reminder-list")).toContainText("Не доставлено");
     await expect(page.getByTestId("planning-reminder-list")).not.toContainText("Доставлено · ждёт завершения");
@@ -191,6 +224,39 @@ test.describe("B3 Planning monitoring routes", () => {
     failUntilRetry = false;
     await retryButton.tap();
     await expect(page.getByTestId("planning-task-list")).toBeVisible();
+  });
+
+  test("Reminder contract failure keeps the fallback and Retry remains read-only", async ({ page }) => {
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/") && request.method() !== "GET") {
+        writes.push(`${request.method()} ${request.url()}`);
+      }
+    });
+    await setRouteResponseState(page, "/api/v1/planning/reminders/view", 200, (payload) => {
+      payload.sources = null;
+    });
+    await page.goto("/reminders");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
+    const retryButton = page.getByRole("button", { name: "Повторить" }).first();
+    const failedRetryResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/planning/reminders/view" && response.status() === 200;
+    });
+    await retryButton.tap();
+    await failedRetryResponse;
+    await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
+    expect(writes).toEqual([]);
+
+    await page.unroute("**/api/v1/planning/reminders/view*");
+    const recoveredResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/planning/reminders/view" && response.status() === 200;
+    });
+    await retryButton.tap();
+    await recoveredResponse;
+    await expect(page.getByTestId("planning-reminder-list")).toBeVisible();
+    expect(writes).toEqual([]);
   });
 
   test("503 with an empty bounded preview is not rendered as successful empty for any route", async ({ page }) => {

@@ -161,6 +161,14 @@ describe("fixed Planning read client", () => {
     expect(parsed.sources).toEqual([nativePhaseBSource, phaseBSource]);
   });
 
+  it("rejects an explicit null sources value instead of weakening the contract", () => {
+    expect(() => planningReadParsers.parseEnvelope(
+      envelope({ sources: null }),
+      "task",
+      (value) => value
+    )).toThrowError(PlanningReadError);
+  });
+
   it("parses source metadata on object responses without exposing upstream identity fields", () => {
     const sources = [nativePhaseBSource, phaseBSource];
     const parsed = planningReadParsers.parseObjectEnvelope({

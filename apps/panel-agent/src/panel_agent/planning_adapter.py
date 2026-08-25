@@ -1541,6 +1541,7 @@ class PlanningAdapter:
             offset=offset,
             count=len(page),
             hasMore=offset + len(page) < len(mapped),
+            sources=self._project_sources(self._sources_from_results(envelopes)),
         )
 
     async def _scan_reminder_sources(
