@@ -43,13 +43,14 @@
   flex-wrap: nowrap;
 }
 .planning-calendar-month-controls__label {
-  width: 138px;
-  min-width: 138px;
-  flex: 0 0 138px;
+  width: 144px;
+  min-width: 144px;
+  flex: 0 0 144px;
   color: var(--text);
   font-size: 16px;
   text-align: center;
   text-transform: capitalize;
+  white-space: nowrap;
 }
 .planning-calendar-today-control {
   display: flex;

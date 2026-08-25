@@ -111,15 +111,16 @@ test.describe("Issue #112 Calendar Slice A", () => {
         const box = item.getBoundingClientRect();
         return { left: box.left, right: box.right, width: box.width, height: box.height };
       };
-      return { previous: rect(previous), label: rect(label), next: rect(next), gap: getComputedStyle(element).gap };
+      return { previous: rect(previous), label: rect(label), next: rect(next), gap: getComputedStyle(element).gap, whiteSpace: getComputedStyle(label).whiteSpace };
     });
     expect(monthPager.previous.width).toBeCloseTo(48, 3);
     expect(monthPager.previous.height).toBeCloseTo(48, 3);
     expect(monthPager.next.width).toBeCloseTo(monthPager.previous.width, 3);
     expect(monthPager.next.height).toBeCloseTo(monthPager.previous.height, 3);
     expect(monthPager.gap).toBe("4px");
+    expect(monthPager.whiteSpace).toBe("nowrap");
     expect(Math.abs((monthPager.label.left - monthPager.previous.right) - (monthPager.next.left - monthPager.label.right))).toBeLessThanOrEqual(0.5);
-    expect(monthPager.label.width).toBeCloseTo(138, 3);
+    expect(monthPager.label.width).toBeCloseTo(144, 3);
     const longestMonthLabelWidth = await page.getByTestId("planning-calendar-month-heading").evaluate((element) => {
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
@@ -137,12 +138,16 @@ test.describe("Issue #112 Calendar Slice A", () => {
     const todayControlBox = await page.getByTestId("planning-calendar-today-control").boundingBox();
     const monthColumnBox = await page.locator(".calendar-month").boundingBox();
     const selectedDayColumnBox = await page.getByTestId("planning-calendar-selected-day").boundingBox();
+    const todayButtonBox = await page.getByTestId("planning-calendar-today-control").getByRole("button", { name: "Сегодня" }).boundingBox();
+    const refreshButtonBox = await page.getByTestId("planning-calendar-refresh").boundingBox();
     expect(todayControlBox?.x).toBeGreaterThan((monthControlsBox?.x ?? 0) + (monthControlsBox?.width ?? 0));
     expect(Math.abs((monthControlsBox?.x ?? 0) - (monthColumnBox?.x ?? 0))).toBeLessThanOrEqual(1);
     expect(monthControlsBox?.width ?? 0).toBeLessThan((monthColumnBox?.width ?? 0) * 0.5);
     const todayRight = (todayControlBox?.x ?? 0) + (todayControlBox?.width ?? 0);
     const selectedDayRight = (selectedDayColumnBox?.x ?? 0) + (selectedDayColumnBox?.width ?? 0);
     expect(Math.abs(todayRight - selectedDayRight)).toBeLessThanOrEqual(1);
+    expect(todayButtonBox?.width).toBeCloseTo(112, 3);
+    expect(refreshButtonBox?.width).toBeCloseTo(48, 3);
     await expect(page.getByTestId("route-calendar")).not.toContainText("Planning read API");
     await expect(page.getByTestId("route-calendar")).not.toContainText("Выбранный день");
 
@@ -198,7 +203,7 @@ test.describe("Issue #112 Calendar Slice A", () => {
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Работа в субботу" })).toBeVisible();
 
     const overflow = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, width: document.documentElement.clientWidth }));
-    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.width + 1);
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.width);
     expect(methods.every((method) => method === "GET")).toBe(true);
   });
 
