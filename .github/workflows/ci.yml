@@ -226,6 +226,14 @@ jobs:
           B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
         run: npm run test:e2e -- tests/e2e/b3-planning-routes.spec.ts
 
+      - name: Run focused #113 Planning stale-while-revalidate gate
+        if: runner.os == 'Linux'
+        env:
+          B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/issue-113-planning-stale-while-revalidate.spec.ts
+
       - name: Run focused PR9 Planning foundation gate
         if: runner.os == 'Linux'
         env:
