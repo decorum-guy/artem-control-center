@@ -810,6 +810,7 @@ function syncStateLabel(value: PlanningCalendarEvent["syncState"]): string {
 }
 
 function syncWarningLabel(value: PlanningCalendarEvent["syncState"]): string | null {
+  if (value === "local_only") return "Только локально";
   if (value === "pending") return "Ожидает синхронизации";
   if (value === "stale") return "Синхронизация устарела";
   if (value === "conflict") return "Конфликт синхронизации";
