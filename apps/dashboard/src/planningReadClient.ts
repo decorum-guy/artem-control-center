@@ -1307,48 +1307,103 @@ export async function mutatePlanningEvent(request: PlanningEventMutationRequest)
 
 export interface PlanningReadState<T> {
   loading: boolean;
+  refreshing: boolean;
   data: PlanningReadEnvelope<T> | null;
   error: PlanningReadError | null;
 }
 
+interface PlanningReadInternalState<T> extends PlanningReadState<T> {
+  queryKey: string;
+  refreshKey: string;
+}
+
+export interface UsePlanningReadOptions<T> {
+  /** Logical data identity. Changing this must never expose the previous query's rows. */
+  queryKey: string;
+  /** Re-read trigger for the same logical query (snapshot revision, retry, mutation readback). */
+  refreshKey: string;
+  reader: ((signal: AbortSignal) => Promise<PlanningReadEnvelope<T>>) | null;
+  enabled?: boolean;
+}
+
 export function usePlanningRead<T>(
-  requestKey: string,
-  reader: ((signal: AbortSignal) => Promise<PlanningReadEnvelope<T>>) | null,
-  enabled = true
+  { queryKey, refreshKey, reader, enabled = true }: UsePlanningReadOptions<T>
 ): PlanningReadState<T> {
   const readerRef = useRef(reader);
   readerRef.current = reader;
-  const [state, setState] = useState<PlanningReadState<T>>({ loading: enabled, data: null, error: null });
+  const generationRef = useRef(0);
+  const [state, setState] = useState<PlanningReadInternalState<T>>({
+    queryKey,
+    refreshKey,
+    loading: enabled,
+    refreshing: false,
+    data: null,
+    error: null
+  });
 
   useEffect(() => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     if (!enabled || !readerRef.current) {
-      setState({ loading: false, data: null, error: null });
+      setState({ queryKey, refreshKey, loading: false, refreshing: false, data: null, error: null });
       return undefined;
     }
     const controller = new AbortController();
-    let active = true;
-    setState({ loading: true, data: null, error: null });
-    void readerRef.current(controller.signal)
+    const activeReader = readerRef.current;
+    setState((previous) => {
+      const sameQuery = previous.queryKey === queryKey;
+      const hasData = sameQuery && previous.data !== null;
+      return {
+        queryKey,
+        refreshKey,
+        loading: !hasData,
+        refreshing: hasData,
+        data: sameQuery ? previous.data : null,
+        error: null
+      };
+    });
+    void activeReader(controller.signal)
       .then((data) => {
-        if (active) setState({ loading: false, data, error: null });
+        setState((previous) => {
+          if (generationRef.current !== generation || previous.queryKey !== queryKey) return previous;
+          return { queryKey, refreshKey, loading: false, refreshing: false, data, error: null };
+        });
       })
       .catch((reason: unknown) => {
-        if (!active || (reason instanceof PlanningReadError && reason.code === "aborted")) return;
-        setState({
-          loading: false,
-          data: null,
-          error: reason instanceof PlanningReadError
+        if (generationRef.current !== generation || controller.signal.aborted || (reason instanceof PlanningReadError && reason.code === "aborted")) return;
+        setState((previous) => {
+          if (previous.queryKey !== queryKey) return previous;
+          const error = reason instanceof PlanningReadError
             ? reason
-            : new PlanningReadError("Planning route is unavailable", "network")
+            : new PlanningReadError("Planning route is unavailable", "network");
+          return {
+            queryKey,
+            refreshKey,
+            loading: false,
+            refreshing: false,
+            data: previous.data,
+            error
+          };
         });
       });
     return () => {
-      active = false;
       controller.abort();
     };
-  }, [enabled, requestKey]);
+  }, [enabled, queryKey, refreshKey]);
 
-  return state;
+  if (!enabled || state.queryKey !== queryKey) {
+    return { loading: enabled, refreshing: false, data: null, error: null };
+  }
+  if (state.refreshKey !== refreshKey) {
+    const hasData = state.data !== null;
+    return { loading: !hasData, refreshing: hasData, data: hasData ? state.data : null, error: null };
+  }
+  return {
+    loading: state.loading,
+    refreshing: state.refreshing,
+    data: state.data,
+    error: state.error
+  };
 }
 
 export const planningReadParsers = {

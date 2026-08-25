@@ -47,6 +47,7 @@ export function PlanningRouteFrame({
   lastSyncedAt,
   sources,
   error,
+  refreshing = false,
   preview,
   onRetry,
   controls,
@@ -61,6 +62,7 @@ export function PlanningRouteFrame({
   lastSyncedAt: string | null;
   sources?: PlanningCalendarSource[];
   error?: PlanningReadError | null;
+  refreshing?: boolean;
   preview?: boolean;
   onRetry: () => void;
   controls: ReactNode;
@@ -84,6 +86,7 @@ export function PlanningRouteFrame({
         sourceStatus={sourceStatus}
         lastSyncedAt={lastSyncedAt}
         error={error}
+        refreshing={refreshing}
         preview={preview}
         onRetry={onRetry}
       />
@@ -130,12 +133,14 @@ export function PlanningRouteHealth({
   sourceStatus,
   lastSyncedAt,
   error,
+  refreshing = false,
   preview,
   onRetry
 }: {
   sourceStatus: PlanningSourceStatus | "unavailable";
   lastSyncedAt: string | null;
   error?: PlanningReadError | null;
+  refreshing?: boolean;
   preview?: boolean;
   onRetry?: () => void;
 }) {
@@ -143,13 +148,17 @@ export function PlanningRouteHealth({
   const state = errorUnavailable ? "unavailable" : sourceStatus;
   const label = preview
     ? "Последние данные · краткий снимок"
-    : state === "degraded"
-      ? "Есть проблемы"
-      : state === "stale"
-        ? (syncTimeLabel(lastSyncedAt) ? `Данные от ${syncTimeLabel(lastSyncedAt)}` : "Данные устарели")
-        : state === "offline" || state === "unavailable"
-          ? "Актуальные данные недоступны"
-          : null;
+    : error
+      ? "Обновление не удалось"
+      : refreshing
+        ? "Обновляем данные…"
+        : state === "degraded"
+          ? "Есть проблемы"
+          : state === "stale"
+            ? (syncTimeLabel(lastSyncedAt) ? `Данные от ${syncTimeLabel(lastSyncedAt)}` : "Данные устарели")
+            : state === "offline" || state === "unavailable"
+              ? "Актуальные данные недоступны"
+              : null;
   if (!label && !error) return null;
   return (
     <section
@@ -163,7 +172,9 @@ export function PlanningRouteHealth({
         {preview ? (
           <p>Показан ограниченный снимок Overview. Фильтры и пагинация отключены, потому что полный маршрут недоступен.</p>
         ) : error ? (
-          <p>Не удалось получить данные маршрута. Это состояние не означает, что список пуст.</p>
+          <p>Не удалось обновить данные маршрута. Подтверждённый список остаётся видимым; повторите чтение.</p>
+        ) : refreshing ? (
+          <p>Подтверждённый список остаётся видимым, пока приходит свежий ответ.</p>
         ) : state === "degraded" ? (
           <p>Источник отвечает с ограничениями; свежесть данных отмечена рядом с маршрутом.</p>
         ) : state !== "current" ? (
