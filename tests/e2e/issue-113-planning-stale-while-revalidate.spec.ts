@@ -309,6 +309,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect.poll(() => calendar.backgroundReads).toBe(1);
     await expect(page.getByText("Старое событие 1")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(2);
+    await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-route-health")).toContainText("Не удалось обновить данные");
     await expect(page.getByTestId("planning-route-health")).toContainText("Показаны последние доступные данные");
     await expect(page.getByTestId("planning-route-error")).toHaveCount(0);

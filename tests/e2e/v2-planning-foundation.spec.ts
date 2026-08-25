@@ -67,7 +67,8 @@ test.describe("PR9 Planning visual/module foundation", () => {
     const overlap = page.getByTestId("planning-calendar-event-row").filter({ hasText: "Первая пересекающаяся встреча" });
     await expect(overlap).toHaveAttribute("data-overlap", "true");
     await expect(overlap).toContainText("Пересекается по времени");
-    await expect(overlap).toContainText("Синхронизация");
+    await expect(overlap).not.toContainText("Синхронизация: Синхронизировано");
+    await expect(overlap).not.toContainText("Europe/Moscow");
 
     await page.goto("/reminders?theme=day");
     await expect(page.getByTestId("route-reminders")).toHaveAttribute("data-planning-module", "planning.reminders-monitoring");
@@ -87,6 +88,7 @@ test.describe("PR9 Planning visual/module foundation", () => {
 
     await mutatePlanningRoute(page, "/api/v1/planning/tasks", (payload) => { payload.sourceStatus = "stale"; });
     await page.goto("/tasks?theme=day");
+    await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-route-health")).toContainText("Данные могут быть устаревшими");
     await capture(page, directory, "planning-tasks-stale");
     await page.unroute("**/api/v1/planning/tasks**");

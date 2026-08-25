@@ -1752,6 +1752,7 @@ body::-webkit-scrollbar {
   display: flex;
   flex: 0 1 190px;
   align-items: center;
+  justify-content: center;
   min-width: 160px;
   padding: 0 13px;
 }
@@ -1760,6 +1761,7 @@ body::-webkit-scrollbar {
   display: flex;
   flex: 0 1 auto;
   align-items: center;
+  justify-content: center;
   gap: 9px;
   min-width: 48px;
   padding: 0 13px;
@@ -1782,13 +1784,14 @@ body::-webkit-scrollbar {
 .v2-status-text {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-width: 0;
   gap: 8px;
   color: var(--cc-text-secondary);
   font-size: var(--cc-type-metadata-size);
   font-weight: var(--cc-type-metadata-weight);
   line-height: var(--cc-type-metadata-line);
-  text-align: left;
+  text-align: center;
 }
 
 .v2-status-text > span:last-child {

@@ -182,6 +182,7 @@ test.describe("B3 Planning monitoring routes", () => {
       payload.sourceStatus = "degraded";
     });
     await page.goto("/tasks");
+    await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-route-health")).toHaveAttribute("data-state", "degraded");
     await expect(page.getByTestId("planning-route-health")).toContainText("Есть проблемы");
     await page.unroute("**/api/v1/planning/tasks**");
@@ -190,6 +191,7 @@ test.describe("B3 Planning monitoring routes", () => {
       payload.sourceStatus = "stale";
     });
     await page.goto("/tasks");
+    await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-route-health")).toHaveAttribute("data-state", "stale");
     await expect(page.getByTestId("planning-route-health")).toContainText("Данные могут быть устаревшими");
     await page.unroute("**/api/v1/planning/tasks**");

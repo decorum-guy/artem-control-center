@@ -30,6 +30,7 @@
   color: var(--cc-text, #fff);
   background: var(--cc-surface-strong, rgba(255, 255, 255, .08));
   cursor: pointer;
+  line-height: 0;
   touch-action: none;
   user-select: none;
 }
@@ -44,7 +45,12 @@
   background: rgba(245, 180, 75, .14);
 }
 
-.interaction-lock-icon { font-size: 22px; line-height: 1; }
+.interaction-lock-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+}
 
 .interaction-lock-progress {
   position: absolute;
@@ -65,7 +71,6 @@
   background: currentColor;
 }
 
-.interaction-lock-hint,
 .interaction-lock-status {
   color: var(--cc-text-secondary, #c4ccd7);
   font-size: 12px;
@@ -87,6 +92,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   /* The timer still measures the exact hold, but no continuously changing
-     fill is visible. The stepped text cue remains the reduced-motion signal. */
+     fill is visible. The control geometry remains unchanged. */
   .interaction-lock-progress > span { display: none; }
 }

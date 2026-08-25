@@ -71,6 +71,7 @@ import { useNoticeCenter } from "./NoticeCenter";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { useInteractionLock } from "./InteractionLock";
+import { Icon } from "./icons";
 import type { ActionConfirmationId } from "./actionConfirmationCatalog";
 import {
   taskMutationBodyFromPreview,
@@ -808,6 +809,14 @@ function syncStateLabel(value: PlanningCalendarEvent["syncState"]): string {
   }[value];
 }
 
+function syncWarningLabel(value: PlanningCalendarEvent["syncState"]): string | null {
+  if (value === "pending") return "Ожидает синхронизации";
+  if (value === "stale") return "Синхронизация устарела";
+  if (value === "conflict") return "Конфликт синхронизации";
+  if (value === "error") return "Ошибка синхронизации";
+  return null;
+}
+
 function providerSourceForEvent(event: PlanningCalendarEvent, sources: PlanningCalendarSource[]): PlanningCalendarSource | null {
   const identity = calendarIdentityForEvent(event);
   return sources.find((source) => source.id === identity.providerId || (source.kind === "native" && identity.providerId === "local-planning")) ?? null;
@@ -845,7 +854,7 @@ function CalendarEventRow({ event, overlap, now, onOpen, sourceStale, accentColo
         <strong>{event.title}</strong>
         <span className="planning-route-row__source planning-calendar-state-line">
           <span data-testid="planning-calendar-identity">{calendarIdentityLabel(event)}</span>
-          <span data-testid="planning-calendar-sync-state">Синхронизация: {syncStateLabel(event.syncState)}</span>
+          {syncWarningLabel(event.syncState) && <span data-testid="planning-calendar-sync-warning">{syncWarningLabel(event.syncState)}</span>}
           {sourceStale && <span data-testid="planning-calendar-stale-cue">Сохранённая копия</span>}
         </span>
       </span>
@@ -886,7 +895,7 @@ function CalendarDetailSheet({
     <PlanningSheet title={event.title} eyebrow={localEvent ? "Календарь · локальное событие" : "Календарь · только чтение"} onClose={onClose} testId="planning-calendar-detail">
       <dl className="planning-detail-list">
         <ReadOnlyField label="Тип" value={event.allDay ? "Весь день" : "Событие с временем"} />
-        <ReadOnlyField label="Начало и конец" value={formatEventRange(event)} />
+        <ReadOnlyField label="Начало и конец" value={formatEventRange(event, true)} />
         <ReadOnlyField label="Часовой пояс" value={event.timezone} />
         <ReadOnlyField label="Провайдер" value={identity.providerLabel} />
         <ReadOnlyField label="Календарь" value={identity.calendarLabel} />
@@ -915,13 +924,19 @@ function CalendarMonthControls({
   onPrevious,
   onToday,
   onNext,
-  futureAction
+  futureAction,
+  onRefresh,
+  refreshDisabled,
+  refreshing
 }: {
   month: { year: number; month: number };
   onPrevious: () => void;
   onToday: () => void;
   onNext: () => void;
   futureAction?: ReactNode;
+  onRefresh: () => void;
+  refreshDisabled: boolean;
+  refreshing: boolean;
 }) {
   const rawLabel = new Intl.DateTimeFormat("ru-RU", { month: "long", timeZone: "UTC" })
     .format(new Date(Date.UTC(month.year, month.month - 1, 1)));
@@ -936,6 +951,18 @@ function CalendarMonthControls({
       <div className="planning-calendar-today-control" data-testid="planning-calendar-today-control" role="group" aria-label="Переход к сегодняшнему дню">
         <button type="button" className="planning-secondary-button" onClick={onToday}>Сегодня</button>
         {futureAction && <div className="planning-future-action-slot" data-testid="planning-future-action-slot">{futureAction}</div>}
+        <button
+          type="button"
+          className={`planning-icon-button${refreshing ? " planning-icon-button--busy" : ""}`}
+          aria-label={refreshing ? "Обновление календаря" : "Обновить календарь"}
+          title="Обновить календарь"
+          aria-busy={refreshing}
+          data-testid="planning-calendar-refresh"
+          disabled={refreshDisabled}
+          onClick={onRefresh}
+        >
+          <Icon name="refresh" size={19} />
+        </button>
       </div>
     </div>
   );
@@ -954,11 +981,14 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const [mutationSheet, setMutationSheet] = useState<EventMutationSheetMode | null>(null);
   const [mutationPending, setMutationPending] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [expandedDay, setExpandedDay] = useState(false);
+  const [calendarRefreshPending, setCalendarRefreshPending] = useState(false);
   const [liveNow, setLiveNow] = useState(() => new Date());
   const { status: accessStatus, ensureCapability } = useAccess();
   const { guardMutation } = useInteractionLock();
   const { confirmAction } = useActionConfirmation();
   const deletePendingRef = useRef(false);
+  const calendarRefreshStartedRef = useRef(false);
   const { showNotice } = useNoticeCenter();
   const visibleMonth = useMemo(() => calendarMonthParts(visibleMonthKey), [visibleMonthKey]);
   const monthGrid = useMemo(
@@ -1017,6 +1047,13 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     const today = currentLocalDate(new Date(), DEFAULT_PLANNING_TIME_ZONE);
     setVisibleMonthKey(calendarMonthKeyForDate(today));
     selectDate(today);
+  }
+
+  function refreshCalendarData(): void {
+    if (calendarRefreshPending || routeRead.refreshing) return;
+    calendarRefreshStartedRef.current = false;
+    setCalendarRefreshPending(true);
+    setRetry((value) => value + 1);
   }
 
   async function ensureCalendarCapability(action: "create" | "edit" | "delete", title: string): Promise<boolean> {
@@ -1149,6 +1186,17 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     const timer = window.setInterval(() => setLiveNow(new Date()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (!calendarRefreshPending) return;
+    if (routeRead.refreshing || routeRead.loading) {
+      calendarRefreshStartedRef.current = true;
+      return;
+    }
+    if (calendarRefreshStartedRef.current) {
+      calendarRefreshStartedRef.current = false;
+      setCalendarRefreshPending(false);
+    }
+  }, [calendarRefreshPending, routeRead.loading, routeRead.refreshing]);
   return (
     <PlanningRouteFrame
       module={calendarModule}
@@ -1169,14 +1217,17 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           onToday={selectToday}
           onNext={() => navigateMonth(1)}
           futureAction={createAction}
+          onRefresh={refreshCalendarData}
+          refreshDisabled={calendarRefreshPending || routeRead.refreshing}
+          refreshing={calendarRefreshPending || routeRead.refreshing}
         />
       )}
       testId="route-calendar"
     >
       <PlanningRouteState loading={routeRead.loading} empty={false} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
         {envelope && (
-          <div className="calendar-month-layout" data-testid="planning-calendar-month">
-            <section className="calendar-month" aria-label={`Календарь ${visibleMonthKey}`}>
+          <div className={`calendar-month-layout${expandedDay ? " calendar-month-layout--expanded" : ""}`} data-testid="planning-calendar-month" data-expanded-day={expandedDay ? "true" : "false"}>
+            <section className="calendar-month" aria-label={`Календарь ${visibleMonthKey}`} aria-hidden={expandedDay}>
               <div className="calendar-month__weekdays" aria-hidden="true">
                 {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((weekday) => <span key={weekday}>{weekday}</span>)}
               </div>
@@ -1214,11 +1265,21 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
             <section className="calendar-selected-day" data-testid="planning-calendar-selected-day" aria-labelledby="planning-calendar-selected-day-heading">
               <div className="calendar-selected-day__heading">
                 <h2 id="planning-calendar-selected-day-heading" data-testid="planning-calendar-selected-day-heading">{calendarDayLabel(selectedDate)}</h2>
+                <button
+                  type="button"
+                  className="planning-secondary-button calendar-selected-day__expand"
+                  data-testid="planning-calendar-expand"
+                  aria-controls="planning-calendar-selected-day-events"
+                  aria-expanded={expandedDay}
+                  onClick={() => setExpandedDay((current) => !current)}
+                >
+                  {expandedDay ? "Свернуть день" : "Развернуть день"}
+                </button>
               </div>
               {selectedDayEvents.length === 0 ? (
                 <div className="calendar-selected-day__empty" data-testid="planning-calendar-selected-day-empty">Нет событий</div>
               ) : (
-                <div className="calendar-selected-day__events">
+                <div className="calendar-selected-day__events" id="planning-calendar-selected-day-events">
                   {selectedDayEvents.filter((event) => event.allDay).length > 0 && (
                     <div className="calendar-band" data-testid="planning-calendar-all-day-band">
                       <p className="calendar-band__label">Весь день</p>

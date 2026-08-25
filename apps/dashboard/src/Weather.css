@@ -287,9 +287,10 @@
 .weather-rain-chance--active { color: color-mix(in srgb, #6aa8cf 72%, var(--text)) !important; font-weight: 700; }
 
 .weather-days { display: grid; }
+.weather-days--v2 { --weather-days-columns: minmax(120px, 1fr) 38px minmax(120px, 1.2fr) 52px 94px; }
 .weather-days__header--v2 {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 38px minmax(120px, 1.2fr) 52px 94px;
+  grid-template-columns: var(--weather-days-columns);
   align-items: end;
   gap: var(--space-3);
   min-height: 28px;
@@ -299,10 +300,10 @@
   font-weight: 700;
   letter-spacing: .02em;
 }
-.weather-days__header--v2 > span:nth-child(1) { grid-column: 1; }
-.weather-days__header--v2 > .weather-days__header-weather { grid-column: 2 / 4; }
-.weather-days__header--v2 > span:nth-child(3) { grid-column: 4; }
-.weather-days__header--v2 > span:nth-child(4) { grid-column: 5; text-align: right; }
+.weather-days__header--v2 > span:nth-child(1) { grid-column: 1; text-align: center; }
+.weather-days__header--v2 > .weather-days__header-weather { grid-column: 2 / 4; text-align: center; }
+.weather-days__header--v2 > span:nth-child(3) { grid-column: 4; text-align: center; }
+.weather-days__header--v2 > span:nth-child(4) { grid-column: 5; text-align: center; }
 .weather-day {
   display: grid;
   grid-template-columns: minmax(105px, .8fr) 42px minmax(150px, 1.4fr) 55px 92px;
@@ -1159,7 +1160,7 @@
 }
 
 .weather-page--v2 .weather-days--v2 .weather-day--v2 {
-  grid-template-columns: minmax(120px, 1fr) 38px minmax(120px, 1.2fr) 52px 94px;
+  grid-template-columns: var(--weather-days-columns);
   min-height: 56px;
   border-top-color: var(--cc-divider);
 }
@@ -1308,13 +1309,15 @@
     border-left: 0;
   }
 
+  .weather-page--v2 .weather-days--v2 {
+    --weather-days-columns: 92px 34px minmax(0, 1fr) 44px 70px;
+  }
+
   .weather-page--v2 .weather-days--v2 .weather-day--v2 {
-    grid-template-columns: 92px 34px minmax(0, 1fr) 44px 70px;
     gap: 6px;
   }
 
   .weather-page--v2 .weather-days__header--v2 {
-    grid-template-columns: 92px 34px minmax(0, 1fr) 44px 70px;
     gap: 6px;
   }
 }
