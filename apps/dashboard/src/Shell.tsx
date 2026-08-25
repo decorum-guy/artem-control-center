@@ -24,6 +24,10 @@ export type RoutePath =
   | "/dev/widget-gallery";
 
 export type ShellRoutePath = RoutePath | "/weather";
+export type ShellNavigationTarget = ShellRoutePath | {
+  readonly path: ShellRoutePath;
+  readonly search?: string;
+};
 
 const primaryNavigation: Array<{ path: ShellRoutePath; label: string; short: string }> = [
   { path: "/overview", label: "Обзор", short: "О" },
@@ -70,7 +74,7 @@ function NavigationLink({
   label: string;
   short?: string;
   current: ShellRoutePath;
-  onNavigate: (path: ShellRoutePath) => void;
+  onNavigate: (target: ShellNavigationTarget) => void;
 }) {
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
@@ -98,7 +102,7 @@ export function ProductShell({
 }: {
   route: ShellRoutePath;
   snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
-  onNavigate: (path: ShellRoutePath) => void;
+  onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
   if (v2VisualShellEnabled) {
@@ -124,7 +128,7 @@ function LegacyProductShell({
 }: {
   route: ShellRoutePath;
   snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
-  onNavigate: (path: ShellRoutePath) => void;
+  onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
   const [now, setNow] = useState(() => new Date());
@@ -220,7 +224,7 @@ function V2NavigationLink({
   label: string;
   icon: IconName;
   current: ShellRoutePath;
-  onNavigate: (path: ShellRoutePath) => void;
+  onNavigate: (target: ShellNavigationTarget) => void;
   child?: boolean;
 }) {
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
@@ -282,7 +286,7 @@ function V2ProductShell({
 }: {
   route: ShellRoutePath;
   snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
-  onNavigate: (path: ShellRoutePath) => void;
+  onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
   const [now, setNow] = useState(() => new Date());

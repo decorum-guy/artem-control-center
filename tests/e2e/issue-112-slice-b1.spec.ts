@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import type { PlanningSnapshot } from "../../packages/contracts/src/index";
+import type { PlanningCalendarEvent, PlanningSnapshot } from "../../packages/contracts/src/index";
 import { planningFixtures } from "../../apps/dashboard/src/planningFixtures";
 
 const b1Enabled = [
@@ -104,7 +104,11 @@ async function emitRevision(page: Page, revision: number): Promise<void> {
   }, revision);
 }
 
-async function installPlanningSnapshot(page: Page, getState: () => { revision: number; status: string }): Promise<void> {
+async function installPlanningSnapshot(
+  page: Page,
+  getState: () => { revision: number; status: string },
+  updatePlanning?: (planning: PlanningSnapshot) => void
+): Promise<void> {
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const payload = await response.json() as Record<string, unknown>;
@@ -112,13 +116,18 @@ async function installPlanningSnapshot(page: Page, getState: () => { revision: n
     const planning = clone(planningFixtures.healthy) as PlanningSnapshot;
     planning.sourceStatus = state.status as PlanningSnapshot["sourceStatus"];
     planning.providerStatuses = planning.providerStatuses.map((source) => ({ ...source, status: state.status === "current" ? "current" : "stale" }));
+    updatePlanning?.(planning);
     payload.revision = state.revision;
     payload.planning = planning;
     await route.fulfill({ response, body: JSON.stringify(payload) });
   });
 }
 
-async function installCalendarFixture(page: Page, getState: () => { status: string }): Promise<{ methods: string[]; reads: () => number }> {
+async function installCalendarFixture(
+  page: Page,
+  getState: () => { status: string },
+  events: () => readonly Record<string, unknown>[] = () => b1Events
+): Promise<{ methods: string[]; reads: () => number }> {
   const methods: string[] = [];
   let readCount = 0;
   await page.route("**/api/v1/planning/events**", async (route) => {
@@ -127,16 +136,41 @@ async function installCalendarFixture(page: Page, getState: () => { status: stri
     readCount += 1;
     const response = await route.fetch();
     const payload = await response.json() as Record<string, unknown>;
-    payload.items = b1Events;
+    payload.items = events();
     payload.limit = 100;
     payload.offset = 0;
-    payload.count = b1Events.length;
+    payload.count = events().length;
     payload.hasMore = false;
     payload.sources = b1Sources.map((source) => ({ ...source, status: getState().status === "current" ? "current" : "stale" }));
     payload.sourceStatus = getState().status;
     await route.fulfill({ response, body: JSON.stringify(payload) });
   });
   return { methods, reads: () => readCount };
+}
+
+async function calendarGeometry(page: Page): Promise<Record<string, { top: number; left: number }>> {
+  return page.evaluate(() => {
+    const position = (selector: string) => {
+      const rect = document.querySelector(selector)?.getBoundingClientRect();
+      if (!rect) throw new Error(`Missing ${selector}`);
+      return { top: rect.top, left: rect.left };
+    };
+    return {
+      monthGrid: position(".calendar-month__grid"),
+      selectedDayPane: position("[data-testid='planning-calendar-selected-day']"),
+      selectedDayHeading: position("[data-testid='planning-calendar-selected-day-heading']")
+    };
+  });
+}
+
+function expectStableGeometry(
+  before: Record<string, { top: number; left: number }>,
+  during: Record<string, { top: number; left: number }>
+): void {
+  for (const key of Object.keys(before)) {
+    expect(Math.abs(during[key].top - before[key].top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(during[key].left - before[key].left)).toBeLessThanOrEqual(1);
+  }
 }
 
 async function capture(page: Page, testInfo: TestInfo, name: string): Promise<void> {
@@ -254,6 +288,154 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     await expect(page.getByTestId("planning-calendar-selected-day-empty")).toHaveCount(0);
   });
 
+  test("same-query background refresh is silent before dwell, non-reflowing after dwell, and keeps last good data on error", async ({ page }, testInfo) => {
+    const state = { revision: 1, status: "current" };
+    await installSse(page);
+    await installPlanningSnapshot(page, () => state);
+    const fixture = await installCalendarFixture(page, () => state);
+    let holdRefresh = false;
+    let failRefresh = false;
+    let releaseRefresh: (() => void) | null = null;
+    await page.unroute("**/api/v1/planning/events**");
+    await page.route("**/api/v1/planning/events**", async (route) => {
+      fixture.methods.push(route.request().method());
+      if (route.request().method() !== "GET") return route.fallback();
+      if (holdRefresh) await new Promise<void>((resolve) => { releaseRefresh = resolve; });
+      if (failRefresh) return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "unavailable" }) });
+      const response = await route.fetch();
+      const payload = await response.json() as Record<string, unknown>;
+      payload.items = b1Events;
+      payload.sources = b1Sources;
+      payload.count = b1Events.length;
+      payload.limit = 100;
+      payload.offset = 0;
+      payload.hasMore = false;
+      await route.fulfill({ response, body: JSON.stringify(payload) });
+    });
+    await page.goto("/calendar");
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(3);
+    const baseline = await calendarGeometry(page);
+
+    async function beginBackgroundRefresh(nextRevision: number): Promise<void> {
+      holdRefresh = true;
+      state.revision = nextRevision;
+      await emitRevision(page, nextRevision);
+      await expect.poll(() => Boolean(releaseRefresh)).toBe(true);
+      await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(3);
+    }
+    async function finishBackgroundRefresh(): Promise<void> {
+      holdRefresh = false;
+      releaseRefresh?.();
+      releaseRefresh = null;
+      await expect(page.getByTestId("planning-calendar-refresh-notice")).toHaveCount(0);
+      await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(3);
+    }
+
+    await beginBackgroundRefresh(2);
+    expectStableGeometry(baseline, await calendarGeometry(page));
+    await page.clock.fastForward(500);
+    await expect(page.getByTestId("planning-calendar-refresh-notice")).toHaveCount(0);
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
+    expectStableGeometry(baseline, await calendarGeometry(page));
+    await finishBackgroundRefresh();
+
+    await beginBackgroundRefresh(3);
+    await page.clock.fastForward(1_500);
+    await expect(page.getByTestId("planning-calendar-refresh-notice")).toHaveCount(0);
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
+    expectStableGeometry(baseline, await calendarGeometry(page));
+    await finishBackgroundRefresh();
+
+    await beginBackgroundRefresh(4);
+    await page.clock.fastForward(2_100);
+    await expect(page.getByTestId("planning-calendar-refresh-notice")).toContainText("Календарь обновляется");
+    expectStableGeometry(baseline, await calendarGeometry(page));
+    await capture(page, testInfo, "calendar-long-background-refresh-notice.png");
+    await finishBackgroundRefresh();
+
+    failRefresh = true;
+    state.revision = 5;
+    await emitRevision(page, 5);
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(3);
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
+    await page.clock.fastForward(3_600);
+    await expect(page.getByTestId("planning-route-health")).toContainText("Не удалось обновить данные");
+    await expect(page.getByTestId("planning-route-health")).toHaveAttribute("data-state", "unavailable");
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(3);
+    await expect(page.getByTestId("planning-calendar-selected-day-heading")).toContainText("12 августа");
+  });
+
+  test("Overview health is actionable and Calendar events deep-link to their local event date", async ({ page }, testInfo) => {
+    const state = { revision: 1, status: "degraded" };
+    const timedEvent = calendarEvent("00000000-0000-4000-8000-000000002201", {
+      title: "Встреча после полуночи",
+      startAtUtc: "2026-08-31T21:30:00Z",
+      endAtUtc: "2026-08-31T22:30:00Z"
+    }) as PlanningCalendarEvent;
+    await installSse(page);
+    await installPlanningSnapshot(page, () => state, (planning) => {
+      planning.calendar = { today: [], upcoming: [timedEvent], conflicts: [] };
+    });
+    await installCalendarFixture(page, () => state, () => [timedEvent]);
+    await page.goto("/overview");
+    const healthAction = page.getByTestId("planning-overview-health-action");
+    await expect(healthAction).toHaveText("Есть проблемы");
+    await expect(healthAction).toHaveAttribute("aria-haspopup", "dialog");
+    await healthAction.click();
+    await expect(page.getByTestId("planning-overview-health-details")).toContainText("Не удалось обновить часть данных");
+    await expect(page.getByTestId("planning-overview-health-details")).toContainText("Показаны последние доступные данные");
+    await capture(page, testInfo, "overview-degraded-health-details.png");
+    await page.getByTestId("planning-overview-health-details").getByRole("button", { name: "Закрыть" }).click();
+
+    await page.getByTestId("planning-event-row").click();
+    await expect(page).toHaveURL(/\/calendar\?date=2026-09-01/);
+    await expect(page.getByTestId("planning-calendar-selected-day-heading")).toContainText("1 сентября");
+    await expect(page.getByTestId("planning-calendar-month-heading")).toContainText("Сентябрь");
+    await capture(page, testInfo, "overview-calendar-deep-link.png");
+    await page.getByRole("button", { name: "Сегодня" }).click();
+    await expect(page.getByTestId("planning-calendar-selected-day-heading")).toContainText("12 августа");
+  });
+
+  test("all-day Overview events preserve their canonical date and invalid Calendar dates safely fall back to today", async ({ page }) => {
+    const state = { revision: 1, status: "current" };
+    const allDayEvent = calendarEvent("00000000-0000-4000-8000-000000002202", {
+      title: "Весь день в октябре",
+      allDay: true,
+      startAtUtc: null,
+      endAtUtc: null,
+      startDate: "2026-10-05",
+      endDateExclusive: "2026-10-06"
+    }) as PlanningCalendarEvent;
+    await installSse(page);
+    await installPlanningSnapshot(page, () => state, (planning) => {
+      planning.calendar = { today: [], upcoming: [allDayEvent], conflicts: [] };
+    });
+    await installCalendarFixture(page, () => state, () => [allDayEvent]);
+    await page.goto("/overview");
+    await page.getByTestId("planning-event-row").click();
+    await expect(page).toHaveURL(/\/calendar\?date=2026-10-05/);
+    await expect(page.getByTestId("planning-calendar-selected-day-heading")).toContainText("5 октября");
+    await page.goto("/calendar?date=2026-02-30");
+    await expect(page.getByTestId("planning-calendar-selected-day-heading")).toContainText("12 августа");
+  });
+
+  test("stale and offline Overview health states remain actionable without claiming a specific subsystem", async ({ page }) => {
+    const state = { revision: 1, status: "stale" };
+    await installSse(page);
+    await installPlanningSnapshot(page, () => state);
+    await page.goto("/overview");
+    await expect(page.getByTestId("planning-overview-health-action")).toHaveText("Данные могут быть устаревшими");
+    await page.getByTestId("planning-overview-health-action").click();
+    await expect(page.getByTestId("planning-overview-health-details")).toContainText("Показана последняя доступная информация");
+    await page.getByTestId("planning-overview-health-details").getByRole("button", { name: "Закрыть" }).click();
+    state.status = "offline";
+    state.revision = 2;
+    await emitRevision(page, 2);
+    await expect(page.getByTestId("planning-overview-health-action")).toHaveText("Данные недоступны");
+    await page.getByTestId("planning-overview-health-action").press("Enter");
+    await expect(page.getByTestId("planning-overview-health-details")).toContainText("Подключение к планированию сейчас недоступно");
+  });
+
   test("warning dwell suppresses transient degradation and stabilizes recovery", async ({ page }) => {
     const state = { revision: 1, status: "current" };
     await installSse(page);
@@ -269,7 +451,7 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     state.revision = 3;
     await emitRevision(page, 3);
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(3);
-    await expect(page.getByTestId("planning-route-health")).not.toContainText("Есть проблемы");
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
 
     state.status = "degraded";
     state.revision = 4;

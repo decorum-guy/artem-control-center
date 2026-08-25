@@ -7,7 +7,7 @@ import type {
   PlanningSnapshot,
   PlanningTask
 } from "@artem/contracts";
-import type { RoutePath } from "./Shell";
+import type { ShellNavigationTarget } from "./Shell";
 import { formatReminderDueLabel } from "./planningOverview";
 import {
   currentLocalDate,
@@ -85,6 +85,7 @@ import {
   type EventMutationSheetMode
 } from "./eventMutationBody";
 import { calendarEventPreviewSaveState } from "./calendarEventPreviewPolicy";
+import { calendarDateFromSearch } from "./calendarNavigation";
 
 const tasksModule = planningModuleForRoute("/tasks")!;
 const calendarModule = planningModuleForRoute("/calendar")!;
@@ -92,7 +93,7 @@ const remindersModule = planningModuleForRoute("/reminders")!;
 
 interface PlanningRouteProps {
   snapshot: { revision: number; planning?: PlanningSnapshot | null };
-  onNavigate: (path: RoutePath) => void;
+  onNavigate: (target: ShellNavigationTarget) => void;
 }
 
 function RouteControls({ children }: { children: ReactNode }) {
@@ -975,9 +976,40 @@ function calendarMonthParts(monthKey: string): { year: number; month: number } {
   return { year: Number(match[1]), month: Number(match[2]) };
 }
 
+const CALENDAR_REFRESH_NOTICE_DWELL_MS = 2_000;
+
+function calendarInitialDate(): string {
+  return calendarDateFromSearch(window.location.search)
+    ?? currentLocalDate(new Date(), DEFAULT_PLANNING_TIME_ZONE);
+}
+
+function useCalendarRefreshNotice(refreshing: boolean, hasConfirmedContent: boolean): void {
+  const { showNotice, dismissNotice } = useNoticeCenter();
+
+  useEffect(() => {
+    const id = "planning.calendar.refresh";
+    if (!refreshing || !hasConfirmedContent) {
+      dismissNotice(id);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      showNotice({
+        id,
+        severity: "progress",
+        title: "Календарь обновляется",
+        detail: "Обновление выполняется.",
+        testId: "planning-calendar-refresh-notice"
+      });
+    }, CALENDAR_REFRESH_NOTICE_DWELL_MS);
+    return () => window.clearTimeout(timer);
+  }, [dismissNotice, hasConfirmedContent, refreshing, showNotice]);
+
+  useEffect(() => () => dismissNotice("planning.calendar.refresh"), [dismissNotice]);
+}
+
 export function CalendarPage({ snapshot }: PlanningRouteProps) {
-  const [visibleMonthKey, setVisibleMonthKey] = useState(() => calendarMonthKeyForDate(currentLocalDate(new Date(), DEFAULT_PLANNING_TIME_ZONE)));
-  const [selectedDate, setSelectedDate] = useState(() => currentLocalDate(new Date(), DEFAULT_PLANNING_TIME_ZONE));
+  const [visibleMonthKey, setVisibleMonthKey] = useState(() => calendarMonthKeyForDate(calendarInitialDate()));
+  const [selectedDate, setSelectedDate] = useState(calendarInitialDate);
   const [selectedEvent, setSelectedEvent] = useState<PlanningCalendarEvent | null>(null);
   const [mutationSheet, setMutationSheet] = useState<EventMutationSheetMode | null>(null);
   const [mutationPending, setMutationPending] = useState(false);
@@ -1012,6 +1044,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     false
   );
   const envelope = routeRead.data;
+  useCalendarRefreshNotice(routeRead.refreshing, Boolean(envelope));
   const preview = false;
   const routeError = Boolean(routeRead.error && !routeRead.data);
   const events = calendarEventsInRange(envelope?.items ?? [], monthGrid.range);
@@ -1209,6 +1242,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
       error={routeRead.error}
       hasConfirmedContent={Boolean(routeRead.data)}
       refreshing={routeRead.refreshing}
+      suppressRefreshWithConfirmedContent
       preview={preview}
       onRetry={() => setRetry((value) => value + 1)}
       controls={(

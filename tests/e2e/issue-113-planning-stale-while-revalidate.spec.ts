@@ -287,7 +287,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByText("Старое событие 1")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем…");
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
     const during = await page.locator(".planning-route-workzone").boundingBox();
     expect(during?.height).toBeGreaterThanOrEqual((before?.height ?? 1) * 0.9);
 

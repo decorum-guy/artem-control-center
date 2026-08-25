@@ -50,6 +50,7 @@ export function PlanningRouteFrame({
   error,
   hasConfirmedContent = false,
   refreshing = false,
+  suppressRefreshWithConfirmedContent = false,
   preview,
   onRetry,
   controls,
@@ -66,6 +67,8 @@ export function PlanningRouteFrame({
   error?: PlanningReadError | null;
   hasConfirmedContent?: boolean;
   refreshing?: boolean;
+  /** Calendar uses a delayed fixed overlay; other Planning routes retain their established in-flow cue. */
+  suppressRefreshWithConfirmedContent?: boolean;
   preview?: boolean;
   onRetry: () => void;
   controls: ReactNode;
@@ -91,6 +94,7 @@ export function PlanningRouteFrame({
         error={error}
         hasConfirmedContent={hasConfirmedContent}
         refreshing={refreshing}
+        suppressRefreshWithConfirmedContent={suppressRefreshWithConfirmedContent}
         preview={preview}
         onRetry={onRetry}
       />
@@ -147,6 +151,7 @@ export function PlanningRouteHealth({
   error,
   hasConfirmedContent = false,
   refreshing = false,
+  suppressRefreshWithConfirmedContent = false,
   preview,
   onRetry
 }: {
@@ -155,6 +160,7 @@ export function PlanningRouteHealth({
   error?: PlanningReadError | null;
   hasConfirmedContent?: boolean;
   refreshing?: boolean;
+  suppressRefreshWithConfirmedContent?: boolean;
   preview?: boolean;
   onRetry?: () => void;
 }) {
@@ -164,8 +170,8 @@ export function PlanningRouteHealth({
   const warningVisibleImmediately = preview || !hasConfirmedContent;
   const warning = warningVisibleImmediately ? rawWarning : visibleWarning;
   const visibleError = Boolean(error) && (warningVisibleImmediately || visibleWarning !== null);
-  const state = visibleError && sourceStatus === "current"
-    ? "degraded"
+  const state = visibleError
+    ? (errorUnavailable ? "unavailable" : "degraded")
     : warning && warning !== "error"
       ? warning
       : warningVisibleImmediately
@@ -177,7 +183,7 @@ export function PlanningRouteHealth({
       ? "Не удалось обновить данные"
       : visibleError
         ? "Данные недоступны"
-        : refreshing
+        : refreshing && (!hasConfirmedContent || !suppressRefreshWithConfirmedContent)
           ? "Обновляем…"
           : state === "degraded"
             ? "Есть проблемы"
@@ -186,7 +192,9 @@ export function PlanningRouteHealth({
               : state === "offline" || state === "unavailable"
                 ? "Данные недоступны"
                 : null;
-  if (!label && !warning && !error) return null;
+  // A transient read error must stay visually silent until warning dwell elapses;
+  // otherwise an empty in-flow section itself causes the Calendar to jump.
+  if (!label && !warning) return null;
   return (
     <section
       className={`planning-route-health planning-route-health--${state}`}
@@ -205,7 +213,7 @@ export function PlanningRouteHealth({
           <p>Показаны последние доступные данные. Повторите попытку.</p>
         ) : visibleError ? (
           <p>Повторите попытку.</p>
-        ) : refreshing ? (
+        ) : refreshing && (!hasConfirmedContent || !suppressRefreshWithConfirmedContent) ? (
           <p>Показаны последние доступные данные, пока выполняется обновление.</p>
         ) : state === "degraded" ? (
           <p>Некоторые данные могут быть недоступны. Проверьте состояние ниже.</p>

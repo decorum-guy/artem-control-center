@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { DashboardSnapshot, OverviewLayoutDocument, ServiceSnapshot } from "@artem/contracts";
-import type { ShellRoutePath } from "../../Shell";
+import type { ShellNavigationTarget } from "../../Shell";
 import { useNoticeCenter } from "../../NoticeCenter";
 import { DashboardGrid } from "./DashboardGrid";
 import { EditToolbar } from "./EditToolbar";
@@ -21,7 +21,7 @@ export function OverviewV2Page({
   coffeeActionPending
 }: {
   snapshot: DashboardSnapshot;
-  onNavigate: (path: ShellRoutePath) => void;
+  onNavigate: (target: ShellNavigationTarget) => void;
   onCoffeeAction: (service: ServiceSnapshot, actionId: string) => void;
   coffeeActionPending: boolean;
 }): ReactNode {
