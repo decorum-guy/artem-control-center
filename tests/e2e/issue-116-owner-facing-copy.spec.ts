@@ -140,7 +140,8 @@ test.describe("Issue #116 owner-facing copy", () => {
       ["/tasks", "route-tasks", "tasks-healthy.png"],
       ["/reminders", "route-reminders", "reminders-healthy.png"],
       ["/settings", "route-settings", "settings-healthy.png"],
-      ["/system", "route-system", "system-healthy.png"]
+      ["/system", "route-system", "system-healthy.png"],
+      ["/home?scenario=home-normal", "route-home-v2", "home-healthy.png"]
     ] as const;
 
     await page.clock.install({ time: "2026-08-12T12:00:00Z" });
@@ -148,6 +149,10 @@ test.describe("Issue #116 owner-facing copy", () => {
     for (const [path, testId, filename] of surfaces) {
       await page.goto(path);
       await expectPlainOwnerCopy(page, testId);
+      if (testId === "route-home-v2") {
+        await expect(page.getByTestId("home-authority-line")).not.toContainText("WebSocket");
+        await expect(page.getByTestId("home-authority-line")).not.toContainText("Источник дома");
+      }
       await page.screenshot({ path: `${directory}/${filename}`, animations: "disabled" });
     }
   });

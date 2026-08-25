@@ -153,9 +153,41 @@ test.describe("Control Center V2 PR7 route density", () => {
     await page.goto("/home?scenario=home-coffee-kettle");
     await waitForRoute(page, "route-home-v2").catch(async () => waitForRoute(page, "route-home"));
     await expect(page.getByTestId("home-authority-line")).toContainText("Home Assistant");
+    await expect(page.getByTestId("home-authority-line")).not.toContainText("WebSocket");
+    await expect(page.getByTestId("home-authority-line")).not.toContainText("Источник дома");
     await expect(page.getByTestId("widget-coffee-machine")).toBeVisible();
     await expect(page.getByTestId("device-row-kettle")).toBeVisible();
     await expect(page.locator(".future-device")).toHaveCount(0);
+
+    const coffeeGeometry = await page.locator(".coffee-panel--home-v2").evaluate((panel) => {
+      const asset = panel.querySelector<HTMLElement>(".coffee-asset");
+      const image = panel.querySelector<HTMLImageElement>(".coffee-asset__image");
+      const marker = panel.querySelector<HTMLElement>(".coffee-state-marker");
+      if (!asset || !image || !marker) return null;
+      const rect = (element: Element) => {
+        const box = element.getBoundingClientRect();
+        return { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height };
+      };
+      const assetRect = rect(asset);
+      const imageRect = rect(image);
+      const markerRect = rect(marker);
+      const style = getComputedStyle(image);
+      return {
+        asset: assetRect,
+        image: imageRect,
+        marker: markerRect,
+        objectFit: style.objectFit,
+        naturalRatio: image.naturalWidth / image.naturalHeight
+      };
+    });
+    expect(coffeeGeometry).not.toBeNull();
+    expect(coffeeGeometry!.image.left).toBeGreaterThanOrEqual(coffeeGeometry!.asset.left - 1);
+    expect(coffeeGeometry!.image.right).toBeLessThanOrEqual(coffeeGeometry!.asset.right + 1);
+    expect(coffeeGeometry!.image.top).toBeGreaterThanOrEqual(coffeeGeometry!.asset.top - 1);
+    expect(coffeeGeometry!.image.bottom).toBeLessThanOrEqual(coffeeGeometry!.asset.bottom + 1);
+    expect(coffeeGeometry!.image.bottom).toBeLessThanOrEqual(coffeeGeometry!.marker.top - 2);
+    expect(coffeeGeometry!.objectFit).toBe("contain");
+    expect(coffeeGeometry!.naturalRatio).toBeCloseTo(1024 / 1536, 2);
 
     const coffee = await page.getByTestId("widget-coffee-machine").boundingBox();
     const kettle = await page.getByTestId("device-row-kettle").boundingBox();
@@ -318,6 +350,7 @@ test.describe("Control Center V2 PR7 route density", () => {
     };
 
     await capture("home-default.png", "/home?scenario=home-normal", (snapshot) => setCoffeeState(snapshot, "off"));
+    await capture("home-v2-coffee.png", "/home?scenario=home-normal", (snapshot) => setCoffeeState(snapshot, "off"));
     await capture("home-coffee-kettle.png", "/home?scenario=home-coffee-kettle", (snapshot) => setCoffeeState(snapshot, "off"));
     await capture("home-coffee-only.png", "/home?scenario=home-coffee-only", (snapshot) => setCoffeeState(snapshot, "off"));
     await capture("home-ha-stale.png", "/home?scenario=home-ha-stale", (snapshot) => setCoffeeState(snapshot, "stale"));

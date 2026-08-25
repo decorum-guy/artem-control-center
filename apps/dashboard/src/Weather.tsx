@@ -819,7 +819,7 @@ function WeatherHeroV2({
           <div><span>Ощущается</span><strong>{formatTemperature(forecast.current.apparentTemperature)}</strong></div>
           <div><span>Осадки</span><strong>{forecast.current.precipitation.toFixed(1)} мм</strong></div>
           <div><span>Ветер</span><strong>{Math.round(forecast.current.windSpeed)} км/ч</strong></div>
-          {today && <div><span>Сегодня</span><strong>{formatTemperature(today.temperatureMax)} / {formatTemperature(today.temperatureMin)}</strong></div>}
+          {today && <div><span>Макс. / мин.</span><strong>{formatTemperature(today.temperatureMax)} / {formatTemperature(today.temperatureMin)}</strong></div>}
         </div>
       </div>
     </section>
@@ -890,13 +890,21 @@ function DailyForecastV2({ forecast }: { forecast: WeatherForecast }) {
           <p className="section-kicker">Далее</p>
           <h2 id="weather-daily-title">{forecast.daily.length ? `Прогноз на ${forecast.daily.length} дней` : "Дневной прогноз"}</h2>
         </div>
-        <span>Дивидерные строки</span>
       </header>
       <div className="weather-days weather-days--v2">
+        <div className="weather-days__header weather-days__header--v2" role="row" aria-label="Колонки дневного прогноза">
+          <span role="columnheader">День</span>
+          <span className="weather-days__header-weather" role="columnheader">Погода</span>
+          <span role="columnheader">Осадки</span>
+          <span role="columnheader">Макс. / мин.</span>
+        </div>
         {forecast.daily.map((day, index) => (
           <article className="weather-day weather-day--v2" key={day.date}>
             <div className="weather-day__name">
-              <strong>{index === 0 ? "Сегодня" : formatWeekday(day.date)}</strong>
+              <div className="weather-day__name-line">
+                <strong>{formatWeekday(day.date)}</strong>
+                {index === 0 && <span className="weather-day__today-badge">Сегодня</span>}
+              </div>
               <span>{new Date(`${day.date}T12:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
             </div>
             <WeatherGlyph code={day.weatherCode} compact phase="neutral" />
@@ -907,7 +915,6 @@ function DailyForecastV2({ forecast }: { forecast: WeatherForecast }) {
         ))}
         {!forecast.daily.length && <p className="weather-zone-unavailable">Дневной прогноз недоступен.</p>}
       </div>
-      <p className="weather-source-line">Источник: {forecast.attribution}. Часовой пояс: {forecast.timezoneAbbreviation || forecast.timezone}.</p>
     </section>
   );
 }
