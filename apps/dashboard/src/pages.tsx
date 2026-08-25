@@ -68,7 +68,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
       <PageHeading
         eyebrow="Сегодня"
         title="Обзор"
-        description="Дом, ближайшие дела и состояние сервисов — без лишней технической детализации."
+        description="Дом, ближайшие дела и состояние сервисов."
       />
 
       <div className="overview-focus" data-testid="overview-primary-content">
@@ -84,7 +84,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
               />
             </ErrorBoundary>
           ) : (
-            <div className="empty-state">Кофемашина пока не добавлена в registry.</div>
+            <div className="empty-state">Кофемашина пока не настроена.</div>
           )}
         </section>
 
@@ -106,7 +106,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
                 <button type="button" onClick={() => onNavigate("/tasks")}>Открыть</button>
               </header>
               <strong>Нет источника задач</strong>
-              <p>Срочные задачи появятся только из подключённого контракта.</p>
+              <p>Срочные задачи появятся после подключения источника.</p>
             </section>
             <section className={`attention-section ${attentionServices.length ? "attention-section--active" : ""}`}>
               <p className="section-kicker">Требует внимания</p>
@@ -166,7 +166,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
           <p>
             {attentionServices.length
               ? attentionServices[0].summary
-              : "Активных incidents нет."}
+              : "Активных проблем нет."}
           </p>
         </section>
 
@@ -207,7 +207,7 @@ export function HomePage({ snapshot, onCoffeeAction, coffeeActionPending }: Page
         <PageHeading
           eyebrow="Устройства"
           title="Дом"
-          description="Повседневные устройства и сцены. Внутренняя архитектура Home Assistant остаётся в фоне."
+          description="Повседневные устройства и сцены."
         />
         <div className="infrastructure-indicator">
           <span>Home Assistant</span>
@@ -284,7 +284,7 @@ export function ServicesPage({ snapshot }: PageProps) {
       <PageHeading
         eyebrow="Операционный каталог"
         title="Сервисы"
-        description="Состояние, свежесть и доступные операции. Monitor-only сервисы являются полноценными участниками каталога."
+        description="Состояние, свежесть и доступные операции сервисов."
       />
       <div className="service-summary-line">
         <span>{catalog.filter((service) => service.health === "healthy").length} работают</span>
@@ -325,7 +325,7 @@ export function SystemPage({ snapshot }: { snapshot: DashboardSnapshot }) {
       <PageHeading
         eyebrow="Питание и доступность"
         title="Система"
-        description="Фиксированные управляющие действия Panel Agent для локальной панели и ASUS ROG G703GI. Состояние остаётся простым и честным: в сети, не в сети или переход."
+        description="Фиксированные действия для локальной панели и ASUS ROG G703GI."
       />
       {rogG703 ? (
         <RogG703Controls service={rogG703} />
@@ -334,8 +334,7 @@ export function SystemPage({ snapshot }: { snapshot: DashboardSnapshot }) {
           <span className="placeholder-status">ROG G703GI</span>
           <h2>Интеграция ASUS отключена</h2>
           <p>
-            Включите серверный PANEL_ROG_G703_ENABLED и настройте локальный companion,
-            чтобы увидеть управление. MAC-адрес и секрет никогда не передаются в браузер.
+            Управление появится после настройки интеграции. Секретные данные не отображаются на панели.
           </p>
         </section>
       )}
@@ -363,19 +362,19 @@ const placeholderCopy: Record<
     eyebrow: "Надёжность",
     title: "Резервные копии",
     description: "Свежесть критичных копий, активные операции и подтверждённые restore points.",
-    status: "Backup contract подготовлен, но runtime data ещё не подключены."
+    status: "Данные резервных копий ещё не подключены."
   },
   "/apps": {
     eyebrow: "Быстрый запуск",
     title: "Приложения",
-    description: "Избранные локальные и web-приложения с policy-controlled actions.",
+    description: "Избранные локальные и web-приложения.",
     status: "Каталог приложений ещё не настроен."
   },
   "/system": {
     eyebrow: "Панель управления",
     title: "Система",
-    description: "Состояние Panel Agent, registry reconciliation и локального runtime.",
-    status: "Подробные системные данные появятся после read-only adapter integration."
+    description: "Состояние панели и системных сервисов.",
+    status: "Подробные системные данные пока недоступны."
   }
 };
 
@@ -391,7 +390,7 @@ export function PlaceholderPage({
       <WorkZone className="placeholder-surface">
         <span className="placeholder-status">Подготовлено</span>
         <h2>{copy.status}</h2>
-        <p>Раздел использует общую navigation shell и будет наполняться только подтверждёнными данными.</p>
+        <p>Раздел будет наполнен после подключения данных.</p>
       </WorkZone>
     </div>
   );
@@ -413,7 +412,7 @@ export function SettingsPage({
       <PageHeading
         eyebrow="Панель"
         title="Настройки"
-        description="Внешний вид и поведение этого экрана. Production credentials здесь не хранятся."
+        description="Внешний вид и поведение этого экрана."
       />
       <CoffeeSettingsPanel />
       <section className="settings-section">

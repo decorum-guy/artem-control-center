@@ -295,7 +295,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(sheet.locator('output[aria-label="Время разогрева"]')).toHaveText("15 мин");
     await sheet.getByTestId("coffee-timing-warmup").getByRole("button", { name: /уменьшить/ }).click();
     await sheet.getByRole("button", { name: "Сохранить", exact: true }).click();
-    await expect(sheet.locator(".settings-notice")).toContainText("подтверждено Home Assistant");
+    await expect(sheet.locator(".settings-notice")).toContainText("Сохранено.");
     await expect(sheet.locator('output[aria-label="Время разогрева"]')).toHaveText("14 мин");
   });
 
@@ -343,13 +343,13 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     const coffeeSheet = page.getByTestId("settings-coffee-sheet");
     await expect(coffeeSheet.locator('output[aria-label="Время разогрева"]')).toHaveText("15 мин");
     await expect(coffeeSheet.getByRole("button", { name: "Сохранить", exact: true })).toBeDisabled();
-    await expect(coffeeSheet.getByText("Изменения отключены политикой Panel Agent.")).toBeVisible();
+    await expect(coffeeSheet.getByText("Изменения сейчас недоступны.")).toBeVisible();
     await closeSheet(page);
 
     await page.getByTestId("settings-summary-notifications").click();
     const notificationSheet = page.getByTestId("settings-notifications-sheet");
     await expect(notificationSheet.locator("input[type=checkbox]").first()).toBeDisabled();
-    await expect(notificationSheet.getByText("Изменения отключены политикой Panel Agent.")).toBeVisible();
+    await expect(notificationSheet.getByText("Изменения сейчас недоступны.")).toBeVisible();
   });
 
   test("all Settings interaction targets are at least 48px", async ({ page }) => {
@@ -414,7 +414,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await page.getByTestId("settings-summary-coffee").click();
     const sheet = page.getByTestId("settings-coffee-sheet");
     await expect(sheet.getByText("Предупредить о долгой работе через", { exact: true })).toBeVisible();
-    await expect(sheet.getByText("Изменения отключены политикой Panel Agent.", { exact: true })).toBeVisible();
+    await expect(sheet.getByText("Изменения сейчас недоступны.", { exact: true })).toBeVisible();
     await expect(sheet.getByRole("button", { name: "Сохранить", exact: true })).toBeVisible();
     const longLabel = sheet.getByText("Предупредить о долгой работе через", { exact: true });
     expect(await longLabel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBeTruthy();
@@ -478,7 +478,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     const sheet = page.getByTestId("settings-runtime-sheet");
     await expect(sheet.getByRole("button", { name: "Скрыть панель" })).toBeVisible();
     await expect(sheet.getByRole("button", { name: "Полностью закрыть" })).toBeVisible();
-    await expect(sheet.getByText("Произвольных команд здесь нет.")).toBeVisible();
+    await expect(sheet.getByText("Системные действия панели.")).toBeVisible();
     await expect(sheet.locator("input, textarea")).toHaveCount(0);
   });
 

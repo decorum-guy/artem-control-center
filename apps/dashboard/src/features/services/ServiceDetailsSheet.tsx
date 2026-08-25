@@ -9,17 +9,11 @@ import { healthLabel, healthTone } from "../operations/routeDensity";
 
 const sourceLabels: Record<ServiceSnapshot["source"], string> = {
   live: "Актуальный источник",
-  cached: "Кэшированный источник",
-  fixture: "Тестовый источник",
-  stale: "Устаревший источник",
+  cached: "Последние доступные данные",
+  fixture: "Тестовый режим",
+  stale: "Данные могут быть устаревшими",
   unavailable: "Источник недоступен"
 };
-
-function safeRevision(service: ServiceSnapshot): string | null {
-  const data = service.data as Record<string, unknown>;
-  const revision = data.commit ?? data.deploymentRevision ?? data.revision;
-  return typeof revision === "string" && revision.length <= 80 ? revision : null;
-}
 export function ServiceDetailsSheet({
   service,
   onClose
@@ -30,13 +24,12 @@ export function ServiceDetailsSheet({
   const { explainAvailability } = useAccess();
   const avalar = useAvalarActions();
   const fixedActions = avalar.actionsFor(service);
-  const revision = safeRevision(service);
 
   return (
     <Sheet
       title={service.title}
       eyebrow="Сведения о сервисе"
-      description="Технические факты из текущего snapshot. Секреты и внутренние credentials не показываются."
+      description="Состояние и доступные действия сервиса."
       onClose={onClose}
       testId="service-details-sheet"
     >
@@ -48,10 +41,8 @@ export function ServiceDetailsSheet({
       <dl className="service-details-sheet__facts">
         <div><dt>Сводка</dt><dd>{service.summary}</dd></div>
         <div><dt>Источник</dt><dd>{sourceLabels[service.source]}</dd></div>
-        <div><dt>Контракт</dt><dd>{service.dataContract}</dd></div>
         <div><dt>Свежесть</dt><dd>{service.presentation?.freshnessLabel ?? "не указана"}</dd></div>
         {service.presentation?.environment && <div><dt>Среда</dt><dd>{service.presentation.environment}</dd></div>}
-        {revision && <div><dt>Ревизия</dt><dd>{revision}</dd></div>}
       </dl>
 
       <section className="service-details-sheet__section" aria-labelledby="service-details-actions-title">

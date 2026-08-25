@@ -105,7 +105,7 @@ export function useCoffeeSettings(): CoffeeSettingsController {
     }
     if (!timing) return;
     if (!timing.writesEnabled) {
-      setNotice("Изменения отключены политикой Panel Agent.");
+      setNotice("Изменения сейчас недоступны.");
       return;
     }
     if (serverTimingChanged) {
@@ -137,7 +137,7 @@ export function useCoffeeSettings(): CoffeeSettingsController {
       setTimingDirty(false);
       setServerTimingChanged(false);
       setAvailable(true);
-      setNotice("Сохранено и подтверждено Home Assistant.");
+      setNotice("Сохранено.");
     } catch (error) {
       if (error instanceof CoffeeApiError && error.status === 409) {
         await refresh();
@@ -181,7 +181,7 @@ export function useCoffeeSettings(): CoffeeSettingsController {
     }
     if (!notifications) return;
     if (!notifications.writesEnabled) {
-      setNotice("Изменения отключены политикой Panel Agent.");
+      setNotice("Изменения сейчас недоступны.");
       return;
     }
     const eventPatch =
@@ -255,7 +255,7 @@ export function CoffeeSettingsPanel() {
       <CoffeeNotificationEditor settings={settings} />
 
       {writesDisabled && (
-        <p className="settings-disabled">Изменения отключены политикой Panel Agent.</p>
+        <p className="settings-disabled">Изменения сейчас недоступны.</p>
       )}
       {settings.notice && <p className="settings-notice" role="status">{settings.notice}</p>}
     </section>
@@ -276,7 +276,7 @@ export function CoffeeTimingEditor({
         <div>
           <h3>Время</h3>
           <p>
-            Эти значения общие для панели и Telegram-бота и хранятся в Home Assistant.
+            Эти значения общие для панели и Telegram-бота.
           </p>
         </div>
       )}
@@ -319,7 +319,7 @@ export function CoffeeTimingEditor({
             <span className="muted">Есть несохранённые изменения.</span>
           )}
           {!timing.writesEnabled && (
-            <p className="settings-disabled">Изменения отключены политикой Panel Agent.</p>
+            <p className="settings-disabled">Изменения сейчас недоступны.</p>
           )}
         </div>
       ) : (
@@ -401,7 +401,7 @@ export function CoffeeNotificationEditor({
         );
       })}
       {!notifications.writesEnabled && (
-        <p className="settings-disabled">Изменения отключены политикой Panel Agent.</p>
+        <p className="settings-disabled">Изменения сейчас недоступны.</p>
       )}
     </div>
   );
@@ -437,7 +437,7 @@ function settingsError(error: unknown): string {
     if (error.status === 409) {
       return "Настройки изменились в Telegram. Обновите значения и повторите.";
     }
-    if (error.status === 403) return "Изменения отключены политикой Panel Agent.";
+    if (error.status === 403) return "Изменения сейчас недоступны.";
     if (error.status === 400) return "Home Assistant не принимает такое значение.";
   }
   return "Не удалось подтвердить изменение. Текущее состояние не изменено в интерфейсе.";

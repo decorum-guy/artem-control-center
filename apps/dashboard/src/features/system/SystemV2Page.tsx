@@ -49,17 +49,22 @@ function SystemFactRow({
 }
 
 function SystemRuntimeSnapshot({ service }: { service: ServiceSnapshot }) {
+  const summary = service.health === "healthy"
+    ? "Панель работает нормально"
+    : service.health === "degraded"
+      ? "Панель требует внимания"
+      : "Панель недоступна";
   return (
     <section
       className={`system-runtime-snapshot system-runtime-snapshot--${service.health}`}
       data-testid="system-runtime-snapshot"
       data-service-id={service.id}
-      aria-label="Снимок состояния Panel Agent runtime"
+      aria-label="Текущее состояние панели"
     >
       <div className="system-runtime-snapshot__copy">
-        <p className="section-kicker">Снимок состояния</p>
-        <h3>{service.title}</h3>
-        <p>{service.summary}</p>
+        <p className="section-kicker">Текущее состояние</p>
+        <h3>Панель</h3>
+        <p>{summary}</p>
         <span>{service.presentation?.freshnessLabel ?? "Свежесть не указана"}</span>
       </div>
       <StatusText label={healthLabel(service.health)} tone={healthTone(service.health)} />
@@ -253,7 +258,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
           </WorkZone>
         )}
 
-        <ErrorBoundary title="Panel Agent">
+        <ErrorBoundary title="Системные действия">
           <WorkZone className="system-primary-zone system-primary-zone--runtime">
             <div className="system-runtime-workzone">
               {runtime && <SystemRuntimeSnapshot service={runtime} />}

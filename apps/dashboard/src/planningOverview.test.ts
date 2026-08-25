@@ -155,7 +155,7 @@ describe("Planning Overview selectors and presentation", () => {
     expect(planningHealthPresentation(planningFixtures.healthy)).toMatchObject({ state: "current", label: null });
     expect(planningHealthPresentation(planningFixtures.degraded)).toMatchObject({ state: "degraded", label: "Есть проблемы" });
     expect(planningHealthPresentation(planningFixtures.stale).state).toBe("stale");
-    expect(planningHealthPresentation(planningFixtures.stale).label).toMatch(/^Данные от /);
+    expect(planningHealthPresentation(planningFixtures.stale).label).toBe("Данные могут быть устаревшими");
     expect(planningHealthPresentation(planningFixtures.offlineWithLastGoodItems).label).toMatch(/недоступны/);
     expect(planningHealthPresentation(planningFixtures.offlineEmpty)).toMatchObject({ state: "offline", hasLastGoodData: false });
     expect(planningHealthPresentation(undefined)).toMatchObject({ state: "unavailable", label: "Планирование недоступно" });

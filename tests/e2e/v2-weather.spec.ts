@@ -21,6 +21,8 @@ type WeatherFixture =
   | "long-location";
 
 const artifactNames = [
+  "weather-hero-hourly.png",
+  "weather-daily-table.png",
   "weather-clear-day.png",
   "weather-clear-night.png",
   "weather-partly-cloudy-day.png",
@@ -119,6 +121,16 @@ test.describe("Control Center V2 Weather", () => {
     await expect(page.getByTestId("weather-hourly-zone")).toContainText("Почасовой прогноз");
     await expect(page.getByTestId("weather-context-zone")).toContainText("Ветер");
     await expect(page.getByTestId("weather-daily-zone")).toContainText("Прогноз");
+    await expect(page.locator(".weather-days__header--v2")).toContainText("День");
+    await expect(page.locator(".weather-days__header--v2")).toContainText("Погода");
+    await expect(page.locator(".weather-days__header--v2")).toContainText("Осадки");
+    await expect(page.locator(".weather-days__header--v2")).toContainText("Макс. / мин.");
+    await expect(page.locator(".weather-day--v2").first().locator(".weather-day__name strong")).not.toHaveText("Сегодня");
+    await expect(page.locator(".weather-day--v2").first().locator(".weather-day__today-badge")).toHaveText("Сегодня");
+    await expect(page.locator(".weather-metrics")).toContainText("Макс. / мин.");
+    await expect(page.locator(".weather-metrics")).not.toContainText("Сегодня");
+    await expect(page.getByTestId("route-weather")).not.toContainText("Дивидерные строки");
+    await expect(page.getByTestId("route-weather")).not.toContainText("Источник:");
     await expectNoDocumentOverflow(page);
     await expectWeatherTouchTargets(page);
   });
@@ -346,6 +358,9 @@ test.describe("Control Center V2 Weather", () => {
     };
 
     await capture("weather-clear-day.png", "clear-day", "theme=day");
+    await openWeather(page, "clear-day", "theme=day");
+    await page.screenshot({ path: path.join(directory, "weather-hero-hourly.png"), animations: "disabled" });
+    await page.getByTestId("weather-daily-zone").screenshot({ path: path.join(directory, "weather-daily-table.png"), animations: "disabled" });
     await capture("weather-clear-night.png", "clear-night", "theme=night");
     await capture("weather-partly-cloudy-day.png", "partly-day", "theme=day");
     await capture("weather-partly-cloudy-night.png", "partly-night", "theme=night");

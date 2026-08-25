@@ -39,10 +39,11 @@ export function HomeV2Page({
           <strong>Home Assistant</strong>
           <StatusText label={authorityLabel} tone={authorityTone} />
         </div>
-        <span className="home-authority-line__source">
-          {authority?.presentation?.freshnessLabel ?? "Источник состояния не получен"}
-        </span>
-        <span className="home-authority-line__authority">Источник дома</span>
+        {authority && authority.health !== "healthy" && authority.presentation?.freshnessLabel && (
+          <span className="home-authority-line__freshness">
+            {authority.presentation.freshnessLabel}
+          </span>
+        )}
       </section>
 
       <section className="home-v2-primary-grid" data-testid="home-primary-grid" aria-label="Основные устройства дома">
@@ -72,7 +73,7 @@ export function HomeV2Page({
           <div className="home-v2-empty" data-testid="home-no-devices">
             <Icon name="home" />
             <strong>Домашние устройства не зарегистрированы</strong>
-            <span>В этом snapshot нет подтверждённых устройств для показа.</span>
+            <span>Устройства пока не найдены.</span>
           </div>
         )}
       </section>

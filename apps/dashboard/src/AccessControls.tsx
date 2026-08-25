@@ -57,8 +57,8 @@ const availabilityCopy: Record<string, string> = {
   elevation_required: "Требуется временный полный доступ",
   profile_blocked: "Недоступно в текущем профиле",
   pin_not_configured: "Сначала настройте PIN на Samsung",
-  gate_disabled: "Операция отключена серверной политикой",
-  integration_unavailable: "Исполнитель интеграции не настроен",
+  gate_disabled: "Операция отключена",
+  integration_unavailable: "Сервис недоступен",
   busy: "Другая операция уже выполняется",
   cooldown: "Повторный запуск временно ограничен",
   precondition_failed: "Предварительная проверка не пройдена"
@@ -404,11 +404,11 @@ const profileCopy: Record<AccessProfile, { title: string; description: string }>
   },
   standard: {
     title: "Обычный доступ",
-    description: "Повседневные действия доступны; restart, deploy и restore требуют PIN."
+    description: "Повседневные действия доступны; чувствительные операции требуют PIN."
   },
   full: {
     title: "Полный доступ",
-    description: "Все отдельно включённые серверные операции доступны без таймера до ручного отключения."
+    description: "Все разрешённые операции доступны без таймера до ручного отключения."
   }
 };
 
@@ -419,8 +419,8 @@ export function AccessSettingsPanel() {
     <section className="settings-section access-settings" aria-labelledby="access-settings-title">
       <div className="access-settings-copy">
         <h2 id="access-settings-title">Уровень доступа</h2>
-        <p>Профиль проверяется Panel Agent, поэтому скрытие кнопки или прямой HTTP-запрос не обходят защиту.</p>
-        {!available && <span className="runtime-controls-status">Access API пока недоступен.</span>}
+        <p>Профиль защищает операции, даже если кнопка скрыта или недоступна.</p>
+        {!available && <span className="runtime-controls-status">Состояние доступа недоступно.</span>}
         {status && (
           <span className="access-current-state">
             Сейчас: {profileCopy[status.effectiveProfile].title}
@@ -445,7 +445,7 @@ export function AccessSettingsPanel() {
         ))}
       </div>
       {status && !status.pinConfigured && (
-        <p className="access-warning">PIN ещё не настроен локальным helper-скриптом на Samsung.</p>
+        <p className="access-warning">PIN ещё не настроен на Samsung.</p>
       )}
     </section>
   );

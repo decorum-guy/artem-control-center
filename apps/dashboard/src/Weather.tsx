@@ -765,9 +765,9 @@ function WeatherHeroV2({
   const stateLabel = preview
     ? "Предпросмотр"
     : error
-      ? "Обновление не удалось"
+      ? "Не удалось обновить прогноз"
       : forecast.stale
-        ? observedTime ? `Данные от ${observedTime} · устарели` : "Данные устарели"
+        ? observedTime ? `Данные могут быть устаревшими · обновлено ${observedTime}` : "Данные могут быть устаревшими"
         : refreshing
           ? "Обновляем…"
           : `Обновлено ${ageLabel(forecast.ageSeconds)}`;
@@ -809,17 +809,17 @@ function WeatherHeroV2({
           {error
             ? `${error} · показываем последние известные значения`
             : forecast.stale
-              ? "Последний сохранённый прогноз · свежие значения сейчас недоступны"
+              ? "Последний доступный прогноз · свежие значения сейчас недоступны"
               : preview
                 ? "Точка ещё не сохранена"
-                : "Данные провайдера показаны без изменения источника"}
+                : "Прогноз обновлён"}
         </div>
 
         <div className="weather-metrics" aria-label="Текущие показатели">
           <div><span>Ощущается</span><strong>{formatTemperature(forecast.current.apparentTemperature)}</strong></div>
           <div><span>Осадки</span><strong>{forecast.current.precipitation.toFixed(1)} мм</strong></div>
           <div><span>Ветер</span><strong>{Math.round(forecast.current.windSpeed)} км/ч</strong></div>
-          {today && <div><span>Сегодня</span><strong>{formatTemperature(today.temperatureMax)} / {formatTemperature(today.temperatureMin)}</strong></div>}
+          {today && <div><span>Макс. / мин.</span><strong>{formatTemperature(today.temperatureMax)} / {formatTemperature(today.temperatureMin)}</strong></div>}
         </div>
       </div>
     </section>
@@ -890,13 +890,21 @@ function DailyForecastV2({ forecast }: { forecast: WeatherForecast }) {
           <p className="section-kicker">Далее</p>
           <h2 id="weather-daily-title">{forecast.daily.length ? `Прогноз на ${forecast.daily.length} дней` : "Дневной прогноз"}</h2>
         </div>
-        <span>Дивидерные строки</span>
       </header>
       <div className="weather-days weather-days--v2">
+        <div className="weather-days__header weather-days__header--v2" role="row" aria-label="Колонки дневного прогноза">
+          <span role="columnheader">День</span>
+          <span className="weather-days__header-weather" role="columnheader">Погода</span>
+          <span role="columnheader">Осадки</span>
+          <span role="columnheader">Макс. / мин.</span>
+        </div>
         {forecast.daily.map((day, index) => (
           <article className="weather-day weather-day--v2" key={day.date}>
             <div className="weather-day__name">
-              <strong>{index === 0 ? "Сегодня" : formatWeekday(day.date)}</strong>
+              <div className="weather-day__name-line">
+                <strong>{formatWeekday(day.date)}</strong>
+                {index === 0 && <span className="weather-day__today-badge">Сегодня</span>}
+              </div>
               <span>{new Date(`${day.date}T12:00:00`).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
             </div>
             <WeatherGlyph code={day.weatherCode} compact phase="neutral" />
@@ -907,7 +915,6 @@ function DailyForecastV2({ forecast }: { forecast: WeatherForecast }) {
         ))}
         {!forecast.daily.length && <p className="weather-zone-unavailable">Дневной прогноз недоступен.</p>}
       </div>
-      <p className="weather-source-line">Источник: {forecast.attribution}. Часовой пояс: {forecast.timezoneAbbreviation || forecast.timezone}.</p>
     </section>
   );
 }

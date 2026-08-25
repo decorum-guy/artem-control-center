@@ -113,7 +113,7 @@ export function RuntimeControls({
         clearRuntimeShutdownPending();
         setPending(null);
         setNotice(
-          "Команда принята, но runtime не остановился. Повторите попытку или используйте ярлык Stop Control Center."
+          "Команда принята, но панель не остановилась. Повторите попытку или используйте ярлык Stop Control Center."
         );
         return;
       }
@@ -131,7 +131,7 @@ export function RuntimeControls({
         clearRuntimeShutdownPending();
       }
       setPending(null);
-      setNotice("Действие не выполнено. Проверьте локальный runtime и повторите попытку.");
+      setNotice("Действие не выполнено. Проверьте панель и повторите попытку.");
     }
   }
 
@@ -149,12 +149,12 @@ export function RuntimeControls({
           <h2 id="runtime-controls-title">Управление панелью</h2>
           <p>
             {variant === "system-v2"
-              ? "Panel Agent runtime и фиксированные действия kiosk-runtime."
-              : "Скрытие закрывает только полноэкранное окно: локальные сервисы продолжают работать, а панель можно вернуть обычным ярлыком запуска."}
+              ? "Системные действия панели."
+              : "Скрытие закрывает окно. Панель можно вернуть ярлыком запуска."}
           </p>
           {availability === "unavailable" && (
             <span className="runtime-controls-status">
-              Системные действия доступны только в настроенном Windows kiosk-runtime.
+              Системные действия недоступны на этом устройстве.
             </span>
           )}
           {notice && <span className="runtime-controls-status" role="status">{notice}</span>}

@@ -93,13 +93,13 @@ export function EditToolbar({
       </header>
       {!canWrite && (
         <p className="overview-v2-editor-capability" data-testid="overview-editor-capability">
-          Сохранение панели отключено на сервере. Изменения доступны только как безопасный просмотр.
+          Сохранение панели отключено. Изменения доступны только для просмотра.
         </p>
       )}
       {resetOpen && (
         <DialogFrame
           title="Сбросить панель?"
-          description="Текущий черновик будет заменён shipped-раскладкой и настройками виджетов. Сохранение произойдёт только после нажатия «Готово»."
+          description="Текущая раскладка будет заменена стандартной. Сохранение произойдёт только после нажатия «Готово»."
           testId="overview-reset-dialog"
           onClose={() => setResetOpen(false)}
           footer={(

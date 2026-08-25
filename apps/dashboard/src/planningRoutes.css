@@ -35,14 +35,16 @@
 .planning-calendar-month-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
   gap: var(--space-2);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .planning-calendar-month-controls__label {
   min-width: 150px;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   color: var(--text);
   font-size: 16px;
   text-align: center;
@@ -51,7 +53,9 @@
 .planning-calendar-today-control {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  align-self: start;
+  min-height: 48px;
   min-width: 0;
   gap: var(--space-2);
 }

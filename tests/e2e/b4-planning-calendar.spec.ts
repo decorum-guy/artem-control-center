@@ -243,7 +243,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.goto("/calendar");
     await expect(page.getByRole("button", { name: "Создать событие" })).toHaveCount(0);
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Внешняя встреча" }).tap();
-    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Внешний календарь · только чтение");
+    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Внешний календарь · только просмотр");
     await expect(page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" })).toHaveCount(0);
     await expect(page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Удалить" })).toHaveCount(0);
     await capture(page, testInfo, "b4-calendar-read-only.png");
@@ -312,7 +312,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
 
     await page.getByRole("button", { name: "Сегодня" }).tap();
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Внешняя встреча" }).tap();
-    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Внешний календарь · только чтение");
+    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Внешний календарь · только просмотр");
     await capture(page, testInfo, "b4-calendar-external-read-only.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
 

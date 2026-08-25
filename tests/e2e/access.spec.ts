@@ -18,7 +18,7 @@ test("full access PIN can be entered entirely with the on-screen keypad", async 
   let profile: "standard" | "full" = "standard";
   let submittedPin: string | null = null;
 
-  await page.route("**/api/v1/access**", async (route) => {
+  await page.route(new RegExp("/api/v1/access(?:/[^?]+)?(?:\\?.*)?$"), async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
@@ -77,7 +77,7 @@ test("full access PIN can be entered entirely with the on-screen keypad", async 
   await dialog.getByRole("button", { name: "4", exact: true }).click();
   await dialog.getByRole("button", { name: "Разблокировать" }).click();
 
-  expect(submittedPin).toBe("1234");
   await expect(dialog).toHaveCount(0);
+  expect(submittedPin).toBe("1234");
   await expect(page.getByText("Сейчас: Полный доступ")).toBeVisible();
 });
