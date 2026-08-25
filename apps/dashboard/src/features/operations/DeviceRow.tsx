@@ -11,6 +11,9 @@ export function DeviceRow({
   primary?: boolean;
 }) {
   const actionTitles = service.actions.filter((action) => action.enabled).map((action) => action.title);
+  const degradedFreshnessLabel = service.health === "healthy"
+    ? null
+    : service.presentation?.freshnessLabel;
   return (
     <article
       className={`device-row${primary ? " device-row--primary" : ""}`}
@@ -24,7 +27,7 @@ export function DeviceRow({
       </div>
       <div className="device-row__status">
         <StatusText label={healthLabel(service.health)} tone={healthTone(service.health)} />
-        {service.presentation?.freshnessLabel && <span>{service.presentation.freshnessLabel}</span>}
+        {degradedFreshnessLabel && <span>{degradedFreshnessLabel}</span>}
       </div>
       <div className="device-row__capabilities">
         {actionTitles.length

@@ -150,8 +150,12 @@ test.describe("Issue #116 owner-facing copy", () => {
       await page.goto(path);
       await expectPlainOwnerCopy(page, testId);
       if (testId === "route-home-v2") {
-        await expect(page.getByTestId("home-authority-line")).not.toContainText("WebSocket");
-        await expect(page.getByTestId("home-authority-line")).not.toContainText("Источник дома");
+        const home = page.getByTestId("route-home-v2");
+        await expect(page.getByTestId("home-authority-line")).toContainText("Home Assistant");
+        await expect(home).not.toContainText("WebSocket");
+        await expect(home).not.toContainText("Источник дома");
+        await expect(page.getByTestId("device-row-kettle")).toContainText("Выключен");
+        await expect(page.getByTestId("device-row-kettle")).toContainText("В норме");
       }
       await page.screenshot({ path: `${directory}/${filename}`, animations: "disabled" });
     }

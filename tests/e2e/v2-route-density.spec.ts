@@ -116,6 +116,19 @@ function setCoffeeState(snapshot: Snapshot, state: "off" | "stale" | "unavailabl
   };
 }
 
+function setKettleHealth(snapshot: Snapshot, health: "healthy" | "stale" | "offline", freshnessLabel: string): Snapshot {
+  return {
+    ...snapshot,
+    services: snapshot.services.map((service) => service.id === "kettle"
+      ? {
+          ...service,
+          health,
+          presentation: { ...service.presentation, freshnessLabel }
+        }
+      : service)
+  };
+}
+
 function longRussianServices(snapshot: Snapshot): Snapshot {
   return {
     ...snapshot,
@@ -203,6 +216,27 @@ test.describe("Control Center V2 PR7 route density", () => {
     await page.goto("/home?scenario=home-no-devices");
     await expect(page.getByTestId("home-no-devices")).toBeVisible();
     await expect(page.locator(".future-device")).toHaveCount(0);
+  });
+
+  test("Home hides healthy device transport copy but keeps degraded device warnings", async ({ page }) => {
+    await installSnapshotMock(page, (snapshot) => setKettleHealth(snapshot, "healthy", "WebSocket подключен"));
+    await page.goto("/home?scenario=home-coffee-kettle");
+    const kettle = page.getByTestId("device-row-kettle");
+    await expect(kettle).toContainText("Выключен");
+    await expect(kettle).toContainText("В норме");
+    await expect(kettle).not.toContainText("WebSocket");
+    await expect(page.getByTestId("home-authority-line")).toContainText("Home Assistant");
+
+    await page.unroute("**/api/v1/snapshot**");
+    await installSnapshotMock(page, (snapshot) => setKettleHealth(snapshot, "stale", "Данные устарели"));
+    await page.goto("/home?scenario=home-coffee-kettle");
+    await expect(page.getByTestId("device-row-kettle")).toContainText("Данные устарели");
+
+    await page.unroute("**/api/v1/snapshot**");
+    await installSnapshotMock(page, (snapshot) => setKettleHealth(snapshot, "offline", "Последнее состояние недоступно"));
+    await page.goto("/home?scenario=home-coffee-kettle");
+    await expect(page.getByTestId("device-row-kettle")).toContainText("Недоступен");
+    await expect(page.getByTestId("device-row-kettle")).toContainText("Последнее состояние недоступно");
   });
 
   test("Home HA stale/offline states remain truthful and Coffee keeps its existing action path", async ({ page }) => {
