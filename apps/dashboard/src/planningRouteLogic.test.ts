@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { PlanningCalendarEvent, PlanningProject, PlanningReminder, PlanningTask } from "@artem/contracts";
 import {
   deliveryLabels,
+  calendarEventColor,
+  calendarEventsForLocalDay,
   calendarEventsInRange,
   eventOverlapIds,
   eventTemporalState,
@@ -71,12 +73,74 @@ const baseReminder: PlanningReminder = {
   updatedAt: "2026-08-12T09:00:00Z"
 };
 
+const sourceCalendars = [
+  {
+    id: "icloud-source",
+    kind: "external" as const,
+    provider: "icloud" as const,
+    label: "iCloud",
+    status: "current" as const,
+    configured: true,
+    lastSyncedAt: "2026-08-12T09:00:00Z",
+    observedAt: "2026-08-12T09:00:00Z",
+    calendars: [
+      { id: "work", label: "Работа", color: "#A1B2C3", enabled: true, status: "current" as const, lastSyncedAt: "2026-08-12T09:00:00Z", observedAt: "2026-08-12T09:00:00Z" },
+      { id: "home", label: "Дом", color: "#D4E5F6", enabled: true, status: "current" as const, lastSyncedAt: "2026-08-12T09:00:00Z", observedAt: "2026-08-12T09:00:00Z" }
+    ]
+  },
+  {
+    id: "native-planning",
+    kind: "native" as const,
+    provider: "local" as const,
+    label: "Local Planning",
+    status: "current" as const,
+    configured: true,
+    lastSyncedAt: "2026-08-12T09:00:00Z",
+    observedAt: "2026-08-12T09:00:00Z",
+    calendars: []
+  }
+];
+
 describe("B3 route semantics", () => {
   it("keeps date-only tasks free of midnight/timezone inventions", () => {
     const label = formatTaskDueForRoute(baseTask);
     expect(label).toContain("12 авг");
     expect(label).not.toContain("00:00");
     expect(label).not.toContain("Europe/");
+  });
+
+  it("keeps selected-day filtering date-only safe and includes cross-midnight timed overlap", () => {
+    const allDay = baseEvent({
+      id: "00000000-0000-4000-8000-000000000210",
+      allDay: true,
+      startAtUtc: null,
+      endAtUtc: null,
+      startDate: "2026-08-12",
+      endDateExclusive: "2026-08-13"
+    });
+    const crossesMidnight = baseEvent({
+      id: "00000000-0000-4000-8000-000000000211",
+      startAtUtc: "2026-08-12T20:30:00Z",
+      endAtUtc: "2026-08-13T00:30:00Z"
+    });
+    expect(calendarEventsForLocalDay([allDay, crossesMidnight], "2026-08-12").map((event) => event.id)).toEqual([allDay.id, crossesMidnight.id]);
+    expect(calendarEventsForLocalDay([crossesMidnight], "2026-08-13").map((event) => event.id)).toEqual([crossesMidnight.id]);
+  });
+
+  it("joins accepted source calendar colors and uses stable fallbacks", () => {
+    const work = baseEvent({
+      calendarIdentity: { providerId: "icloud-source", providerLabel: "iCloud", calendarId: "work", calendarLabel: "Работа" },
+      localOnlyMutable: false,
+      syncState: "synced"
+    });
+    const home = { ...work, id: "00000000-0000-4000-8000-000000000212", calendarIdentity: { ...work.calendarIdentity!, calendarId: "home", calendarLabel: "Дом" } };
+    const local = baseEvent({ id: "00000000-0000-4000-8000-000000000213", calendarIdentity: { providerId: "native-planning", providerLabel: "Local Planning", calendarId: "local", calendarLabel: "Локальный" } });
+    const invalid = { ...work, id: "00000000-0000-4000-8000-000000000214", calendarIdentity: { ...work.calendarIdentity!, calendarId: "missing", calendarLabel: "Нет цвета" } };
+    expect(calendarEventColor(work, sourceCalendars)).toBe("#A1B2C3");
+    expect(calendarEventColor(home, sourceCalendars)).toBe("#D4E5F6");
+    expect(calendarEventColor(local, sourceCalendars)).toBe("#5B6EE1");
+    expect(calendarEventColor(invalid, sourceCalendars)).toBe(calendarEventColor(invalid, sourceCalendars));
+    expect(calendarEventColor(invalid, sourceCalendars)).toMatch(/^#[0-9A-F]{6}$/);
   });
 
   it("formats timed tasks with the canonical IANA timezone", () => {

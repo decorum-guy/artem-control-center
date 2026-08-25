@@ -81,7 +81,7 @@ export function PlanningRouteFrame({
     >
       <RouteHeader eyebrow={eyebrow} title={module.label} description={description} />
       <div className="planning-route-heading-row">
-        <div className="planning-route-controls planning-route-controls--primary">{controls}</div>
+        <div className={`planning-route-controls planning-route-controls--primary${module.domain === "calendar" ? " planning-route-controls--calendar" : ""}`}>{controls}</div>
         {futureAction && <div className="planning-future-action-slot" data-testid="planning-future-action-slot">{futureAction}</div>}
       </div>
       <PlanningRouteHealth
