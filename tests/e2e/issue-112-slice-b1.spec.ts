@@ -1,7 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import type { PlanningCalendarEvent, PlanningSnapshot } from "../../packages/contracts/src/index";
+import type {
+  PlanningCalendarEvent,
+  PlanningProviderFreshnessStatus,
+  PlanningProviderStatus,
+  PlanningSnapshot
+} from "../../packages/contracts/src/index";
 import { planningFixtures } from "../../apps/dashboard/src/planningFixtures";
 
 const b1Enabled = [
@@ -121,6 +126,51 @@ async function installPlanningSnapshot(
     payload.planning = planning;
     await route.fulfill({ response, body: JSON.stringify(payload) });
   });
+}
+
+async function installUnavailablePlanningSnapshot(
+  page: Page,
+  getState: () => { revision: number }
+): Promise<void> {
+  await page.route("**/api/v1/snapshot**", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json() as Record<string, unknown>;
+    payload.revision = getState().revision;
+    delete payload.planning;
+    await route.fulfill({ response, body: JSON.stringify(payload) });
+  });
+}
+
+function providerStatus(
+  overrides: Partial<PlanningProviderStatus> & Pick<PlanningProviderStatus, "label" | "provider" | "status">
+): PlanningProviderStatus {
+  return {
+    id: `${overrides.provider}-source`,
+    kind: overrides.provider === "icloud" ? "external" : "native",
+    provider: overrides.provider,
+    label: overrides.label,
+    status: overrides.status,
+    configured: true,
+    lastSyncedAt: "2026-08-12T09:00:00Z",
+    observedAt: "2026-08-12T09:00:00Z",
+    calendars: [],
+    ...overrides
+  };
+}
+
+function calendarStatus(
+  label: string,
+  status: PlanningProviderFreshnessStatus
+): PlanningProviderStatus["calendars"][number] {
+  return {
+    id: label.toLowerCase(),
+    label,
+    color: "#E7B64A",
+    enabled: true,
+    status,
+    lastSyncedAt: "2026-08-12T09:00:00Z",
+    observedAt: "2026-08-12T09:00:00Z"
+  };
 }
 
 async function installCalendarFixture(
@@ -375,6 +425,15 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     await installSse(page);
     await installPlanningSnapshot(page, () => state, (planning) => {
       planning.calendar = { today: [], upcoming: [timedEvent], conflicts: [] };
+      planning.providerStatuses = [
+        providerStatus({
+          label: "iCloud",
+          provider: "icloud",
+          status: "stale",
+          calendars: [calendarStatus("Работа", "stale")]
+        }),
+        providerStatus({ label: "Local Planning", provider: "local", status: "current" })
+      ];
     });
     await installCalendarFixture(page, () => state, () => [timedEvent]);
     await page.goto("/overview");
@@ -382,8 +441,15 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     await expect(healthAction).toHaveText("Есть проблемы");
     await expect(healthAction).toHaveAttribute("aria-haspopup", "dialog");
     await healthAction.click();
-    await expect(page.getByTestId("planning-overview-health-details")).toContainText("Не удалось обновить часть данных");
-    await expect(page.getByTestId("planning-overview-health-details")).toContainText("Показаны последние доступные данные");
+    const healthDetails = page.getByTestId("planning-overview-health-details");
+    await expect(healthDetails).toContainText("iCloud");
+    await expect(healthDetails).toContainText("Данные могут быть устаревшими");
+    await expect(healthDetails).toContainText("Работа");
+    await expect(healthDetails).not.toContainText("Local Planning");
+    await expect(healthDetails.getByRole("button", { name: "Открыть календарь" })).toBeVisible();
+    await expect(healthDetails).not.toContainText("stale");
+    await expect(healthDetails).not.toContainText("error");
+    await expect(healthDetails).not.toContainText("API");
     await capture(page, testInfo, "overview-degraded-health-details.png");
     await page.getByTestId("planning-overview-health-details").getByRole("button", { name: "Закрыть" }).click();
 
@@ -394,6 +460,60 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     await capture(page, testInfo, "overview-calendar-deep-link.png");
     await page.getByRole("button", { name: "Сегодня" }).click();
     await expect(page.getByTestId("planning-calendar-selected-day-heading")).toContainText("12 августа");
+  });
+
+  test("Overview health details name only safe abnormal sources and fall back when the aggregate cannot identify one", async ({ page }) => {
+    const state = { revision: 1, status: "degraded" };
+    await installSse(page);
+    await installPlanningSnapshot(page, () => state, (planning) => {
+      planning.providerStatuses = [
+        providerStatus({
+          label: "iCloud",
+          provider: "icloud",
+          status: "error",
+          calendars: [calendarStatus("Семья", "error")]
+        }),
+        providerStatus({ label: "Local Planning", provider: "local", status: "current" })
+      ];
+    });
+    await page.goto("/overview");
+    await page.getByTestId("planning-overview-health-action").click();
+    const details = page.getByTestId("planning-overview-health-details");
+    await expect(details).toContainText("iCloud");
+    await expect(details).toContainText("Не удалось обновить данные");
+    await expect(details).toContainText("Семья");
+    await expect(details).not.toContainText("Local Planning");
+    await page.getByRole("button", { name: "Закрыть" }).click();
+
+    state.revision = 2;
+    await installPlanningSnapshot(page, () => state, (planning) => {
+      planning.providerStatuses = [
+        providerStatus({ label: "iCloud", provider: "icloud", status: "current" }),
+        providerStatus({ label: "Local Planning", provider: "local", status: "current" })
+      ];
+    });
+    await page.reload();
+    await page.getByTestId("planning-overview-health-action").click();
+    await expect(details).toContainText("Планирование сообщает о проблеме, но конкретный источник определить не удалось.");
+    await expect(details.getByRole("button", { name: "Открыть календарь" })).toHaveCount(0);
+  });
+
+  test("healthy and unavailable Overview states do not fabricate health source details", async ({ page }) => {
+    const healthyState = { revision: 1, status: "current" };
+    await installSse(page);
+    await installPlanningSnapshot(page, () => healthyState);
+    await page.goto("/overview");
+    await expect(page.getByTestId("planning-overview-health-action")).toHaveCount(0);
+
+    const unavailableState = { revision: 2 };
+    await installUnavailablePlanningSnapshot(page, () => unavailableState);
+    await page.reload();
+    await expect(page.getByTestId("planning-overview-health-action")).toHaveText("Планирование недоступно");
+    await page.getByTestId("planning-overview-health-action").click();
+    const details = page.getByTestId("planning-overview-health-details");
+    await expect(details).toContainText("Данные планирования сейчас недоступны.");
+    await expect(details.getByRole("button", { name: "Открыть календарь" })).toHaveCount(0);
+    await expect(details).not.toContainText("Local Planning");
   });
 
   test("all-day Overview events preserve their canonical date and invalid Calendar dates safely fall back to today", async ({ page }) => {

@@ -700,6 +700,36 @@ p { color: var(--text-secondary); }
 }
 .planning-card__health--action:hover { background: var(--surface-hover); }
 .planning-overview-health-details__copy { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.planning-overview-health-details__problems {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.planning-overview-health-details__problem {
+  display: grid;
+  gap: 3px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.planning-overview-health-details__problem > strong { color: var(--text-primary); }
+.planning-overview-health-details__calendars {
+  display: grid;
+  gap: 3px;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.planning-overview-health-details__calendars li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
 .planning-card--stale .planning-card__health { color: var(--stale); }
 .planning-card--offline .planning-card__health,
 .planning-card--unavailable .planning-card__health { color: var(--danger); }
