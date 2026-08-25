@@ -23,21 +23,40 @@
   flex-wrap: wrap;
 }
 .planning-route-controls--primary { min-width: 0; }
+.planning-route-controls--calendar { flex: 1 1 auto; }
 .planning-future-action-slot { min-height: 48px; }
+.planning-calendar-header-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, .8fr);
+  gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
+}
 .planning-calendar-month-controls {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   min-width: 0;
   gap: var(--space-2);
   flex-wrap: wrap;
 }
 .planning-calendar-month-controls__label {
   min-width: 150px;
+  flex: 1 1 auto;
   color: var(--text);
   font-size: 16px;
   text-align: center;
   text-transform: capitalize;
 }
+.planning-calendar-today-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  gap: var(--space-2);
+}
+.planning-calendar-today-control > .planning-secondary-button { min-width: 112px; }
+.planning-calendar-today-control > .planning-future-action-slot { display: flex; justify-content: center; }
 
 .planning-segmented {
   display: inline-flex;
@@ -411,6 +430,8 @@
   .planning-route-health { align-items: flex-start; flex-direction: column; }
   .planning-route-health__retry { width: 100%; }
   .planning-source-strip { align-items: flex-start; flex-direction: column; }
+  .planning-calendar-header-controls { grid-template-columns: minmax(0, 1fr); }
+  .planning-calendar-today-control { align-items: stretch; flex-wrap: wrap; }
   .calendar-month-layout { grid-template-columns: minmax(0, 1fr); }
   .calendar-month-cell { min-height: 68px; padding: 7px 5px; }
 }

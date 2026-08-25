@@ -914,22 +914,29 @@ function CalendarMonthControls({
   month,
   onPrevious,
   onToday,
-  onNext
+  onNext,
+  futureAction
 }: {
   month: { year: number; month: number };
   onPrevious: () => void;
   onToday: () => void;
   onNext: () => void;
+  futureAction?: ReactNode;
 }) {
   const rawLabel = new Intl.DateTimeFormat("ru-RU", { month: "long", timeZone: "UTC" })
     .format(new Date(Date.UTC(month.year, month.month - 1, 1)));
   const label = `${rawLabel.slice(0, 1).toLocaleUpperCase("ru-RU")}${rawLabel.slice(1)} ${month.year}`;
   return (
-    <div className="planning-calendar-month-controls" role="group" aria-label="Навигация по месяцам">
-      <button type="button" className="planning-secondary-button" aria-label="Предыдущий месяц" onClick={onPrevious}>‹</button>
-      <strong className="planning-calendar-month-controls__label" data-testid="planning-calendar-month-heading">{label}</strong>
-      <button type="button" className="planning-secondary-button" onClick={onToday}>Сегодня</button>
-      <button type="button" className="planning-secondary-button" aria-label="Следующий месяц" onClick={onNext}>›</button>
+    <div className="planning-calendar-header-controls" data-testid="planning-calendar-header-controls">
+      <div className="planning-calendar-month-controls" data-testid="planning-calendar-month-controls" role="group" aria-label="Навигация по месяцам">
+        <button type="button" className="planning-secondary-button" aria-label="Предыдущий месяц" onClick={onPrevious}>‹</button>
+        <strong className="planning-calendar-month-controls__label" data-testid="planning-calendar-month-heading">{label}</strong>
+        <button type="button" className="planning-secondary-button" aria-label="Следующий месяц" onClick={onNext}>›</button>
+      </div>
+      <div className="planning-calendar-today-control" data-testid="planning-calendar-today-control" role="group" aria-label="Переход к сегодняшнему дню">
+        <button type="button" className="planning-secondary-button" onClick={onToday}>Сегодня</button>
+        {futureAction && <div className="planning-future-action-slot" data-testid="planning-future-action-slot">{futureAction}</div>}
+      </div>
     </div>
   );
 }
@@ -987,6 +994,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const canCreate = calendarMutationAllowed(planning, "create") && accessAllows("create");
   const canEdit = Boolean(selectedEvent?.localOnlyMutable && calendarMutationAllowed(planning, "edit") && accessAllows("edit"));
   const canDelete = Boolean(selectedEvent?.localOnlyMutable && !selectedEvent?.deletedAt && calendarMutationAllowed(planning, "delete") && accessAllows("delete"));
+  const createAction = canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать событие</button> : undefined;
 
   const monthDates = useMemo(
     () => Array.from({ length: monthGrid.rows * 7 }, (_, index) => addCalendarDays(monthGrid.gridStartLocalDate, index)),
@@ -1145,7 +1153,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     <PlanningRouteFrame
       module={calendarModule}
       eyebrow="Расписание"
-      description="Месяц и выбранный день — источники и события остаются подтверждёнными через Planning read API."
+      description=""
       sourceStatus={envelope?.sourceStatus ?? planning?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       sources={sources}
@@ -1160,9 +1168,9 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           onPrevious={() => navigateMonth(-1)}
           onToday={selectToday}
           onNext={() => navigateMonth(1)}
+          futureAction={createAction}
         />
       )}
-      futureAction={canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать событие</button> : undefined}
       testId="route-calendar"
     >
       <PlanningRouteState loading={routeRead.loading} empty={false} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
@@ -1205,7 +1213,6 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
             </section>
             <section className="calendar-selected-day" data-testid="planning-calendar-selected-day" aria-labelledby="planning-calendar-selected-day-heading">
               <div className="calendar-selected-day__heading">
-                <p className="calendar-selected-day__eyebrow">Выбранный день</p>
                 <h2 id="planning-calendar-selected-day-heading" data-testid="planning-calendar-selected-day-heading">{calendarDayLabel(selectedDate)}</h2>
               </div>
               {selectedDayEvents.length === 0 ? (

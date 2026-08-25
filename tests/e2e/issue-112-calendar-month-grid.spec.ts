@@ -99,6 +99,14 @@ test.describe("Issue #112 Calendar Slice A", () => {
     await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-month-heading")).toHaveText("Август 2026");
     await expect(page.getByTestId("planning-calendar-month-cell")).toHaveCount(42);
+    await expect(page.getByTestId("planning-calendar-header-controls")).toHaveCSS("display", "grid");
+    await expect(page.getByTestId("planning-calendar-month-controls").getByRole("button", { name: "Сегодня" })).toHaveCount(0);
+    await expect(page.getByTestId("planning-calendar-today-control").getByRole("button", { name: "Сегодня" })).toBeVisible();
+    const monthControlsBox = await page.getByTestId("planning-calendar-month-controls").boundingBox();
+    const todayControlBox = await page.getByTestId("planning-calendar-today-control").boundingBox();
+    expect(todayControlBox?.x).toBeGreaterThan((monthControlsBox?.x ?? 0) + (monthControlsBox?.width ?? 0));
+    await expect(page.getByTestId("route-calendar")).not.toContainText("Planning read API");
+    await expect(page.getByTestId("route-calendar")).not.toContainText("Выбранный день");
 
     const today = page.locator('[data-testid="planning-calendar-month-cell"][data-date="2026-08-12"]');
     await expect(today).toHaveAttribute("aria-selected", "true");

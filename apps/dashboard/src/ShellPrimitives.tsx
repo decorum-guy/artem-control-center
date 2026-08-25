@@ -52,7 +52,7 @@ export function RouteHeader({
       <p className="section-kicker">{eyebrow}</p>
       <h1>{title}</h1>
       {actions}
-      <p>{description}</p>
+      {description && <p>{description}</p>}
     </header>
   );
 }
