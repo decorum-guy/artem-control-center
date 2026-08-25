@@ -81,14 +81,15 @@ export function formatReminderExactDue(reminder: PlanningReminder): string {
   return `${formatDateTime(reminder.dueAtUtc, reminder.timezone)} · ${reminder.timezone}`;
 }
 
-export function formatEventRange(event: PlanningCalendarEvent): string {
+export function formatEventRange(event: PlanningCalendarEvent, includeTimezone = false): string {
   if (event.allDay) {
     return event.startDate && event.endDateExclusive
       ? `${formatDateOnly(event.startDate)} — ${formatDateOnly(event.endDateExclusive)}`
       : "Весь день";
   }
   if (!event.startAtUtc || !event.endAtUtc) return "Время не указано";
-  return `${formatDateTime(event.startAtUtc, event.timezone)} — ${formatClock(event.endAtUtc, event.timezone)} · ${event.timezone}`;
+  const range = `${formatDateTime(event.startAtUtc, event.timezone)} — ${formatClock(event.endAtUtc, event.timezone)}`;
+  return includeTimezone ? `${range} · ${event.timezone}` : range;
 }
 
 export function projectNameForTask(task: PlanningTask, projects: PlanningProject[]): string {

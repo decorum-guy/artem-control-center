@@ -182,6 +182,7 @@ test.describe("Issue #116 owner-facing copy", () => {
     await emitRevision(page, 2);
     await expect.poll(() => reads).toBeGreaterThan(2);
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(1);
+    await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-route-health")).toContainText("Не удалось обновить данные");
     await expect(page.getByTestId("planning-route-health")).toContainText("Показаны последние доступные данные");
     await expect(page.getByTestId("planning-route-error")).toHaveCount(0);
@@ -232,6 +233,7 @@ test.describe("Issue #116 owner-facing copy", () => {
     await preparePlanningPage(page);
     await installCalendarResponse(page, (payload) => { payload.sourceStatus = "stale"; });
     await page.goto("/calendar");
+    await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-route-health")).toContainText("Данные могут быть устаревшими");
     await expectPlainOwnerCopy(page, "route-calendar");
 

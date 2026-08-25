@@ -267,19 +267,25 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await captureScreenshot(page, "touch-lock-unlocked-restored.png");
   });
 
-  test("short tap cancels and reduced motion keeps a static active hold cue", async ({ page }) => {
+  test("short tap cancels and reduced motion keeps the stationary control geometry", async ({ page }) => {
     await installFixtures(page, "full");
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/overview");
     await unlockWithKeyboard(page);
     const control = page.getByTestId("interaction-lock-control");
     await control.hover();
+    const beforeHold = await control.boundingBox();
     await page.mouse.down();
     await page.waitForTimeout(650);
     await expect(control.getByRole("progressbar")).toBeVisible();
-    await expect(page.getByText("Почти готово…")).toBeVisible();
+    await expect(control.locator(".interaction-lock-hint")).toHaveCount(0);
     await expect(control).toHaveAttribute("data-reduced-motion", "true");
     await expect(control.getByTestId("interaction-lock-progress-fill")).toBeHidden();
+    const duringHold = await control.boundingBox();
+    expect(duringHold?.width).toBe(beforeHold?.width);
+    expect(duringHold?.height).toBe(beforeHold?.height);
+    expect(Math.abs((duringHold?.x ?? 0) - (beforeHold?.x ?? 0))).toBeLessThanOrEqual(1);
+    expect(Math.abs((duringHold?.y ?? 0) - (beforeHold?.y ?? 0))).toBeLessThanOrEqual(1);
     await captureScreenshot(page, "touch-lock-reduced-motion-hold.png");
     await page.mouse.up();
     await expect(control).toHaveAttribute("aria-pressed", "false");

@@ -5,6 +5,7 @@ import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
 import { Sheet } from "./Sheet";
 import type { PlanningModuleDefinition } from "./planningModuleRegistry";
 import { RouteHeader } from "./ShellPrimitives";
+import { useOwnerWarningDwell } from "./planningWarningDwell";
 
 export function syncTimeLabel(value: string | null): string | null {
   if (!value) return null;
@@ -49,6 +50,7 @@ export function PlanningRouteFrame({
   error,
   hasConfirmedContent = false,
   refreshing = false,
+  suppressRefreshWithConfirmedContent = false,
   preview,
   onRetry,
   controls,
@@ -65,6 +67,8 @@ export function PlanningRouteFrame({
   error?: PlanningReadError | null;
   hasConfirmedContent?: boolean;
   refreshing?: boolean;
+  /** Calendar uses a delayed fixed overlay; other Planning routes retain their established in-flow cue. */
+  suppressRefreshWithConfirmedContent?: boolean;
   preview?: boolean;
   onRetry: () => void;
   controls: ReactNode;
@@ -90,6 +94,7 @@ export function PlanningRouteFrame({
         error={error}
         hasConfirmedContent={hasConfirmedContent}
         refreshing={refreshing}
+        suppressRefreshWithConfirmedContent={suppressRefreshWithConfirmedContent}
         preview={preview}
         onRetry={onRetry}
       />
@@ -115,20 +120,28 @@ function PlanningSourceStrip({ sources }: { sources: PlanningCalendarSource[] })
     <section className="planning-source-strip" data-testid="planning-source-strip" aria-label="Источники календаря">
       <span className="planning-source-strip__label">Источники</span>
       <div className="planning-source-strip__items">
-        {sources.map((source) => (
-          <span
-            className={`planning-source-strip__item planning-source-strip__item--${source.status}`}
-            data-testid="planning-source"
-            data-source-id={source.id}
-            key={source.id}
-          >
-            <strong>{source.label}</strong>
-            <span>{sourceStatusLabel(source.status)}</span>
-            {source.status === "stale" && source.lastSyncedAt && <span>· обновлено {syncTimeLabel(source.lastSyncedAt)}</span>}
-          </span>
-        ))}
+        {sources.map((source) => <PlanningSourceItem source={source} key={source.id} />)}
       </div>
     </section>
+  );
+}
+
+function PlanningSourceItem({ source }: { source: PlanningCalendarSource }) {
+  const rawWarning = source.status === "current" ? null : source.status;
+  const visibleWarning = useOwnerWarningDwell(rawWarning);
+  const displayStatus = source.status === "current" ? (visibleWarning ?? "current") : visibleWarning;
+  return (
+    <span
+      className={`planning-source-strip__item planning-source-strip__item--${displayStatus ?? "pending"}`}
+      data-testid="planning-source"
+      data-source-id={source.id}
+      data-raw-source-status={source.status}
+      data-warning-visible={displayStatus && displayStatus !== "current" ? "true" : "false"}
+    >
+      <strong>{source.label}</strong>
+      {displayStatus && <span>{sourceStatusLabel(displayStatus)}</span>}
+      {displayStatus === "stale" && source.lastSyncedAt && <span>· обновлено {syncTimeLabel(source.lastSyncedAt)}</span>}
+    </span>
   );
 }
 
@@ -138,6 +151,7 @@ export function PlanningRouteHealth({
   error,
   hasConfirmedContent = false,
   refreshing = false,
+  suppressRefreshWithConfirmedContent = false,
   preview,
   onRetry
 }: {
@@ -146,43 +160,60 @@ export function PlanningRouteHealth({
   error?: PlanningReadError | null;
   hasConfirmedContent?: boolean;
   refreshing?: boolean;
+  suppressRefreshWithConfirmedContent?: boolean;
   preview?: boolean;
   onRetry?: () => void;
 }) {
   const errorUnavailable = Boolean(error && error.status === 503);
-  const state = errorUnavailable ? "unavailable" : sourceStatus;
+  const rawWarning = preview ? null : errorUnavailable ? "unavailable" : error ? "error" : sourceStatus === "current" ? null : sourceStatus;
+  const visibleWarning = useOwnerWarningDwell(rawWarning);
+  const warningVisibleImmediately = preview || !hasConfirmedContent;
+  const warning = warningVisibleImmediately ? rawWarning : visibleWarning;
+  const visibleError = Boolean(error) && (warningVisibleImmediately || visibleWarning !== null);
+  const state = visibleError
+    ? (errorUnavailable ? "unavailable" : "degraded")
+    : warning && warning !== "error"
+      ? warning
+      : warningVisibleImmediately
+        ? (errorUnavailable ? "unavailable" : sourceStatus)
+        : "current";
   const label = preview
     ? "Последние доступные данные"
-    : error && hasConfirmedContent
+    : visibleError && hasConfirmedContent
       ? "Не удалось обновить данные"
-      : error
+      : visibleError
         ? "Данные недоступны"
-      : refreshing
-        ? "Обновляем…"
-        : state === "degraded"
-          ? "Есть проблемы"
-          : state === "stale"
-            ? "Данные могут быть устаревшими"
-            : state === "offline" || state === "unavailable"
-              ? "Данные недоступны"
-              : null;
-  if (!label && !error) return null;
+        : refreshing && (!hasConfirmedContent || !suppressRefreshWithConfirmedContent)
+          ? "Обновляем…"
+          : state === "degraded"
+            ? "Есть проблемы"
+            : state === "stale"
+              ? "Данные могут быть устаревшими"
+              : state === "offline" || state === "unavailable"
+                ? "Данные недоступны"
+                : null;
+  // A transient read error must stay visually silent until warning dwell elapses;
+  // otherwise an empty in-flow section itself causes the Calendar to jump.
+  if (!label && !warning) return null;
   return (
     <section
       className={`planning-route-health planning-route-health--${state}`}
       data-testid="planning-route-health"
       data-state={state}
+      data-has-confirmed-content={hasConfirmedContent ? "true" : "false"}
+      data-raw-warning={rawWarning ?? "none"}
+      data-visible-warning={visibleWarning ?? "none"}
       aria-live="polite"
     >
       <div className="planning-route-health__copy">
         <strong>{label ?? "Планирование"}</strong>
         {preview ? (
           <p>Показаны последние доступные данные. Они могут быть неполными.</p>
-        ) : error && hasConfirmedContent ? (
+        ) : visibleError && hasConfirmedContent ? (
           <p>Показаны последние доступные данные. Повторите попытку.</p>
-        ) : error ? (
+        ) : visibleError ? (
           <p>Повторите попытку.</p>
-        ) : refreshing ? (
+        ) : refreshing && (!hasConfirmedContent || !suppressRefreshWithConfirmedContent) ? (
           <p>Показаны последние доступные данные, пока выполняется обновление.</p>
         ) : state === "degraded" ? (
           <p>Некоторые данные могут быть недоступны. Проверьте состояние ниже.</p>

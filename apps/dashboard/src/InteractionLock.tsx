@@ -20,6 +20,7 @@ import {
   type HoldState
 } from "./interactionLockGesture";
 import { interactionLockEnabled, interactionLockStartsLocked } from "./touchInputLockConfig";
+import { Icon } from "./icons";
 import "./InteractionLock.css";
 
 interface InteractionLockContextValue {
@@ -229,7 +230,7 @@ export function InteractionLockControl() {
         onBlur={() => cancelHold()}
         onClick={(event) => event.preventDefault()}
       >
-        <span className="interaction-lock-icon" aria-hidden="true">{locked ? "🔒" : "🔓"}</span>
+        <Icon name={locked ? "lock" : "lock-open"} size={22} className="interaction-lock-icon" />
         {holding && (
           <span
             className="interaction-lock-progress"
@@ -243,7 +244,6 @@ export function InteractionLockControl() {
           </span>
         )}
       </button>
-      {holding && <span className="interaction-lock-hint" aria-live="polite">{holdProgressCopy(holdProgress)}</span>}
       <span className="interaction-lock-sr-status" role="status" aria-live="polite">{announcement}</span>
     </div>
   );

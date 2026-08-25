@@ -12,7 +12,10 @@ export type IconName =
   | "settings"
   | "grip"
   | "shield"
-  | "close";
+  | "close"
+  | "refresh"
+  | "lock"
+  | "lock-open";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   name: IconName;
@@ -99,6 +102,21 @@ const iconPaths: Record<IconName, ReactNode> = {
   ),
   close: (
     <path d="m6 6 12 12M18 6 6 18" />
+  ),
+  refresh: (
+    <path d="M20 11a8 8 0 0 0-14.8-3.9L4 9M4 9h5M4 9V4M4 13a8 8 0 0 0 14.8 3.9L20 15M20 15h-5M20 15v5" />
+  ),
+  lock: (
+    <>
+      <rect x="5" y="10" width="14" height="11" rx="2" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+    </>
+  ),
+  "lock-open": (
+    <>
+      <rect x="5" y="10" width="14" height="11" rx="2" />
+      <path d="M8 10V7a4 4 0 0 1 7.2-2.4" />
+    </>
   )
 };
 

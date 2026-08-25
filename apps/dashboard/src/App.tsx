@@ -15,7 +15,7 @@ import {
 } from "./planningRouteConfig";
 import { planningRoutePaths } from "./planningModuleRegistry";
 import { reconcileLayout, resolveManifest } from "./registry";
-import { ProductShell, type ShellRoutePath } from "./Shell";
+import { ProductShell, type ShellNavigationTarget, type ShellRoutePath } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { CoffeeWidget, GenericServiceWidget } from "./widgets";
 import { executeCoffeeAction } from "./coffeeApi";
@@ -134,9 +134,15 @@ export function App() {
     [snapshot]
   );
 
-  function navigate(nextRoute: ShellRoutePath) {
-    const query = import.meta.env.DEV ? window.location.search : "";
-    window.history.pushState({}, "", `${nextRoute}${query}`);
+  function navigate(target: ShellNavigationTarget) {
+    const nextRoute = typeof target === "string" ? target : target.path;
+    const query = new URLSearchParams(import.meta.env.DEV ? window.location.search : "");
+    if (typeof target !== "string") {
+      const targetQuery = new URLSearchParams(target.search);
+      targetQuery.forEach((value, name) => query.set(name, value));
+    }
+    const search = query.toString();
+    window.history.pushState({}, "", `${nextRoute}${search ? `?${search}` : ""}`);
     setRoute(nextRoute);
   }
 

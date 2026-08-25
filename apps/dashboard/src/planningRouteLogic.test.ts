@@ -7,6 +7,7 @@ import {
   calendarEventsInRange,
   eventOverlapIds,
   eventTemporalState,
+  formatEventRange,
   formatTaskDueForRoute,
   groupCalendarEvents,
   planningRouteReferenceTime,
@@ -141,6 +142,12 @@ describe("B3 route semantics", () => {
     expect(calendarEventColor(local, sourceCalendars)).toBe("#5B6EE1");
     expect(calendarEventColor(invalid, sourceCalendars)).toBe(calendarEventColor(invalid, sourceCalendars));
     expect(calendarEventColor(invalid, sourceCalendars)).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it("keeps normal event cards human-readable while retaining timezone detail for the sheet", () => {
+    const event = baseEvent({ startAtUtc: "2026-08-12T10:00:00Z", endAtUtc: "2026-08-12T11:00:00Z", timezone: "Europe/Moscow" });
+    expect(formatEventRange(event)).toBe("12 авг., 13:00 — 14:00");
+    expect(formatEventRange(event, true)).toContain("Europe/Moscow");
   });
 
   it("formats timed tasks with the canonical IANA timezone", () => {

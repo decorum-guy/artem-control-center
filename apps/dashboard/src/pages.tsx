@@ -7,7 +7,7 @@ import type {
 import { planningOverviewEnabled } from "./planningOverviewConfig";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { resolveManifest, servicesByPriority } from "./registry";
-import type { RoutePath } from "./Shell";
+import type { RoutePath, ShellNavigationTarget } from "./Shell";
 import {
   CoffeeWidget,
   HealthMark,
@@ -22,7 +22,7 @@ import { RouteHeader, WorkZone } from "./ShellPrimitives";
 
 interface PageProps {
   snapshot: DashboardSnapshot;
-  onNavigate: (path: RoutePath) => void;
+  onNavigate: (target: ShellNavigationTarget) => void;
   onCoffeeAction?: (service: ServiceSnapshot, actionId: string) => void;
   coffeeActionPending?: boolean;
 }

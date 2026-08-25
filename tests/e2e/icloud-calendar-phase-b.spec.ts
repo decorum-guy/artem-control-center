@@ -267,6 +267,7 @@ test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
   test("stale cached iCloud stays visible and marks only external rows", async ({ page }, testInfo) => {
     await installCalendarFixtures(page, { sourceStatus: "stale" });
     await page.goto("/calendar?theme=day");
+    await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-source").filter({ hasText: "сохранённая копия" })).toBeVisible();
     await expect(page.getByTestId("planning-source-strip")).toContainText("обновлено 11:42");
     await expect(page.getByTestId("planning-calendar-stale-cue")).toHaveCount(2);
