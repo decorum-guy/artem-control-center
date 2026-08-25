@@ -58,7 +58,10 @@ test.describe("PR9 Planning visual/module foundation", () => {
 
     await page.goto("/calendar?theme=day");
     await expect(page.getByTestId("route-calendar")).toHaveAttribute("data-planning-module", "planning.calendar-agenda");
-    await expect(page.getByRole("button", { name: "Предыдущий день" })).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-month-heading")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-month-cell")).toHaveCount(42);
+    await expect(page.getByTestId("planning-calendar-selected-day-heading")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-all-day-band")).toContainText("Весь день");
     await expect(page.getByTestId("planning-calendar-all-day-band")).not.toContainText("00:00");
     const overlap = page.getByTestId("planning-calendar-event-row").filter({ hasText: "Первая пересекающаяся встреча" });
