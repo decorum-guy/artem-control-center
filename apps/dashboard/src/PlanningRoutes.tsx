@@ -946,9 +946,9 @@ function CalendarMonthControls({
   return (
     <div className="planning-calendar-header-controls" data-testid="planning-calendar-header-controls">
       <div className="planning-calendar-month-controls" data-testid="planning-calendar-month-controls" role="group" aria-label="Навигация по месяцам">
-        <button type="button" className="planning-secondary-button" aria-label="Предыдущий месяц" onClick={onPrevious}>‹</button>
+        <button type="button" className="planning-secondary-button planning-calendar-month-nav-button" aria-label="Предыдущий месяц" onClick={onPrevious}>‹</button>
         <strong className="planning-calendar-month-controls__label" data-testid="planning-calendar-month-heading">{label}</strong>
-        <button type="button" className="planning-secondary-button" aria-label="Следующий месяц" onClick={onNext}>›</button>
+        <button type="button" className="planning-secondary-button planning-calendar-month-nav-button" aria-label="Следующий месяц" onClick={onNext}>›</button>
       </div>
       <div className="planning-calendar-today-control" data-testid="planning-calendar-today-control" role="group" aria-label="Переход к сегодняшнему дню">
         <button type="button" className="planning-secondary-button" onClick={onToday}>Сегодня</button>

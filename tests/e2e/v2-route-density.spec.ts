@@ -332,6 +332,24 @@ test.describe("Control Center V2 PR7 route density", () => {
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Не в сети");
     await expect(page.getByTestId("system-rog-action")).toHaveText("Включить");
+    const rogGeometry = await page.getByTestId("system-rog-g703").evaluate((root) => {
+      const title = root.querySelector<HTMLElement>("#system-rog-g703-title");
+      const status = root.querySelector<HTMLElement>(".system-rog-detail__state strong");
+      const state = title?.closest(".system-rog-detail__state");
+      if (!title || !status) throw new Error("ROG title/state geometry is incomplete");
+      const titleBox = title.getBoundingClientRect();
+      const statusBox = status.getBoundingClientRect();
+      return {
+        titleLeft: titleBox.left,
+        statusLeft: statusBox.left,
+        titleBottom: titleBox.bottom,
+        statusTop: statusBox.top,
+        titleInPrimaryState: Boolean(state)
+      };
+    });
+    expect(rogGeometry.titleInPrimaryState).toBe(true);
+    expect(Math.abs(rogGeometry.titleLeft - rogGeometry.statusLeft)).toBeLessThanOrEqual(1);
+    expect(rogGeometry.statusTop - rogGeometry.titleBottom).toBeGreaterThanOrEqual(8);
 
     await page.unroute("**/api/v1/snapshot**");
     await installSnapshotMock(page, (snapshot) => addRog(snapshot, "waking"));

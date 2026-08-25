@@ -246,19 +246,37 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
 
     const selectedHeading = await page.getByTestId("planning-calendar-selected-day-heading").innerText();
     const indicatorColors = await page.locator('[data-date="2026-08-12"]').getByTestId("planning-calendar-event-indicator").evaluateAll((items) => items.map((item) => item.getAttribute("data-color")));
-    const cardEvidence = await page.getByTestId("planning-calendar-event-row").evaluateAll((items) => items.map((item) => ({
-      color: getComputedStyle(item).borderLeftColor,
-      accent: getComputedStyle(item).getPropertyValue("--calendar-event-accent").trim(),
-      text: item.textContent ?? ""
-    })));
-    expect(new Set(cardEvidence.map((item) => item.accent))).toEqual(new Set(indicatorColors));
-    expect(cardEvidence.every((item) => item.color !== "rgba(0, 0, 0, 0)" && item.color !== "transparent")).toBe(true);
+    const cardEvidence = await page.getByTestId("planning-calendar-event-row").evaluateAll((items) => items.map((item) => {
+      const style = getComputedStyle(item);
+      const normalizeColor = (value: string) => {
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Canvas color normalization is unavailable");
+        context.fillStyle = value;
+        return context.fillStyle.toLowerCase();
+      };
+      const rawAccent = style.getPropertyValue("--calendar-event-accent").trim();
+      return {
+        border: normalizeColor(style.borderLeftColor),
+        accent: normalizeColor(rawAccent),
+        rawAccent,
+        width: style.borderLeftWidth,
+        text: item.textContent ?? ""
+      };
+    }));
+    const timedEvidence = cardEvidence.filter((item) => item.text.includes("Длинная встреча") || item.text.includes("Командная встреча"));
+    expect(new Set(cardEvidence.map((item) => item.accent))).toEqual(new Set(indicatorColors.map((color) => color?.toLowerCase())));
+    expect(cardEvidence.every((item) => item.rawAccent && item.border === item.accent && item.width === "4px")).toBe(true);
+    expect(new Set(timedEvidence.map((item) => item.accent)).size).toBe(2);
+    expect(timedEvidence.every((item) => item.border === item.accent && item.width === "4px")).toBe(true);
     expect(cardEvidence.map((item) => item.text).join(" ")).not.toContain("Europe/Moscow");
     expect(cardEvidence.map((item) => item.text).join(" ")).not.toContain("Синхронизация: Синхронизировано");
     expect(cardEvidence.map((item) => item.text).join(" ")).toContain("Дом");
 
     const allDayBand = page.getByTestId("planning-calendar-all-day-band");
     const allDayRow = allDayBand.getByTestId("planning-calendar-event-row");
+    const allDayEvidence = cardEvidence.find((item) => item.text.includes("Весь день"));
+    expect(allDayEvidence).toMatchObject({ border: allDayEvidence?.accent, width: "4px" });
     const bandBox = await allDayBand.boundingBox();
     const rowBox = await allDayRow.boundingBox();
     expect((rowBox?.x ?? 0)).toBeGreaterThan((bandBox?.x ?? 0));
