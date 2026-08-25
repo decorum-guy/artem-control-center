@@ -176,7 +176,7 @@ export function App() {
       id: "coffee.action",
       severity: "progress",
       title: service.title,
-      detail: "Команда отправлена, ждём подтверждение Home Assistant…"
+        detail: "Команда отправлена, проверяем состояние…"
     });
     try {
       const result = await executeCoffeeAction(action, crypto.randomUUID());
@@ -184,7 +184,7 @@ export function App() {
         id: "coffee.action",
         severity: "progress",
         title: service.title,
-        detail: "Команда подтверждена, обновляем данные панели…"
+        detail: "Проверяем новое состояние…"
       });
       const reconciled = await reconcileSnapshot();
       showNotice({
@@ -192,8 +192,8 @@ export function App() {
         severity: reconciled ? "success" : "warning",
         title: service.title,
         detail: reconciled
-          ? `Home Assistant подтвердил состояние «${result.confirmedState === "on" ? "включена" : "выключена"}».`
-          : "Команда подтверждена, но данные панели ещё обновляются.",
+          ? `Кофемашина ${result.confirmedState === "on" ? "включена" : "выключена"}.`
+          : "Состояние ещё обновляется.",
         timeoutMs: 6_000
       });
     } catch {

@@ -124,7 +124,7 @@ test("coffee settings use API values and persist timing and notification changes
   await warmupMinus.click();
   await warmupMinus.click();
   await page.getByRole("button", { name: "Сохранить" }).click();
-  await expect(page.locator(".settings-notice")).toContainText("подтверждено Home Assistant");
+  await expect(page.locator(".settings-notice")).toContainText("Сохранено.");
   await expect(warmup).toHaveText("13 мин");
 
   const telegram = page.getByText("Разогрев завершён")
@@ -220,7 +220,7 @@ test("coffee actions stay policy-disabled by default and show confirmed HA resul
   await expect(confirmation).toBeVisible();
   await expect(confirmation).toContainText("Включить кофемашину?");
   await confirmation.getByRole("button", { name: "Включить кофемашину" }).click();
-  await expect(page.getByRole("status")).toContainText("Home Assistant подтвердил");
+  await expect(page.getByRole("status")).toContainText("Кофемашина включена.");
   await expect(page.getByTestId("widget-coffee-machine"))
     .not.toHaveAttribute("data-stage", "off");
 });

@@ -363,7 +363,7 @@ test.describe("B4.2 task mutations", () => {
     });
     await page.getByRole("button", { name: "Архивировать" }).click();
     const confirmation = page.getByTestId("action-confirmation");
-    await expect(confirmation).toContainText("логическое архивирование");
+    await expect(confirmation).toContainText("Задача исчезнет из активных списков.");
     await mkdir(artifactDirectory(testInfo), { recursive: true });
     await page.screenshot({ path: path.join(artifactDirectory(testInfo), "b4-tasks-archive-confirmation.png"), animations: "disabled" });
     await confirmation.getByRole("button", { name: "Отмена" }).click();

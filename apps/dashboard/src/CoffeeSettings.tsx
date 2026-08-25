@@ -137,7 +137,7 @@ export function useCoffeeSettings(): CoffeeSettingsController {
       setTimingDirty(false);
       setServerTimingChanged(false);
       setAvailable(true);
-      setNotice("Сохранено и подтверждено Home Assistant.");
+      setNotice("Сохранено.");
     } catch (error) {
       if (error instanceof CoffeeApiError && error.status === 409) {
         await refresh();

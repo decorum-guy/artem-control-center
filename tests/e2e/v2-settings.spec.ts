@@ -295,7 +295,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(sheet.locator('output[aria-label="Время разогрева"]')).toHaveText("15 мин");
     await sheet.getByTestId("coffee-timing-warmup").getByRole("button", { name: /уменьшить/ }).click();
     await sheet.getByRole("button", { name: "Сохранить", exact: true }).click();
-    await expect(sheet.locator(".settings-notice")).toContainText("подтверждено Home Assistant");
+    await expect(sheet.locator(".settings-notice")).toContainText("Сохранено.");
     await expect(sheet.locator('output[aria-label="Время разогрева"]')).toHaveText("14 мин");
   });
 
