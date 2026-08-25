@@ -944,7 +944,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   }, [segment, requestTodayLocalDate]);
   const routeRead = usePlanningRead(
     `events:${requestRange.fromUtc}:${requestRange.toUtc}:${page}:${snapshot.revision}:${retry}`,
-    (signal) => readPlanningEvents(requestRange.fromUtc, requestRange.toUtc, 20, page * 20, signal)
+    (signal) => readPlanningEvents(requestRange.fromUtc, requestRange.toUtc, 20, page * 20, signal, segment)
   );
   const planning = snapshot.planning ?? null;
   const previewCandidate = Boolean(routeRead.error && planning && page === 0);

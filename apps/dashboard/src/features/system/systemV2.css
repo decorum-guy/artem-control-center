@@ -14,6 +14,38 @@
 .system-aggregate-strip > span { color: var(--cc-text-secondary); font-size: var(--cc-type-body-size); line-height: var(--cc-type-body-line); text-align: right; }
 .system-aggregate-strip--attention { border-color: var(--cc-warning-border); background: var(--cc-warning-bg); }
 
+.system-problem-surface {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-zone);
+  background: var(--cc-surface-1);
+}
+.system-problem-surface--attention { border-color: var(--cc-warning-border); background: var(--cc-warning-bg); }
+.system-problem-surface__header { display: flex; align-items: center; justify-content: space-between; gap: var(--cc-space-4); }
+.system-problem-surface__header > div { min-width: 0; }
+.system-problem-surface__header h2 { margin: 0; color: var(--cc-text); font-size: var(--cc-type-section-title-size); line-height: var(--cc-type-section-title-line); }
+.system-problem-surface__header button { min-height: 48px; padding: 0 14px; border: 1px solid var(--cc-border-strong); border-radius: var(--cc-radius-control); color: var(--cc-text); background: var(--cc-interactive); font-size: var(--cc-type-control-size); font-weight: var(--cc-type-control-weight); }
+.system-problem-list { display: grid; gap: 0; border-top: 1px solid var(--cc-divider); }
+.system-problem-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--cc-space-4); min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--cc-divider); }
+.system-problem-row__copy { display: grid; gap: 2px; min-width: 0; }
+.system-problem-row__copy strong { color: var(--cc-text); font-size: var(--cc-type-widget-title-size); line-height: var(--cc-type-widget-title-line); overflow-wrap: anywhere; }
+.system-problem-row__copy span { color: var(--cc-text-secondary); font-size: var(--cc-type-body-size); line-height: var(--cc-type-body-line); overflow-wrap: anywhere; }
+.system-problem-row__meta { display: grid; justify-items: end; gap: 2px; min-width: 150px; }
+.system-problem-row__meta > span:last-child { color: var(--cc-text-muted); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); text-align: right; }
+.system-problem-empty { margin: 0; color: var(--cc-text-secondary); font-size: var(--cc-type-body-size); }
+.system-problem-history { display: grid; gap: 6px; padding-top: 4px; }
+.system-problem-history > .section-kicker { margin-bottom: 0; }
+.system-problem-history__row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-width: 0; padding: 4px 0; color: var(--cc-text-secondary); font-size: var(--cc-type-metadata-size); }
+.system-problem-history__row time { color: var(--cc-text-muted); }
+.system-problem-feedback { margin: 0; color: var(--cc-text-secondary); font-size: var(--cc-type-metadata-size); }
+.system-problem-fallback { display: grid; gap: 8px; }
+.system-problem-fallback p { margin: 0; color: var(--cc-text-secondary); font-size: var(--cc-type-metadata-size); }
+.system-problem-fallback textarea { width: 100%; min-height: 180px; resize: vertical; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-control); color: var(--cc-text); background: var(--cc-surface-2); font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; }
+
 .system-v2-zone-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -106,4 +138,11 @@
   .system-rog-detail__footer button, .system-rog-detail__unavailable { width: 100%; }
   .system-diagnostic-row { grid-template-columns: 24px minmax(0, 1fr); }
   .system-diagnostic-row__status { grid-column: 2; justify-items: start; }
+  .system-problem-surface__header { align-items: flex-start; flex-direction: column; }
+  .system-problem-surface__header button { width: 100%; }
+  .system-problem-row { grid-template-columns: minmax(0, 1fr); }
+  .system-problem-row__meta { justify-items: start; min-width: 0; }
+  .system-problem-row__meta > span:last-child { text-align: left; }
+  .system-problem-history__row { grid-template-columns: minmax(0, 1fr) auto; }
+  .system-problem-history__row time { grid-column: 1 / -1; }
 }

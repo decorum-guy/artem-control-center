@@ -119,6 +119,115 @@ export interface ServiceSnapshot {
   presentation?: ServicePresentation;
 }
 
+export type DiagnosticsProblemState =
+  | "offline"
+  | "degraded"
+  | "stale"
+  | "error"
+  | "recovered";
+export type DiagnosticsSeverity = "info" | "warning" | "error";
+
+export interface DiagnosticsProblem {
+  id: string;
+  subsystem: string;
+  severity: DiagnosticsSeverity;
+  state: DiagnosticsProblemState;
+  current: boolean;
+  summary: string;
+  firstObservedAt: string | null;
+  lastObservedAt: string;
+  lastHealthyAt: string | null;
+  freshness: string | null;
+  correlationCode: string | null;
+}
+
+export interface DiagnosticsTransition {
+  problemId: string;
+  subsystem: string;
+  fromState: DiagnosticsProblemState | null;
+  toState: DiagnosticsProblemState;
+  current: boolean;
+  observedAt: string;
+  summary: string;
+}
+
+export interface DiagnosticsCollectorStatus {
+  collector: string;
+  status: "ok" | "error";
+  code: string | null;
+}
+
+export interface DiagnosticsCalendarQuery {
+  scopeType: "ACTUAL_REQUEST_RANGE" | "PROJECTION_SCOPE";
+  fromDate: string;
+  toDate: string;
+  requestFromUtc: string | null;
+  requestToUtc: string | null;
+  view: "today" | "agenda" | null;
+  timezone: string;
+  observedAt: string;
+  lastSyncedAt: string | null;
+  resultStatus: "success_nonempty" | "success_empty" | "degraded" | "error" | "unavailable";
+  itemCount: number;
+  sourceCount: number;
+  calendarCount: number;
+  sourceStatus: string | null;
+  cacheUsed: boolean;
+  fallbackUsed: boolean;
+  projectionStatus: "current" | "cached" | "empty" | "unavailable";
+  projectionScope: string | null;
+  providers: DiagnosticsProviderSummary[];
+}
+
+export interface DiagnosticsProviderSummary {
+  id: string;
+  kind: "native" | "external";
+  provider: "local" | "icloud";
+  label: string;
+  status: string;
+  configured: boolean;
+  lastSyncedAt: string | null;
+  observedAt: string | null;
+  calendarCount: number;
+}
+
+export interface DiagnosticsPlanningSummary {
+  schemaVersion: string | null;
+  sourceStatus: string | null;
+  lastSyncedAt: string | null;
+  staleAfter: string | null;
+  remindersCount: number;
+  tasksCount: number;
+  calendarCount: number;
+  cacheUsed: boolean;
+  providers: DiagnosticsProviderSummary[];
+}
+
+export interface DiagnosticsMutationGates {
+  writesEnabled: boolean;
+  coffeeActionsEnabled: boolean;
+  coffeeTimingWritesEnabled: boolean;
+  coffeeNotificationWritesEnabled: boolean;
+  planningReminderMutationsEnabled: boolean;
+  planningTaskMutationsEnabled: boolean;
+  planningCalendarMutationsEnabled: boolean;
+}
+
+export interface DiagnosticsReport {
+  schemaVersion: "diagnostics.v1";
+  generatedAt: string;
+  buildRevision: string;
+  mode: PanelMode;
+  snapshotRevision: number;
+  problems: DiagnosticsProblem[];
+  recentTransitions: DiagnosticsTransition[];
+  collectorStatus: DiagnosticsCollectorStatus[];
+  planning: DiagnosticsPlanningSummary;
+  calendar: DiagnosticsCalendarQuery;
+  calendarReads: DiagnosticsCalendarQuery[];
+  mutationGates: DiagnosticsMutationGates;
+}
+
 export type PlanningSourceStatus = "current" | "stale" | "offline" | "degraded";
 export type PlanningSource =
   | "alice"

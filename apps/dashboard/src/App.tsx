@@ -316,7 +316,7 @@ export function App() {
       {error && <p className="global-error">{error}</p>}
       {!snapshot && !error && <p className="loading">Собираем локальный snapshot…</p>}
       {snapshot && (
-        <ProductShell route={route} services={snapshot.services} onNavigate={navigate}>
+        <ProductShell route={route} snapshot={snapshot} onNavigate={navigate}>
           {!v2DensityRoute && ((route !== "/overview" || !overviewV2Enabled) && (route === "/overview" || route === "/home" || route === "/services")) && (
             <ConnectivityRecoverySurface
               services={snapshot.services}

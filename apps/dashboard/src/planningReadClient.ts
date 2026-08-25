@@ -69,6 +69,7 @@ export interface PlanningParsePreview {
 
 export type ReminderMonitorView = "upcoming" | "overdue" | "delivery";
 export type TaskRouteView = "today" | "overdue" | "upcoming";
+export type CalendarReadView = "today" | "agenda";
 
 export class PlanningReadError extends Error {
   readonly status: number | null;
@@ -606,11 +607,13 @@ export function readPlanningEvents(
   toUtc: string,
   limit = planningRouteLimit,
   offset = 0,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  view?: CalendarReadView
 ): Promise<PlanningReadEnvelope<PlanningCalendarEvent>> {
   const params = boundedPage(limit, offset);
   params.set("from", fromUtc);
   params.set("to", toUtc);
+  if (view) params.set("view", view);
   return getRead("/api/v1/planning/events", params, "calendar_event", parseCalendarEvent, signal);
 }
 
