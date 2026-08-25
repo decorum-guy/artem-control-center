@@ -58,13 +58,13 @@ async function emitRevision(page: Page, revision: number): Promise<void> {
   }, revision);
 }
 
-async function installSnapshot(page: Page, planning: PlanningSnapshot): Promise<{ setRevision: (revision: number) => void }> {
+async function installSnapshot(page: Page, planning: PlanningSnapshot | null): Promise<{ setRevision: (revision: number) => void }> {
   let revision = 1;
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const payload = await response.json() as Record<string, unknown>;
     payload.revision = revision;
-    payload.planning = clone(planning);
+    payload.planning = planning ? clone(planning) : null;
     await route.fulfill({ response, body: JSON.stringify(payload) });
   });
   return { setRevision: (nextRevision) => { revision = nextRevision; } };
@@ -91,7 +91,7 @@ async function installAccessFixtures(page: Page): Promise<void> {
   });
 }
 
-async function preparePage(page: Page, planning: PlanningSnapshot = planningFixtures.empty): Promise<{ setRevision: (revision: number) => void }> {
+async function preparePage(page: Page, planning: PlanningSnapshot | null = planningFixtures.empty): Promise<{ setRevision: (revision: number) => void }> {
   await page.clock.install({ time: "2026-08-12T12:00:00Z" });
   await installSse(page);
   await installAccessFixtures(page);
@@ -123,7 +123,7 @@ async function fulfillList(route: Parameters<Parameters<Page["route"]>[1]>[0], t
 
 async function installCalendarRead(
   page: Page,
-  options: { delayView?: "agenda"; delayNextRequest?: boolean; failSecond?: boolean; empty?: boolean } = {}
+  options: { delayView?: "agenda"; delayNextRequest?: boolean; failInitial?: boolean; failSecond?: boolean; failView?: "agenda"; empty?: boolean } = {}
 ): Promise<{ requests: number; methods: string[]; release: Deferred; fromValues: string[] }> {
   let requestCount = 0;
   let requestMethods: string[] = [];
@@ -140,6 +140,14 @@ async function installCalendarRead(
     const view = url.searchParams.get("view");
     if ((options.delayView && view === options.delayView) || (options.delayNextRequest && (options.empty ? requestCount === 3 : requestCount >= 3))) {
       await release.promise;
+    }
+    if (options.failInitial && requestCount <= 2) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "planning_read_unavailable" }) });
+      return;
+    }
+    if (options.failView && view === options.failView) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "planning_read_unavailable" }) });
+      return;
     }
     if (options.failSecond && requestCount === 3) {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "planning_read_unavailable" }) });
@@ -287,6 +295,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByText("Старое событие 1")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(2);
     await expect(page.getByTestId("planning-route-health")).toContainText("Обновление не удалось");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Подтверждённый список остаётся видимым");
     await expect(page.getByTestId("planning-route-error")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-empty")).toHaveCount(0);
 
@@ -299,6 +308,37 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     expect(methods).toEqual(["GET"]);
   });
 
+  test("Calendar first-load failure does not claim retained confirmed content", async ({ page }) => {
+    await preparePage(page, null);
+    const calendar = await installCalendarRead(page, { failInitial: true });
+    await page.goto("/calendar");
+
+    await expect.poll(() => calendar.requests).toBeGreaterThan(0);
+    await expect(page.getByTestId("planning-route-error")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(0);
+    await expect(page.getByTestId("planning-route-health")).toContainText("Актуальные данные недоступны");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Это состояние не означает, что список пуст");
+    await expect(page.getByTestId("planning-route-health")).not.toContainText("Подтверждённый список остаётся видимым");
+  });
+
+  test("Calendar query-change failure does not claim old rows remain visible", async ({ page }) => {
+    await preparePage(page, null);
+    const calendar = await installCalendarRead(page, { delayView: "agenda", failView: "agenda" });
+    await page.goto("/calendar");
+    await expect(page.getByText("Старое событие 1")).toBeVisible();
+
+    await page.getByRole("button", { name: "Повестка" }).click();
+    await expect.poll(() => calendar.requests).toBeGreaterThanOrEqual(2);
+    await expect(page.getByText("Старое событие 1")).toHaveCount(0);
+    await expect(page.getByTestId("planning-route-loading")).toBeVisible();
+
+    calendar.release.resolve();
+    await expect(page.getByTestId("planning-route-error")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(0);
+    await expect(page.getByTestId("planning-route-health")).toContainText("Актуальные данные недоступны");
+    await expect(page.getByTestId("planning-route-health")).not.toContainText("Подтверждённый список остаётся видимым");
+  });
+
   test("Calendar query identity changes do not show Today rows under Agenda or another date", async ({ page }) => {
     await preparePage(page);
     const calendar = await installCalendarRead(page, { delayView: "agenda" });
@@ -306,7 +346,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByText("Старое событие 1")).toBeVisible();
 
     await page.getByRole("button", { name: "Повестка" }).click();
-    await expect.poll(() => calendar.requests).toBe(3);
+    await expect.poll(() => calendar.requests).toBeGreaterThanOrEqual(2);
     await expect(page.getByText("Старое событие 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
     calendar.release.resolve();

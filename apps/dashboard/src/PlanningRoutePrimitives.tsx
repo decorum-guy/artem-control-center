@@ -47,6 +47,7 @@ export function PlanningRouteFrame({
   lastSyncedAt,
   sources,
   error,
+  hasConfirmedContent = false,
   refreshing = false,
   preview,
   onRetry,
@@ -62,6 +63,7 @@ export function PlanningRouteFrame({
   lastSyncedAt: string | null;
   sources?: PlanningCalendarSource[];
   error?: PlanningReadError | null;
+  hasConfirmedContent?: boolean;
   refreshing?: boolean;
   preview?: boolean;
   onRetry: () => void;
@@ -86,6 +88,7 @@ export function PlanningRouteFrame({
         sourceStatus={sourceStatus}
         lastSyncedAt={lastSyncedAt}
         error={error}
+        hasConfirmedContent={hasConfirmedContent}
         refreshing={refreshing}
         preview={preview}
         onRetry={onRetry}
@@ -133,6 +136,7 @@ export function PlanningRouteHealth({
   sourceStatus,
   lastSyncedAt,
   error,
+  hasConfirmedContent = false,
   refreshing = false,
   preview,
   onRetry
@@ -140,6 +144,7 @@ export function PlanningRouteHealth({
   sourceStatus: PlanningSourceStatus | "unavailable";
   lastSyncedAt: string | null;
   error?: PlanningReadError | null;
+  hasConfirmedContent?: boolean;
   refreshing?: boolean;
   preview?: boolean;
   onRetry?: () => void;
@@ -148,8 +153,10 @@ export function PlanningRouteHealth({
   const state = errorUnavailable ? "unavailable" : sourceStatus;
   const label = preview
     ? "Последние данные · краткий снимок"
-    : error
+    : error && hasConfirmedContent
       ? "Обновление не удалось"
+      : error
+        ? "Актуальные данные недоступны"
       : refreshing
         ? "Обновляем данные…"
         : state === "degraded"
@@ -171,8 +178,10 @@ export function PlanningRouteHealth({
         <strong>{label ?? "Планирование"}</strong>
         {preview ? (
           <p>Показан ограниченный снимок Overview. Фильтры и пагинация отключены, потому что полный маршрут недоступен.</p>
-        ) : error ? (
+        ) : error && hasConfirmedContent ? (
           <p>Не удалось обновить данные маршрута. Подтверждённый список остаётся видимым; повторите чтение.</p>
+        ) : error ? (
+          <p>Не удалось получить данные маршрута. Это состояние не означает, что список пуст. Повторите чтение.</p>
         ) : refreshing ? (
           <p>Подтверждённый список остаётся видимым, пока приходит свежий ответ.</p>
         ) : state === "degraded" ? (
