@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type {
   PlanningCalendarEvent,
   PlanningCalendarSource,
@@ -10,12 +10,11 @@ import type {
 import type { RoutePath } from "./Shell";
 import { formatReminderDueLabel } from "./planningOverview";
 import {
-  calendarAgendaRangeUtc,
-  calendarDayRangeUtc,
   currentLocalDate,
   DEFAULT_PLANNING_TIME_ZONE,
   addCalendarDays
 } from "./calendarRange";
+import { calendarMonthGrid, calendarMonthKeyForDate, shiftCalendarMonth } from "./calendarMonth";
 import {
   mutatePlanningReminder,
   mutatePlanningEvent,
@@ -25,7 +24,7 @@ import {
   previewPlanningTask,
   previewPlanningReminder,
   previewPlanningEvent,
-  readPlanningEvents,
+  readPlanningEventsForRange,
   readPlanningProjects,
   readPlanningReminders,
   readPlanningTasks,
@@ -36,11 +35,12 @@ import {
   deliveryLabels,
   eventOverlapIds,
   eventTemporalState,
+  calendarEventColor,
+  calendarEventsForLocalDay,
   calendarEventsInRange,
   formatEventRange,
   formatReminderExactDue,
   formatTaskDueForRoute,
-  groupCalendarEvents,
   lifecycleLabels,
   priorityLabels,
   projectNameForTask,
@@ -828,12 +828,13 @@ function providerStatusLabel(source: PlanningCalendarSource | null): string | nu
   }[source.status];
 }
 
-function CalendarEventRow({ event, overlap, now, onOpen, sourceStale }: { event: PlanningCalendarEvent; overlap: boolean; now: Date; onOpen: () => void; sourceStale: boolean }) {
+function CalendarEventRow({ event, overlap, now, onOpen, sourceStale, accentColor }: { event: PlanningCalendarEvent; overlap: boolean; now: Date; onOpen: () => void; sourceStale: boolean; accentColor: string }) {
   const state = eventTemporalState(event, now);
   return (
     <button
       type="button"
       className={`planning-route-row calendar-event-row calendar-event-row--${state}${overlap ? " calendar-event-row--overlap" : ""}`}
+      style={{ "--calendar-event-accent": accentColor } as CSSProperties}
       data-testid="planning-calendar-event-row"
       data-sync-state={event.syncState}
       data-overlap={overlap ? "true" : "false"}
@@ -909,29 +910,39 @@ function CalendarDetailSheet({
   );
 }
 
-function CalendarSegments({ segment, onChange }: { segment: "today" | "agenda"; onChange: (segment: "today" | "agenda") => void }) {
+function CalendarMonthControls({
+  month,
+  onPrevious,
+  onToday,
+  onNext
+}: {
+  month: { year: number; month: number };
+  onPrevious: () => void;
+  onToday: () => void;
+  onNext: () => void;
+}) {
+  const rawLabel = new Intl.DateTimeFormat("ru-RU", { month: "long", timeZone: "UTC" })
+    .format(new Date(Date.UTC(month.year, month.month - 1, 1)));
+  const label = `${rawLabel.slice(0, 1).toLocaleUpperCase("ru-RU")}${rawLabel.slice(1)} ${month.year}`;
   return (
-    <div className="planning-segmented" role="group" aria-label="Представление календаря">
-      <button type="button" aria-pressed={segment === "today"} onClick={() => onChange("today")}>Сегодня</button>
-      <button type="button" aria-pressed={segment === "agenda"} onClick={() => onChange("agenda")}>Повестка</button>
+    <div className="planning-calendar-month-controls" role="group" aria-label="Навигация по месяцам">
+      <button type="button" className="planning-secondary-button" aria-label="Предыдущий месяц" onClick={onPrevious}>‹</button>
+      <strong className="planning-calendar-month-controls__label" data-testid="planning-calendar-month-heading">{label}</strong>
+      <button type="button" className="planning-secondary-button" onClick={onToday}>Сегодня</button>
+      <button type="button" className="planning-secondary-button" aria-label="Следующий месяц" onClick={onNext}>›</button>
     </div>
   );
 }
 
-function CalendarDateNavigation({ segment, onPrevious, onToday, onNext }: { segment: "today" | "agenda"; onPrevious: () => void; onToday: () => void; onNext: () => void }) {
-  return (
-    <div className="planning-calendar-date-nav" role="group" aria-label="Навигация по датам">
-      <button type="button" className="planning-secondary-button" onClick={onPrevious}>{segment === "today" ? "Предыдущий день" : "Предыдущие 7 дней"}</button>
-      <button type="button" className="planning-secondary-button" onClick={onToday}>Сегодня</button>
-      <button type="button" className="planning-secondary-button" onClick={onNext}>{segment === "today" ? "Следующий день" : "Следующие 7 дней"}</button>
-    </div>
-  );
+function calendarMonthParts(monthKey: string): { year: number; month: number } {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
+  if (!match) throw new RangeError("Calendar month must be YYYY-MM");
+  return { year: Number(match[1]), month: Number(match[2]) };
 }
 
 export function CalendarPage({ snapshot }: PlanningRouteProps) {
-  const [segment, setSegment] = useState<"today" | "agenda">("today");
-  const [periodOffset, setPeriodOffset] = useState(0);
-  const [page, setPage] = useState(0);
+  const [visibleMonthKey, setVisibleMonthKey] = useState(() => calendarMonthKeyForDate(currentLocalDate(new Date(), DEFAULT_PLANNING_TIME_ZONE)));
+  const [selectedDate, setSelectedDate] = useState(() => currentLocalDate(new Date(), DEFAULT_PLANNING_TIME_ZONE));
   const [selectedEvent, setSelectedEvent] = useState<PlanningCalendarEvent | null>(null);
   const [mutationSheet, setMutationSheet] = useState<EventMutationSheetMode | null>(null);
   const [mutationPending, setMutationPending] = useState(false);
@@ -942,50 +953,33 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const { confirmAction } = useActionConfirmation();
   const deletePendingRef = useRef(false);
   const { showNotice } = useNoticeCenter();
-  const requestTodayLocalDate = addCalendarDays(
-    currentLocalDate(liveNow, DEFAULT_PLANNING_TIME_ZONE),
-    segment === "today" ? periodOffset : periodOffset * 7
+  const visibleMonth = useMemo(() => calendarMonthParts(visibleMonthKey), [visibleMonthKey]);
+  const monthGrid = useMemo(
+    () => calendarMonthGrid(visibleMonth.year, visibleMonth.month, DEFAULT_PLANNING_TIME_ZONE),
+    [visibleMonth]
   );
-  const requestRange = useMemo(() => {
-    if (segment === "today") return calendarDayRangeUtc(requestTodayLocalDate, DEFAULT_PLANNING_TIME_ZONE);
-    return calendarAgendaRangeUtc(requestTodayLocalDate, 7, DEFAULT_PLANNING_TIME_ZONE);
-  }, [segment, requestTodayLocalDate]);
   const routeRead = usePlanningRead(
     {
-      queryKey: `events:${segment}:${requestRange.fromUtc}:${requestRange.toUtc}:${page}`,
+      queryKey: `events:month:${visibleMonthKey}:${monthGrid.range.fromUtc}:${monthGrid.range.toUtc}`,
       refreshKey: `${snapshot.revision}:${retry}`,
-      reader: (signal) => readPlanningEvents(requestRange.fromUtc, requestRange.toUtc, 20, page * 20, signal, segment)
+      reader: (signal) => readPlanningEventsForRange(monthGrid.range.fromUtc, monthGrid.range.toUtc, signal)
     }
   );
   const planning = snapshot.planning ?? null;
-  const previewCandidate = Boolean(routeRead.error && !routeRead.data && planning && page === 0);
   const referenceTime = planningRouteReferenceTime(
-    routeRead.data?.sourceStatus ?? planning?.sourceStatus ?? "unavailable",
-    routeRead.data?.generatedAt ?? planning?.generatedAt ?? null,
-    routeRead.data?.lastSyncedAt ?? planning?.lastSyncedAt ?? null,
+    routeRead.data?.sourceStatus ?? "unavailable",
+    routeRead.data?.generatedAt ?? null,
+    routeRead.data?.lastSyncedAt ?? null,
     liveNow,
-    previewCandidate || !routeRead.data
+    false
   );
-  const displayTodayLocalDate = addCalendarDays(
-    currentLocalDate(referenceTime, DEFAULT_PLANNING_TIME_ZONE),
-    segment === "today" ? periodOffset : periodOffset * 7
-  );
-  const displayRange = useMemo(() => {
-    if (segment === "today") return calendarDayRangeUtc(displayTodayLocalDate, DEFAULT_PLANNING_TIME_ZONE);
-    return calendarAgendaRangeUtc(displayTodayLocalDate, 7, DEFAULT_PLANNING_TIME_ZONE);
-  }, [segment, displayTodayLocalDate]);
-  const previewItems = planning
-    ? [...planning.calendar.today, ...planning.calendar.upcoming]
-    : [];
-  const fallbackItems = calendarEventsInRange(previewItems, displayRange);
-  const fallback = planning && page === 0 ? previewEnvelope("calendar_event", fallbackItems, planning) : null;
-  const envelope = routeRead.data ?? fallback;
-  const preview = !routeRead.data && Boolean(fallback) && Boolean(routeRead.error);
-  const routeError = Boolean(routeRead.error && !routeRead.data && !fallback);
-  const events = calendarEventsInRange(envelope?.items ?? [], displayRange);
+  const envelope = routeRead.data;
+  const preview = false;
+  const routeError = Boolean(routeRead.error && !routeRead.data);
+  const events = calendarEventsInRange(envelope?.items ?? [], monthGrid.range);
+  const selectedDayEvents = calendarEventsForLocalDay(events, selectedDate, DEFAULT_PLANNING_TIME_ZONE);
   const sources = envelope?.sources ?? planning?.providerStatuses ?? [];
-  const overlapIds = eventOverlapIds(events);
-  const groups = groupCalendarEvents(events, displayRange.fromLocalDate, displayRange.toLocalDateExclusive);
+  const overlapIds = eventOverlapIds(selectedDayEvents);
   const accessAllows = (action: "create" | "edit" | "delete"): boolean => {
     if (!accessStatus) return true;
     return Boolean(accessStatus.capabilities[planningCalendarAccessCapabilities[action]]?.allowed);
@@ -993,6 +987,29 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const canCreate = calendarMutationAllowed(planning, "create") && accessAllows("create");
   const canEdit = Boolean(selectedEvent?.localOnlyMutable && calendarMutationAllowed(planning, "edit") && accessAllows("edit"));
   const canDelete = Boolean(selectedEvent?.localOnlyMutable && !selectedEvent?.deletedAt && calendarMutationAllowed(planning, "delete") && accessAllows("delete"));
+
+  const monthDates = useMemo(
+    () => Array.from({ length: monthGrid.rows * 7 }, (_, index) => addCalendarDays(monthGrid.gridStartLocalDate, index)),
+    [monthGrid]
+  );
+
+  function selectDate(localDate: string): void {
+    setSelectedDate(localDate);
+    setSelectedEvent(null);
+  }
+
+  function navigateMonth(delta: number): void {
+    const nextMonthKey = shiftCalendarMonth(visibleMonthKey, delta);
+    setVisibleMonthKey(nextMonthKey);
+    setSelectedDate(`${nextMonthKey}-01`);
+    setSelectedEvent(null);
+  }
+
+  function selectToday(): void {
+    const today = currentLocalDate(new Date(), DEFAULT_PLANNING_TIME_ZONE);
+    setVisibleMonthKey(calendarMonthKeyForDate(today));
+    selectDate(today);
+  }
 
   async function ensureCalendarCapability(action: "create" | "edit" | "delete", title: string): Promise<boolean> {
     const capability = planningCalendarAccessCapabilities[action];
@@ -1124,16 +1141,12 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     const timer = window.setInterval(() => setLiveNow(new Date()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
-  useEffect(() => {
-    setPage(0);
-  }, [segment, periodOffset]);
-
   return (
     <PlanningRouteFrame
       module={calendarModule}
       eyebrow="Расписание"
-      description="Сегодня и ближайшие семь дней — весь день отдельно, события по локальному календарному дню."
-      sourceStatus={envelope?.sourceStatus ?? "unavailable"}
+      description="Месяц и выбранный день — источники и события остаются подтверждёнными через Planning read API."
+      sourceStatus={envelope?.sourceStatus ?? planning?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       sources={sources}
       error={routeRead.error}
@@ -1142,44 +1155,82 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
       preview={preview}
       onRetry={() => setRetry((value) => value + 1)}
       controls={(
-        <>
-          <CalendarSegments segment={segment} onChange={setSegment} />
-          <CalendarDateNavigation
-            segment={segment}
-            onPrevious={() => setPeriodOffset((value) => value - 1)}
-            onToday={() => setPeriodOffset(0)}
-            onNext={() => setPeriodOffset((value) => value + 1)}
-          />
-        </>
+        <CalendarMonthControls
+          month={visibleMonth}
+          onPrevious={() => navigateMonth(-1)}
+          onToday={selectToday}
+          onNext={() => navigateMonth(1)}
+        />
       )}
       futureAction={canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать событие</button> : undefined}
       testId="route-calendar"
     >
-      <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && events.length === 0)} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
+      <PlanningRouteState loading={routeRead.loading} empty={false} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
         {envelope && (
-          <>
-            {groups.length ? (
-              <div className="calendar-groups" data-testid="planning-calendar-groups">
-                {groups.map((group) => (
-                  <section className="calendar-day-group" key={group.localDate}>
-                    <h2>{calendarDayLabel(group.localDate)}</h2>
-                    {group.allDay.length > 0 && (
-                      <div className="calendar-band" data-testid="planning-calendar-all-day-band">
-                        <p className="calendar-band__label">Весь день</p>
-                        {group.allDay.map((event) => <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} sourceStale={providerSourceNeedsStaleCue(providerSourceForEvent(event, sources))} onOpen={() => setSelectedEvent(event)} />)}
-                      </div>
-                    )}
-                    <div className="calendar-timed-list">
-                      {group.timed.map((event) => <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} sourceStale={providerSourceNeedsStaleCue(providerSourceForEvent(event, sources))} onOpen={() => setSelectedEvent(event)} />)}
-                    </div>
-                  </section>
-                ))}
+          <div className="calendar-month-layout" data-testid="planning-calendar-month">
+            <section className="calendar-month" aria-label={`Календарь ${visibleMonthKey}`}>
+              <div className="calendar-month__weekdays" aria-hidden="true">
+                {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((weekday) => <span key={weekday}>{weekday}</span>)}
               </div>
-            ) : (
-              <div className="planning-route-state planning-route-state--empty">В выбранном диапазоне событий нет.</div>
-            )}
-            {!preview && <PaginationControls page={page} hasMore={envelope.hasMore} disabled={routeRead.loading} onPrevious={() => setPage((value) => Math.max(0, value - 1))} onNext={() => setPage((value) => value + 1)} />}
-          </>
+              <div className="calendar-month__grid">
+                {monthDates.map((localDate) => {
+                  const dayEvents = calendarEventsForLocalDay(events, localDate, DEFAULT_PLANNING_TIME_ZONE);
+                  const colors = [...new Set(dayEvents.map((event) => calendarEventColor(event, sources)))];
+                  const inMonth = localDate.startsWith(`${visibleMonthKey}-`);
+                  const dateLabel = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+                    .format(new Date(`${localDate}T12:00:00Z`));
+                  const eventLabel = dayEvents.length === 0 ? "событий нет" : `событий: ${dayEvents.length}`;
+                  return (
+                    <button
+                      type="button"
+                      className={`calendar-month-cell${inMonth ? "" : " calendar-month-cell--outside"}`}
+                      key={localDate}
+                      data-testid="planning-calendar-month-cell"
+                      data-date={localDate}
+                      data-current={localDate === currentLocalDate(liveNow, DEFAULT_PLANNING_TIME_ZONE) ? "true" : "false"}
+                      aria-current={localDate === currentLocalDate(liveNow, DEFAULT_PLANNING_TIME_ZONE) ? "date" : undefined}
+                      aria-selected={selectedDate === localDate}
+                      aria-label={`${dateLabel}, ${eventLabel}`}
+                      onClick={() => selectDate(localDate)}
+                    >
+                      <span className="calendar-month-cell__date" aria-hidden="true">{Number(localDate.slice(-2))}</span>
+                      <span className="calendar-month-cell__indicators" aria-hidden="true">
+                        {colors.slice(0, 3).map((color) => <span className="calendar-month-cell__indicator" data-testid="planning-calendar-event-indicator" data-color={color} style={{ backgroundColor: color }} key={color} />)}
+                        {colors.length > 3 && <span className="calendar-month-cell__overflow">+{colors.length - 3}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+            <section className="calendar-selected-day" data-testid="planning-calendar-selected-day" aria-labelledby="planning-calendar-selected-day-heading">
+              <div className="calendar-selected-day__heading">
+                <p className="calendar-selected-day__eyebrow">Выбранный день</p>
+                <h2 id="planning-calendar-selected-day-heading" data-testid="planning-calendar-selected-day-heading">{calendarDayLabel(selectedDate)}</h2>
+              </div>
+              {selectedDayEvents.length === 0 ? (
+                <div className="calendar-selected-day__empty" data-testid="planning-calendar-selected-day-empty">Нет событий</div>
+              ) : (
+                <div className="calendar-selected-day__events">
+                  {selectedDayEvents.filter((event) => event.allDay).length > 0 && (
+                    <div className="calendar-band" data-testid="planning-calendar-all-day-band">
+                      <p className="calendar-band__label">Весь день</p>
+                      {selectedDayEvents.filter((event) => event.allDay).map((event) => {
+                        const source = providerSourceForEvent(event, sources);
+                        return <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} accentColor={calendarEventColor(event, sources)} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
+                      })}
+                    </div>
+                  )}
+                  <div className="calendar-timed-list">
+                    {selectedDayEvents.filter((event) => !event.allDay).map((event) => {
+                      const source = providerSourceForEvent(event, sources);
+                      return <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} accentColor={calendarEventColor(event, sources)} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
+                    })}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
         )}
       </PlanningRouteState>
       {selectedEvent && !mutationSheet && (

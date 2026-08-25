@@ -6,7 +6,9 @@ import type {
   PlanningTask
 } from "@artem/contracts";
 import type { CalendarRange } from "./calendarRange";
-import { localDateForInstant } from "./calendarRange";
+import { calendarDayRangeUtc, DEFAULT_PLANNING_TIME_ZONE, localDateForInstant } from "./calendarRange";
+import type { PlanningCalendarSource } from "@artem/contracts";
+import { calendarIdentityForEvent } from "./planningIdentity";
 
 export const taskViewLabels: Record<"today" | "overdue" | "upcoming", string> = {
   today: "Сегодня",
@@ -167,6 +169,42 @@ export function calendarEventsInRange(
     return Date.parse(event.startAtUtc) < Date.parse(range.toUtc)
       && Date.parse(event.endAtUtc) > Date.parse(range.fromUtc);
   });
+}
+
+export function calendarEventsForLocalDay(
+  events: PlanningCalendarEvent[],
+  localDate: string,
+  timeZone = DEFAULT_PLANNING_TIME_ZONE
+): PlanningCalendarEvent[] {
+  const dayRange = calendarDayRangeUtc(localDate, timeZone);
+  return calendarEventsInRange(events, dayRange).sort((left, right) => {
+    if (left.allDay !== right.allDay) return left.allDay ? -1 : 1;
+    return (left.startAtUtc ?? left.startDate ?? "").localeCompare(right.startAtUtc ?? right.startDate ?? "")
+      || left.id.localeCompare(right.id);
+  });
+}
+
+const localCalendarColor = "#5B6EE1";
+const fallbackCalendarColors = ["#2F8F83", "#B47718", "#8B5FBF", "#B14C62"];
+
+function stableColorIndex(value: string): number {
+  let hash = 0;
+  for (const character of value) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return hash % fallbackCalendarColors.length;
+}
+
+export function calendarEventColor(
+  event: PlanningCalendarEvent,
+  sources: PlanningCalendarSource[]
+): string {
+  const identity = calendarIdentityForEvent(event);
+  const source = sources.find((candidate) => candidate.id === identity.providerId);
+  const sourceCalendar = source?.calendars.find((calendar) => calendar.id === identity.calendarId);
+  if (sourceCalendar?.color && /^#[0-9A-Fa-f]{6,8}$/.test(sourceCalendar.color)) return sourceCalendar.color;
+  if (event.localOnlyMutable || identity.providerId === "local-planning" || identity.providerId === "native-planning") {
+    return localCalendarColor;
+  }
+  return fallbackCalendarColors[stableColorIndex(`${identity.providerId}:${identity.calendarId}`)];
 }
 
 function addLocalDate(localDate: string, days: number): string {

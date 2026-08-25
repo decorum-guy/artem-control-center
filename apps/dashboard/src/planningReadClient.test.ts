@@ -8,6 +8,7 @@ import {
   planningReadParsers,
   previewPlanningReminder,
   readPlanningEvents,
+  readPlanningEventsForRange,
   readPlanningTaskById,
   readPlanningTasks
 } from "./planningReadClient";
@@ -145,6 +146,31 @@ describe("fixed Planning read client", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       "/api/v1/planning/events?limit=20&offset=0&from=2026-08-24T21%3A00%3A00Z&to=2026-08-25T21%3A00%3A00Z&view=today"
     );
+  });
+
+  it("covers a visible month with bounded 100-item GET pages and merges canonical metadata", async () => {
+    const second = { ...calendarEvent, id: "00000000-0000-4000-8000-000000000602", title: "Вторая встреча" };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const offset = new URL(String(input), "http://localhost").searchParams.get("offset");
+      const items = offset === "0" ? [calendarEvent] : [second];
+      return new Response(JSON.stringify({
+        ...envelope({ domain: "calendar_event", items, limit: 100, offset: Number(offset), count: items.length, hasMore: offset === "0", sources: [nativePhaseBSource] })
+      }), { status: 200 });
+    });
+
+    const result = await readPlanningEventsForRange("2026-07-26T21:00:00Z", "2026-09-06T21:00:00Z");
+    expect(result.items.map((item) => item.id)).toEqual([calendarEvent.id, second.id]);
+    expect(result).toMatchObject({ pages: 2, count: 2, hasMore: false, sources: [nativePhaseBSource] });
+    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost").searchParams.get("offset"))).toEqual(["0", "100"]);
+    expect(fetchMock.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
+  });
+
+  it("fails closed when a visible range exceeds the three-page safety bound", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
+      ...envelope({ domain: "calendar_event", items: [calendarEvent], limit: 100, count: 1, hasMore: true })
+    }), { status: 200 }));
+    await expect(readPlanningEventsForRange("2026-07-26T21:00:00Z", "2026-09-06T21:00:00Z"))
+      .rejects.toMatchObject({ code: "contract" });
   });
 
   it("keeps old Alice envelopes without sources compatible and accepts strict new sources", () => {

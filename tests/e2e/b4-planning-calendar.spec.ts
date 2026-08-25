@@ -309,13 +309,14 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" }).tap();
     await capture(page, testInfo, "b4-calendar-local-create-all-day.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
-    await page.getByRole("button", { name: "Повестка" }).tap();
 
+    await page.getByRole("button", { name: "Сегодня" }).tap();
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Внешняя встреча" }).tap();
     await expect(page.getByTestId("planning-calendar-detail")).toContainText("Внешний календарь · только чтение");
     await capture(page, testInfo, "b4-calendar-external-read-only.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
 
+    await page.locator('[data-testid="planning-calendar-month-cell"][data-date="2026-08-14"]').tap();
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "День без времени" }).tap();
     await expect(page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" })).toBeVisible();
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" }).tap();

@@ -617,6 +617,50 @@ export function readPlanningEvents(
   return getRead("/api/v1/planning/events", params, "calendar_event", parseCalendarEvent, signal);
 }
 
+export interface PlanningCalendarRangeEnvelope extends PlanningReadEnvelope<PlanningCalendarEvent> {
+  /** Number of fixed-size GET pages used to cover the visible month grid. */
+  pages: number;
+}
+
+/**
+ * Read a complete visible calendar grid with a finite browser-side bound.
+ * The Panel Agent already accepts 100-item pages, so a normal month is covered
+ * without weakening the fixed read contract or creating an unbounded loop.
+ */
+export async function readPlanningEventsForRange(
+  fromUtc: string,
+  toUtc: string,
+  signal?: AbortSignal,
+  maxPages = 3
+): Promise<PlanningCalendarRangeEnvelope> {
+  if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 3) {
+    throw new PlanningReadError("Calendar range page bound is invalid", "contract");
+  }
+  const items: PlanningCalendarEvent[] = [];
+  let first: PlanningReadEnvelope<PlanningCalendarEvent> | null = null;
+  let pages = 0;
+  let hasMore = true;
+  while (hasMore && pages < maxPages) {
+    const page = await readPlanningEvents(fromUtc, toUtc, 100, pages * 100, signal);
+    first ??= page;
+    items.push(...page.items);
+    hasMore = page.hasMore;
+    pages += 1;
+  }
+  if (hasMore || !first) {
+    throw new PlanningReadError("Visible calendar range exceeds the bounded read limit", "contract");
+  }
+  return {
+    ...first,
+    items,
+    limit: 100,
+    offset: 0,
+    count: items.length,
+    hasMore: false,
+    pages
+  };
+}
+
 export function readPlanningReminders(
   view: ReminderMonitorView,
   limit = planningRouteLimit,

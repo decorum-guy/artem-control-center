@@ -131,7 +131,7 @@ test.describe("B3 Planning monitoring routes", () => {
     await assertNoWrites();
   });
 
-  test("Calendar shows full Today history, seven-day agenda, overlaps, local source, and details", async ({ page }) => {
+  test("Calendar shows the month grid, selected-day rows, overlaps, local source, and details", async ({ page }) => {
     const assertNoWrites = await assertPlanningTrafficIsReadOnly(page);
     await page.goto("/calendar");
     await expect(page.getByTestId("route-calendar")).toBeVisible();
@@ -142,11 +142,12 @@ test.describe("B3 Planning monitoring routes", () => {
     await expect(page.getByTestId("planning-calendar-event-row").first()).toContainText("Только локально");
     await openDetailAndClose(page, "planning-calendar-event-row", "planning-calendar-detail");
 
-    await page.getByRole("button", { name: "Повестка" }).tap();
-    await expect(page.getByTestId("planning-calendar-groups")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Следующие 7 дней" })).toBeVisible();
-    await page.getByRole("button", { name: "Следующие 7 дней" }).tap();
-    await expect(page.getByRole("button", { name: "Предыдущие 7 дней" })).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
+    await page.getByRole("button", { name: "Предыдущий месяц" }).tap();
+    await expect(page.getByTestId("planning-calendar-month-heading")).toContainText("Июль");
+    await page.getByRole("button", { name: "Следующий месяц" }).tap();
+    await expect(page.getByTestId("planning-calendar-month-heading")).toContainText("Август");
+    await page.getByRole("button", { name: "Сегодня" }).tap();
     await expectNoHorizontalOverflow(page);
     await assertNoWrites();
   });
@@ -268,26 +269,23 @@ test.describe("B3 Planning monitoring routes", () => {
       await setEmptyPlanningPreview(page, domain);
       await setRouteResponseState(page, routePath, 503);
       await page.goto(routeUrl);
-      await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
-      await expect(page.getByTestId("planning-route-preview-empty")).toContainText("В кратком снимке объектов нет");
-      await expect(page.getByTestId("planning-route-preview-empty")).toContainText("Полный список сейчас недоступен");
-      await expect(page.getByTestId("planning-route-empty")).toHaveCount(0);
-      await expect(page.getByTestId("planning-route-preview-empty").getByRole("button", { name: "Повторить" })).toBeVisible();
+      if (domain === "calendar") {
+        await expect(page.getByTestId("planning-route-health")).toContainText("Актуальные данные недоступны");
+        await expect(page.getByTestId("planning-route-error")).toBeVisible();
+        await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(0);
+      } else {
+        await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
+        await expect(page.getByTestId("planning-route-preview-empty")).toContainText("В кратком снимке объектов нет");
+        await expect(page.getByTestId("planning-route-preview-empty")).toContainText("Полный список сейчас недоступен");
+        await expect(page.getByTestId("planning-route-empty")).toHaveCount(0);
+        await expect(page.getByTestId("planning-route-preview-empty").getByRole("button", { name: "Повторить" })).toBeVisible();
+      }
       await page.unroute(`**${routePath}*`);
       await page.unroute("**/api/v1/snapshot**");
     }
   });
 
-  test("shifted Agenda fallback preview is range-filtered and PlanningSheet contains focus", async ({ page }) => {
-    await setRouteResponseState(page, "/api/v1/planning/events", 503);
-    await page.goto("/calendar");
-    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(6);
-    await page.getByRole("button", { name: "Повестка" }).tap();
-    await page.getByRole("button", { name: "Следующие 7 дней" }).tap();
-    await expect(page.getByTestId("planning-route-preview-empty")).toBeVisible();
-    await expect(page.getByTestId("route-calendar")).not.toContainText("Утреннее совещание");
-    await page.unroute("**/api/v1/planning/events*");
-
+  test("unavailable Calendar stays fatal while PlanningSheet retains focus", async ({ page }) => {
     await page.goto("/tasks");
     const opener = page.getByRole("button", { name: "Проект", exact: true });
     await opener.focus();
@@ -338,13 +336,12 @@ test.describe("B3 Planning monitoring routes", () => {
       ["tasks-today", "/tasks?theme=day"],
       ["tasks-overdue", "/tasks?theme=day"],
       ["calendar-today", "/calendar?theme=day"],
-      ["calendar-agenda", "/calendar?theme=day"],
+      ["calendar-month", "/calendar?theme=day"],
       ["reminders-soon", "/reminders?theme=day"],
       ["reminders-delivery", "/reminders?theme=night"]
     ] as const) {
       await page.goto(url);
       if (name === "tasks-overdue") await page.locator(".planning-segmented").first().getByRole("button", { name: "Просрочено" }).tap();
-      if (name === "calendar-agenda") await page.getByRole("button", { name: "Повестка" }).tap();
       if (name === "reminders-delivery") await page.locator(".planning-segmented").getByRole("button", { name: "Доставка" }).tap();
       await page.screenshot({ path: path.join(artifactDir, `${name}.png`), animations: "disabled" });
     }

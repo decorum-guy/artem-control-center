@@ -124,8 +124,10 @@ async function fulfillList(route: Parameters<Parameters<Page["route"]>[1]>[0], t
 async function installCalendarRead(
   page: Page,
   options: { delayView?: "agenda"; delayNextRequest?: boolean; failInitial?: boolean; failSecond?: boolean; failView?: "agenda"; empty?: boolean } = {}
-): Promise<{ requests: number; methods: string[]; release: Deferred; fromValues: string[] }> {
+): Promise<{ requests: number; backgroundReads: number; methods: string[]; release: Deferred; fromValues: string[] }> {
   let requestCount = 0;
+  let backgroundReads = 0;
+  let initialMonthResponse = false;
   let requestMethods: string[] = [];
   const fromValues: string[] = [];
   let template: Record<string, unknown> | null = null;
@@ -138,18 +140,22 @@ async function installCalendarRead(
     const url = new URL(request.url());
     fromValues.push(url.searchParams.get("from") ?? "");
     const view = url.searchParams.get("view");
-    if ((options.delayView && view === options.delayView) || (options.delayNextRequest && (options.empty ? requestCount === 3 : requestCount >= 3))) {
+    const offset = url.searchParams.get("offset") ?? "0";
+    const isMonthStart = !view && offset === "0";
+    const isBackgroundMonthRead = isMonthStart && initialMonthResponse;
+    if (isBackgroundMonthRead) backgroundReads += 1;
+    if ((options.delayView && (view === options.delayView || isBackgroundMonthRead)) || (options.delayNextRequest && isBackgroundMonthRead)) {
       await release.promise;
     }
     if (options.failInitial && requestCount <= 2) {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "planning_read_unavailable" }) });
       return;
     }
-    if (options.failView && view === options.failView) {
+    if (options.failView && (view === options.failView || isBackgroundMonthRead)) {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "planning_read_unavailable" }) });
       return;
     }
-    if (options.failSecond && requestCount === 3) {
+    if (options.failSecond && isBackgroundMonthRead && backgroundReads === 1) {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "planning_read_unavailable" }) });
       return;
     }
@@ -160,13 +166,14 @@ async function installCalendarRead(
       payload.count = 0;
       payload.offset = Number(url.searchParams.get("offset") ?? "0");
       payload.hasMore = false;
+      if (isMonthStart && !isBackgroundMonthRead) initialMonthResponse = true;
       await route.fulfill({ response, body: JSON.stringify(payload) });
       return;
     }
     const response = await route.fetch();
     const payload = await response.json() as Record<string, unknown>;
     if (!template) template = listItems(payload)[0];
-    const prefix = requestCount <= 2 ? "Старое событие" : requestCount === 3 ? "Свежее событие" : "Событие после повтора";
+    const prefix = backgroundReads === 0 ? "Старое событие" : backgroundReads === 1 ? "Свежее событие" : "Событие после повтора";
     payload.items = [1, 2].map((index) => ({
       ...template,
       id: `00000000-0000-4000-8000-${String(900 + index).padStart(12, "0")}`,
@@ -175,10 +182,12 @@ async function installCalendarRead(
     payload.count = 2;
     payload.offset = Number(url.searchParams.get("offset") ?? "0");
     payload.hasMore = false;
+    if (isMonthStart && !isBackgroundMonthRead) initialMonthResponse = true;
     await route.fulfill({ response, body: JSON.stringify(payload) });
   });
   return {
     get requests() { return requestCount; },
+    get backgroundReads() { return backgroundReads; },
     get methods() { return requestMethods; },
     release,
     get fromValues() { return fromValues; }
@@ -200,7 +209,9 @@ async function installTaskRead(page: Page, options: { delayView?: "overdue"; del
     const response = await route.fetch();
     const payload = await response.json() as Record<string, unknown>;
     template ??= listItems(payload)[0];
-    const items = requestCount <= 2 ? ["Старая задача 1", "Старая задача 2"] : ["Новая задача 1", "Новая задача 2"];
+    const items = options.delayView && view === options.delayView
+      ? ["Новая задача 1", "Новая задача 2"]
+      : requestCount <= 2 ? ["Старая задача 1", "Старая задача 2"] : ["Новая задача 1", "Новая задача 2"];
     payload.items = items.map((title, index) => ({
       ...template,
       id: `00000000-0000-4000-8000-${String(910 + index).padStart(12, "0")}`,
@@ -214,26 +225,29 @@ async function installTaskRead(page: Page, options: { delayView?: "overdue"; del
   return { get requests() { return requestCount; }, release, getTemplate: () => template };
 }
 
-async function installReminderRead(page: Page, options: { delayView?: "delivery"; delaySecond?: boolean; lateBackground?: boolean; hasMore?: boolean } = {}): Promise<{ requests: number; release: Deferred; getTemplate: () => Record<string, unknown> | null }> {
+async function installReminderRead(page: Page, options: { delayView?: "delivery"; delaySecond?: boolean; lateBackground?: boolean; hasMore?: boolean } = {}): Promise<{ requests: number; release: Deferred; startBackground: () => void; getTemplate: () => Record<string, unknown> | null }> {
   let requestCount = 0;
   let template: Record<string, unknown> | null = null;
   const release = deferred();
+  let backgroundMode = false;
+  let backgroundRequestStarted = false;
   await page.route("**/api/v1/planning/reminders/view**", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     requestCount += 1;
     const url = new URL(route.request().url());
     const view = url.searchParams.get("view");
-    if ((options.delayView && view === options.delayView) || (options.delaySecond && requestCount === 3)) {
+    if ((options.delayView && view === options.delayView) || (options.delaySecond && backgroundMode && !backgroundRequestStarted)) {
+      backgroundRequestStarted = true;
       await release.promise;
     }
     const response = await route.fetch();
     const payload = await response.json() as Record<string, unknown>;
     if (!template) template = listItems(payload)[0];
-    const items = requestCount <= 2
-      ? ["Старое напоминание 1", "Старое напоминание 2"]
-      : options.lateBackground && requestCount === 3
+    const items = options.lateBackground && backgroundRequestStarted && requestCount === 2
         ? ["Поздний старый ответ 1", "Поздний старый ответ 2"]
-        : ["Новое напоминание 1", "Новое напоминание 2"];
+        : (backgroundRequestStarted || (options.delayView && view === options.delayView)
+          ? ["Новое напоминание 1", "Новое напоминание 2"]
+          : ["Старое напоминание 1", "Старое напоминание 2"]);
     payload.items = items.map((title, index) => ({
       ...template,
       ...(view === "delivery" ? { status: "due", deliveryState: "failed" } : {}),
@@ -245,7 +259,7 @@ async function installReminderRead(page: Page, options: { delayView?: "delivery"
     payload.hasMore = options.hasMore ?? false;
     await route.fulfill({ response, body: JSON.stringify(payload) });
   });
-  return { get requests() { return requestCount; }, release, getTemplate: () => template };
+  return { get requests() { return requestCount; }, release, startBackground: () => { backgroundMode = true; }, getTemplate: () => template };
 }
 
 test.describe("Issue #113 planning stale-while-revalidate", () => {
@@ -259,7 +273,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     );
   });
 
-  test("Calendar keeps populated Agenda mounted during a delayed snapshot refresh and atomically accepts fresh rows", async ({ page }) => {
+  test("Calendar keeps the populated month grid mounted during a delayed snapshot refresh and atomically accepts fresh rows", async ({ page }) => {
     const { setRevision } = await preparePage(page);
     const calendar = await installCalendarRead(page, { delayNextRequest: true });
     await page.goto("/calendar");
@@ -268,9 +282,10 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
 
     setRevision(2);
     await emitRevision(page, 2);
-    await expect.poll(() => calendar.requests).toBe(3);
+    await expect.poll(() => calendar.backgroundReads).toBe(1);
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(2);
     await expect(page.getByText("Старое событие 1")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем данные");
     const during = await page.locator(".planning-route-workzone").boundingBox();
@@ -291,7 +306,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
 
     setRevision(2);
     await emitRevision(page, 2);
-    await expect.poll(() => calendar.requests).toBe(3);
+    await expect.poll(() => calendar.backgroundReads).toBe(1);
     await expect(page.getByText("Старое событие 1")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(2);
     await expect(page.getByTestId("planning-route-health")).toContainText("Обновление не удалось");
@@ -321,14 +336,14 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByTestId("planning-route-health")).not.toContainText("Подтверждённый список остаётся видимым");
   });
 
-  test("Calendar query-change failure does not claim old rows remain visible", async ({ page }) => {
+  test("Calendar month-change failure does not claim old rows remain visible", async ({ page }) => {
     await preparePage(page, null);
     const calendar = await installCalendarRead(page, { delayView: "agenda", failView: "agenda" });
     await page.goto("/calendar");
     await expect(page.getByText("Старое событие 1")).toBeVisible();
 
-    await page.getByRole("button", { name: "Повестка" }).click();
-    await expect.poll(() => calendar.requests).toBeGreaterThanOrEqual(2);
+    await page.getByRole("button", { name: "Предыдущий месяц" }).click();
+    await expect.poll(() => calendar.backgroundReads).toBe(1);
     await expect(page.getByText("Старое событие 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
 
@@ -339,20 +354,22 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByTestId("planning-route-health")).not.toContainText("Подтверждённый список остаётся видимым");
   });
 
-  test("Calendar query identity changes do not show Today rows under Agenda or another date", async ({ page }) => {
+  test("Calendar query identity changes do not show old-month rows under a new month", async ({ page }) => {
     await preparePage(page);
     const calendar = await installCalendarRead(page, { delayView: "agenda" });
     await page.goto("/calendar");
     await expect(page.getByText("Старое событие 1")).toBeVisible();
 
-    await page.getByRole("button", { name: "Повестка" }).click();
-    await expect.poll(() => calendar.requests).toBeGreaterThanOrEqual(2);
+    await page.getByRole("button", { name: "Предыдущий месяц" }).click();
+    await expect.poll(() => calendar.backgroundReads).toBe(1);
     await expect(page.getByText("Старое событие 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
     calendar.release.resolve();
-    await expect(page.getByText("Свежее событие 1").first()).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-month-heading")).toContainText("Июль");
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(0);
 
     const initialFrom = calendar.fromValues[0];
+    const previousFrom = calendar.fromValues.at(-1) ?? initialFrom;
     let nextFrom = "";
     await page.unroute("**/api/v1/planning/events**");
     await page.route("**/api/v1/planning/events**", async (route) => {
@@ -360,29 +377,31 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
       nextFrom = new URL(route.request().url()).searchParams.get("from") ?? "";
       await route.continue();
     });
-    await page.getByRole("button", { name: "Следующие 7 дней" }).click();
-    await expect(page.getByText("Свежее событие 1")).toHaveCount(0);
+    await page.getByRole("button", { name: "Следующий месяц" }).click();
     await expect.poll(() => nextFrom).not.toBe("");
-    expect(nextFrom).not.toBe(initialFrom);
+    expect(nextFrom).not.toBe(previousFrom);
   });
 
   test("Calendar legitimate empty response remains an empty state while revalidating", async ({ page }) => {
     const { setRevision } = await preparePage(page);
     const calendar = await installCalendarRead(page, { delayNextRequest: true, empty: true });
     await page.goto("/calendar");
-    await expect(page.getByTestId("planning-route-empty")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-selected-day-empty")).toBeVisible();
     const before = await page.locator(".planning-route-workzone").boundingBox();
 
     setRevision(2);
     await emitRevision(page, 2);
-    await expect.poll(() => calendar.requests).toBe(3);
-    await expect(page.getByTestId("planning-route-empty")).toBeVisible();
+    await expect.poll(() => calendar.backgroundReads).toBe(1);
+    await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-selected-day-empty")).toBeVisible();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
     const during = await page.locator(".planning-route-workzone").boundingBox();
     expect(during?.height).toBeGreaterThanOrEqual((before?.height ?? 1) * 0.9);
     calendar.release.resolve();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-empty")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-selected-day-empty")).toBeVisible();
   });
 
   test("Tasks preserve rows for a background snapshot refresh", async ({ page }) => {
@@ -409,7 +428,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByText("Старая задача 1")).toBeVisible();
 
     await page.getByRole("button", { name: "Просрочено" }).click();
-    await expect.poll(() => tasks.requests).toBe(3);
+    await expect.poll(() => tasks.requests).toBeGreaterThanOrEqual(2);
     await expect(page.getByText("Старая задача 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
     tasks.release.resolve();
@@ -444,9 +463,10 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await page.goto("/reminders");
     await expect(page.getByText("Старое напоминание 1")).toBeVisible();
 
+    reminders.startBackground();
     setRevision(2);
     await emitRevision(page, 2);
-    await expect.poll(() => reminders.requests).toBe(3);
+    await expect.poll(() => reminders.requests).toBeGreaterThanOrEqual(2);
     await expect(page.getByText("Старое напоминание 1")).toBeVisible();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем данные");
@@ -462,7 +482,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByText("Старое напоминание 1")).toBeVisible();
 
     await page.getByRole("button", { name: "Доставка", exact: true }).tap();
-    await expect.poll(() => reminders.requests).toBe(3);
+    await expect.poll(() => reminders.requests).toBeGreaterThanOrEqual(2);
     await expect(page.getByText("Старое напоминание 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
     reminders.release.resolve();
@@ -503,9 +523,10 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await page.goto("/reminders");
     await expect(page.getByText("Старое напоминание 1")).toBeVisible();
 
+    reminders.startBackground();
     setRevision(2);
     await emitRevision(page, 2);
-    await expect.poll(() => reminders.requests).toBe(3);
+    await expect.poll(() => reminders.requests).toBeGreaterThanOrEqual(2);
 
     await page.getByRole("button", { name: "Доставка", exact: true }).tap();
     await expect(page.getByText("Новое напоминание 1")).toBeVisible();
