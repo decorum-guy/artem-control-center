@@ -119,7 +119,7 @@ test.describe("Issue #112 Calendar Slice A", () => {
     expect(monthPager.next.height).toBeCloseTo(monthPager.previous.height, 3);
     expect(monthPager.gap).toBe("4px");
     expect(Math.abs((monthPager.label.left - monthPager.previous.right) - (monthPager.next.left - monthPager.label.right))).toBeLessThanOrEqual(0.5);
-    expect(monthPager.label.width).toBeCloseTo(132, 3);
+    expect(monthPager.label.width).toBeCloseTo(138, 3);
     const longestMonthLabelWidth = await page.getByTestId("planning-calendar-month-heading").evaluate((element) => {
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");

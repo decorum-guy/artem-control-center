@@ -43,9 +43,9 @@
   flex-wrap: nowrap;
 }
 .planning-calendar-month-controls__label {
-  width: 132px;
-  min-width: 132px;
-  flex: 0 0 132px;
+  width: 138px;
+  min-width: 138px;
+  flex: 0 0 138px;
   color: var(--text);
   font-size: 16px;
   text-align: center;
