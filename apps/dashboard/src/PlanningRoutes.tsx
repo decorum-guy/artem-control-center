@@ -395,13 +395,19 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   const lifecyclePendingRef = useRef(false);
   const [lifecyclePending, setLifecyclePending] = useState(false);
   const routeRead = usePlanningRead(
-    `tasks:${view}:${projectId ?? "all"}:${page}:${snapshot.revision}:${retry}`,
-    (signal) => readPlanningTasks(view, projectId, 20, page * 20, signal)
+    {
+      queryKey: `tasks:${view}:${projectId ?? "all"}:${page}`,
+      refreshKey: `${snapshot.revision}:${retry}`,
+      reader: (signal) => readPlanningTasks(view, projectId, 20, page * 20, signal)
+    }
   );
   const projectRead = usePlanningRead(
-    `projects:${projectPage}:${snapshot.revision}:${retry}:${filterOpen ? "open" : "closed"}`,
-    filterOpen ? (signal) => readPlanningProjects(20, projectPage * 20, signal) : null,
-    filterOpen
+    {
+      queryKey: `projects:${projectPage}:${filterOpen ? "open" : "closed"}`,
+      refreshKey: `${snapshot.revision}:${retry}`,
+      reader: filterOpen ? (signal) => readPlanningProjects(20, projectPage * 20, signal) : null,
+      enabled: filterOpen
+    }
   );
   const planning = snapshot.planning ?? null;
   const fallback = planning && page === 0 && projectId === null
@@ -409,7 +415,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
     : null;
   const envelope = routeRead.data ?? fallback;
   const preview = !routeRead.data && Boolean(fallback) && Boolean(routeRead.error);
-  const routeError = Boolean(routeRead.error && !fallback);
+  const routeError = Boolean(routeRead.error && !routeRead.data && !fallback);
   const projects = projectRead.data?.items ?? (planning?.tasks.projects ?? []);
   const projectMap = new Map(projects.map((project) => [project.id, project.name]));
   const projectFilterLabel = projectId ? (projectMap.get(projectId) ?? "Проект недоступен") : "Все проекты";
@@ -564,6 +570,8 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       error={routeRead.error}
+      hasConfirmedContent={Boolean(routeRead.data)}
+      refreshing={routeRead.refreshing}
       preview={preview}
       onRetry={() => setRetry((value) => value + 1)}
       controls={(
@@ -943,11 +951,14 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     return calendarAgendaRangeUtc(requestTodayLocalDate, 7, DEFAULT_PLANNING_TIME_ZONE);
   }, [segment, requestTodayLocalDate]);
   const routeRead = usePlanningRead(
-    `events:${requestRange.fromUtc}:${requestRange.toUtc}:${page}:${snapshot.revision}:${retry}`,
-    (signal) => readPlanningEvents(requestRange.fromUtc, requestRange.toUtc, 20, page * 20, signal, segment)
+    {
+      queryKey: `events:${segment}:${requestRange.fromUtc}:${requestRange.toUtc}:${page}`,
+      refreshKey: `${snapshot.revision}:${retry}`,
+      reader: (signal) => readPlanningEvents(requestRange.fromUtc, requestRange.toUtc, 20, page * 20, signal, segment)
+    }
   );
   const planning = snapshot.planning ?? null;
-  const previewCandidate = Boolean(routeRead.error && planning && page === 0);
+  const previewCandidate = Boolean(routeRead.error && !routeRead.data && planning && page === 0);
   const referenceTime = planningRouteReferenceTime(
     routeRead.data?.sourceStatus ?? planning?.sourceStatus ?? "unavailable",
     routeRead.data?.generatedAt ?? planning?.generatedAt ?? null,
@@ -970,7 +981,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const fallback = planning && page === 0 ? previewEnvelope("calendar_event", fallbackItems, planning) : null;
   const envelope = routeRead.data ?? fallback;
   const preview = !routeRead.data && Boolean(fallback) && Boolean(routeRead.error);
-  const routeError = Boolean(routeRead.error && !fallback);
+  const routeError = Boolean(routeRead.error && !routeRead.data && !fallback);
   const events = calendarEventsInRange(envelope?.items ?? [], displayRange);
   const sources = envelope?.sources ?? planning?.providerStatuses ?? [];
   const overlapIds = eventOverlapIds(events);
@@ -1126,6 +1137,8 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       sources={sources}
       error={routeRead.error}
+      hasConfirmedContent={Boolean(routeRead.data)}
+      refreshing={routeRead.refreshing}
       preview={preview}
       onRetry={() => setRetry((value) => value + 1)}
       controls={(
@@ -1438,8 +1451,11 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   const lifecyclePendingRef = useRef(false);
   const [lifecyclePending, setLifecyclePending] = useState(false);
   const routeRead = usePlanningRead(
-    `reminders:${view}:${page}:${snapshot.revision}:${retry}`,
-    (signal) => readPlanningReminders(view, 20, page * 20, signal)
+    {
+      queryKey: `reminders:${view}:${page}`,
+      refreshKey: `${snapshot.revision}:${retry}`,
+      reader: (signal) => readPlanningReminders(view, 20, page * 20, signal)
+    }
   );
   const planning = snapshot.planning ?? null;
   const fallbackReferenceTime = planningRouteReferenceTime(
@@ -1452,7 +1468,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   const fallback = planning && page === 0 ? previewEnvelope("reminder", reminderFallbackItems(planning, view, fallbackReferenceTime), planning) : null;
   const envelope = routeRead.data ?? fallback;
   const preview = !routeRead.data && Boolean(fallback) && Boolean(routeRead.error);
-  const routeError = Boolean(routeRead.error && !fallback);
+  const routeError = Boolean(routeRead.error && !routeRead.data && !fallback);
   const referenceTime = planningRouteReferenceTime(
     envelope?.sourceStatus ?? "unavailable",
     envelope?.generatedAt ?? null,
@@ -1621,6 +1637,8 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       error={routeRead.error}
+      hasConfirmedContent={Boolean(routeRead.data)}
+      refreshing={routeRead.refreshing}
       preview={preview}
       onRetry={() => setRetry((value) => value + 1)}
       controls={(
