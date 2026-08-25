@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -35,6 +37,58 @@ def settings(tmp_path, scenario: str) -> IntegrationSettings:
     )
 
 
+_OBSERVED_SOURCES = [
+    {
+        "sourceType": "native_planning",
+        "accountId": "local",
+        "provider": "local",
+        "status": "current",
+        "lastSyncedAt": "2026-08-12T09:00:00Z",
+        "observedAt": "2026-08-12T09:00:00Z",
+        "errorCode": None,
+        "calendars": [],
+    },
+    {
+        "sourceType": "external_calendar",
+        "accountId": "private-account-opaque",
+        "provider": "icloud",
+        "status": "current",
+        "lastSyncedAt": "2026-08-12T09:00:00Z",
+        "observedAt": "2026-08-12T09:00:00Z",
+        "errorCode": None,
+        "calendars": [
+            {
+                "calendarId": "private-calendar-opaque",
+                "displayName": "Рабочий календарь",
+                "color": "#4477AA",
+                "enabled": True,
+                "status": "current",
+                "lastSyncedAt": "2026-08-12T09:00:00Z",
+                "observedAt": "2026-08-12T09:00:00Z",
+                "errorCode": None,
+            }
+        ],
+    },
+]
+
+
+class SourcedReminderFixtureTransport(PlanningFixtureTransport):
+    """Add valid upstream source metadata to the normal reminder fixture."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await super().handle_async_request(request)
+        if response.status_code != 200 or request.url.path != "/internal/planning/v1/reminders":
+            return response
+        payload = response.json()
+        payload["sources"] = _OBSERVED_SOURCES
+        return httpx.Response(
+            200,
+            json=payload,
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+
+
 def test_reminder_monitor_views_keep_lifecycle_and_delivery_distinct(tmp_path):
     adapter = PlanningAdapter(
         settings(tmp_path, "b3-healthy"),
@@ -63,6 +117,77 @@ def test_reminder_monitor_views_keep_lifecycle_and_delivery_distinct(tmp_path):
     assert "Доставлено, ждёт завершения" not in {item.title for item in delivery.items}
     assert all(item.status == "due" for item in delivery.items)
     assert [item.deliveryState for item in delivery.items] == ["failed", "retrying", "queued"]
+    for result in (upcoming, overdue, delivery):
+        assert result.sources is not None
+        assert [source.id for source in result.sources] == ["native-planning"]
+
+
+@pytest.mark.parametrize("view", ["upcoming", "overdue", "delivery"])
+def test_reminder_view_route_emits_browser_safe_sources_for_legacy_upstream(tmp_path, view):
+    adapter = PlanningAdapter(
+        settings(tmp_path, "b3-healthy"),
+        transport=PlanningFixtureTransport("b3-healthy"),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+    app = FastAPI()
+    app.include_router(build_planning_router(adapter))
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/v1/planning/reminders/view?view={view}&limit=20&offset=0"
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["schemaVersion"] == "planning.panel.v1"
+    assert payload["domain"] == "reminder"
+    assert payload["sourceStatus"] == "current"
+    assert payload["lastSyncedAt"]
+    assert isinstance(payload["sources"], list)
+    assert payload["sources"] == [
+        {
+            "id": "native-planning",
+            "kind": "native",
+            "provider": "local",
+            "label": "Local Planning",
+            "status": "current",
+            "configured": True,
+            "lastSyncedAt": None,
+            "observedAt": payload["sources"][0]["observedAt"],
+            "calendars": [],
+        }
+    ]
+    assert payload["sources"] is not None
+
+
+def test_reminder_view_projects_observed_sources_and_hides_upstream_identity(tmp_path):
+    adapter = PlanningAdapter(
+        settings(tmp_path, "b3-healthy"),
+        transport=SourcedReminderFixtureTransport("b3-healthy"),
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+    app = FastAPI()
+    app.include_router(build_planning_router(adapter))
+
+    with TestClient(app) as client:
+        responses = {
+            view: client.get(
+                f"/api/v1/planning/reminders/view?view={view}&limit=20&offset=0"
+            )
+            for view in ("upcoming", "overdue", "delivery")
+        }
+
+    for response in responses.values():
+        payload = response.json()
+        assert response.status_code == 200
+        assert isinstance(payload["sources"], list)
+        assert {source["kind"] for source in payload["sources"]} == {"native", "external"}
+        assert {source["provider"] for source in payload["sources"]} == {"local", "icloud"}
+        serialized = json.dumps(payload, ensure_ascii=False)
+        assert "private-account-opaque" not in serialized
+        assert "private-calendar-opaque" not in serialized
+        assert "accountId" not in serialized
+        assert "correlation_id" not in serialized
 
 
 def test_reminder_derived_view_has_truthful_bounded_pagination(tmp_path):
