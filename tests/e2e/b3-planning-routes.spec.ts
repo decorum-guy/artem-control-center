@@ -191,7 +191,7 @@ test.describe("B3 Planning monitoring routes", () => {
     });
     await page.goto("/tasks");
     await expect(page.getByTestId("planning-route-health")).toHaveAttribute("data-state", "stale");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Данные от");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Данные могут быть устаревшими");
     await page.unroute("**/api/v1/planning/tasks**");
 
     await setRouteResponseState(page, "/api/v1/planning/tasks", 200, (payload) => {
@@ -206,8 +206,8 @@ test.describe("B3 Planning monitoring routes", () => {
 
     await setRouteResponseState(page, "/api/v1/planning/tasks", 503);
     await page.goto("/tasks");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
-    await expect(page.getByTestId("planning-route-health")).toContainText("ограниченный снимок Overview");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
+    await expect(page.getByTestId("planning-route-health")).toContainText("могут быть неполными");
     await expect(page.getByRole("button", { name: "Ещё" })).toHaveCount(0);
     await page.unroute("**/api/v1/planning/tasks**");
 
@@ -238,7 +238,7 @@ test.describe("B3 Planning monitoring routes", () => {
       payload.sources = null;
     });
     await page.goto("/reminders");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
     const retryButton = page.getByRole("button", { name: "Повторить" }).first();
     const failedRetryResponse = page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -246,7 +246,7 @@ test.describe("B3 Planning monitoring routes", () => {
     });
     await retryButton.tap();
     await failedRetryResponse;
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
     expect(writes).toEqual([]);
 
     await page.unroute("**/api/v1/planning/reminders/view*");
@@ -270,13 +270,13 @@ test.describe("B3 Planning monitoring routes", () => {
       await setRouteResponseState(page, routePath, 503);
       await page.goto(routeUrl);
       if (domain === "calendar") {
-        await expect(page.getByTestId("planning-route-health")).toContainText("Актуальные данные недоступны");
+        await expect(page.getByTestId("planning-route-health")).toContainText("Данные недоступны");
         await expect(page.getByTestId("planning-route-error")).toBeVisible();
         await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(0);
       } else {
-        await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
-        await expect(page.getByTestId("planning-route-preview-empty")).toContainText("В кратком снимке объектов нет");
-        await expect(page.getByTestId("planning-route-preview-empty")).toContainText("Полный список сейчас недоступен");
+        await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
+        await expect(page.getByTestId("planning-route-preview-empty")).toContainText("Нет доступных объектов");
+        await expect(page.getByTestId("planning-route-preview-empty")).toContainText("Повторите попытку");
         await expect(page.getByTestId("planning-route-empty")).toHaveCount(0);
         await expect(page.getByTestId("planning-route-preview-empty").getByRole("button", { name: "Повторить" })).toBeVisible();
       }
@@ -325,7 +325,7 @@ test.describe("B3 Planning monitoring routes", () => {
     });
     await setRouteResponseState(page, "/api/v1/planning/tasks", 503);
     await page.goto("/tasks");
-    await expect(page.getByTestId("planning-route-error")).toContainText("Не удалось получить данные");
+    await expect(page.getByTestId("planning-route-error")).toContainText("Данные недоступны");
     await expect(page.getByTestId("planning-route-empty")).toHaveCount(0);
   });
 
@@ -349,7 +349,7 @@ test.describe("B3 Planning monitoring routes", () => {
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "planning_read_unavailable" }) });
     });
     await page.goto("/tasks?theme=night");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
     await page.screenshot({ path: path.join(artifactDir, "tasks-offline-preview.png"), animations: "disabled" });
     await page.unroute("**/api/v1/planning/tasks**");
     await expectNoHorizontalOverflow(page);

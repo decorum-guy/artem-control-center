@@ -152,19 +152,19 @@ export function PlanningRouteHealth({
   const errorUnavailable = Boolean(error && error.status === 503);
   const state = errorUnavailable ? "unavailable" : sourceStatus;
   const label = preview
-    ? "Последние данные · краткий снимок"
+    ? "Последние доступные данные"
     : error && hasConfirmedContent
-      ? "Обновление не удалось"
+      ? "Не удалось обновить данные"
       : error
-        ? "Актуальные данные недоступны"
+        ? "Данные недоступны"
       : refreshing
-        ? "Обновляем данные…"
+        ? "Обновляем…"
         : state === "degraded"
           ? "Есть проблемы"
           : state === "stale"
-            ? (syncTimeLabel(lastSyncedAt) ? `Данные от ${syncTimeLabel(lastSyncedAt)}` : "Данные устарели")
+            ? "Данные могут быть устаревшими"
             : state === "offline" || state === "unavailable"
-              ? "Актуальные данные недоступны"
+              ? "Данные недоступны"
               : null;
   if (!label && !error) return null;
   return (
@@ -177,17 +177,19 @@ export function PlanningRouteHealth({
       <div className="planning-route-health__copy">
         <strong>{label ?? "Планирование"}</strong>
         {preview ? (
-          <p>Показан ограниченный снимок Overview. Фильтры и пагинация отключены, потому что полный маршрут недоступен.</p>
+          <p>Показаны последние доступные данные. Они могут быть неполными.</p>
         ) : error && hasConfirmedContent ? (
-          <p>Не удалось обновить данные маршрута. Подтверждённый список остаётся видимым; повторите чтение.</p>
+          <p>Показаны последние доступные данные. Повторите попытку.</p>
         ) : error ? (
-          <p>Не удалось получить данные маршрута. Это состояние не означает, что список пуст. Повторите чтение.</p>
+          <p>Повторите попытку.</p>
         ) : refreshing ? (
-          <p>Подтверждённый список остаётся видимым, пока приходит свежий ответ.</p>
+          <p>Показаны последние доступные данные, пока выполняется обновление.</p>
         ) : state === "degraded" ? (
-          <p>Источник отвечает с ограничениями; свежесть данных отмечена рядом с маршрутом.</p>
+          <p>Некоторые данные могут быть недоступны. Проверьте состояние ниже.</p>
+        ) : state === "stale" ? (
+          <p>{syncTimeLabel(lastSyncedAt) ? `Последнее обновление: ${syncTimeLabel(lastSyncedAt)}` : "Повторите попытку."}</p>
         ) : state !== "current" ? (
-          <p>Проверьте соединение или повторите чтение, когда Panel Agent будет доступен.</p>
+          <p>Проверьте соединение и повторите попытку.</p>
         ) : null}
       </div>
       {onRetry && (
@@ -218,8 +220,8 @@ export function PlanningRouteState({
   if (preview && empty) {
     return (
       <section className="planning-route-state planning-route-state--error" data-testid="planning-route-preview-empty">
-        <strong>В кратком снимке объектов нет</strong>
-        <p>Полный список сейчас недоступен. Повторите чтение.</p>
+        <strong>Нет доступных объектов</strong>
+        <p>Повторите попытку.</p>
         <button type="button" onClick={onRetry}>Повторить</button>
       </section>
     );
@@ -227,8 +229,8 @@ export function PlanningRouteState({
   if (error) {
     return (
       <section className="planning-route-state planning-route-state--error" data-testid="planning-route-error">
-        <strong>Не удалось получить данные</strong>
-        <p>Panel Agent не подтвердил полный ответ маршрута.</p>
+        <strong>Данные недоступны</strong>
+        <p>Повторите попытку.</p>
         <button type="button" onClick={onRetry}>Повторить</button>
       </section>
     );
@@ -237,7 +239,7 @@ export function PlanningRouteState({
     return (
       <section className="planning-route-state planning-route-state--empty" data-testid="planning-route-empty">
         <strong>Здесь пока пусто</strong>
-        <p>Для выбранного представления подтверждённых объектов нет.</p>
+        <p>Для выбранного представления пока ничего нет.</p>
       </section>
     );
   }

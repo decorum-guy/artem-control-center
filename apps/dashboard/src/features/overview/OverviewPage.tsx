@@ -138,7 +138,7 @@ export function OverviewV2Page({
       etagRef.current = result.etag;
       dispatch({ type: "save-succeeded", document: result.document });
       setAppearanceInstanceId(null);
-      showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Новая конфигурация загружена с Panel Agent.", timeoutMs: 6_000 });
+        showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Новая конфигурация загружена.", timeoutMs: 6_000 });
     } catch (error) {
       if (error instanceof OverviewLayoutApiError && error.conflict) {
         dispatch({ type: "save-conflict", message: "Панель изменилась в другом окне. Локальный черновик сохранён." });
@@ -224,11 +224,11 @@ export function OverviewV2Page({
         {!overviewEditorEnabled
           ? "Редактор панели выключен флагом продукта."
           : layoutLoading
-            ? "Проверяем доступность Panel Agent…"
+            ? "Проверяем панель…"
             : !layoutAvailable
-              ? "Сохранённая конфигурация недоступна; показывается shipped preset."
+              ? "Сохранённая конфигурация недоступна; показывается стандартная раскладка."
               : !canWrite
-                ? "Сохранение панели отключено сервером."
+                ? "Сохранение панели отключено."
                 : "Редактор панели готов."}
       </span>
     </header>

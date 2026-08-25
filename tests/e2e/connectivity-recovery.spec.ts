@@ -136,6 +136,6 @@ test("degraded connectivity remains visible when the local recovery API is unava
   await page.goto("/overview?scenario=ha-offline-policy-available");
   const surface = page.getByTestId("connectivity-recovery-surface");
   await expect(surface).toBeVisible();
-  await expect(surface).toContainText("recovery API ещё не готов");
+  await expect(surface).toContainText("восстановление недоступно");
   await expect(surface.getByRole("button", { name: "Подключиться снова" })).toBeDisabled();
 });

@@ -177,7 +177,7 @@ export function ConnectivityRecoveryButton({
     ? explainAvailability(decision.availability)
     : connectivity.available
       ? "Операция сейчас недоступна"
-      : "Локальный recovery API ещё недоступен";
+      : "Восстановление недоступно";
 
   return (
     <button
@@ -225,7 +225,7 @@ export function ConnectivityRecoverySurface({
           Home Assistant: {homeAssistantLive ? "на связи" : "нет свежего соединения"}
           {" · "}
           AliceTG: {aliceLive ? "на связи" : "нет свежего соединения"}
-          {!recoveryApiReady ? " · recovery API ещё не готов" : ""}
+          {!recoveryApiReady ? " · восстановление недоступно" : ""}
         </span>
       </div>
       <ConnectivityRecoveryButton degraded={degraded} />

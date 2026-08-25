@@ -72,7 +72,7 @@ export function HomeV2Page({
           <div className="home-v2-empty" data-testid="home-no-devices">
             <Icon name="home" />
             <strong>Домашние устройства не зарегистрированы</strong>
-            <span>В этом snapshot нет подтверждённых устройств для показа.</span>
+            <span>Устройства пока не найдены.</span>
           </div>
         )}
       </section>

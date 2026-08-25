@@ -44,10 +44,10 @@ const AvalarActionsContext = createContext<AvalarActionsContextValue | null>(nul
 
 const progressCopy: Record<AvalarActionStatus, string> = {
   requested: "Запрос зарегистрирован",
-  prechecking: "Проверяем среду и блокировки",
+  prechecking: "Проверяем доступность",
   accepted: "Операция принята",
-  running: "Выполняем на сервере",
-  verifying: "Проверяем health, сайт и revision",
+  running: "Выполняем действие",
+  verifying: "Проверяем результат",
   success: "Операция подтверждена",
   failed: "Операция завершилась ошибкой"
 };
@@ -90,7 +90,7 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
       correlationId: next.meta,
       severity: next.tone,
       title: next.title,
-      detail: next.meta ? `${next.message} · ${next.meta}` : next.message,
+      detail: next.message,
       timeoutMs,
       testId: "avalar-action-notice"
     });
@@ -135,7 +135,7 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
     if (!decision) {
       showNotice({
         title: actionTitle,
-        message: "AVALAR action API пока недоступен.",
+        message: "Действие AVALAR сейчас недоступно.",
         tone: "warning"
       }, 6_000);
       return;
@@ -205,7 +205,7 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
       } else {
         showNotice({
           title: actionTitle,
-          message: finished.error ?? "action_failed",
+          message: "Операция не выполнена.",
           tone: "error",
           meta: `Операция ${finished.correlationId.slice(0, 8)}`
         }, 10_000);

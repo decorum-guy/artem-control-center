@@ -285,7 +285,7 @@ export function App() {
         )}
 
         {error && <p className="global-error">{error}</p>}
-        {!snapshot && !error && <p className="loading">Собираем fixture snapshot…</p>}
+        {!snapshot && !error && <p className="loading">Загружаем данные…</p>}
         <section className="dev-widget-grid" aria-label="Automatically reconciled widgets">
           {snapshot &&
             widgets.map((widget) => {
@@ -314,7 +314,7 @@ export function App() {
   return (
     <div className={appClassName}>
       {error && <p className="global-error">{error}</p>}
-      {!snapshot && !error && <p className="loading">Собираем локальный snapshot…</p>}
+      {!snapshot && !error && <p className="loading">Загружаем данные…</p>}
       {snapshot && (
         <ProductShell route={route} snapshot={snapshot} onNavigate={navigate}>
           {!v2DensityRoute && ((route !== "/overview" || !overviewV2Enabled) && (route === "/overview" || route === "/home" || route === "/services")) && (

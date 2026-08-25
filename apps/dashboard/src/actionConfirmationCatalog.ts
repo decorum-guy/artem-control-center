@@ -36,7 +36,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Перезапустить Stage?",
     target: "AVALAR Stage",
     environment: "stage",
-    description: "Перезапустим текущий Stage без git pull, затем повторно проверим health и развёрнутую revision.",
+    description: "Перезапустим Stage и проверим его состояние.",
     confirmLabel: "Перезапустить Stage"
   },
   "avalar.stage.deploy": {
@@ -46,7 +46,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Задеплоить Stage?",
     target: "AVALAR Stage",
     environment: "stage",
-    description: "Обновим Stage из утверждённой ветки GitHub и после deploy проверим live, ready, сайт и revision.",
+    description: "Обновим Stage и проверим его состояние после запуска.",
     confirmLabel: "Задеплоить Stage"
   },
   "avalar.main.restart": {
@@ -56,7 +56,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Перезапустить production?",
     target: "AVALAR Main",
     environment: "production",
-    description: "Это production. Перезапустим Main без смены развёрнутой revision и затем проверим его состояние.",
+    description: "Это production. Перезапустим Main без обновления версии.",
     confirmLabel: "Перезапустить Main",
     requiredPhrase: "RESTART MAIN"
   },
@@ -67,7 +67,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Задеплоить production?",
     target: "AVALAR Main",
     environment: "production",
-    description: "Это production deploy. Запустим только зарегистрированный Main deploy и после него проверим health, сайт и новую revision.",
+    description: "Это production. Обновим Main и проверим его состояние после запуска.",
     confirmLabel: "Задеплоить Main",
     requiredPhrase: "DEPLOY MAIN"
   },
@@ -78,7 +78,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Включить кофемашину?",
     target: "Кофемашина",
     environment: "Home Assistant",
-    description: "Отправим разрешённую команду включения и покажем успех только после подтверждения состояния Home Assistant.",
+    description: "Включим кофемашину и покажем успех только после подтверждения её состояния.",
     confirmLabel: "Включить кофемашину"
   },
   "home.kettle.boil": {
@@ -88,7 +88,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Вскипятить чайник?",
     target: "Чайник",
     environment: "Home Assistant",
-    description: "Запустим зарегистрированную команду кипячения и дождёмся подтверждения состояния Home Assistant.",
+    description: "Запустим кипячение и покажем успех только после подтверждения состояния чайника.",
     confirmLabel: "Вскипятить"
   },
   "system.runtime.shutdown": {
@@ -96,9 +96,9 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     level: "simple",
     tone: "standard",
     title: "Полностью закрыть панель?",
-    target: "Локальный Windows kiosk-runtime",
+    target: "Локальная панель Windows",
     environment: "система",
-    description: "Остановим окно панели и локальные процессы runtime. Скрытие панели остаётся отдельной командой.",
+    description: "Закроем панель и локальные процессы. Скрытие панели остаётся отдельной командой.",
     confirmLabel: "Полностью закрыть"
   },
   "system.rog_g703.hibernate": {
@@ -107,8 +107,8 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     tone: "standard",
     title: "Перевести ASUS ROG G703GI в гибернацию?",
     target: "ASUS ROG G703GI",
-    environment: "Windows S4",
-    description: "Отправим только фиксированную команду гибернации Windows и дождёмся, когда ASUS перестанет отвечать.",
+    environment: "Windows",
+    description: "Переведём ASUS в гибернацию и дождёмся завершения перехода.",
     confirmLabel: "Гибернация"
   },
   "planning.reminders.complete": {
@@ -118,7 +118,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Явно завершить напоминание?",
     target: "Напоминание",
     environment: "Planning · AliceTG Bot",
-    description: "Это изменит жизненный цикл напоминания на «Завершено». «Доставлено» не означает завершено; доставка и завершение — разные состояния.",
+    description: "Это завершит напоминание. Доставка не меняет его статус автоматически.",
     confirmLabel: "Завершить напоминание"
   },
   "planning.reminders.cancel": {
@@ -128,7 +128,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Явно отменить напоминание?",
     target: "Напоминание",
     environment: "Planning · AliceTG Bot",
-    description: "Это изменит жизненный цикл напоминания на «Отменено». «Доставлено» не означает завершено; доставка и завершение — разные состояния.",
+    description: "Это отменит напоминание. Доставка не меняет его статус автоматически.",
     confirmLabel: "Отменить напоминание"
   },
   "planning.tasks.complete": {
@@ -138,7 +138,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Завершить задачу?",
     target: "Задача",
     environment: "Planning · AliceTG Bot",
-    description: "Это явно переведёт задачу в состояние «Завершено».",
+    description: "Задача будет помечена как завершённая.",
     confirmLabel: "Завершить задачу"
   },
   "planning.tasks.archive": {
@@ -148,7 +148,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Архивировать задачу?",
     target: "Задача",
     environment: "Planning · AliceTG Bot",
-    description: "Это выполнит логическое архивирование задачи. Физическое удаление строки базы данных не выполняется.",
+    description: "Задача исчезнет из активных списков.",
     confirmLabel: "Архивировать задачу"
   },
   "planning.calendar.delete": {
@@ -158,7 +158,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     title: "Удалить локальное событие?",
     target: "Событие календаря",
     environment: "Planning · AliceTG Bot",
-    description: "Это выполнит логическое удаление native local-only события. Внешний календарь не изменяется.",
+    description: "Удалим локальное событие. Внешний календарь не изменится.",
     confirmLabel: "Удалить событие"
   }
 };

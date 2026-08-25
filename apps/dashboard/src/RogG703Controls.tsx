@@ -20,7 +20,7 @@ export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
     <section className="rog-g703-controls" data-testid="rog-g703-controls" aria-labelledby="rog-g703-title">
       <header className="rog-g703-controls__header">
         <div>
-          <p className="section-kicker">Фиксированная интеграция · Windows</p>
+        <p className="section-kicker">Устройство · Windows</p>
           <h2 id="rog-g703-title">{service.title}</h2>
         </div>
         <HealthMark health={service.health} compact />
@@ -60,10 +60,10 @@ export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
       </div>
 
       <p className="rog-g703-controls__note">
-        Выключение здесь означает только гибернацию Windows S4. Полный S5 shutdown не предлагается.
+        Кнопка переводит Windows в гибернацию. Полное выключение здесь недоступно.
       </p>
       {!controller.apiAvailable && (
-        <p className="rog-g703-controls__unavailable">Панель не получила доступность фиксированного ASUS action API.</p>
+        <p className="rog-g703-controls__unavailable">Управление ASUS ROG сейчас недоступно.</p>
       )}
     </section>
   );

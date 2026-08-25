@@ -87,13 +87,13 @@ test.describe("PR9 Planning visual/module foundation", () => {
 
     await mutatePlanningRoute(page, "/api/v1/planning/tasks", (payload) => { payload.sourceStatus = "stale"; });
     await page.goto("/tasks?theme=day");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Данные от");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Данные могут быть устаревшими");
     await capture(page, directory, "planning-tasks-stale");
     await page.unroute("**/api/v1/planning/tasks**");
 
     await failPlanningRoute(page, "/api/v1/planning/tasks");
     await page.goto("/tasks?theme=night");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние данные · краткий снимок");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
     await capture(page, directory, "planning-tasks-offline");
     await page.unroute("**/api/v1/planning/tasks**");
 

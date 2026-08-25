@@ -54,7 +54,7 @@ export function SettingsV2Page({
       <RouteHeader
         eyebrow="Панель"
         title="Настройки"
-        description="Внешний вид и доступные возможности панели. Production credentials здесь не хранятся."
+        description="Внешний вид и доступные возможности панели."
       />
 
       <section className="settings-v2-appearance" aria-labelledby="settings-v2-appearance-title">
@@ -127,7 +127,7 @@ export function SettingsV2Page({
             onClick={() => setOpenSheet("access")}
           />
           <SettingsSummaryRow
-            title="Runtime"
+            title="Управление панелью"
             summary={runtimeSummary(runtime.availability)}
             stateLabel={runtimeStateLabel(runtime.availability)}
             stateTone={runtime.availability === "unavailable" ? "unavailable" : "neutral"}
@@ -163,7 +163,7 @@ function SettingsSheet({
         testId="settings-coffee-sheet"
         eyebrow="Кофемашина"
         title="Время"
-        description="Общие значения для панели и Telegram-бота. Сохранение подтверждается Home Assistant."
+        description="Общие значения для панели и Telegram-бота."
         onClose={onClose}
       >
         <div className="settings-v2-sheet-content" data-testid="coffee-settings">
@@ -197,7 +197,7 @@ function SettingsSheet({
         testId="settings-access-sheet"
         eyebrow="Безопасность"
         title="Доступ"
-        description="Профиль и доступность операций определяет существующая политика Panel Agent."
+        description="Профиль определяет доступные операции."
         onClose={onClose}
       >
         <div className="settings-v2-sheet-content settings-v2-access-content">
@@ -211,8 +211,8 @@ function SettingsSheet({
     <Sheet
       testId="settings-runtime-sheet"
       eyebrow="Панель"
-      title="Runtime"
-      description="Фиксированные действия локального kiosk-runtime. Произвольных команд здесь нет."
+      title="Управление панелью"
+      description="Фиксированные действия панели. Произвольные команды недоступны."
       onClose={onClose}
     >
       <div className="settings-v2-sheet-content settings-v2-runtime-content">
@@ -277,9 +277,9 @@ function accessStateLabel(status: AccessStatus | null, available: boolean): stri
 }
 
 function runtimeSummary(availability: "loading" | "available" | "unavailable"): string {
-  if (availability === "available") return "Фиксированные действия Panel Agent";
-  if (availability === "loading") return "Проверяем состояние kiosk-runtime";
-  return "Локальный kiosk-runtime недоступен";
+  if (availability === "available") return "Фиксированные действия панели";
+  if (availability === "loading") return "Проверяем состояние панели";
+  return "Панель недоступна";
 }
 
 function runtimeStateLabel(availability: "loading" | "available" | "unavailable"): string {

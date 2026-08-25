@@ -287,7 +287,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByText("Старое событие 1")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем данные");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем…");
     const during = await page.locator(".planning-route-workzone").boundingBox();
     expect(during?.height).toBeGreaterThanOrEqual((before?.height ?? 1) * 0.9);
 
@@ -309,8 +309,8 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect.poll(() => calendar.backgroundReads).toBe(1);
     await expect(page.getByText("Старое событие 1")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(2);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Обновление не удалось");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Подтверждённый список остаётся видимым");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Не удалось обновить данные");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Показаны последние доступные данные");
     await expect(page.getByTestId("planning-route-error")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-empty")).toHaveCount(0);
 
@@ -331,9 +331,9 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect.poll(() => calendar.requests).toBeGreaterThan(0);
     await expect(page.getByTestId("planning-route-error")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Актуальные данные недоступны");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Это состояние не означает, что список пуст");
-    await expect(page.getByTestId("planning-route-health")).not.toContainText("Подтверждённый список остаётся видимым");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Данные недоступны");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Повторите попытку");
+    await expect(page.getByTestId("planning-route-health")).not.toContainText("Показаны последние доступные данные");
   });
 
   test("Calendar month-change failure does not claim old rows remain visible", async ({ page }) => {
@@ -350,8 +350,8 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     calendar.release.resolve();
     await expect(page.getByTestId("planning-route-error")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Актуальные данные недоступны");
-    await expect(page.getByTestId("planning-route-health")).not.toContainText("Подтверждённый список остаётся видимым");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Данные недоступны");
+    await expect(page.getByTestId("planning-route-health")).not.toContainText("Показаны последние доступные данные");
   });
 
   test("Calendar query identity changes do not show old-month rows under a new month", async ({ page }) => {
@@ -415,7 +415,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect.poll(() => tasks.requests).toBe(3);
     await expect(page.getByText("Старая задача 1")).toBeVisible();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем данные");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем…");
     tasks.release.resolve();
     await expect(page.getByText("Новая задача 1")).toBeVisible();
     await expect(page.getByText("Старая задача 1")).toHaveCount(0);
@@ -469,7 +469,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect.poll(() => reminders.requests).toBeGreaterThanOrEqual(2);
     await expect(page.getByText("Старое напоминание 1")).toBeVisible();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем данные");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем…");
     reminders.release.resolve();
     await expect(page.getByText("Новое напоминание 1")).toBeVisible();
     await expect(page.getByText("Старое напоминание 1")).toHaveCount(0);

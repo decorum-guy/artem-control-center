@@ -146,7 +146,7 @@ function ProjectFilterSheet({
     <PlanningSheet
       title="Проект"
       eyebrow="Фильтр задач"
-      description="Показаны только проекты, подтверждённые Planning read API."
+      description="Выберите проект для списка задач."
       onClose={onClose}
       testId="planning-project-sheet"
     >
@@ -274,7 +274,7 @@ function TaskMutationSheet({
     <PlanningSheet
       title={mode === "create" ? "Новая задача" : "Изменить задачу"}
       eyebrow="Задача · проверка перед сохранением"
-      description="Свободный текст сначала превращается в видимое предложение. Неоднозначная дата или время блокирует сохранение. Примеры: «завтра купить продукты» и «завтра в 18:30 отправить отчёт»."
+      description="Введите задачу. Неоднозначная дата или время блокирует сохранение. Примеры: «завтра купить продукты» и «завтра в 18:30 отправить отчёт»."
       onClose={onClose}
       testId="planning-task-mutation"
     >
@@ -306,7 +306,7 @@ function TaskMutationSheet({
           </section>
         )}
         <p className="planning-detail-note">
-          {mode === "edit" && task ? `Текущая запись: ${task.title}. Канонические поля заменятся только после ответа сервера.` : "Сохранить можно только однозначное предложение задачи."}
+          {mode === "edit" && task ? `Текущая запись: ${task.title}. Изменения появятся после сохранения.` : "Сохранить можно только однозначную задачу."}
         </p>
       </div>
       <div className="planning-sheet-actions">
@@ -444,7 +444,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         id: `planning.task.access.${action}`,
         severity: "warning",
         title: "Действие недоступно",
-        detail: "Текущий профиль не объявляет эту Planning capability. Запрос не отправлен."
+        detail: "Для этой операции нет разрешения в текущем профиле. Запрос не отправлен."
       });
       return false;
     }
@@ -454,7 +454,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         id: `planning.task.access.${action}`,
         severity: "warning",
         title: "Действие недоступно",
-        detail: "Текущий профиль Control Center запрещает эту операцию. Запрос не отправлен."
+        detail: "Эта операция запрещена текущим профилем. Запрос не отправлен."
       });
     }
     return allowed;
@@ -481,7 +481,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         id: `planning.task.${action}.${result.object.id}`,
         severity: "success",
         title: action === "create" ? "Задача создана" : "Задача изменена",
-        detail: "Канонический ответ сервера заменил локальное состояние."
+        detail: "Изменения сохранены."
       });
     } catch (error) {
       if (error instanceof PlanningMutationError && error.reconciledObject) {
@@ -492,7 +492,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
           id: `planning.task.reconciled.${error.reconciledObject.id}`,
           severity: "warning",
           title: "Результат подтверждён чтением",
-          detail: "Транспорт не подтвердил запись вовремя; состояние сверено с каноническим сервером без показа ложного успеха."
+          detail: "Результат сохранения проверен."
         });
         return;
       }
@@ -501,8 +501,8 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         severity: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "warning" : "error",
         title: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "Задача изменилась" : "Результат не подтверждён",
         detail: error instanceof PlanningMutationError && error.mutationCode === "conflict"
-          ? "Канонический сервер отклонил устаревшую версию. Сначала перечитайте запись."
-          : "Успех не показан. Повторите чтение и проверьте каноническое состояние перед новой попыткой."
+          ? "Запись уже изменилась. Сначала перечитайте её."
+          : "Результат не подтверждён. Повторите чтение перед новой попыткой."
       });
     }
   }
@@ -533,7 +533,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         id: `planning.task.${action}.${result.object.id}`,
         severity: "success",
         title: action === "complete" ? "Задача завершена" : "Задача архивирована",
-        detail: action === "archive" ? "Задача логически удалена из активных представлений; физического удаления нет." : "Это явное изменение жизненного цикла задачи."
+        detail: action === "archive" ? "Задача убрана из активных списков." : "Статус задачи изменён."
       });
     } catch (error) {
       if (error instanceof PlanningMutationError && error.reconciledObject) {
@@ -543,7 +543,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
           id: `planning.task.reconciled.${target.id}`,
           severity: "warning",
           title: "Результат подтверждён чтением",
-          detail: "Транспорт не подтвердил запись вовремя; локальное состояние заменено каноническим readback."
+          detail: "Результат изменения проверен."
         });
         return;
       }
@@ -551,7 +551,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         id: `planning.task.action-uncertain.${target.id}`,
         severity: "error",
         title: "Результат не подтверждён",
-        detail: "Успех не показан. Перечитайте задачу перед повторной попыткой."
+        detail: "Результат не подтверждён. Повторите чтение перед новой попыткой."
       });
     } finally {
       lifecyclePendingRef.current = false;
@@ -566,7 +566,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   return (
     <PlanningRouteFrame
       module={tasksModule}
-      description="Задачи по сроку, приоритету и проекту. Изменения доступны только при совместном разрешении маршрута, rollout, источника и canonical capability."
+      description="Задачи по сроку, приоритету и проекту."
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       error={routeRead.error}
@@ -734,7 +734,7 @@ function CalendarMutationSheet({
     <PlanningSheet
       title={mode === "create" ? "Новое событие" : "Изменить событие"}
       eyebrow="Календарь · проверка перед сохранением"
-      description="Фраза проходит через канонический Planning parser. Неоднозначное время блокирует сохранение; внешние календари остаются только для чтения."
+      description="Сохранить можно только однозначное событие. Внешние календари доступны только для просмотра."
       onClose={onClose}
       testId="planning-calendar-mutation"
     >
@@ -775,7 +775,7 @@ function CalendarMutationSheet({
           </section>
         )}
         <p className="planning-detail-note">
-          {mode === "edit" && event ? `Текущая запись: ${event.title}. Заметки и место не меняются этим parser-driven edit.` : "Сохранить можно только однозначное timed или all-day предложение."}
+          {mode === "edit" && event ? `Текущая запись: ${event.title}. Заметки и место не меняются при этом редактировании.` : "Сохранить можно только однозначное событие."}
         </p>
       </div>
       <div className="planning-sheet-actions">
@@ -904,7 +904,7 @@ function CalendarDetailSheet({
         </div>
       )}
       <p className="planning-detail-note">
-        {deleted ? "Событие логически удалено; каноническая tombstone-запись остаётся доступной по ID." : localEvent ? "Native local-only событие. Провайдеры и внешняя синхронизация не затрагиваются." : "Внешний календарь · только чтение. Редактирование и удаление здесь недоступны."}
+        {deleted ? "Событие удалено." : localEvent ? "Локальное событие. Внешняя синхронизация не используется." : "Внешний календарь · только просмотр. Редактирование и удаление недоступны."}
       </p>
     </PlanningSheet>
   );
@@ -1026,7 +1026,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         id: `planning.calendar.access.${action}`,
         severity: "warning",
         title: "Действие недоступно",
-        detail: "Текущий профиль не объявляет эту Planning capability. Запрос не отправлен."
+        detail: "Для этой операции нет разрешения в текущем профиле. Запрос не отправлен."
       });
       return false;
     }
@@ -1036,7 +1036,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         id: `planning.calendar.access.${action}`,
         severity: "warning",
         title: "Действие недоступно",
-        detail: "Текущий профиль Control Center запрещает эту операцию. Запрос не отправлен."
+        detail: "Эта операция запрещена текущим профилем. Запрос не отправлен."
       });
     }
     return allowed;
@@ -1064,7 +1064,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         id: `planning.calendar.${action}.${result.object.id}`,
         severity: "success",
         title: action === "create" ? "Событие создано" : "Событие изменено",
-        detail: "Канонический ответ сервера заменил локальное состояние."
+        detail: "Изменения сохранены."
       });
     } catch (error) {
       if (error instanceof PlanningMutationError && error.reconciledObject) {
@@ -1075,7 +1075,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           id: `planning.calendar.reconciled.${target?.id ?? "create"}`,
           severity: "warning",
           title: "Результат подтверждён чтением",
-          detail: "Транспорт не подтвердил запись вовремя; состояние сверено по canonical event read-by-ID."
+          detail: "Результат сохранения проверен."
         });
       } else {
         const conflict = error instanceof PlanningMutationError && error.mutationCode === "conflict";
@@ -1119,7 +1119,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         id: `planning.calendar.delete.${target.id}`,
         severity: "success",
         title: "Событие удалено",
-        detail: "Событие логически tombstoned; физической строки и внешнего календаря это не удаляет."
+        detail: "Событие удалено."
       });
     } catch (error) {
       if (error instanceof PlanningMutationError && error.reconciledObject) {
@@ -1129,7 +1129,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           id: `planning.calendar.delete.reconciled.${target.id}`,
           severity: "warning",
           title: "Удаление подтверждено чтением",
-          detail: "Канонический tombstone подтверждён через read-by-ID."
+          detail: "Удаление подтверждено."
         });
       } else {
         showNotice({
@@ -1378,7 +1378,7 @@ function ReminderMutationSheet({
     <PlanningSheet
       title={mode === "create" ? "Новое напоминание" : "Изменить напоминание"}
       eyebrow="Напоминание · проверка перед сохранением"
-      description="Свободный текст сначала превращается в видимое предложение. Неоднозначное время не угадывается."
+      description="Введите напоминание. Неоднозначное время нужно уточнить."
       onClose={onClose}
       testId="planning-reminder-mutation"
     >
@@ -1414,7 +1414,7 @@ function ReminderMutationSheet({
           </section>
         )}
         <p className="planning-detail-note">
-          {mode === "edit" && reminder ? `Текущая запись: ${reminder.title}. Сохранение заменит её только после ответа канонического сервера.` : "Сохранить можно только однозначное предложение напоминания."}
+          {mode === "edit" && reminder ? `Текущая запись: ${reminder.title}. Изменения появятся после сохранения.` : "Сохранить можно только однозначное напоминание."}
         </p>
       </div>
       <div className="planning-sheet-actions">
@@ -1564,7 +1564,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         id: `planning.reminder.access.${action}`,
         severity: "warning",
         title: "Действие недоступно",
-        detail: "Текущий профиль не объявляет эту Planning capability. Запрос не отправлен."
+        detail: "Для этой операции нет разрешения в текущем профиле. Запрос не отправлен."
       });
       return false;
     }
@@ -1574,7 +1574,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         id: `planning.reminder.access.${action}`,
         severity: "warning",
         title: "Действие недоступно",
-        detail: "Текущий профиль Control Center запрещает эту операцию. Запрос не отправлен."
+        detail: "Эта операция запрещена текущим профилем. Запрос не отправлен."
       });
     }
     return allowed;
@@ -1601,7 +1601,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         id: `planning.reminder.${action}.${result.object.id}`,
         severity: "success",
         title: action === "create" ? "Напоминание создано" : "Напоминание изменено",
-        detail: "Канонический ответ сервера заменил локальное состояние."
+        detail: "Изменения сохранены."
       });
     } catch (error) {
       if (error instanceof PlanningMutationError && error.reconciledObject) {
@@ -1612,7 +1612,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
           id: `planning.reminder.reconciled.${error.reconciledObject.id}`,
           severity: "warning",
           title: "Результат подтверждён чтением",
-          detail: "Транспорт не подтвердил запись вовремя; состояние сверено с каноническим сервером без показа ложного успеха."
+          detail: "Результат сохранения проверен."
         });
         return;
       }
@@ -1621,8 +1621,8 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         severity: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "warning" : "error",
         title: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "Напоминание изменилось" : "Результат не подтверждён",
         detail: error instanceof PlanningMutationError && error.mutationCode === "conflict"
-          ? "Канонический сервер отклонил устаревшую версию. Сначала перечитайте запись."
-          : "Успех не показан. Повторите чтение и проверьте каноническое состояние перед новой попыткой."
+          ? "Запись уже изменилась. Сначала перечитайте её."
+          : "Результат не подтверждён. Повторите чтение перед новой попыткой."
       });
     }
   }
@@ -1664,7 +1664,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
           id: `planning.reminder.reconciled.${reminderId}`,
           severity: "warning",
           title: "Результат подтверждён чтением",
-          detail: "Транспорт не подтвердил запись вовремя; локальное состояние заменено каноническим readback."
+          detail: "Результат изменения проверен."
         });
         return;
       }

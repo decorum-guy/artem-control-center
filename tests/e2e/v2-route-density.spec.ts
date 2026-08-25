@@ -286,9 +286,9 @@ test.describe("Control Center V2 PR7 route density", () => {
       services: [...addRog(snapshot, "online").services, runtimeService("healthy")]
     }));
     await page.goto("/system");
-    await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Panel Agent runtime");
+    await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Панель");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("В норме");
-    await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Runtime reachable");
+    await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Панель работает нормально");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("проверено только что");
 
     await page.unroute("**/api/v1/snapshot**");
@@ -298,9 +298,9 @@ test.describe("Control Center V2 PR7 route density", () => {
     }));
     await page.goto("/system");
     await expect(page.getByTestId("system-aggregate-strip")).toContainText("Требуют внимания · 2");
-    await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Panel Agent runtime");
+    await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Панель");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Требует внимания");
-    await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Runtime requires attention");
+    await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Панель требует внимания");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("проверено только что");
     await expect(page.getByTestId("system-runtime-zone")).not.toContainText("CPU");
     await expect(page.getByTestId("system-runtime-zone")).not.toContainText("RAM");

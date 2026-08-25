@@ -104,7 +104,14 @@ test.describe("Issue #112 Calendar Slice A", () => {
     await expect(page.getByTestId("planning-calendar-today-control").getByRole("button", { name: "Сегодня" })).toBeVisible();
     const monthControlsBox = await page.getByTestId("planning-calendar-month-controls").boundingBox();
     const todayControlBox = await page.getByTestId("planning-calendar-today-control").boundingBox();
+    const monthColumnBox = await page.locator(".calendar-month").boundingBox();
+    const selectedDayColumnBox = await page.getByTestId("planning-calendar-selected-day").boundingBox();
     expect(todayControlBox?.x).toBeGreaterThan((monthControlsBox?.x ?? 0) + (monthControlsBox?.width ?? 0));
+    expect(Math.abs((monthControlsBox?.x ?? 0) - (monthColumnBox?.x ?? 0))).toBeLessThanOrEqual(1);
+    expect(monthControlsBox?.width ?? 0).toBeLessThan((monthColumnBox?.width ?? 0) * 0.5);
+    const todayRight = (todayControlBox?.x ?? 0) + (todayControlBox?.width ?? 0);
+    const selectedDayRight = (selectedDayColumnBox?.x ?? 0) + (selectedDayColumnBox?.width ?? 0);
+    expect(Math.abs(todayRight - selectedDayRight)).toBeLessThanOrEqual(1);
     await expect(page.getByTestId("route-calendar")).not.toContainText("Planning read API");
     await expect(page.getByTestId("route-calendar")).not.toContainText("Выбранный день");
 

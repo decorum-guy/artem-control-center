@@ -19,11 +19,11 @@ import {
 type AvailabilityMap = Record<RogG703ActionId, RogG703ActionAvailability>;
 
 export const rogG703StatusCopy: Record<RogG703DeviceStatus, { label: string; detail: string }> = {
-  online: { label: "В сети", detail: "Companion ASUS отвечает" },
-  offline: { label: "Не в сети", detail: "Сон или гибернация — по сети их не различаем" },
+  online: { label: "В сети", detail: "ASUS отвечает" },
+  offline: { label: "Не в сети", detail: "Устройство не отвечает" },
   waking: { label: "Пробуждение", detail: "Ждём, когда ASUS появится в сети" },
-  hibernating: { label: "Гибернация", detail: "Ждём переход Windows в S4" },
-  unavailable: { label: "Недоступен", detail: "Проверка companion сейчас недоступна" }
+  hibernating: { label: "Гибернация", detail: "Ждём завершения перехода" },
+  unavailable: { label: "Недоступен", detail: "Проверка устройства сейчас недоступна" }
 };
 
 const actionProgressCopy: Record<RogG703ActionExecution["status"], string> = {
@@ -170,7 +170,7 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
       "progress",
       actionId === ROG_G703_WAKE_ACTION
         ? "Отправляем пакет пробуждения…"
-        : "Отправляем команду гибернации Windows S4…"
+        : "Отправляем команду гибернации…"
     );
 
     try {

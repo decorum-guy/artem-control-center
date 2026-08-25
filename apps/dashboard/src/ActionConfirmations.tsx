@@ -216,13 +216,6 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
               <strong>{pending.target ?? pending.spec.target}</strong>
             </div>
 
-            {pending.revision && (
-              <div className="action-confirmation__revision">
-                <span>Текущая revision</span>
-                <code>{pending.revision}</code>
-              </div>
-            )}
-
             <p id="action-confirmation-description" className="action-confirmation__description">
               {pending.spec.description}
             </p>

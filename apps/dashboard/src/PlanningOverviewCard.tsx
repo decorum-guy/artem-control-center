@@ -117,7 +117,7 @@ export function PlanningOverviewCard({
           </div>
           <span className="planning-card__health">{health.label}</span>
         </header>
-        <p className="planning-card__unavailable-copy">Live-данные Planning не подключены к snapshot.</p>
+        <p className="planning-card__unavailable-copy">Данные пока недоступны. Повторите попытку.</p>
       </section>
     );
   }

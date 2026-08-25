@@ -161,11 +161,11 @@ test.describe("B2 Planning Overview", () => {
       }
       if (label === "degraded") await expect(card).toContainText("Есть проблемы");
       if (label === "stale") {
-        await expect(card).toContainText("Данные от");
+        await expect(card).toContainText("Данные могут быть устаревшими");
         await expect(card).not.toContainText("через");
       }
       if (label === "offline") {
-        await expect(card).toContainText("Актуальные данные недоступны");
+        await expect(card).toContainText("Данные недоступны");
         await expect(card).not.toContainText("через");
       }
       if (label === "offline-empty") {

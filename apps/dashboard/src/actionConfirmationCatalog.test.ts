@@ -29,7 +29,7 @@ describe("action confirmation catalog", () => {
     expect(actionConfirmationCatalog["system.rog_g703.hibernate"]).toMatchObject({
       title: "Перевести ASUS ROG G703GI в гибернацию?",
       target: "ASUS ROG G703GI",
-      environment: "Windows S4"
+      environment: "Windows"
     });
   });
 
@@ -51,16 +51,16 @@ describe("action confirmation catalog", () => {
       title: "Явно отменить напоминание?",
       confirmLabel: "Отменить напоминание"
     });
-    expect(actionConfirmationCatalog["planning.reminders.complete"].description).toContain("«Доставлено» не означает завершено");
-    expect(actionConfirmationCatalog["planning.reminders.cancel"].description).toContain("«Доставлено» не означает завершено");
+    expect(actionConfirmationCatalog["planning.reminders.complete"].description).toContain("Доставка не меняет его статус");
+    expect(actionConfirmationCatalog["planning.reminders.cancel"].description).toContain("Доставка не меняет его статус");
   });
 
-  it("uses current shared confirmation for task completion and logical archive", () => {
+  it("uses current shared confirmation for task completion and owner-facing archive", () => {
     expect(actionConfirmationCatalog["planning.tasks.complete"]).toMatchObject({
       level: "simple",
       title: "Завершить задачу?",
       confirmLabel: "Завершить задачу"
     });
-    expect(actionConfirmationCatalog["planning.tasks.archive"].description).toContain("Физическое удаление");
+    expect(actionConfirmationCatalog["planning.tasks.archive"].description).toBe("Задача исчезнет из активных списков.");
   });
 });

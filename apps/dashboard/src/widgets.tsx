@@ -309,18 +309,15 @@ export function HomeDeviceWidget({
 export function ServiceRow({ service }: { service: ServiceSnapshot }) {
   const incidents = service.presentation?.incidents ?? (service.health === "healthy" ? 0 : 1);
   const sourceLabels = {
-    live: "live",
-    cached: "cache",
-    fixture: "fixture",
-    stale: "stale",
+    live: "актуальные данные",
+    cached: "последние доступные данные",
+    fixture: "тестовый режим",
+    stale: "данные могут быть устаревшими",
     unavailable: "нет данных"
   } as const;
   const avalar = useAvalarActions();
   const { explainAvailability } = useAccess();
   const avalarActions = avalar.actionsFor(service);
-  const serviceData = service.data as Record<string, unknown>;
-  const commit = typeof serviceData.commit === "string" ? serviceData.commit : null;
-  const deployedAt = typeof serviceData.deployedAt === "string" ? serviceData.deployedAt : null;
 
   return (
     <article className={`service-row ${service.id === "avalar-site-main" ? "service-row--production" : ""}`} data-testid={`widget-${service.id}`}>
@@ -329,12 +326,6 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
         <div>
           <h3>{service.title}</h3>
           <p>{service.summary}</p>
-          {commit && (
-            <p className="service-row__revision">
-              {commit.slice(0, 10)}
-              {deployedAt ? ` · ${new Date(deployedAt).toLocaleString("ru-RU")}` : ""}
-            </p>
-          )}
         </div>
       </div>
       <dl className="service-row__facts">
@@ -351,7 +342,7 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
           <dd>{sourceLabels[service.source]}</dd>
         </div>
         <div>
-          <dt>Latency</dt>
+          <dt>Отклик</dt>
           <dd>
             {typeof service.presentation?.latencyMs === "number"
               ? `${service.presentation.latencyMs} ms`
@@ -359,7 +350,7 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
           </dd>
         </div>
         <div>
-          <dt>Incidents</dt>
+          <dt>Проблемы</dt>
           <dd>{incidents}</dd>
         </div>
       </dl>
@@ -378,7 +369,7 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
               type="button"
               className={`service-action service-action--${decision?.availability ?? "unavailable"}`}
               disabled={!canPress}
-              title={decision ? explainAvailability(decision.availability) : "Action API недоступен"}
+              title={decision ? explainAvailability(decision.availability) : "Действие недоступно"}
               onClick={() => void avalar.run(service, actionId)}
             >
               {locked ? "🔒 " : ""}{avalarActionTitles[actionId]}

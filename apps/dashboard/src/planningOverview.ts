@@ -329,7 +329,6 @@ export function planningHealthPresentation(
     return { state: "unavailable", label: "Планирование недоступно", hasLastGoodData: false };
   }
 
-  const syncedAt = formatPlanningSyncedAt(snapshot.lastSyncedAt);
   switch (snapshot.sourceStatus) {
     case "current":
       return { state: "current", label: null, hasLastGoodData: hasPlanningItems(snapshot) };
@@ -338,13 +337,13 @@ export function planningHealthPresentation(
     case "stale":
       return {
         state: "stale",
-        label: syncedAt ? `Данные от ${syncedAt}` : "Данные устарели",
+        label: "Данные могут быть устаревшими",
         hasLastGoodData: hasPlanningItems(snapshot)
       };
     case "offline":
       return {
         state: "offline",
-        label: syncedAt ? `Актуальные данные недоступны · от ${syncedAt}` : "Актуальные данные недоступны",
+        label: "Данные недоступны",
         hasLastGoodData: hasPlanningItems(snapshot)
       };
   }
