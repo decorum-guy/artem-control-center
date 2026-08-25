@@ -83,7 +83,7 @@ test("runtime shutdown uses the trusted custom confirmation and cancel has no PO
   await shutdown.tap();
   const dialog = page.getByTestId("action-confirmation");
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText("Локальный Windows kiosk-runtime");
+  await expect(dialog).toContainText("Локальная панель Windows");
   await dialog.getByRole("button", { name: "Отмена" }).tap();
   await expect(dialog).toBeHidden();
   expect(shutdownPosts).toBe(0);
