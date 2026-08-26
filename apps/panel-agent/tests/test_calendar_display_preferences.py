@@ -125,9 +125,29 @@ def test_same_revision_writes_are_serialized_and_only_one_commits(tmp_path, monk
 
     path = tmp_path / "calendar-colors.json"
     store = CalendarDisplayPreferencesStore(str(path), writes_enabled=True)
+
+    class ObservedStoreLock:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._attempt_lock = threading.Lock()
+            self.acquisition_attempts = 0
+            self.second_acquisition_attempted = threading.Event()
+
+        def __enter__(self):
+            with self._attempt_lock:
+                self.acquisition_attempts += 1
+                if self.acquisition_attempts == 2:
+                    self.second_acquisition_attempted.set()
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, *_args):
+            self._lock.release()
+
+    observed_lock = ObservedStoreLock()
+    monkeypatch.setattr(store, "_write_lock", observed_lock)
     first_atomic_write_entered = threading.Event()
     release_first_atomic_write = threading.Event()
-    second_write_attempted = threading.Event()
     original_atomic_write = store._atomic_write
     outcomes: dict[str, object] = {}
 
@@ -151,7 +171,6 @@ def test_same_revision_writes_are_serialized_and_only_one_commits(tmp_path, monk
             outcomes["first"] = error
 
     def second_writer():
-        second_write_attempted.set()
         try:
             outcomes["second"] = store.write(
                 provider_id="icloud-safe",
@@ -169,7 +188,8 @@ def test_same_revision_writes_are_serialized_and_only_one_commits(tmp_path, monk
 
     second_thread = threading.Thread(target=second_writer)
     second_thread.start()
-    assert second_write_attempted.wait(timeout=5)
+    assert observed_lock.second_acquisition_attempted.wait(timeout=5)
+    assert observed_lock.acquisition_attempts == 2
     release_first_atomic_write.set()
     first_thread.join(timeout=5)
     second_thread.join(timeout=5)
