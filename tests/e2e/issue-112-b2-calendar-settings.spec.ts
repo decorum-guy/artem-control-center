@@ -1,6 +1,17 @@
-import { expect, test, type Page } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 const enabled = process.env.VITE_V2_VISUAL_SHELL === "true" && process.env.B3_PLANNING_CALENDAR_ROUTE_ENABLED === "true";
+const artifactDirectory = (testInfo: TestInfo) =>
+  process.env.ISSUE_112_B2_CALENDAR_SETTINGS_ARTIFACT_DIR ?? testInfo.outputPath("issue-112-b2-calendar-settings-review");
+
+async function capture(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+  const directory = artifactDirectory(testInfo);
+  await mkdir(directory, { recursive: true });
+  await page.screenshot({ path: path.join(directory, name), animations: "disabled" });
+}
+
 const sources = [{
   id: "icloud-safe", kind: "external", provider: "icloud", label: "iCloud", status: "current", configured: true,
   lastSyncedAt: "2026-08-26T00:00:00Z", observedAt: "2026-08-26T00:00:00Z",
@@ -54,16 +65,16 @@ test.describe("Issue #112 B2.1 Calendar Settings", () => {
     await install(page);
     await page.goto("/settings");
     await expect(page.getByTestId("settings-summary-calendars")).toContainText("13 календарей");
-    await page.screenshot({ path: testInfo.outputPath("settings-main-calendars.png"), animations: "disabled" });
+    await capture(page, testInfo, "settings-main-calendars.png");
     await page.getByTestId("settings-summary-calendars").click();
     const rows = page.getByTestId("settings-calendar-row");
     await expect(rows).toHaveCount(13);
     await expect(rows.nth(0)).toContainText("Рабочий");
     await expect(rows.nth(1)).toContainText("Рабочий");
     await expect(rows.nth(0).getByTestId("settings-calendar-effective-swatch")).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath("settings-calendar-sheet.png"), animations: "disabled" });
+    await capture(page, testInfo, "settings-calendar-sheet.png");
     await rows.nth(0).getByRole("button", { name: /Цвет/ }).click();
-    await page.screenshot({ path: testInfo.outputPath("settings-calendar-palette.png"), animations: "disabled" });
+    await capture(page, testInfo, "settings-calendar-palette.png");
     await page.getByRole("button", { name: "Выбрать #D65A4A" }).click();
     await expect(rows.nth(0).getByTestId("settings-calendar-effective-swatch")).toHaveCSS("background-color", "rgb(214, 90, 74)");
     const body = page.locator(".cc-overlay__body");
@@ -91,7 +102,7 @@ test.describe("Issue #112 B2.1 Calendar Settings", () => {
     await expect(page.locator('[data-date="2026-08-26"]').getByTestId("planning-calendar-event-indicator").first()).toHaveAttribute("data-color", "#D65A4A");
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Весь день" })).toHaveCSS("border-left-color", "rgb(214, 90, 74)");
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Встреча" })).toHaveCSS("border-left-color", "rgb(214, 90, 74)");
-    await page.screenshot({ path: testInfo.outputPath("calendar-override-accents.png"), animations: "disabled" });
+    await capture(page, testInfo, "calendar-override-accents.png");
   });
 
   test("keeps the confirmed colour and explains a failed save without backend detail", async ({ page }) => {

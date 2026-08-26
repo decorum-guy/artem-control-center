@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from threading import Lock
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -49,6 +50,9 @@ class CalendarDisplayPreferencesStore:
     def __init__(self, path: str, *, writes_enabled: bool = False) -> None:
         self.path = Path(path or ".cache/calendar-display-colors.json")
         self.writes_enabled = writes_enabled
+        # FastAPI may run synchronous route handlers concurrently.  This lock
+        # covers one complete revision-checked transaction for this store only.
+        self._write_lock = Lock()
 
     def _read_raw(self) -> Mapping[str, Any] | None:
         if not self.path.exists():
@@ -114,34 +118,35 @@ class CalendarDisplayPreferencesStore:
         expected_revision: int,
         known_identities: Iterable[tuple[str, str]],
     ) -> CalendarDisplayPreferencesResponse:
-        current = self.read()
-        if current.revision != expected_revision:
-            raise CalendarDisplayPreferencesConflict("revision_conflict")
-        key = (provider_id, calendar_id)
-        existing = {(entry.providerId, entry.calendarId): entry for entry in current.overrides}
-        if key not in existing and key not in set(known_identities):
-            raise CalendarDisplayPreferencesError("calendar_identity_unknown")
-        if color is None:
-            existing.pop(key, None)
-        else:
-            existing[key] = CalendarDisplayColorOverride(
-                providerId=provider_id,
-                calendarId=calendar_id,
-                color=color,
+        with self._write_lock:
+            current = self.read()
+            if current.revision != expected_revision:
+                raise CalendarDisplayPreferencesConflict("revision_conflict")
+            key = (provider_id, calendar_id)
+            existing = {(entry.providerId, entry.calendarId): entry for entry in current.overrides}
+            if key not in existing and key not in set(known_identities):
+                raise CalendarDisplayPreferencesError("calendar_identity_unknown")
+            if color is None:
+                existing.pop(key, None)
+            else:
+                existing[key] = CalendarDisplayColorOverride(
+                    providerId=provider_id,
+                    calendarId=calendar_id,
+                    color=color,
+                )
+            document = {
+                "schemaVersion": SCHEMA_VERSION,
+                "revision": expected_revision + 1,
+                "updatedAt": _utc_now(),
+                "overrides": [entry.model_dump() for _, entry in sorted(existing.items())],
+            }
+            self._atomic_write(document)
+            return CalendarDisplayPreferencesResponse(
+                **document,
+                available=True,
+                warnings=[],
+                writesEnabled=self.writes_enabled,
             )
-        document = {
-            "schemaVersion": SCHEMA_VERSION,
-            "revision": expected_revision + 1,
-            "updatedAt": _utc_now(),
-            "overrides": [entry.model_dump() for _, entry in sorted(existing.items())],
-        }
-        self._atomic_write(document)
-        return CalendarDisplayPreferencesResponse(
-            **document,
-            available=True,
-            warnings=[],
-            writesEnabled=self.writes_enabled,
-        )
 
     def _atomic_write(self, document: Mapping[str, Any]) -> None:
         encoded = json.dumps(document, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")

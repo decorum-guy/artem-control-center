@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import threading
 
 from fastapi.testclient import TestClient
 
@@ -114,3 +115,70 @@ def test_corrupt_state_fails_safe_and_atomic_failure_preserves_confirmed_file(tm
     except OSError:
         pass
     assert store.path.read_bytes() == before
+
+
+def test_same_revision_writes_are_serialized_and_only_one_commits(tmp_path, monkeypatch):
+    from panel_agent.calendar_display_preferences import (
+        CalendarDisplayPreferencesConflict,
+        CalendarDisplayPreferencesStore,
+    )
+
+    path = tmp_path / "calendar-colors.json"
+    store = CalendarDisplayPreferencesStore(str(path), writes_enabled=True)
+    first_atomic_write_entered = threading.Event()
+    release_first_atomic_write = threading.Event()
+    second_write_attempted = threading.Event()
+    original_atomic_write = store._atomic_write
+    outcomes: dict[str, object] = {}
+
+    def block_first_atomic_write(document):
+        first_atomic_write_entered.set()
+        assert release_first_atomic_write.wait(timeout=5)
+        original_atomic_write(document)
+
+    monkeypatch.setattr(store, "_atomic_write", block_first_atomic_write)
+
+    def first_writer():
+        try:
+            outcomes["first"] = store.write(
+                provider_id="icloud-safe",
+                calendar_id="work-a",
+                color="#AABBCC",
+                expected_revision=0,
+                known_identities={("icloud-safe", "work-a")},
+            )
+        except Exception as error:  # pragma: no cover - asserted below
+            outcomes["first"] = error
+
+    def second_writer():
+        second_write_attempted.set()
+        try:
+            outcomes["second"] = store.write(
+                provider_id="icloud-safe",
+                calendar_id="work-b",
+                color="#DDEEFF",
+                expected_revision=0,
+                known_identities={("icloud-safe", "work-b")},
+            )
+        except Exception as error:
+            outcomes["second"] = error
+
+    first_thread = threading.Thread(target=first_writer)
+    first_thread.start()
+    assert first_atomic_write_entered.wait(timeout=5)
+
+    second_thread = threading.Thread(target=second_writer)
+    second_thread.start()
+    assert second_write_attempted.wait(timeout=5)
+    release_first_atomic_write.set()
+    first_thread.join(timeout=5)
+    second_thread.join(timeout=5)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert outcomes["first"].revision == 1
+    assert isinstance(outcomes["second"], CalendarDisplayPreferencesConflict)
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["revision"] == 1
+    assert persisted["overrides"] == [{"providerId": "icloud-safe", "calendarId": "work-a", "color": "#AABBCC"}]
+    assert list(path.parent.glob(f".{path.name}.*.tmp")) == []
