@@ -59,6 +59,7 @@ def make_service(tmp_path: Path, fake_git: FakeGit) -> PanelUpdateService:
 
 def make_policy(tmp_path: Path, profile: str) -> AccessPolicyStore:
     policy_path = tmp_path / f"access-{profile}.json"
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
     policy_path.write_text(
         json.dumps({"schemaVersion": 1, "revision": 1, "baseProfile": profile}),
         encoding="utf-8",
