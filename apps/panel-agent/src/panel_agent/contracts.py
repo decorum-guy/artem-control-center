@@ -1,6 +1,7 @@
+import re
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .planning import PlanningProjection
 
@@ -286,6 +287,57 @@ class CoffeeActionResponse(BaseModel):
     confirmedState: Literal["on", "off"]
     alreadyInState: bool
     observedAt: Optional[str]
+
+
+_CALENDAR_DISPLAY_ID = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+_CALENDAR_DISPLAY_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+class CalendarDisplayColorOverride(BaseModel):
+    """Safe identity pair and Panel-only canonical colour."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    providerId: str = Field(min_length=1, max_length=128, pattern=_CALENDAR_DISPLAY_ID)
+    calendarId: str = Field(min_length=1, max_length=128, pattern=_CALENDAR_DISPLAY_ID)
+    color: str = Field(min_length=7, max_length=7)
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str) -> str:
+        if _CALENDAR_DISPLAY_COLOR.fullmatch(value) is None:
+            raise ValueError("calendar display colour must be #RRGGBB")
+        return value.upper()
+
+
+class CalendarDisplayColorPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expectedRevision: int = Field(ge=0, le=2_147_483_647)
+    providerId: str = Field(min_length=1, max_length=128, pattern=_CALENDAR_DISPLAY_ID)
+    calendarId: str = Field(min_length=1, max_length=128, pattern=_CALENDAR_DISPLAY_ID)
+    color: Optional[str] = Field(default=None, min_length=7, max_length=7)
+
+    @field_validator("color")
+    @classmethod
+    def _optional_color(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if _CALENDAR_DISPLAY_COLOR.fullmatch(value) is None:
+            raise ValueError("calendar display colour must be #RRGGBB")
+        return value.upper()
+
+
+class CalendarDisplayPreferencesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schemaVersion: Literal["calendar.display-preferences.v1"]
+    revision: int = Field(ge=0)
+    updatedAt: str
+    overrides: List[CalendarDisplayColorOverride] = Field(default_factory=list, max_length=128)
+    available: bool
+    warnings: List[Literal["stored_preferences_unavailable"]] = Field(default_factory=list, max_length=1)
+    writesEnabled: bool = False
 
 
 class OverviewPlacement(BaseModel):

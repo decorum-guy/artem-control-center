@@ -9,6 +9,7 @@ import { WeatherAutoRefresh } from "./WeatherAutoRefresh";
 import { App } from "./App";
 import { NoticeCenterProvider } from "./NoticeCenter";
 import { InteractionLockProvider } from "./InteractionLock";
+import { CalendarDisplayPreferencesProvider } from "./CalendarDisplayPreferences";
 import "./InteractionLock.css";
 import "./ActionConfirmations.css";
 import "./AvalarActions.css";
@@ -27,18 +28,20 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <NoticeCenterProvider>
       <InteractionLockProvider>
-        <AccessProvider>
-          <ActionConfirmationProvider>
-            <WeatherProvider>
-              <WeatherAutoRefresh />
-              <ConnectivityActionsProvider>
-                <AvalarActionsProvider>
-                  <App />
-                </AvalarActionsProvider>
-              </ConnectivityActionsProvider>
-            </WeatherProvider>
-          </ActionConfirmationProvider>
-        </AccessProvider>
+        <CalendarDisplayPreferencesProvider>
+          <AccessProvider>
+            <ActionConfirmationProvider>
+              <WeatherProvider>
+                <WeatherAutoRefresh />
+                <ConnectivityActionsProvider>
+                  <AvalarActionsProvider>
+                    <App />
+                  </AvalarActionsProvider>
+                </ConnectivityActionsProvider>
+              </WeatherProvider>
+            </ActionConfirmationProvider>
+          </AccessProvider>
+        </CalendarDisplayPreferencesProvider>
       </InteractionLockProvider>
     </NoticeCenterProvider>
   </StrictMode>

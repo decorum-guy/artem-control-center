@@ -373,6 +373,7 @@ export function App() {
               <SettingsV2Page
                 theme={theme}
                 motion={motion}
+                calendarSources={snapshot?.planning?.providerStatuses ?? []}
                 onThemeChange={setTheme}
                 onMotionChange={setMotion}
               />

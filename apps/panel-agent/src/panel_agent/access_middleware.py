@@ -11,6 +11,7 @@ from .access_policy import AccessPolicyStore
 _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
     ("PATCH", "/api/v1/settings/coffee/timing"): "home.coffee.settings.timing",
     ("PATCH", "/api/v1/settings/notifications/coffee"): "home.coffee.settings.notifications",
+    ("PATCH", "/api/v1/settings/calendar/display-colors"): "settings.calendar.colors",
     ("POST", "/api/v1/actions/home/coffee"): "home.coffee.control",
 }
 

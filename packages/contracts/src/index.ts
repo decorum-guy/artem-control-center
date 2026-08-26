@@ -396,6 +396,23 @@ export interface PlanningProviderStatus {
 
 export type PlanningCalendarSource = PlanningProviderStatus;
 
+/** Panel-owned display preferences. These never alter provider metadata. */
+export interface CalendarDisplayColorOverride {
+  providerId: string;
+  calendarId: string;
+  color: string;
+}
+
+export interface CalendarDisplayPreferences {
+  schemaVersion: "calendar.display-preferences.v1";
+  revision: number;
+  updatedAt: string;
+  overrides: CalendarDisplayColorOverride[];
+  available: boolean;
+  warnings: "stored_preferences_unavailable"[];
+  writesEnabled: boolean;
+}
+
 export interface PlanningSnapshot {
   schemaVersion: "planning.panel.v1";
   generatedAt: string;

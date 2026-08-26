@@ -54,12 +54,14 @@ test("production runtime injects only its safe configured revision into Panel Ag
     buildRevision: "59d376c02d26",
     commandPath: "runtime-command.json",
     dashboardDist: "dist",
-    stateCachePath: "panel-state-cache.json"
+    stateCachePath: "panel-state-cache.json",
+    calendarDisplayColorPath: "calendar-display-colors.json"
   });
 
   assert.equal(environment.PANEL_AGENT_MODE, "production");
   assert.equal(environment.PANEL_AGENT_BUILD_REVISION, "59d376c02d26");
   assert.equal(environment.PANEL_STATE_CACHE_PATH, "panel-state-cache.json");
+  assert.equal(environment.PANEL_CALENDAR_DISPLAY_COLOR_PATH, "calendar-display-colors.json");
 });
 
 test("production runtime uses an honest unknown revision when Git cannot provide one", () => {
@@ -69,7 +71,8 @@ test("production runtime uses an honest unknown revision when Git cannot provide
     mode: "production",
     commandPath: "runtime-command.json",
     dashboardDist: "dist",
-    stateCachePath: "panel-state-cache.json"
+    stateCachePath: "panel-state-cache.json",
+    calendarDisplayColorPath: "calendar-display-colors.json"
   });
 
   assert.equal(environment.PANEL_AGENT_BUILD_REVISION, "unknown");

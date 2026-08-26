@@ -18,6 +18,8 @@ from .contracts import (
     CoffeeNotificationSettings,
     CoffeeTimingPatch,
     CoffeeTimingSettings,
+    CalendarDisplayColorPatch,
+    CalendarDisplayPreferencesResponse,
     DashboardSnapshot,
     DiagnosticsReport,
     OverviewLayoutPatch,
@@ -38,6 +40,11 @@ from .overview_layout import (
     OverviewLayoutStore,
     OverviewLayoutValidationError,
     OverviewRevisionConflict,
+)
+from .calendar_display_preferences import (
+    CalendarDisplayPreferencesConflict,
+    CalendarDisplayPreferencesError,
+    CalendarDisplayPreferencesStore,
 )
 
 
@@ -64,6 +71,10 @@ runtime.set_snapshot_callback(snapshot_publisher.rebuild)
 overview_layout_store = OverviewLayoutStore(
     SETTINGS.overview_layout_path,
     writes_enabled=SETTINGS.overview_layout_writes_enabled and SETTINGS.writes_enabled,
+)
+calendar_display_preferences_store = CalendarDisplayPreferencesStore(
+    SETTINGS.calendar_display_color_path,
+    writes_enabled=SETTINGS.calendar_display_color_writes_enabled and SETTINGS.writes_enabled,
 )
 
 
@@ -252,6 +263,57 @@ def get_overview_layout(response: Response) -> OverviewLayoutResponse:
     response.headers["ETag"] = overview_layout_store.etag(layout.revision)
     response.headers["X-Overview-Layout-Writes-Enabled"] = str(_overview_write_allowed()).lower()
     return layout.model_copy(update={"writesEnabled": _overview_write_allowed()})
+
+
+def _calendar_display_write_allowed() -> bool:
+    return _write_allowed(SETTINGS.calendar_display_color_writes_enabled)
+
+
+def _calendar_display_known_identities() -> set[tuple[str, str]]:
+    projection = runtime.planning.projection
+    if projection is None:
+        return set()
+    return {
+        (source.id, calendar.id)
+        for source in projection.providerStatuses
+        for calendar in source.calendars
+    }
+
+
+@app.get(
+    "/api/v1/settings/calendar/display-colors",
+    response_model=CalendarDisplayPreferencesResponse,
+)
+def get_calendar_display_preferences(response: Response) -> CalendarDisplayPreferencesResponse:
+    preferences = calendar_display_preferences_store.read()
+    response.headers["Cache-Control"] = "no-store"
+    return preferences.model_copy(update={"writesEnabled": _calendar_display_write_allowed()})
+
+
+@app.patch(
+    "/api/v1/settings/calendar/display-colors",
+    response_model=CalendarDisplayPreferencesResponse,
+)
+def patch_calendar_display_preferences(
+    patch: CalendarDisplayColorPatch,
+    response: Response,
+) -> CalendarDisplayPreferencesResponse:
+    if not _calendar_display_write_allowed():
+        raise HTTPException(status_code=403, detail="calendar_display_preferences_write_disabled")
+    try:
+        saved = calendar_display_preferences_store.write(
+            provider_id=patch.providerId,
+            calendar_id=patch.calendarId,
+            color=patch.color,
+            expected_revision=patch.expectedRevision,
+            known_identities=_calendar_display_known_identities(),
+        )
+    except CalendarDisplayPreferencesConflict:
+        raise HTTPException(status_code=409, detail="revision_conflict")
+    except CalendarDisplayPreferencesError as exc:
+        raise HTTPException(status_code=404 if str(exc) == "calendar_identity_unknown" else 422, detail=str(exc))
+    response.headers["Cache-Control"] = "no-store"
+    return saved.model_copy(update={"writesEnabled": _calendar_display_write_allowed()})
 
 
 async def _read_bounded_overview_request_body(request: Request) -> bytes:

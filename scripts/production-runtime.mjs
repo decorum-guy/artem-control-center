@@ -135,6 +135,7 @@ export function buildAgentEnvironment({
   commandPath,
   dashboardDist,
   stateCachePath,
+  calendarDisplayColorPath,
   buildRevision = "unknown"
 }) {
   return {
@@ -145,7 +146,8 @@ export function buildAgentEnvironment({
     PANEL_KIOSK_CONTROLS_ENABLED: "true",
     PANEL_RUNTIME_COMMAND_PATH: commandPath,
     PANEL_DASHBOARD_DIST: dashboardDist,
-    PANEL_STATE_CACHE_PATH: stateCachePath
+    PANEL_STATE_CACHE_PATH: stateCachePath,
+    PANEL_CALENDAR_DISPLAY_COLOR_PATH: calendarDisplayColorPath
   };
 }
 
@@ -242,7 +244,8 @@ export async function runProductionRuntime() {
     buildRevision: revision,
     commandPath,
     dashboardDist,
-    stateCachePath: fileEnv.PANEL_STATE_CACHE_PATH || join(runtimeDir, "panel-state-cache.json")
+    stateCachePath: fileEnv.PANEL_STATE_CACHE_PATH || join(runtimeDir, "panel-state-cache.json"),
+    calendarDisplayColorPath: fileEnv.PANEL_CALENDAR_DISPLAY_COLOR_PATH || join(runtimeDir, "calendar-display-colors.json")
   });
 
   process.title = "artem-control-center-runtime";
