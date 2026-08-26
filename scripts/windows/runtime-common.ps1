@@ -138,12 +138,13 @@ function Test-ArtemUpdaterOwnerProcess {
     if ($OwnerPid -le 0 -or $RequestId -notmatch '^[0-9a-f]{24}$') { return $false }
     try {
         $process = Get-CimInstance Win32_Process -Filter "ProcessId = $OwnerPid" -ErrorAction SilentlyContinue
+        $hasRequestArgument = $null -ne $process -and $process.CommandLine -like "*-RequestId*"
         return (
             $null -ne $process -and
             $process.Name -in @("powershell.exe", "pwsh.exe") -and
             $null -ne $process.CommandLine -and
             $process.CommandLine -like "*update-production.ps1*" -and
-            $process.CommandLine -like "*$RequestId*"
+            (-not $hasRequestArgument -or $process.CommandLine -like "*$RequestId*")
         )
     }
     catch {
