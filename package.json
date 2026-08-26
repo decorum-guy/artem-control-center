@@ -21,7 +21,7 @@
     "typecheck": "npm run typecheck --workspace @artem/dashboard",
     "test:unit": "npm run test --workspace @artem/dashboard",
     "test:python": "node scripts/python.mjs -m pytest apps/panel-agent/tests",
-    "test:runtime": "node --test scripts/tests/production-runtime.test.mjs",
+    "test:runtime": "node --test scripts/tests/production-runtime.test.mjs scripts/tests/panel-update-runtime.test.mjs",
     "test:production-profile": "node --test scripts/tests/production-build-profile.test.mjs",
     "test:production-smoke": "node scripts/production-smoke.mjs",
     "test": "npm run lint && npm run typecheck && npm run test:unit && npm run test:python && npm run test:runtime && npm run test:production-profile",
