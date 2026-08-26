@@ -1,7 +1,9 @@
 param(
     [switch]$AutoStart,
     [switch]$NoKiosk,
-    [switch]$Wait
+    [switch]$Wait,
+    [ValidatePattern('^[0-9a-f]{24}$')]
+    [string]$UpdateRequestId
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +55,16 @@ Initialize-ArtemRuntimeDirectories -Paths $paths
 Update-ArtemProcessPath
 Sync-ArtemDesktopHelpers
 
+$activeUpdate = Get-ArtemSoftwareUpdateLock -Paths $paths
+$ownsUpdate = (
+    $null -ne $activeUpdate -and
+    $UpdateRequestId -and
+    [string]$activeUpdate.requestId -eq $UpdateRequestId
+)
+if ($null -ne $activeUpdate -and -not $ownsUpdate) {
+    throw "Control Center software update is in progress"
+}
+
 if ($AutoStart -and (Test-Path -LiteralPath $paths.ManualStop)) {
     Write-Host "Artem Control Center remains stopped by manual request."
     exit 0
@@ -74,12 +86,14 @@ if (Test-ArtemRuntimeProcess -Paths $paths) {
         exit 0
     }
 
-    # A live supervisor with an unavailable Panel Agent is a recoverable state.
-    # Previously the interactive Open path stopped here with
-    # "Production runtime process exists but is not ready", which is why a
-    # manual Stop -> Open sequence appeared to fix the panel. Repair the same
-    # state automatically without creating a manual-stop marker, then continue
-    # through the canonical Scheduled Task/direct launch path below.
+    # B2.2 Apply owns a bounded maintenance window. A temporary readiness gap
+    # during building/restarting must never be treated as a stale supervisor.
+    if (Test-ArtemCapabilityApplyActive -Paths $paths) {
+        throw "Control Center capability Apply is still active; runtime recovery was not started"
+    }
+
+    # A live supervisor with an unavailable Panel Agent is otherwise recoverable.
+    # This deliberately remains a non-manual stop so no manual-stop marker is made.
     $staleState = Get-ArtemRuntimeState -Paths $paths
     $stalePid = if ($null -ne $staleState -and $null -ne $staleState.supervisorPid) {
         [string]$staleState.supervisorPid
@@ -95,6 +109,9 @@ if (Test-ArtemRuntimeProcess -Paths $paths) {
     if (Test-ArtemRuntimeProcess -Paths $paths) {
         throw "Unable to recover the unhealthy production runtime"
     }
+}
+elseif (Test-ArtemCapabilityApplyActive -Paths $paths) {
+    throw "Control Center capability Apply is still active; a competing runtime start was not attempted"
 }
 
 if (-not $AutoStart) {
