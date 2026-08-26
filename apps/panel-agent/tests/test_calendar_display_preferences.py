@@ -7,12 +7,13 @@ import threading
 from fastapi.testclient import TestClient
 
 
-def _load_app(monkeypatch, path, *, writes=True):
+def _load_app(monkeypatch, path, *, writes=True, master_writes=None):
     monkeypatch.setenv("PANEL_AGENT_MODE", "fixtures")
     monkeypatch.setenv("PANEL_FIXTURE_WRITES_ENABLED", "true")
-    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true" if writes else "false")
+    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true" if (writes if master_writes is None else master_writes) else "false")
     monkeypatch.setenv("PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED", "true" if writes else "false")
     monkeypatch.setenv("PANEL_CALENDAR_DISPLAY_COLOR_PATH", str(path))
+    monkeypatch.setenv("PANEL_CAPABILITY_OVERRIDES_PATH", str(path.parent / "capability-overrides.json"))
     import panel_agent.main
 
     module = importlib.reload(panel_agent.main)
@@ -80,6 +81,29 @@ def test_valid_colour_is_normalized_persisted_and_duplicate_labels_stay_independ
         restored = _get(client)
         assert restored["revision"] == 2
         assert {entry["calendarId"]: entry["color"] for entry in restored["overrides"]} == {"work-a": "#A1B2C3", "work-b": "#D4E5F6"}
+
+
+def test_calendar_colour_capability_is_an_effective_runtime_gate(tmp_path, monkeypatch):
+    module = _load_app(monkeypatch, tmp_path / "calendar-colors.json", writes=True)
+    with TestClient(module.app) as client:
+        # Baseline effective capability permits the real colour write endpoint.
+        assert _patch(client, 0, "work-a", "#AABBCC").status_code == 200
+        inventory = client.get("/api/v1/settings/capabilities").json()
+        changed = client.patch("/api/v1/settings/capabilities", json={
+            "expectedRevision": inventory["revision"],
+            "capabilityId": "calendar_display_colors",
+            "enabled": False,
+        })
+        assert changed.status_code == 200
+        assert client.get("/api/v1/settings/calendar/display-colors").json()["writesEnabled"] is False
+        assert _patch(client, 1, "work-a", "#DDEEFF").status_code == 403
+
+
+def test_global_write_master_blocks_calendar_colour_writes_even_when_local_gate_is_enabled(tmp_path, monkeypatch):
+    module = _load_app(monkeypatch, tmp_path / "calendar-colors.json", writes=True, master_writes=False)
+    with TestClient(module.app) as client:
+        assert client.get("/api/v1/settings/calendar/display-colors").json()["writesEnabled"] is False
+        assert _patch(client, 0, "work-a", "#AABBCC").status_code == 403
 
 
 def test_rejects_malformed_css_and_unknown_identity_and_reset_only_changes_one_entry(tmp_path, monkeypatch):

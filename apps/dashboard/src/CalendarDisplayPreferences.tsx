@@ -18,7 +18,12 @@ export function CalendarDisplayPreferencesProvider({ children }: { children: Rea
     setLoading(true);
     try { setPreferences(await getCalendarDisplayPreferences()); } catch { setPreferences(null); } finally { setLoading(false); }
   }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+    const onCapabilitiesChanged = () => void refresh();
+    window.addEventListener("artem-capabilities-changed", onCapabilitiesChanged);
+    return () => window.removeEventListener("artem-capabilities-changed", onCapabilitiesChanged);
+  }, [refresh]);
   const save = useCallback(async (entry: { providerId: string; calendarId: string; color: string | null }) => {
     if (!preferences) throw new Error("preferences_unavailable");
     const saved = await patchCalendarDisplayPreference({ expectedRevision: preferences.revision, ...entry });

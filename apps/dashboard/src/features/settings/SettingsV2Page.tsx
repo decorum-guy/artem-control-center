@@ -18,11 +18,12 @@ import { useCalendarDisplayPreferences } from "../../CalendarDisplayPreferences"
 import { calendarDisplayPalette, calendarDisplayOverrideColor, calendarSourceDisplayColor, normalizedCalendarColor } from "../../calendarDisplayColors";
 import { RouteHeader } from "../../ShellPrimitives";
 import { SettingsSummaryColumn, SettingsSummaryRow } from "./SettingsSummaryRow";
+import { CapabilitySettingsSheet, capabilityStateLabel, capabilitySummary, useCapabilities, type CapabilitiesController } from "./CapabilitySettings";
 import "./settingsV2.css";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
-type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars";
+type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities";
 
 const motionLabels: Record<MotionMode, string> = {
   full: "Полное",
@@ -54,6 +55,7 @@ export function SettingsV2Page({
   const { status: accessStatus, available: accessAvailable } = useAccess();
   const runtime = useRuntimeStatus();
   const calendarPreferences = useCalendarDisplayPreferences();
+  const capabilities = useCapabilities();
   const [openSheet, setOpenSheet] = useState<SettingsSheet | null>(null);
 
   return (
@@ -131,6 +133,14 @@ export function SettingsV2Page({
             testId="settings-summary-notifications"
             onClick={() => setOpenSheet("notifications")}
           />
+          <SettingsSummaryRow
+            title="Флаги / Возможности"
+            summary={capabilitySummary(capabilities.inventory, capabilities.loading)}
+            stateLabel={capabilityStateLabel(capabilities.inventory, capabilities.loading)}
+            stateTone={capabilities.inventory ? "neutral" : "unavailable"}
+            testId="settings-summary-capabilities"
+            onClick={() => setOpenSheet("capabilities")}
+          />
         </SettingsSummaryColumn>
         <SettingsSummaryColumn>
           <SettingsSummaryRow
@@ -157,6 +167,7 @@ export function SettingsV2Page({
           kind={openSheet}
           coffee={coffee}
           calendarSources={calendarSources}
+          capabilities={capabilities}
           onClose={() => setOpenSheet(null)}
         />
       )}
@@ -168,14 +179,17 @@ function SettingsSheet({
   kind,
   coffee,
   calendarSources,
+  capabilities,
   onClose
 }: {
   kind: SettingsSheet;
   coffee: CoffeeSettingsController;
   calendarSources: PlanningCalendarSource[];
+  capabilities: CapabilitiesController;
   onClose: () => void;
 }) {
   if (kind === "calendars") return <CalendarSettingsSheet sources={calendarSources} onClose={onClose} />;
+  if (kind === "capabilities") return <CapabilitySettingsSheet onClose={onClose} capabilities={capabilities} />;
   if (kind === "coffee") {
     return (
       <Sheet

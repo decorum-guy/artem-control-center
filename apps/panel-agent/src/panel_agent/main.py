@@ -20,6 +20,7 @@ from .contracts import (
     CoffeeTimingSettings,
     CalendarDisplayColorPatch,
     CalendarDisplayPreferencesResponse,
+    CapabilityPatch,
     DashboardSnapshot,
     DiagnosticsReport,
     OverviewLayoutPatch,
@@ -45,6 +46,13 @@ from .calendar_display_preferences import (
     CalendarDisplayPreferencesConflict,
     CalendarDisplayPreferencesError,
     CalendarDisplayPreferencesStore,
+)
+from .build_capabilities import active_build_flags, active_build_states
+from .capabilities import (
+    CAPABILITY_REGISTRY,
+    CapabilityOverrideStore,
+    CapabilityRevisionConflict,
+    CapabilityStoreError,
 )
 
 
@@ -76,6 +84,7 @@ calendar_display_preferences_store = CalendarDisplayPreferencesStore(
     SETTINGS.calendar_display_color_path,
     writes_enabled=SETTINGS.calendar_display_color_writes_enabled and SETTINGS.writes_enabled,
 )
+capability_override_store = CapabilityOverrideStore()
 
 
 @asynccontextmanager
@@ -266,7 +275,7 @@ def get_overview_layout(response: Response) -> OverviewLayoutResponse:
 
 
 def _calendar_display_write_allowed() -> bool:
-    return _write_allowed(SETTINGS.calendar_display_color_writes_enabled)
+    return _write_allowed(_immediate_capability_enabled("calendar_display_colors"))
 
 
 def _calendar_display_known_identities() -> set[tuple[str, str]]:
@@ -314,6 +323,123 @@ def patch_calendar_display_preferences(
         raise HTTPException(status_code=404 if str(exc) == "calendar_identity_unknown" else 422, detail=str(exc))
     response.headers["Cache-Control"] = "no-store"
     return saved.model_copy(update={"writesEnabled": _calendar_display_write_allowed()})
+
+
+def _immediate_baseline(capability_id: str) -> bool:
+    return {
+        "calendar_display_colors": SETTINGS.calendar_display_color_writes_enabled,
+        "overview_layout_editor": SETTINGS.overview_layout_writes_enabled,
+    }[capability_id]
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    return default if not raw else raw in {"1", "true", "yes", "on"}
+
+
+def _immediate_capability_enabled(capability_id: str) -> bool:
+    document, available = capability_override_store.read()
+    if not available:
+        return _immediate_baseline(capability_id)
+    return document["overrides"].get(capability_id, _immediate_baseline(capability_id))
+
+
+def _read_only_capability_enabled(capability_id: str) -> bool:
+    return {
+        "planning_integration": SETTINGS.panel_planning_enabled,
+        "planning_reminder_mutations": SETTINGS.panel_planning_reminder_mutations_enabled,
+        "planning_task_mutations": SETTINGS.panel_planning_task_mutations_enabled,
+        "planning_calendar_mutations": SETTINGS.panel_planning_calendar_mutations_enabled,
+        "panel_writes": SETTINGS.writes_enabled,
+        "coffee_timing_writes": SETTINGS.coffee_timing_writes_enabled,
+        "coffee_notification_writes": SETTINGS.coffee_notification_writes_enabled,
+        "coffee_actions": SETTINGS.coffee_actions_enabled,
+        "avalar_ssh": SETTINGS.avalar_ssh_enabled,
+        "avalar_actions": SETTINGS.avalar_actions_enabled,
+        "avalar_smoke": SETTINGS.avalar_smoke_enabled,
+        "avalar_stage_restart": SETTINGS.avalar_stage_restart_enabled,
+        "avalar_main_restart": SETTINGS.avalar_main_restart_enabled,
+        "avalar_stage_deploy": SETTINGS.avalar_stage_deploy_enabled,
+        "avalar_main_deploy": SETTINGS.avalar_main_deploy_enabled,
+        "rog_g703": SETTINGS.rog_g703_enabled,
+        "kiosk_controls": _bool_env("PANEL_KIOSK_CONTROLS_ENABLED"),
+    }[capability_id]
+
+
+def _capability_inventory() -> dict:
+    document, available = capability_override_store.read()
+    overrides = document["overrides"] if available else {}
+    active_build, baseline_build, build_available = active_build_states()
+    build_flags, flags_available = active_build_flags()
+    entries = []
+    for definition in CAPABILITY_REGISTRY:
+        configured = None
+        if definition.id in {"calendar_display_colors", "overview_layout_editor"}:
+            configured = _immediate_baseline(definition.id)
+            effective = overrides.get(definition.id, configured)
+            active = desired = effective
+        elif definition.id in active_build:
+            configured = baseline_build[definition.id]
+            active = active_build[definition.id]
+            desired = overrides.get(definition.id, configured)
+        elif definition.technical_flag.startswith("VITE_"):
+            active = desired = build_flags[definition.technical_flag]
+        else:
+            active = desired = _read_only_capability_enabled(definition.id)
+        blocked = "panel_writes_disabled" if definition.id in {"calendar_display_colors", "overview_layout_editor"} and desired and not SETTINGS.writes_enabled else None
+        entry = {
+            "id": definition.id,
+            "label": definition.label,
+            "description": definition.description,
+            "group": definition.group,
+            "technicalFlag": definition.technical_flag,
+            "activeEnabled": active,
+            "desiredEnabled": desired,
+            "pending": definition.behavior == "delayed" and active != desired,
+            "mutable": definition.mutable,
+            "behavior": definition.behavior,
+            "requiredApplyAction": definition.apply_requirement,
+            "operationalBlockedReason": blocked,
+        }
+        if definition.mutable:
+            entry["configuredEnabled"] = configured
+            entry["overrideEnabled"] = overrides.get(definition.id)
+        entries.append(entry)
+    return {
+        "schemaVersion": "capabilities.v1",
+        "revision": document["revision"],
+        "available": available and build_available and flags_available,
+        "writesEnabled": SETTINGS.writes_enabled,
+        "warnings": (
+            ([] if available else ["capability_store_unavailable"])
+            + ([] if build_available and flags_available else ["build_capabilities_unavailable"])
+        ),
+        "entries": entries,
+    }
+
+
+@app.get("/api/v1/settings/capabilities")
+def get_capabilities(response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    return _capability_inventory()
+
+
+@app.patch("/api/v1/settings/capabilities")
+def patch_capability(payload: CapabilityPatch, response: Response) -> dict:
+    if not _capabilities_write_allowed():
+        raise HTTPException(status_code=403, detail="capability_settings_write_disabled")
+    try:
+        capability_override_store.write(
+            capability_id=payload.capabilityId,
+            enabled=payload.enabled,
+            expected_revision=payload.expectedRevision,
+        )
+    except CapabilityRevisionConflict:
+        raise HTTPException(status_code=409, detail="revision_conflict")
+    except CapabilityStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    response.headers["Cache-Control"] = "no-store"
+    return _capability_inventory()
 
 
 async def _read_bounded_overview_request_body(request: Request) -> bytes:
@@ -583,7 +709,15 @@ def _write_allowed(narrow_gate: bool) -> bool:
 
 
 def _overview_write_allowed() -> bool:
-    return _write_allowed(SETTINGS.overview_layout_writes_enabled)
+    return _write_allowed(_immediate_capability_enabled("overview_layout_editor"))
+
+
+def _capabilities_write_allowed() -> bool:
+    return (
+        MODE in {"fixtures", "integration_test", "production"}
+        and (MODE != "fixtures" or _fixture_writes_enabled())
+        and SETTINGS.writes_enabled
+    )
 
 
 def _require_write(narrow_gate: bool) -> None:
