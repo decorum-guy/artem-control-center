@@ -37,11 +37,19 @@ try {
         throw "Fresh canonical dashboard presence must be accepted"
     }
 
-    # Prove HWND is no longer consulted by the visibility authority. If the old
-    # Windows heuristic is accidentally called, this regression fails immediately.
+    # Presence alone is insufficient: it must be paired with the dedicated panel
+    # Edge profile. This prevents an ordinary browser tab from impersonating kiosk.
+    function Test-ArtemKioskRunning { return $false }
+    if (Test-ArtemKioskVisible -Paths $paths) {
+        throw "Fresh heartbeat without panel-owned Edge must not count as kiosk"
+    }
+
+    # Prove HWND is no longer consulted. A live panel profile plus fresh heartbeat
+    # is enough even when the old Windows window resolver is unusable on Samsung.
+    function Test-ArtemKioskRunning { return $true }
     function Get-ArtemVisibleKioskProcesses { throw "HWND authority must not be consulted" }
     if (-not (Test-ArtemKioskVisible -Paths $paths)) {
-        throw "Fresh application presence must be the kiosk visibility authority"
+        throw "Fresh application presence plus panel Edge must be kiosk authority"
     }
 
     Write-TestPresence -Paths $paths -ObservedAt ([DateTimeOffset]::UtcNow.AddSeconds(-30).ToString("o"))
@@ -100,4 +108,4 @@ finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated dashboard heartbeat kiosk authority, stale/future rejection, strict Open and soft updater recovery."
+Write-Host "Validated dashboard heartbeat kiosk authority, panel-profile binding, stale/future rejection, strict Open and soft updater recovery."
