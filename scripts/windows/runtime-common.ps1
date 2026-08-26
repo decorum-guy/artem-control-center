@@ -20,6 +20,9 @@ function Get-ArtemRuntimePaths {
         EdgeProfile = Join-Path $runtimeRoot "edge-profile"
         LastKnownGood = Join-Path $runtimeRoot "last-known-good.txt"
         RollbackHead = Join-Path $runtimeRoot "rollback-head.txt"
+        CapabilityApplyState = Join-Path $runtimeRoot "capability-apply-state.json"
+        UpdateLock = Join-Path $runtimeRoot "update-lock.json"
+        UpdateState = Join-Path $runtimeRoot "update-state.json"
         RuntimeScript = Join-Path $repoRoot "scripts\production-runtime.mjs"
         StartScript = Join-Path $repoRoot "scripts\windows\start-production.ps1"
         OpenKioskScript = Join-Path $repoRoot "scripts\windows\open-kiosk.ps1"
@@ -40,15 +43,20 @@ function Initialize-ArtemRuntimeDirectories {
     New-Item -ItemType Directory -Force -Path $Paths.EdgeProfile | Out-Null
 }
 
-function Get-ArtemRuntimeState {
-    param([Parameter(Mandatory)]$Paths)
-    if (-not (Test-Path -LiteralPath $Paths.State)) { return $null }
+function Get-ArtemJsonPayload {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
     try {
-        return Get-Content -LiteralPath $Paths.State -Raw | ConvertFrom-Json
+        return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     }
     catch {
         return $null
     }
+}
+
+function Get-ArtemRuntimeState {
+    param([Parameter(Mandatory)]$Paths)
+    return Get-ArtemJsonPayload -Path $Paths.State
 }
 
 function Test-ArtemRuntimeProcess {
@@ -95,6 +103,58 @@ function Wait-ArtemPanelReady {
     return $false
 }
 
+function Test-ArtemStateRecent {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string[]]$ActiveStatuses,
+        [Parameter(Mandatory)][int]$MaxAgeMinutes
+    )
+    $payload = Get-ArtemJsonPayload -Path $Path
+    if ($null -eq $payload -or $payload.schemaVersion -ne 1) { return $false }
+    if ([string]$payload.status -notin $ActiveStatuses) { return $false }
+    try {
+        $updated = [DateTimeOffset]::Parse([string]$payload.updatedAt).ToUniversalTime()
+        return ([DateTimeOffset]::UtcNow - $updated).TotalMinutes -le $MaxAgeMinutes
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-ArtemCapabilityApplyActive {
+    param([Parameter(Mandatory)]$Paths)
+    return Test-ArtemStateRecent `
+        -Path $Paths.CapabilityApplyState `
+        -ActiveStatuses @("queued", "building", "restarting") `
+        -MaxAgeMinutes 15
+}
+
+function Get-ArtemSoftwareUpdateLock {
+    param([Parameter(Mandatory)]$Paths)
+    $payload = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+    if ($null -eq $payload -or $payload.schemaVersion -ne 1 -or $payload.status -ne "updating") {
+        return $null
+    }
+    if ([string]$payload.requestId -notmatch '^[0-9a-f]{24}$') { return $null }
+    try {
+        $updated = [DateTimeOffset]::Parse([string]$payload.updatedAt).ToUniversalTime()
+        if (([DateTimeOffset]::UtcNow - $updated).TotalMinutes -gt 60) {
+            Remove-Item -LiteralPath $Paths.UpdateLock -Force -ErrorAction SilentlyContinue
+            return $null
+        }
+    }
+    catch {
+        Remove-Item -LiteralPath $Paths.UpdateLock -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+    return $payload
+}
+
+function Test-ArtemSoftwareUpdateActive {
+    param([Parameter(Mandatory)]$Paths)
+    return $null -ne (Get-ArtemSoftwareUpdateLock -Paths $Paths)
+}
+
 function Get-ArtemEdgeExecutable {
     $candidates = @()
     foreach ($root in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, $env:LOCALAPPDATA)) {
@@ -108,6 +168,8 @@ function Get-ArtemEdgeExecutable {
     throw "Microsoft Edge executable was not found"
 }
 
+# Broad panel-owned Edge process group. This is deliberately profile-scoped and
+# is the cleanup/shutdown boundary, including background processes with no window.
 function Get-ArtemKioskProcesses {
     param([Parameter(Mandatory)]$Paths)
     try {
@@ -124,9 +186,33 @@ function Get-ArtemKioskProcesses {
     }
 }
 
+# Visible kiosk authority. A process is eligible only after it has crossed the
+# dedicated Edge-profile boundary, then it must own an actual top-level window.
+function Get-ArtemVisibleKioskProcesses {
+    param([Parameter(Mandatory)]$Paths)
+    $visible = @()
+    foreach ($owned in @(Get-ArtemKioskProcesses -Paths $Paths)) {
+        try {
+            $process = Get-Process -Id $owned.ProcessId -ErrorAction Stop
+            if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+                $visible += $owned
+            }
+        }
+        catch {
+            continue
+        }
+    }
+    return @($visible)
+}
+
 function Test-ArtemKioskRunning {
     param([Parameter(Mandatory)]$Paths)
     return (Get-ArtemKioskProcesses -Paths $Paths).Count -gt 0
+}
+
+function Test-ArtemKioskVisible {
+    param([Parameter(Mandatory)]$Paths)
+    return (Get-ArtemVisibleKioskProcesses -Paths $Paths).Count -gt 0
 }
 
 function Stop-ArtemKiosk {
@@ -140,6 +226,73 @@ function Stop-ArtemKiosk {
     catch {
         Write-Warning "Unable to close the panel-owned Edge kiosk: $($_.Exception.Message)"
     }
+}
+
+function Start-ArtemKioskWatcher {
+    param([Parameter(Mandatory)]$Paths)
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList @(
+            "-NoProfile",
+            "-WindowStyle", "Hidden",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $Paths.KioskWatchScript
+        ) `
+        -WindowStyle Hidden | Out-Null
+}
+
+function Ensure-ArtemKioskVisible {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [int]$TimeoutSeconds = 20
+    )
+
+    if (Test-ArtemKioskVisible -Paths $Paths) {
+        Start-ArtemKioskWatcher -Paths $Paths
+        return
+    }
+
+    # Edge can retain background profile processes after its visible kiosk dies.
+    # Clear only the dedicated panel profile before launching one fresh window.
+    if (Test-ArtemKioskRunning -Paths $Paths) {
+        Stop-ArtemKiosk -Paths $Paths
+        $cleanupDeadline = (Get-Date).AddSeconds(5)
+        while ((Get-Date) -lt $cleanupDeadline -and (Test-ArtemKioskRunning -Paths $Paths)) {
+            Start-Sleep -Milliseconds 200
+        }
+        if (Test-ArtemKioskRunning -Paths $Paths) {
+            throw "Panel Edge background processes did not close"
+        }
+    }
+
+    Remove-Item `
+        -LiteralPath (Join-Path $Paths.RuntimeRoot "kiosk-close-request.json") `
+        -Force `
+        -ErrorAction SilentlyContinue
+
+    $edge = Get-ArtemEdgeExecutable
+    $edgeArguments = @(
+        "--kiosk",
+        $Paths.PanelUrl,
+        "--edge-kiosk-type=fullscreen",
+        "--user-data-dir=$($Paths.EdgeProfile)",
+        "--no-first-run",
+        "--disable-session-crashed-bubble",
+        "--disable-features=msEdgeSidebarV2"
+    )
+    Start-Process -FilePath $edge -ArgumentList $edgeArguments | Out-Null
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-ArtemKioskVisible -Paths $Paths) {
+            Start-ArtemKioskWatcher -Paths $Paths
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    Stop-ArtemKiosk -Paths $Paths
+    throw "Control Center kiosk window did not become visible"
 }
 
 function Write-ArtemRuntimeCommand {
