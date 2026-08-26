@@ -114,7 +114,8 @@ function Test-ArtemStateRecent {
     if ([string]$payload.status -notin $ActiveStatuses) { return $false }
     try {
         $updated = [DateTimeOffset]::Parse([string]$payload.updatedAt).ToUniversalTime()
-        return ([DateTimeOffset]::UtcNow - $updated).TotalMinutes -le $MaxAgeMinutes
+        $age = [DateTimeOffset]::UtcNow - $updated
+        return $age.TotalSeconds -ge 0 -and $age.TotalMinutes -le $MaxAgeMinutes
     }
     catch {
         return $false
@@ -129,21 +130,62 @@ function Test-ArtemCapabilityApplyActive {
         -MaxAgeMinutes 15
 }
 
+function Test-ArtemUpdaterOwnerProcess {
+    param(
+        [Parameter(Mandatory)][int]$OwnerPid,
+        [Parameter(Mandatory)][string]$RequestId
+    )
+    if ($OwnerPid -le 0 -or $RequestId -notmatch '^[0-9a-f]{24}$') { return $false }
+    try {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $OwnerPid" -ErrorAction SilentlyContinue
+        return (
+            $null -ne $process -and
+            $process.Name -in @("powershell.exe", "pwsh.exe") -and
+            $null -ne $process.CommandLine -and
+            $process.CommandLine -like "*update-production.ps1*" -and
+            $process.CommandLine -like "*$RequestId*"
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
 function Get-ArtemSoftwareUpdateLock {
     param([Parameter(Mandatory)]$Paths)
     $payload = Get-ArtemJsonPayload -Path $Paths.UpdateLock
     if ($null -eq $payload -or $payload.schemaVersion -ne 1 -or $payload.status -ne "updating") {
         return $null
     }
-    if ([string]$payload.requestId -notmatch '^[0-9a-f]{24}$') { return $null }
+    $requestId = [string]$payload.requestId
+    if ($requestId -notmatch '^[0-9a-f]{24}$') { return $null }
+
     try {
         $updated = [DateTimeOffset]::Parse([string]$payload.updatedAt).ToUniversalTime()
-        if (([DateTimeOffset]::UtcNow - $updated).TotalMinutes -gt 60) {
+    }
+    catch {
+        Remove-Item -LiteralPath $Paths.UpdateLock -Force -ErrorAction SilentlyContinue
+        return $null
+    }
+
+    if ($null -ne $payload.ownerPid) {
+        try { $ownerPid = [int]$payload.ownerPid }
+        catch {
             Remove-Item -LiteralPath $Paths.UpdateLock -Force -ErrorAction SilentlyContinue
             return $null
         }
+        if (Test-ArtemUpdaterOwnerProcess -OwnerPid $ownerPid -RequestId $requestId) {
+            return $payload
+        }
+        Remove-Item -LiteralPath $Paths.UpdateLock -Force -ErrorAction SilentlyContinue
+        return $null
     }
-    catch {
+
+    # Before the detached updater claims the lease there is deliberately no PID.
+    # Keep that handoff window short. A future timestamp is never allowed to turn
+    # this pre-owner lease into an immortal maintenance block.
+    $age = [DateTimeOffset]::UtcNow - $updated
+    if ($age.TotalSeconds -lt 0 -or $age.TotalMinutes -gt 2) {
         Remove-Item -LiteralPath $Paths.UpdateLock -Force -ErrorAction SilentlyContinue
         return $null
     }
