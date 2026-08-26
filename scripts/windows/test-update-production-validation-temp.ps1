@@ -108,4 +108,6 @@ finally {
     Remove-Item -LiteralPath $regressionRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated Windows-safe pytest basetemp parsing, repo cleanliness, cleanup contract and tracked dirty-worktree guard."
+& (Join-Path $PSScriptRoot "test-update-maintenance-lease.ps1")
+
+Write-Host "Validated Windows-safe pytest basetemp parsing, repo cleanliness, cleanup contract, tracked dirty-worktree guard and update maintenance lease recovery."
