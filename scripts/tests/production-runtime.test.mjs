@@ -7,6 +7,7 @@ import {
   shouldCreateManualStop,
   buildAgentEnvironment,
   activateStagedDashboard,
+  restoreDashboardBackup,
   capabilityStoreRevision,
   isSafeCapabilityApplyCommand
 } from "../production-runtime.mjs";
@@ -103,6 +104,48 @@ test("capability apply activates only a validated staged dashboard and retains r
   assert.equal(readFileSync(join(active, "index.html"), "utf8"), "new");
   assert.equal(readFileSync(join(backup, "index.html"), "utf8"), "old");
   assert.equal(existsSync(staging), false);
+});
+
+test("post-swap health rejection restores the previous dashboard without discarding desired overrides", () => {
+  const root = mkdtempSync(join(tmpdir(), "artem-capability-rollback-"));
+  const active = join(root, "dist");
+  const staging = join(root, "staging");
+  const backup = join(root, "backup");
+  const overrides = join(root, "capability-overrides.json");
+  mkdirSync(active); mkdirSync(staging);
+  writeFileSync(join(active, "index.html"), "known-good");
+  writeFileSync(join(active, "old-asset.js"), "old");
+  writeFileSync(join(staging, "index.html"), "candidate");
+  writeFileSync(join(staging, "new-asset.js"), "new");
+  writeFileSync(overrides, JSON.stringify({
+    schemaVersion: "capability-overrides.v1", revision: 4,
+    updatedAt: "2026-08-26T00:00:00Z", overrides: { planning_calendar_route: false }
+  }));
+
+  activateStagedDashboard({ active, staging, backup });
+  assert.equal(readFileSync(join(active, "index.html"), "utf8"), "candidate");
+  // This represents the bounded supervisor health rejection.  The durable
+  // desired override is intentionally not changed by rollback.
+  restoreDashboardBackup({ active, backup });
+  assert.equal(readFileSync(join(active, "index.html"), "utf8"), "known-good");
+  assert.equal(readFileSync(join(active, "old-asset.js"), "utf8"), "old");
+  assert.equal(existsSync(join(active, "new-asset.js")), false);
+  assert.deepEqual(JSON.parse(readFileSync(overrides, "utf8")).overrides, { planning_calendar_route: false });
+});
+
+test("post-swap health acceptance leaves the new dashboard active", () => {
+  const root = mkdtempSync(join(tmpdir(), "artem-capability-acceptance-"));
+  const active = join(root, "dist");
+  const staging = join(root, "staging");
+  const backup = join(root, "backup");
+  mkdirSync(active); mkdirSync(staging);
+  writeFileSync(join(active, "index.html"), "known-good");
+  writeFileSync(join(staging, "index.html"), "candidate");
+  activateStagedDashboard({ active, staging, backup });
+  // Healthy acceptance deliberately does not consume the backup before the
+  // transaction completes; active remains the validated new bundle.
+  assert.equal(readFileSync(join(active, "index.html"), "utf8"), "candidate");
+  assert.equal(readFileSync(join(backup, "index.html"), "utf8"), "known-good");
 });
 
 test("capability revision reader fails closed on malformed state", () => {

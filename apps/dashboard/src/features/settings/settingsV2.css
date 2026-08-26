@@ -466,6 +466,8 @@
 .capability-row .setting-switch-row { min-height: 48px; padding: 0; border: 0; }
 .capability-row .setting-switch-row__copy { display: none; }
 .capability-row .setting-switch-row__control { margin-left: auto; }
+.capability-row__actions { display: grid; min-width: 0; gap: 6px; justify-items: stretch; }
+.capability-row__reset { min-height: 34px; padding: 6px 8px; font-size: var(--cc-type-short-label-size); line-height: var(--cc-type-short-label-line); overflow-wrap: anywhere; }
 
 .capability-settings__apply {
   position: sticky;

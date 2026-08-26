@@ -20,6 +20,8 @@ interface CapabilityEntry {
   behavior: Behavior;
   requiredApplyAction: "none" | "restart" | "rebuild";
   operationalBlockedReason: string | null;
+  configuredEnabled?: boolean;
+  overrideEnabled?: boolean | null;
 }
 
 interface Inventory {
@@ -33,6 +35,13 @@ interface Inventory {
 
 function stateCopy(enabled: boolean) { return enabled ? "Включено" : "Выключено"; }
 function behaviorCopy(behavior: Behavior) { return behavior === "immediate" ? "Сразу" : "После применения"; }
+function applyCopy(status: ApplyStatus, writesEnabled: boolean) {
+  if (!writesEnabled) return "Применение недоступно: запись панели отключена.";
+  if (status === "queued") return "Изменение поставлено в очередь…";
+  if (status === "building") return "Собираем новую версию панели…";
+  if (status === "restarting") return "Перезапускаем и проверяем панель…";
+  return "Будет выполнена пересборка и перезапуск панели";
+}
 
 function parseInventory(value: unknown): Inventory {
   if (!value || typeof value !== "object") throw new Error("contract");
@@ -71,6 +80,8 @@ export function useCapabilities() {
   return { inventory, loading, error, refresh, setInventory };
 }
 
+export type CapabilitiesController = ReturnType<typeof useCapabilities>;
+
 export function capabilitySummary(inventory: Inventory | null, loading: boolean) {
   if (loading) return "Проверяем доступные возможности…";
   if (!inventory) return "Настройки возможностей временно недоступны";
@@ -85,8 +96,8 @@ export function capabilityStateLabel(inventory: Inventory | null, loading: boole
   return pending ? "Есть изменения" : "Доступно";
 }
 
-export function CapabilitySettingsSheet({ onClose }: { onClose: () => void }) {
-  const { inventory, loading, error, refresh, setInventory } = useCapabilities();
+export function CapabilitySettingsSheet({ onClose, capabilities }: { onClose: () => void; capabilities: CapabilitiesController }) {
+  const { inventory, loading, error, refresh, setInventory } = capabilities;
   const { guardMutation } = useInteractionLock();
   const { ensureCapability } = useAccess();
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -101,8 +112,9 @@ export function CapabilitySettingsSheet({ onClose }: { onClose: () => void }) {
   }, [inventory]);
 
   const save = useCallback(async (entry: CapabilityEntry, enabled: boolean | null) => {
-    if (!inventory || savingId || !guardMutation()) {
-      if (!guardMutation()) setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
+    const unlocked = guardMutation();
+    if (!inventory || savingId || !unlocked) {
+      if (!unlocked) setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
       return;
     }
     if (!await ensureCapability("settings.capabilities.manage", "Изменить возможности панели")) {
@@ -128,8 +140,9 @@ export function CapabilitySettingsSheet({ onClose }: { onClose: () => void }) {
   }, [ensureCapability, guardMutation, inventory, refresh, savingId, setInventory]);
 
   const apply = useCallback(async () => {
-    if (!inventory || !pending.length || !guardMutation()) {
-      if (!guardMutation()) setNotice("Панель заблокирована. Сначала разблокируйте её.");
+    const unlocked = guardMutation();
+    if (!inventory || !pending.length || !unlocked) {
+      if (!unlocked) setNotice("Панель заблокирована. Сначала разблокируйте её.");
       return;
     }
     if (!await ensureCapability("settings.capabilities.manage", "Применить изменения возможностей")) {
@@ -140,7 +153,10 @@ export function CapabilitySettingsSheet({ onClose }: { onClose: () => void }) {
     setNotice("Применяем изменения…");
     try {
       await request("/api/v1/system/runtime/apply-capabilities", { method: "POST", headers: { "x-panel-intent": "capability-apply" }, body: JSON.stringify({ expectedRevision: inventory.revision }) });
-      const deadline = Date.now() + 120_000;
+      // A Samsung production build can take several minutes. Persisted
+      // supervisor status makes queued/building/restarting honest progress;
+      // the hard bound only protects against a missing supervisor forever.
+      const deadline = Date.now() + 15 * 60_000;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, 1_500));
         try {
@@ -187,7 +203,10 @@ export function CapabilitySettingsSheet({ onClose }: { onClose: () => void }) {
                   <small className="capability-row__technical">{entry.technicalFlag}</small>
                   {entry.operationalBlockedReason === "panel_writes_disabled" && <small className="capability-row__blocked">Включено, но запись панели отключена</small>}
                 </div>
-                {entry.mutable && <SettingSwitchRow label={entry.label} checked={entry.desiredEnabled} onChange={(enabled) => void save(entry, enabled)} disabled={savingId !== null || inventory?.writesEnabled !== true} testId={`capability-switch-${entry.id}`} />}
+                {entry.mutable && <div className="capability-row__actions">
+                  <SettingSwitchRow label={entry.label} checked={entry.desiredEnabled} onChange={(enabled) => void save(entry, enabled)} disabled={savingId !== null || inventory?.writesEnabled !== true} testId={`capability-switch-${entry.id}`} />
+                  {entry.overrideEnabled !== null && entry.overrideEnabled !== undefined && <button type="button" className="planning-secondary-button capability-row__reset" disabled={savingId !== null || inventory?.writesEnabled !== true} onClick={() => void save(entry, null)}>Использовать конфигурацию</button>}
+                </div>}
               </article>
             ))}
           </section>
@@ -196,8 +215,8 @@ export function CapabilitySettingsSheet({ onClose }: { onClose: () => void }) {
         {pending.length > 0 && (
           <div className="capability-settings__apply" data-testid="capability-apply-area">
             <span>{pending.length} {pending.length === 1 ? "изменение ожидает применения" : "изменения ожидают применения"}</span>
-            <small>{applyStatus === "building" || applyStatus === "restarting" ? "Применяем изменения…" : "Будет выполнена пересборка и перезапуск панели"}</small>
-            <button type="button" className="primary-action" disabled={applyStatus !== "idle" && applyStatus !== "failed"} onClick={() => void apply()}>Применить изменения</button>
+            <small>{applyCopy(applyStatus, inventory?.writesEnabled === true)}</small>
+            <button type="button" className="primary-action" disabled={inventory?.writesEnabled !== true || (applyStatus !== "idle" && applyStatus !== "failed")} onClick={() => void apply()}>Применить изменения</button>
           </div>
         )}
       </div>

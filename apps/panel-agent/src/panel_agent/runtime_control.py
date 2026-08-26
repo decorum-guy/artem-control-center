@@ -35,7 +35,14 @@ def _enabled() -> bool:
 
 
 def _capability_apply_enabled() -> bool:
-    return _bool_env("PANEL_CAPABILITY_APPLY_ENABLED") and _command_path() is not None
+    # Applying a persisted delayed override is a write operation too.  Keeping
+    # this check here makes a previously staged command fail closed when the
+    # global master is disabled after staging but before Apply.
+    return (
+        _bool_env("PANEL_WRITES_ENABLED")
+        and _bool_env("PANEL_CAPABILITY_APPLY_ENABLED")
+        and _command_path() is not None
+    )
 
 
 def _require_intent(intent: str) -> None:

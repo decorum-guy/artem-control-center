@@ -45,8 +45,14 @@ class CapabilityDefinition:
     mutable: bool = False
 
 
-# Keep this deliberately small and explicit.  The read-only entries are owner
-# context, not an invitation to edit deployment/security configuration.
+# This is a deliberately explicit owner-facing classification.  It is not
+# generated from IntegrationSettings or the build environment: adding a new
+# product gate must make a maintainer decide whether it belongs in this safe
+# inventory (and update the completeness test), rather than silently exposing
+# a new switch or configuration detail.
+#
+# Read-only entries are context, not an invitation to edit deployment,
+# infrastructure, or security configuration.
 CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("calendar_display_colors", "Изменение цветов календарей", "Цвета действуют только внутри панели.", "Локальные возможности", "PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED", "immediate", "none", True),
     CapabilityDefinition("overview_layout_editor", "Редактирование главного экрана", "Позволяет менять расположение виджетов на главном экране.", "Локальные возможности", "PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED", "immediate", "none", True),
@@ -56,10 +62,29 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("planning_reminders_route", "Раздел «Напоминания»", "Доступность раздела напоминаний в панели.", "Планирование", "VITE_PLANNING_REMINDERS_ROUTE_ENABLED", "delayed", "rebuild", True),
     CapabilityDefinition("v2_visual_shell", "Новая оболочка панели", "Основная оболочка интерфейса.", "Интерфейс", "VITE_V2_VISUAL_SHELL", "delayed", "rebuild"),
     CapabilityDefinition("overview_v2", "Главный экран V2", "Базовая версия главного экрана.", "Интерфейс", "VITE_OVERVIEW_V2_ENABLED", "delayed", "rebuild"),
-    CapabilityDefinition("planning_mutations", "Изменение данных планирования", "Изменение задач, календаря и напоминаний.", "Системные действия", "VITE_PLANNING_TASK_MUTATIONS_ENABLED", "immediate", "none"),
-    CapabilityDefinition("touch_lock", "Блокировка сенсорного ввода", "Защита от случайных касаний.", "Системные действия", "VITE_TOUCH_INPUT_LOCK_ENABLED", "delayed", "rebuild"),
+    CapabilityDefinition("overview_editor_ui", "Поддержка редактора главного экрана", "Сборка интерфейса редактора главного экрана.", "Интерфейс", "VITE_OVERVIEW_EDITOR_ENABLED", "delayed", "rebuild"),
+    CapabilityDefinition("planning_reminder_mutations_ui", "Поддержка изменения напоминаний", "Сборка интерфейса для изменения напоминаний.", "Планирование", "VITE_PLANNING_REMINDER_MUTATIONS_ENABLED", "delayed", "rebuild"),
+    CapabilityDefinition("planning_task_mutations_ui", "Поддержка изменения задач", "Сборка интерфейса для изменения задач.", "Планирование", "VITE_PLANNING_TASK_MUTATIONS_ENABLED", "delayed", "rebuild"),
+    CapabilityDefinition("planning_calendar_mutations_ui", "Поддержка изменения календаря", "Сборка интерфейса для изменения событий календаря.", "Планирование", "VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED", "delayed", "rebuild"),
+    CapabilityDefinition("touch_lock", "Блокировка сенсорного ввода", "Поддержка защиты от случайных касаний.", "Системные действия", "VITE_TOUCH_INPUT_LOCK_ENABLED", "delayed", "rebuild"),
+    CapabilityDefinition("touch_lock_start_locked", "Начальная блокировка сенсорного ввода", "Панель запускается заблокированной.", "Системные действия", "VITE_TOUCH_INPUT_LOCK_START_LOCKED", "delayed", "rebuild"),
+    CapabilityDefinition("planning_integration", "Интеграция планирования", "Подключение панели к сервису планирования.", "Планирование", "PANEL_PLANNING_ENABLED", "immediate", "none"),
+    CapabilityDefinition("planning_reminder_mutations", "Запись напоминаний", "Разрешение Panel Agent изменять напоминания.", "Планирование", "PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("planning_task_mutations", "Запись задач", "Разрешение Panel Agent изменять задачи.", "Планирование", "PANEL_PLANNING_TASK_MUTATIONS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("planning_calendar_mutations", "Запись календаря", "Разрешение Panel Agent изменять события календаря.", "Планирование", "PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("panel_writes", "Запись панели", "Главный защитный барьер для всех операций записи.", "Системные действия", "PANEL_WRITES_ENABLED", "immediate", "none"),
-    CapabilityDefinition("avalar_actions", "Действия AVALAR", "Инфраструктурные действия внешнего сервиса.", "Системные действия", "PANEL_AVALAR_ACTIONS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("coffee_timing_writes", "Запись времени кофемашины", "Разрешение менять расписание кофемашины.", "Системные действия", "PANEL_COFFEE_TIMING_WRITES_ENABLED", "immediate", "none"),
+    CapabilityDefinition("coffee_notification_writes", "Запись уведомлений кофемашины", "Разрешение менять уведомления кофемашины.", "Системные действия", "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED", "immediate", "none"),
+    CapabilityDefinition("coffee_actions", "Действия кофемашины", "Разрешение выполнять действия кофемашины.", "Системные действия", "PANEL_COFFEE_ACTIONS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_ssh", "Статус AVALAR по SSH", "Получение состояния инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SSH_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_actions", "Действия AVALAR", "Инфраструктурные действия внешнего сервиса.", "Инфраструктура", "PANEL_AVALAR_ACTIONS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_smoke", "Проверка AVALAR", "Smoke-проверка инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SMOKE_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_stage_restart", "Перезапуск AVALAR Stage", "Инфраструктурное разрешение перезапуска Stage.", "Инфраструктура", "PANEL_AVALAR_STAGE_RESTART_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_main_restart", "Перезапуск AVALAR Main", "Инфраструктурное разрешение перезапуска Main.", "Инфраструктура", "PANEL_AVALAR_MAIN_RESTART_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_stage_deploy", "Развёртывание AVALAR Stage", "Инфраструктурное разрешение развёртывания Stage.", "Инфраструктура", "PANEL_AVALAR_STAGE_DEPLOY_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_main_deploy", "Развёртывание AVALAR Main", "Инфраструктурное разрешение развёртывания Main.", "Инфраструктура", "PANEL_AVALAR_MAIN_DEPLOY_ENABLED", "immediate", "none"),
+    CapabilityDefinition("rog_g703", "Инфраструктура ROG G703", "Управление зарегистрированной инфраструктурой ROG.", "Инфраструктура", "PANEL_ROG_G703_ENABLED", "immediate", "none"),
+    CapabilityDefinition("kiosk_controls", "Управление киоском", "Разрешение владельцу скрывать или останавливать киоск панели.", "Системные действия", "PANEL_KIOSK_CONTROLS_ENABLED", "immediate", "none"),
 )
 REGISTRY_BY_ID = {entry.id: entry for entry in CAPABILITY_REGISTRY}
 

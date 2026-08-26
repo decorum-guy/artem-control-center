@@ -18,7 +18,7 @@ import { useCalendarDisplayPreferences } from "../../CalendarDisplayPreferences"
 import { calendarDisplayPalette, calendarDisplayOverrideColor, calendarSourceDisplayColor, normalizedCalendarColor } from "../../calendarDisplayColors";
 import { RouteHeader } from "../../ShellPrimitives";
 import { SettingsSummaryColumn, SettingsSummaryRow } from "./SettingsSummaryRow";
-import { CapabilitySettingsSheet, capabilityStateLabel, capabilitySummary, useCapabilities } from "./CapabilitySettings";
+import { CapabilitySettingsSheet, capabilityStateLabel, capabilitySummary, useCapabilities, type CapabilitiesController } from "./CapabilitySettings";
 import "./settingsV2.css";
 
 type Theme = "day" | "night";
@@ -167,6 +167,7 @@ export function SettingsV2Page({
           kind={openSheet}
           coffee={coffee}
           calendarSources={calendarSources}
+          capabilities={capabilities}
           onClose={() => setOpenSheet(null)}
         />
       )}
@@ -178,15 +179,17 @@ function SettingsSheet({
   kind,
   coffee,
   calendarSources,
+  capabilities,
   onClose
 }: {
   kind: SettingsSheet;
   coffee: CoffeeSettingsController;
   calendarSources: PlanningCalendarSource[];
+  capabilities: CapabilitiesController;
   onClose: () => void;
 }) {
   if (kind === "calendars") return <CalendarSettingsSheet sources={calendarSources} onClose={onClose} />;
-  if (kind === "capabilities") return <CapabilitySettingsSheet onClose={onClose} />;
+  if (kind === "capabilities") return <CapabilitySettingsSheet onClose={onClose} capabilities={capabilities} />;
   if (kind === "coffee") {
     return (
       <Sheet

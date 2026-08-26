@@ -1,13 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import {
   productionBuildEnvironment,
   productionBuildProfile,
   productionBuildProfileName,
   productionBuildCapabilities,
-  safeDelayedCapabilityOverrides
+  safeDelayedCapabilityOverrides,
+  loadProductionCapabilityOverrides,
+  resolveCapabilityOverridesPath
 } from "../production-build-profile.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -53,6 +57,30 @@ test("only the four explicitly allowlisted capability IDs overlay the accepted b
   assert.equal(capabilities.baseline.planning_calendar_route, true);
   assert.equal(capabilities.active.planning_calendar_route, false);
   assert.equal(Object.keys(capabilities.active).length, 4);
+});
+
+test("normal production build resolves the Panel-owned LOCALAPPDATA store and an explicit path wins", () => {
+  const root = mkdtempSync(join(tmpdir(), "artem-production-store-"));
+  const localAppData = join(root, "local-app-data");
+  const canonical = join(localAppData, "ArtemControlCenter", "capability-overrides.json");
+  const explicit = join(root, "explicit-overrides.json");
+  mkdirSync(join(localAppData, "ArtemControlCenter"), { recursive: true });
+  writeFileSync(canonical, JSON.stringify({
+    schemaVersion: "capability-overrides.v1", revision: 2, updatedAt: "2026-08-26T00:00:00Z",
+    overrides: { planning_calendar_route: false }
+  }));
+  writeFileSync(explicit, JSON.stringify({
+    schemaVersion: "capability-overrides.v1", revision: 3, updatedAt: "2026-08-26T00:00:00Z",
+    overrides: { planning_tasks_route: false }
+  }));
+
+  assert.equal(resolveCapabilityOverridesPath({ LOCALAPPDATA: localAppData }), canonical);
+  assert.deepEqual(loadProductionCapabilityOverrides({ LOCALAPPDATA: localAppData }), { planning_calendar_route: false });
+  assert.deepEqual(
+    loadProductionCapabilityOverrides({ LOCALAPPDATA: localAppData, PANEL_CAPABILITY_OVERRIDES_PATH: explicit }),
+    { planning_tasks_route: false }
+  );
+  assert.deepEqual(loadProductionCapabilityOverrides({}), {});
 });
 
 test("the package exposes the production build command and Windows workflow invokes it", () => {

@@ -69,3 +69,28 @@ def test_runtime_control_is_disabled_without_explicit_gate(monkeypatch, tmp_path
     assert response.status_code == 409
     assert not command_path.exists()
     assert not close_request_path.exists()
+
+
+def test_capability_apply_fails_closed_when_global_panel_writes_were_disabled(monkeypatch, tmp_path):
+    command_path = tmp_path / "runtime-command.json"
+    store_path = tmp_path / "capability-overrides.json"
+    store_path.write_text(json.dumps({
+        "schemaVersion": "capability-overrides.v1", "revision": 7,
+        "updatedAt": "2026-08-26T00:00:00Z",
+        "overrides": {"planning_calendar_route": False},
+    }), encoding="utf-8")
+    monkeypatch.setenv("PANEL_CAPABILITY_OVERRIDES_PATH", str(store_path))
+    monkeypatch.setenv("PANEL_CAPABILITY_APPLY_ENABLED", "true")
+    monkeypatch.setenv("PANEL_WRITES_ENABLED", "false")
+    module = load_app(monkeypatch, command_path, enabled=True)
+    client = TestClient(module.app)
+
+    assert client.get("/api/v1/system/runtime").json()["capabilityApplyEnabled"] is False
+    response = client.post(
+        "/api/v1/system/runtime/apply-capabilities",
+        headers={"x-panel-intent": "capability-apply"},
+        json={"expectedRevision": 7},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "capability_apply_disabled"
+    assert not command_path.exists()

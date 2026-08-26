@@ -49,12 +49,13 @@ def raw_patch(app, body: bytes, headers: dict[str, str], chunks: list[bytes] | N
     return asyncio.run(run_request())
 
 
-def load_app(monkeypatch, path: Path, *, writes: bool = True):
+def load_app(monkeypatch, path: Path, *, writes: bool = True, master_writes: bool | None = None):
     monkeypatch.setenv("PANEL_AGENT_MODE", "fixtures")
     monkeypatch.setenv("PANEL_FIXTURE_WRITES_ENABLED", "true")
-    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true" if writes else "false")
+    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true" if (writes if master_writes is None else master_writes) else "false")
     monkeypatch.setenv("PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED", "true" if writes else "false")
     monkeypatch.setenv("PANEL_OVERVIEW_LAYOUT_PATH", str(path))
+    monkeypatch.setenv("PANEL_CAPABILITY_OVERRIDES_PATH", str(path.parent / "capability-overrides.json"))
     import panel_agent.main
 
     return importlib.reload(panel_agent.main)
@@ -118,6 +119,42 @@ def test_write_requires_both_write_flags_and_exact_if_match(tmp_path, monkeypatc
         )
         assert conflict.status_code == 412
         assert conflict.json()["detail"] == "revision_conflict"
+
+
+def test_overview_editor_capability_is_an_effective_runtime_gate(tmp_path, monkeypatch):
+    module = load_app(monkeypatch, tmp_path / "layout.json", writes=True)
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        # The configured baseline allows the actual endpoint, not just the
+        # inventory row.  Disable the immediate capability and re-check live.
+        assert client.patch(
+            "/api/v1/overview/layout", headers={"If-Match": initial.headers["etag"]},
+            json={"items": initial.json()["items"]},
+        ).status_code == 200
+        inventory = client.get("/api/v1/settings/capabilities").json()
+        changed = client.patch("/api/v1/settings/capabilities", json={
+            "expectedRevision": inventory["revision"],
+            "capabilityId": "overview_layout_editor",
+            "enabled": False,
+        })
+        assert changed.status_code == 200
+        disabled = get_layout(client)
+        assert disabled.json()["writesEnabled"] is False
+        assert client.patch(
+            "/api/v1/overview/layout", headers={"If-Match": disabled.headers["etag"]},
+            json={"items": disabled.json()["items"]},
+        ).status_code == 403
+
+
+def test_global_write_master_blocks_overview_writes_even_when_local_gate_is_enabled(tmp_path, monkeypatch):
+    module = load_app(monkeypatch, tmp_path / "layout.json", writes=True, master_writes=False)
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        assert initial.json()["writesEnabled"] is False
+        assert client.patch(
+            "/api/v1/overview/layout", headers={"If-Match": initial.headers["etag"]},
+            json={"items": initial.json()["items"]},
+        ).status_code == 403
 
 
 def test_valid_appearance_patch_is_atomic_revisioned_and_survives_restart(tmp_path, monkeypatch):

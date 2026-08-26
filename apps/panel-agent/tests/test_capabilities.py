@@ -7,6 +7,41 @@ import threading
 from fastapi.testclient import TestClient
 
 
+EXPECTED_CURRENT_PRODUCT_FLAGS = {
+    "PANEL_AVALAR_SSH_ENABLED",
+    "PANEL_AVALAR_ACTIONS_ENABLED",
+    "PANEL_AVALAR_SMOKE_ENABLED",
+    "PANEL_AVALAR_STAGE_RESTART_ENABLED",
+    "PANEL_AVALAR_MAIN_RESTART_ENABLED",
+    "PANEL_AVALAR_STAGE_DEPLOY_ENABLED",
+    "PANEL_AVALAR_MAIN_DEPLOY_ENABLED",
+    "PANEL_ROG_G703_ENABLED",
+    "PANEL_WRITES_ENABLED",
+    "PANEL_COFFEE_TIMING_WRITES_ENABLED",
+    "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED",
+    "PANEL_COFFEE_ACTIONS_ENABLED",
+    "PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED",
+    "PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED",
+    "PANEL_PLANNING_ENABLED",
+    "PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED",
+    "PANEL_PLANNING_TASK_MUTATIONS_ENABLED",
+    "PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED",
+    "PANEL_KIOSK_CONTROLS_ENABLED",
+    "VITE_V2_VISUAL_SHELL",
+    "VITE_OVERVIEW_V2_ENABLED",
+    "VITE_OVERVIEW_EDITOR_ENABLED",
+    "VITE_PLANNING_OVERVIEW_ENABLED",
+    "VITE_PLANNING_TASKS_ROUTE_ENABLED",
+    "VITE_PLANNING_CALENDAR_ROUTE_ENABLED",
+    "VITE_PLANNING_REMINDERS_ROUTE_ENABLED",
+    "VITE_PLANNING_REMINDER_MUTATIONS_ENABLED",
+    "VITE_PLANNING_TASK_MUTATIONS_ENABLED",
+    "VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED",
+    "VITE_TOUCH_INPUT_LOCK_ENABLED",
+    "VITE_TOUCH_INPUT_LOCK_START_LOCKED",
+}
+
+
 def _manifest(dist, *, active=None, baseline=None):
     dist.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -23,6 +58,20 @@ def _manifest(dist, *, active=None, baseline=None):
             "planning_tasks_route": True,
             "planning_calendar_route": True,
             "planning_reminders_route": True,
+        },
+        "flags": {
+            "VITE_V2_VISUAL_SHELL": True,
+            "VITE_OVERVIEW_V2_ENABLED": True,
+            "VITE_OVERVIEW_EDITOR_ENABLED": True,
+            "VITE_PLANNING_OVERVIEW_ENABLED": True,
+            "VITE_PLANNING_TASKS_ROUTE_ENABLED": True,
+            "VITE_PLANNING_CALENDAR_ROUTE_ENABLED": True,
+            "VITE_PLANNING_REMINDERS_ROUTE_ENABLED": True,
+            "VITE_PLANNING_REMINDER_MUTATIONS_ENABLED": True,
+            "VITE_PLANNING_TASK_MUTATIONS_ENABLED": True,
+            "VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED": True,
+            "VITE_TOUCH_INPUT_LOCK_ENABLED": True,
+            "VITE_TOUCH_INPUT_LOCK_START_LOCKED": True,
         },
     }
     (dist / "dashboard-capabilities.json").write_text(json.dumps(payload), encoding="utf-8")
@@ -75,6 +124,16 @@ def test_inventory_is_explicit_safe_and_two_behaviors_only(tmp_path, monkeypatch
         assert forbidden not in serialized
 
 
+def test_current_product_gate_set_has_explicit_registry_classification():
+    """A newly introduced product bool requires a deliberate inventory choice."""
+    from panel_agent.capabilities import CAPABILITY_REGISTRY
+
+    classified = {definition.technical_flag for definition in CAPABILITY_REGISTRY}
+    assert classified == EXPECTED_CURRENT_PRODUCT_FLAGS
+    assert "PANEL_FIXTURE_WRITES_ENABLED" not in classified
+    assert "PANEL_CAPABILITY_APPLY_ENABLED" not in classified
+
+
 def test_immediate_persists_reset_and_master_gate_stays_hard(tmp_path, monkeypatch):
     module, store = _load(monkeypatch, tmp_path)
     with TestClient(module.app) as client:
@@ -117,19 +176,63 @@ def test_store_serializes_same_revision_writers(tmp_path):
     from panel_agent.capabilities import CapabilityOverrideStore, CapabilityRevisionConflict
 
     store = CapabilityOverrideStore(tmp_path / "capability-overrides.json")
-    barrier = threading.Barrier(2)
     outcomes = []
+    outcomes_lock = threading.Lock()
+    first_entered_atomic_write = threading.Event()
+    release_first_writer = threading.Event()
+
+    class ObservedStoreLock:
+        """Observe B immediately before it attempts the real acquire()."""
+
+        def __init__(self):
+            self._lock = threading.Lock()
+            self._observed = threading.Lock()
+            self._entries = 0
+            self.second_attempted_acquire = threading.Event()
+
+        def __enter__(self):
+            with self._observed:
+                self._entries += 1
+                if self._entries == 2:
+                    self.second_attempted_acquire.set()
+            self._lock.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self._lock.release()
+
+    observed_lock = ObservedStoreLock()
+    store._write_lock = observed_lock
+    original_atomic_write = store._atomic_write
+
+    def instrumented_atomic_write(document):
+        first_entered_atomic_write.set()
+        assert release_first_writer.wait(timeout=5), "test did not release writer A"
+        original_atomic_write(document)
+
+    store._atomic_write = instrumented_atomic_write
 
     def writer(capability_id):
-        barrier.wait()
         try:
-            outcomes.append(store.write(capability_id=capability_id, enabled=False, expected_revision=0))
+            outcome = store.write(capability_id=capability_id, enabled=False, expected_revision=0)
         except Exception as error:
-            outcomes.append(error)
+            outcome = error
+        with outcomes_lock:
+            outcomes.append(outcome)
 
     first = threading.Thread(target=writer, args=("planning_calendar_route",))
     second = threading.Thread(target=writer, args=("planning_tasks_route",))
-    first.start(); second.start(); first.join(timeout=5); second.join(timeout=5)
+    first.start()
+    assert first_entered_atomic_write.wait(timeout=5)
+    second.start()
+    # If the production lock is removed/bypassed, B never reaches this
+    # observed pre-acquire point and this test fails deterministically.
+    assert observed_lock.second_attempted_acquire.wait(timeout=5)
+    release_first_writer.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+    assert not first.is_alive()
+    assert not second.is_alive()
     assert len(outcomes) == 2
     assert sum(isinstance(item, CapabilityRevisionConflict) for item in outcomes) == 1
     assert sum(isinstance(item, tuple) for item in outcomes) == 1

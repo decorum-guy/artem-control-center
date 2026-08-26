@@ -47,7 +47,7 @@ from .calendar_display_preferences import (
     CalendarDisplayPreferencesError,
     CalendarDisplayPreferencesStore,
 )
-from .build_capabilities import active_build_states
+from .build_capabilities import active_build_flags, active_build_states
 from .capabilities import (
     CAPABILITY_REGISTRY,
     CapabilityOverrideStore,
@@ -332,6 +332,11 @@ def _immediate_baseline(capability_id: str) -> bool:
     }[capability_id]
 
 
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    return default if not raw else raw in {"1", "true", "yes", "on"}
+
+
 def _immediate_capability_enabled(capability_id: str) -> bool:
     document, available = capability_override_store.read()
     if not available:
@@ -341,12 +346,23 @@ def _immediate_capability_enabled(capability_id: str) -> bool:
 
 def _read_only_capability_enabled(capability_id: str) -> bool:
     return {
-        "v2_visual_shell": True,
-        "overview_v2": True,
-        "planning_mutations": SETTINGS.panel_planning_task_mutations_enabled,
-        "touch_lock": True,
+        "planning_integration": SETTINGS.panel_planning_enabled,
+        "planning_reminder_mutations": SETTINGS.panel_planning_reminder_mutations_enabled,
+        "planning_task_mutations": SETTINGS.panel_planning_task_mutations_enabled,
+        "planning_calendar_mutations": SETTINGS.panel_planning_calendar_mutations_enabled,
         "panel_writes": SETTINGS.writes_enabled,
+        "coffee_timing_writes": SETTINGS.coffee_timing_writes_enabled,
+        "coffee_notification_writes": SETTINGS.coffee_notification_writes_enabled,
+        "coffee_actions": SETTINGS.coffee_actions_enabled,
+        "avalar_ssh": SETTINGS.avalar_ssh_enabled,
         "avalar_actions": SETTINGS.avalar_actions_enabled,
+        "avalar_smoke": SETTINGS.avalar_smoke_enabled,
+        "avalar_stage_restart": SETTINGS.avalar_stage_restart_enabled,
+        "avalar_main_restart": SETTINGS.avalar_main_restart_enabled,
+        "avalar_stage_deploy": SETTINGS.avalar_stage_deploy_enabled,
+        "avalar_main_deploy": SETTINGS.avalar_main_deploy_enabled,
+        "rog_g703": SETTINGS.rog_g703_enabled,
+        "kiosk_controls": _bool_env("PANEL_KIOSK_CONTROLS_ENABLED"),
     }[capability_id]
 
 
@@ -354,6 +370,7 @@ def _capability_inventory() -> dict:
     document, available = capability_override_store.read()
     overrides = document["overrides"] if available else {}
     active_build, baseline_build, build_available = active_build_states()
+    build_flags, flags_available = active_build_flags()
     entries = []
     for definition in CAPABILITY_REGISTRY:
         if definition.id in {"calendar_display_colors", "overview_layout_editor"}:
@@ -363,10 +380,12 @@ def _capability_inventory() -> dict:
         elif definition.id in active_build:
             active = active_build[definition.id]
             desired = overrides.get(definition.id, baseline_build[definition.id])
+        elif definition.technical_flag.startswith("VITE_"):
+            active = desired = build_flags[definition.technical_flag]
         else:
             active = desired = _read_only_capability_enabled(definition.id)
         blocked = "panel_writes_disabled" if definition.id in {"calendar_display_colors", "overview_layout_editor"} and desired and not SETTINGS.writes_enabled else None
-        entries.append({
+        entry = {
             "id": definition.id,
             "label": definition.label,
             "description": definition.description,
@@ -379,13 +398,20 @@ def _capability_inventory() -> dict:
             "behavior": definition.behavior,
             "requiredApplyAction": definition.apply_requirement,
             "operationalBlockedReason": blocked,
-        })
+        }
+        if definition.mutable:
+            entry["configuredEnabled"] = baseline
+            entry["overrideEnabled"] = overrides.get(definition.id)
+        entries.append(entry)
     return {
         "schemaVersion": "capabilities.v1",
         "revision": document["revision"],
-        "available": available and build_available,
+        "available": available and build_available and flags_available,
         "writesEnabled": SETTINGS.writes_enabled,
-        "warnings": ([] if available else ["capability_store_unavailable"]) + ([] if build_available else ["build_capabilities_unavailable"]),
+        "warnings": (
+            ([] if available else ["capability_store_unavailable"])
+            + ([] if build_available and flags_available else ["build_capabilities_unavailable"])
+        ),
         "entries": entries,
     }
 

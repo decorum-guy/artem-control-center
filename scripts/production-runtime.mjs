@@ -195,6 +195,13 @@ export function activateStagedDashboard({ active, staging, backup }) {
   }
 }
 
+/** Restore the only retained known-good dashboard after failed acceptance. */
+export function restoreDashboardBackup({ active, backup }) {
+  if (!existsSync(backup)) throw new Error("dashboard_backup_missing");
+  rmSync(active, { recursive: true, force: true });
+  renameSync(backup, active);
+}
+
 function stopProcessTree(child, log) {
   if (!child?.pid || child.killed) return;
   if (process.platform === "win32") {
@@ -311,6 +318,7 @@ export async function runProductionRuntime() {
   let restartTimer = null;
   let applyingCapabilities = false;
   let appliedCapabilityRevision = null;
+  let activeCapabilityApply = null;
 
   function writeCapabilityApplyState(status, extra = {}) {
     atomicWriteJson(capabilityApplyStatePath, {
@@ -371,13 +379,24 @@ export async function runProductionRuntime() {
         expected ? "INFO" : "ERROR",
         `Panel Agent exited pid=${child.pid} code=${code ?? "null"} signal=${signal ?? "none"}`
       );
-      if (!shuttingDown && !expected) requestRestart("agent process exited unexpectedly");
+      if (!shuttingDown && !expected) {
+        if (activeCapabilityApply) {
+          activeCapabilityApply.recoveryFailures += 1;
+          if (activeCapabilityApply.recoveryFailures >= 3) {
+            rollbackCapabilityApply("new_runtime_exited");
+          } else {
+            requestRestart("agent process exited during capability apply");
+          }
+        } else {
+          requestRestart("agent process exited unexpectedly");
+        }
+      }
     });
   }
 
-  function requestRestart(reason) {
+  function requestRestart(reason, { allowBeyondBudget = false } = {}) {
     if (shuttingDown || restartPending) return;
-    if (!restartBudget.record()) {
+    if (!restartBudget.record() && !allowBeyondBudget) {
       log("ERROR", `Restart budget exhausted after: ${reason}`);
       writeState("failed", { lastError: "restart_budget_exhausted" });
       void shutdown(1);
@@ -394,6 +413,28 @@ export async function runProductionRuntime() {
       restartPending = false;
       spawnAgent();
     }, delay);
+  }
+
+  function rollbackCapabilityApply(reason) {
+    const pendingApply = activeCapabilityApply;
+    if (!pendingApply) return;
+    activeCapabilityApply = null;
+    appliedCapabilityRevision = null;
+    log("ERROR", `Capability apply health acceptance failed: ${reason}`);
+    if (agent?.pid) expectedExitPids.add(agent.pid);
+    stopProcessTree(agent, log);
+    agent = null;
+    try {
+      restoreDashboardBackup({ active: dashboardDist, backup: pendingApply.backup });
+    } catch (error) {
+      log("ERROR", `Capability dashboard rollback failed: ${error?.message || error}`);
+      writeCapabilityApplyState("failed", { revision: pendingApply.revision, code: "rollback_failed" });
+      return;
+    }
+    // Failed desired state remains in capability-overrides.json. The restored
+    // bundle is the active state; a later owner retry may build it again.
+    writeCapabilityApplyState("failed", { revision: pendingApply.revision, code: "new_runtime_unhealthy" });
+    requestRestart("capability rollback to known-good dashboard", { allowBeyondBudget: true });
   }
 
   async function shutdown(exitCode) {
@@ -456,6 +497,7 @@ export async function runProductionRuntime() {
       }
       writeCapabilityApplyState("restarting", { revision: command.expectedRevision });
       activateStagedDashboard({ active: dashboardDist, staging, backup });
+      activeCapabilityApply = { revision: command.expectedRevision, backup, recoveryFailures: 0 };
       appliedCapabilityRevision = command.expectedRevision;
       requestRestart("capabilities applied");
     } catch (error) {
@@ -536,7 +578,10 @@ export async function runProductionRuntime() {
       } else {
         healthFailures += 1;
         log("WARN", `Panel Agent health failure ${healthFailures}/3`);
-        if (healthFailures >= 3) requestRestart("three consecutive health failures");
+        if (healthFailures >= 3) {
+          if (activeCapabilityApply) rollbackCapabilityApply("new_runtime_health_failed");
+          else requestRestart("three consecutive health failures");
+        }
       }
     } finally {
       healthCheckRunning = false;

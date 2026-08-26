@@ -1,20 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { delayedBuildCapabilityVariables, productionBuildCapabilities, productionBuildEnvironment, productionBuildProfileName, safeDelayedCapabilityOverrides } from "./production-build-profile.mjs";
+import { delayedBuildCapabilityVariables, loadProductionCapabilityOverrides, productionBuildCapabilities, productionBuildEnvironment, productionBuildProfileName } from "./production-build-profile.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const npmCli = process.env.npm_execpath;
 const command = npmCli ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
 const args = npmCli ? [npmCli, "run", "build"] : ["run", "build"];
 
-function loadOverrides(path) {
-  if (!path || !existsSync(path)) return {};
-  try { return safeDelayedCapabilityOverrides(JSON.parse(readFileSync(path, "utf8"))); }
-  catch { throw new Error("Capability override store is invalid; refusing production build"); }
-}
-
-const overrides = loadOverrides(process.env.PANEL_CAPABILITY_OVERRIDES_PATH);
+const overrides = loadProductionCapabilityOverrides(process.env);
 const capabilities = productionBuildCapabilities(overrides);
 const buildEnvironment = productionBuildEnvironment(process.env, overrides);
 for (const variable of Object.values(delayedBuildCapabilityVariables)) {
@@ -41,6 +35,7 @@ writeFileSync(resolve(outDir, "dashboard-capabilities.json"), `${JSON.stringify(
   schemaVersion: "dashboard-capabilities.v1",
   profile: productionBuildProfileName,
   baseline: capabilities.baseline,
-  active: capabilities.active
+  active: capabilities.active,
+  flags: capabilities.flags
 }, null, 2)}\n`, "utf8");
 await import("./production-build-assert.mjs");

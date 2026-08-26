@@ -6,6 +6,9 @@
  * updater invokes build:production, which applies this complete profile and
  * does not depend on a Samsung-local VITE environment.
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 export const productionBuildProfile = Object.freeze({
   VITE_V2_VISUAL_SHELL: "true",
   VITE_OVERVIEW_V2_ENABLED: "true",
@@ -22,6 +25,14 @@ export const productionBuildProfile = Object.freeze({
 });
 
 export const productionBuildProfileName = "accepted-v2";
+
+/** Resolve the Panel-owned durable store without reading a developer file. */
+export function resolveCapabilityOverridesPath(environment = process.env) {
+  const explicit = environment.PANEL_CAPABILITY_OVERRIDES_PATH?.trim();
+  if (explicit) return explicit;
+  const localAppData = environment.LOCALAPPDATA?.trim();
+  return localAppData ? join(localAppData, "ArtemControlCenter", "capability-overrides.json") : null;
+}
 
 export const delayedBuildCapabilityVariables = Object.freeze({
   planning_overview: "VITE_PLANNING_OVERVIEW_ENABLED",
@@ -42,6 +53,21 @@ export function safeDelayedCapabilityOverrides(value) {
   );
 }
 
+/**
+ * Read only the canonical Panel-owned store selected by the production build.
+ * A missing store is the accepted baseline; a malformed present store fails
+ * closed instead of silently rebuilding a different bundle.
+ */
+export function loadProductionCapabilityOverrides(environment = process.env) {
+  const path = resolveCapabilityOverridesPath(environment);
+  if (!path || !existsSync(path)) return {};
+  try {
+    return safeDelayedCapabilityOverrides(JSON.parse(readFileSync(path, "utf8")));
+  } catch {
+    throw new Error("Capability override store is invalid; refusing production build");
+  }
+}
+
 export function productionBuildCapabilities(overrides = {}) {
   const safe = safeDelayedCapabilityOverrides(overrides);
   const baseline = Object.fromEntries(
@@ -49,7 +75,10 @@ export function productionBuildCapabilities(overrides = {}) {
   );
   return {
     baseline,
-    active: { ...baseline, ...safe }
+    active: { ...baseline, ...safe },
+    flags: Object.fromEntries(
+      Object.entries(productionBuildProfile).map(([name, value]) => [name, value === "true"])
+    )
   };
 }
 
