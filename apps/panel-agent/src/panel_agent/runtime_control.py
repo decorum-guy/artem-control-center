@@ -55,6 +55,11 @@ class CapabilityApplyRequest(BaseModel):
     expectedRevision: int = Field(ge=0, le=2_147_483_647)
 
 
+class KioskPresenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    pageId: str = Field(pattern=r"^[0-9a-f]{24}$")
+
+
 def _write_command(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -127,6 +132,27 @@ def runtime_status(response: Response) -> dict:
         "capabilityApply": _apply_state(),
         "platform": os.name,
     }
+
+
+@router.post("/kiosk-presence", status_code=status.HTTP_204_NO_CONTENT)
+def kiosk_presence(
+    payload: KioskPresenceRequest,
+    x_panel_intent: str = Header(default=""),
+) -> Response:
+    if x_panel_intent != "kiosk-presence":
+        raise HTTPException(status_code=403, detail="kiosk_presence_intent_required")
+    command_path = _command_path()
+    if command_path is None:
+        raise HTTPException(status_code=409, detail="runtime_path_unavailable")
+    _write_command(
+        command_path.parent / "kiosk-presence.json",
+        {
+            "schemaVersion": 1,
+            "pageId": payload.pageId,
+            "observedAt": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/hide", status_code=status.HTTP_202_ACCEPTED)
