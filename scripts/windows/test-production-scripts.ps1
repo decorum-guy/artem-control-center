@@ -205,6 +205,9 @@ try {
     if ($kioskPresenceText -notmatch 'ManualStop' -or $kioskPresenceText -notmatch 'Stop-ArtemKiosk') {
         throw "Kiosk watcher must close the dedicated profile after manual shutdown"
     }
+    if ($kioskPresenceText -notmatch 'kiosk-watcher-owner' -or $watcherText -notmatch 'presence') {
+        throw "Kiosk watcher must stay non-destructive on presence loss and honor single-owner supersession"
+    }
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot "test-kiosk-watcher.ps1"))) {
         throw "Deterministic kiosk watcher regression must exist beside the watcher policy"
     }

@@ -40,16 +40,60 @@ function Test-ArtemKioskVisible {
     )
 }
 
-# A single failed presence probe must never close a physically valid kiosk:
-# heartbeats are 1s against a 5s max age and CIM process snapshots can be
-# transient, so sustained absence is judged over this bounded grace window.
-$script:ArtemKioskWatcherPresenceLossGraceSeconds = 15
+# Kiosk watcher lifecycle. A single failed presence probe must never close a
+# physically valid kiosk, and neither may sustained absence: heartbeats are 1s
+# against a 5s max age and CIM process snapshots can be transient. After presence
+# loss the watcher stays alive non-destructively so it keeps honoring explicit
+# stop requests and can resume normal monitoring if presence recovers.
+#
+# Single-owner/supersession: every confirmed watcher claims kiosk-watcher-owner.json
+# atomically (last writer wins). When a later Open relaunches the kiosk, its new
+# watcher claim makes every previous watcher exit non-destructively on its next
+# poll, so degraded/healthy watchers can never accumulate. An abnormally dead
+# watcher never blocks the next one because claiming is an unconditional overwrite.
+function Get-ArtemKioskWatcherOwnerPath {
+    param([Parameter(Mandatory)]$Paths)
+    return Join-Path $Paths.RuntimeRoot "kiosk-watcher-owner.json"
+}
+
+function Set-ArtemKioskWatcherOwner {
+    param([Parameter(Mandatory)]$Paths)
+    $watcherId = [guid]::NewGuid().ToString("N")
+    # A claim only ever happens after a confirmed kiosk wrote heartbeats into
+    # RuntimeRoot, so the directory already exists here.
+    $ownerPath = Get-ArtemKioskWatcherOwnerPath -Paths $Paths
+    $temporary = "$ownerPath.tmp"
+    [ordered]@{
+        schemaVersion = 1
+        watcherId = $watcherId
+        claimedAt = [DateTimeOffset]::UtcNow.ToString("o")
+    } | ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding ASCII
+    Move-Item -LiteralPath $temporary -Destination $ownerPath -Force
+    return $watcherId
+}
+
+# Only a well-formed foreign claim supersedes us. Missing/garbage payloads fail
+# open toward staying alive rather than self-superseding on transient reads.
+function Test-ArtemKioskWatcherSuperseded {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string]$WatcherId
+    )
+    try {
+        $payload = Get-ArtemJsonPayload -Path (Get-ArtemKioskWatcherOwnerPath -Paths $Paths)
+    }
+    catch {
+        return $false
+    }
+    if ($null -eq $payload -or $payload.schemaVersion -ne 1) { return $false }
+    $currentOwner = [string]$payload.watcherId
+    return ($currentOwner -match '^[0-9a-f]{32}$' -and $currentOwner -ne $WatcherId)
+}
 
 function Invoke-ArtemKioskWatcherLoop {
     param(
         [Parameter(Mandatory)]$Paths,
         [int]$StartupTimeoutSeconds = 20,
-        [int]$PresenceLossGraceSeconds = $script:ArtemKioskWatcherPresenceLossGraceSeconds,
         [int]$PollIntervalMilliseconds = 250,
         [scriptblock]$Clock = { Get-Date }
     )
@@ -75,35 +119,33 @@ function Invoke-ArtemKioskWatcherLoop {
         return [pscustomobject]@{ Outcome = "startup-not-confirmed" }
     }
 
-    $presenceLostSince = $null
+    # Claiming happens only after startup is confirmed, so the previous owner
+    # keeps handling explicit stops until this watcher can actually serve them.
+    $watcherId = Set-ArtemKioskWatcherOwner -Paths $Paths
+
     while ($true) {
-        # Explicit stop requests stay prompt and destructive.
-        if ((Test-Path -LiteralPath $closeRequestPath) -or (Test-Path -LiteralPath $Paths.ManualStop)) {
-            Remove-Item -LiteralPath $closeRequestPath -Force -ErrorAction SilentlyContinue
-            Stop-ArtemKiosk -Paths $Paths
-            return [pscustomobject]@{ Outcome = "explicit-stop"; PresenceLostSince = $presenceLostSince }
+        if (Test-ArtemKioskWatcherSuperseded -Paths $Paths -WatcherId $watcherId) {
+            # A newer confirmed watcher owns the lifecycle now (fresh Open relaunch).
+            # Exit without touching Edge; never destroy what we no longer own.
+            return [pscustomobject]@{ Outcome = "superseded" }
         }
 
-        if (Test-ArtemKioskVisible -Paths $Paths) {
-            $presenceLostSince = $null
+        # Explicit stop requests stay prompt and destructive no matter how long
+        # advisory presence has been missing; panel-agent relies on this for
+        # robust dedicated-profile/tree cleanup around hide and shutdown.
+        if (Test-Path -LiteralPath $closeRequestPath) {
+            Remove-Item -LiteralPath $closeRequestPath -Force -ErrorAction SilentlyContinue
+            Stop-ArtemKiosk -Paths $Paths
+            return [pscustomobject]@{ Outcome = "explicit-stop"; Source = "close-request" }
         }
-        else {
-            $now = & $Clock
-            if ($null -eq $presenceLostSince) {
-                $presenceLostSince = $now
-            }
-            elseif (($now - $presenceLostSince).TotalSeconds -ge $PresenceLossGraceSeconds) {
-                # Sustained absence still does not prove the kiosk closed; a stale
-                # heartbeat next to live panel Edge is exactly what fresh Open owns
-                # recovering via stale-heartbeat removal and dedicated-profile cleanup.
-                # Exit non-destructively so valid Edge windows can never be killed here.
-                return [pscustomobject]@{
-                    Outcome = "presence-lost"
-                    PresenceLostSince = $presenceLostSince
-                    ExitedAt = $now
-                }
-            }
+        if (Test-Path -LiteralPath $Paths.ManualStop) {
+            Stop-ArtemKiosk -Paths $Paths
+            return [pscustomobject]@{ Outcome = "explicit-stop"; Source = "manual-stop" }
         }
+
+        # Advisory visibility is observed but never acted on destructively, so a
+        # stalled or recovered heartbeat cannot itself terminate the watcher.
+        Test-ArtemKioskVisible -Paths $Paths | Out-Null
 
         Start-Sleep -Milliseconds $PollIntervalMilliseconds
     }

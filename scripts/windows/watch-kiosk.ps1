@@ -10,7 +10,8 @@ $paths = Get-ArtemRuntimePaths
 
 # Lifecycle policy lives in the shared watcher loop (see kiosk-presence.ps1):
 # explicit stop requests close the dedicated kiosk promptly; advisory presence
-# loss is tolerated over a bounded grace window and then exits non-destructively.
+# loss never does, so the watcher stays alive non-destructively and a later
+# confirmed watcher supersedes it through kiosk-watcher-owner.json ownership.
 Invoke-ArtemKioskWatcherLoop `
     -Paths $paths `
     -StartupTimeoutSeconds $StartupTimeoutSeconds | Out-Null
