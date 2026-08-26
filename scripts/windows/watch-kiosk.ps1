@@ -1,5 +1,6 @@
 $ErrorActionPreference = "SilentlyContinue"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
+. (Join-Path $PSScriptRoot "kiosk-presence.ps1")
 
 $paths = Get-ArtemRuntimePaths
 $closeRequest = Join-Path $paths.RuntimeRoot "kiosk-close-request.json"
