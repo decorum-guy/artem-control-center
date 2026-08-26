@@ -63,4 +63,17 @@ describe("action confirmation catalog", () => {
     });
     expect(actionConfirmationCatalog["planning.tasks.archive"].description).toBe("Задача исчезнет из активных списков.");
   });
+
+  it("marks full panel shutdown as the only non-waivable confirmation", () => {
+    expect(actionConfirmationCatalog["system.runtime.shutdown"]).toMatchObject({
+      level: "simple",
+      title: "Полностью закрыть панель?",
+      confirmLabel: "Полностью закрыть",
+      alwaysConfirm: true
+    });
+    const mandatory = Object.values(actionConfirmationCatalog)
+      .filter((spec) => spec.alwaysConfirm)
+      .map((spec) => spec.id);
+    expect(mandatory).toEqual(["system.runtime.shutdown"]);
+  });
 });
