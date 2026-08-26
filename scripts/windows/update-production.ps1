@@ -230,6 +230,7 @@ Start-Transcript -Path $transcriptPath -Force | Out-Null
 
 $currentHead = $null
 $targetHead = $null
+$transactionStarted = $false
 $rollbackRestored = $false
 
 try {
@@ -258,6 +259,10 @@ try {
     Write-Host "From: $currentHead"
     Write-Host "To:   $targetHead"
 
+    # From this point the production transaction owns runtime/repo recovery.
+    # Any failure before this flag is set must fail without stopping or rolling
+    # back a checkout that was never modified.
+    $transactionStarted = $true
     Stop-ArtemRuntime -Paths $paths -Manual $false
     Set-Content -LiteralPath $paths.RollbackHead -Value $currentHead -Encoding ASCII
 
@@ -288,7 +293,7 @@ catch {
     $failure = $_
     Write-Warning "Update failed: $($failure.Exception.Message)"
 
-    if ($currentHead) {
+    if ($transactionStarted -and $currentHead) {
         try {
             Stop-ArtemRuntime -Paths $paths -Manual $false
             Set-Location -LiteralPath $paths.RepoRoot
@@ -308,7 +313,7 @@ catch {
         }
     }
     else {
-        Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "preflight_failed"
+        Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "pre_update_failed"
     }
 
     throw $failure
