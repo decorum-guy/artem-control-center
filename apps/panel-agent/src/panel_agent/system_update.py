@@ -1,0 +1,400 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import secrets
+import subprocess
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Callable
+
+from fastapi import APIRouter, Header, HTTPException, Response, status
+from pydantic import BaseModel, ConfigDict, Field
+
+from .access_policy import AccessPolicyStore
+
+SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
+UPDATE_LOCK_MAX_AGE = timedelta(hours=1)
+CAPABILITY_APPLY_MAX_AGE = timedelta(minutes=15)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso_now() -> str:
+    return _utc_now().isoformat()
+
+
+def _parse_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _recent_state(path: Path, statuses: set[str], max_age: timedelta) -> bool:
+    payload = _read_json(path)
+    if not payload or payload.get("schemaVersion") != 1:
+        return False
+    if payload.get("status") not in statuses:
+        return False
+    updated = _parse_time(payload.get("updatedAt"))
+    return updated is not None and _utc_now() - updated <= max_age
+
+
+def capability_apply_active(path: Path | None) -> bool:
+    return bool(
+        path
+        and _recent_state(
+            path,
+            {"queued", "building", "restarting"},
+            CAPABILITY_APPLY_MAX_AGE,
+        )
+    )
+
+
+def software_update_active(runtime_root: Path) -> bool:
+    return _recent_state(
+        runtime_root / "update-lock.json",
+        {"updating"},
+        UPDATE_LOCK_MAX_AGE,
+    )
+
+
+@dataclass(frozen=True)
+class GitCommandResult:
+    returncode: int
+    stdout: str = ""
+
+
+GitRunner = Callable[[tuple[str, ...]], GitCommandResult]
+
+
+@dataclass(frozen=True)
+class UpdatePreflight:
+    current_head: str | None
+    target_head: str | None
+    update_available: bool
+    update_allowed: bool
+    status: str
+    reason: str | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "schemaVersion": "panel-update.v1",
+            "currentHead": self.current_head,
+            "targetHead": self.target_head,
+            "updateAvailable": self.update_available,
+            "updateAllowed": self.update_allowed,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
+
+class PanelUpdateApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expectedCurrentHead: str = Field(pattern=r"^[0-9a-f]{40}$")
+    expectedTargetHead: str = Field(pattern=r"^[0-9a-f]{40}$")
+
+
+class PanelUpdateService:
+    def __init__(
+        self,
+        *,
+        repo_root: Path,
+        command_path: Path,
+        capability_apply_state_path: Path | None = None,
+        git_runner: GitRunner | None = None,
+    ) -> None:
+        self.repo_root = repo_root
+        self.command_path = command_path
+        self.runtime_root = command_path.parent
+        self.capability_apply_state_path = capability_apply_state_path
+        self.lock_path = self.runtime_root / "update-lock.json"
+        self.state_path = self.runtime_root / "update-state.json"
+        self._git_runner = git_runner or self._run_git
+
+    @classmethod
+    def from_environment(cls) -> "PanelUpdateService | None":
+        raw_command = os.getenv("PANEL_RUNTIME_COMMAND_PATH", "").strip()
+        if not raw_command:
+            return None
+        repo_root = Path(__file__).resolve().parents[4]
+        raw_apply_state = os.getenv("PANEL_CAPABILITY_APPLY_STATE_PATH", "").strip()
+        return cls(
+            repo_root=repo_root,
+            command_path=Path(raw_command),
+            capability_apply_state_path=Path(raw_apply_state) if raw_apply_state else None,
+        )
+
+    @property
+    def enabled(self) -> bool:
+        raw = os.getenv("PANEL_KIOSK_CONTROLS_ENABLED", "").strip().lower()
+        return raw in {"1", "true", "yes", "on"}
+
+    def _run_git(self, arguments: tuple[str, ...]) -> GitCommandResult:
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+            shell=False,
+        )
+        return GitCommandResult(result.returncode, result.stdout.strip())
+
+    def _git(self, *arguments: str) -> GitCommandResult:
+        return self._git_runner(tuple(arguments))
+
+    def _blocked(self, reason: str, current: str | None = None, target: str | None = None) -> UpdatePreflight:
+        return UpdatePreflight(current, target, False, False, "blocked", reason)
+
+    def preflight(self) -> UpdatePreflight:
+        if software_update_active(self.runtime_root):
+            return self._blocked("update_in_progress")
+        if capability_apply_active(self.capability_apply_state_path):
+            return self._blocked("capability_apply_active")
+
+        inside = self._git("rev-parse", "--is-inside-work-tree")
+        if inside.returncode != 0 or inside.stdout.strip() != "true":
+            return self._blocked("invalid_repository")
+
+        branch = self._git("branch", "--show-current")
+        if branch.returncode != 0 or branch.stdout.strip() != "main":
+            return self._blocked("wrong_branch")
+
+        dirty = self._git("status", "--porcelain", "--untracked-files=no")
+        if dirty.returncode != 0:
+            return self._blocked("invalid_repository")
+        if dirty.stdout.strip():
+            return self._blocked("dirty_checkout")
+
+        fetched = self._git("fetch", "origin", "main")
+        if fetched.returncode != 0:
+            return self._blocked("fetch_failed")
+
+        current = self._git("rev-parse", "HEAD")
+        target = self._git("rev-parse", "origin/main")
+        current_head = current.stdout.strip().lower()
+        target_head = target.stdout.strip().lower()
+        if (
+            current.returncode != 0
+            or target.returncode != 0
+            or not SHA_PATTERN.fullmatch(current_head)
+            or not SHA_PATTERN.fullmatch(target_head)
+        ):
+            return self._blocked("invalid_repository")
+
+        if current_head == target_head:
+            return UpdatePreflight(
+                current_head,
+                target_head,
+                False,
+                False,
+                "up_to_date",
+                None,
+            )
+
+        ancestor = self._git("merge-base", "--is-ancestor", current_head, target_head)
+        if ancestor.returncode == 1:
+            return self._blocked("diverged", current_head, target_head)
+        if ancestor.returncode != 0:
+            return self._blocked("invalid_repository", current_head, target_head)
+
+        return UpdatePreflight(
+            current_head,
+            target_head,
+            True,
+            True,
+            "update_available",
+            None,
+        )
+
+    def _write_state(self, state: str, **fields: object) -> None:
+        _atomic_write_json(
+            self.state_path,
+            {
+                "schemaVersion": 1,
+                "status": state,
+                "updatedAt": _iso_now(),
+                **fields,
+            },
+        )
+
+    def owner_state(self) -> dict:
+        payload = _read_json(self.state_path)
+        if not payload or payload.get("schemaVersion") != 1:
+            return {"schemaVersion": 1, "status": "idle"}
+        safe_status = payload.get("status")
+        if safe_status not in {"idle", "checking", "updating", "success", "failed"}:
+            return {"schemaVersion": 1, "status": "idle"}
+        result = {
+            "schemaVersion": 1,
+            "status": safe_status,
+            "updatedAt": payload.get("updatedAt"),
+        }
+        if isinstance(payload.get("result"), str):
+            result["result"] = payload["result"]
+        return result
+
+    def _clear_stale_lock(self) -> None:
+        payload = _read_json(self.lock_path)
+        updated = _parse_time(payload.get("updatedAt")) if payload else None
+        if not payload or updated is None or _utc_now() - updated > UPDATE_LOCK_MAX_AGE:
+            try:
+                self.lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _acquire_lock(self, request_id: str, current_head: str, target_head: str) -> bool:
+        self.runtime_root.mkdir(parents=True, exist_ok=True)
+        self._clear_stale_lock()
+        payload = {
+            "schemaVersion": 1,
+            "status": "updating",
+            "requestId": request_id,
+            "expectedCurrentHead": current_head,
+            "expectedTargetHead": target_head,
+            "updatedAt": _iso_now(),
+        }
+        encoded = (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        try:
+            descriptor = os.open(self.lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return False
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return True
+
+    def _release_lock(self, request_id: str) -> None:
+        payload = _read_json(self.lock_path)
+        if payload and payload.get("requestId") == request_id:
+            try:
+                self.lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def apply(self, expected_current: str, expected_target: str) -> dict:
+        request_id = secrets.token_hex(12)
+        if capability_apply_active(self.capability_apply_state_path):
+            raise HTTPException(status_code=409, detail="capability_apply_active")
+        if not self._acquire_lock(request_id, expected_current, expected_target):
+            raise HTTPException(status_code=409, detail="update_in_progress")
+
+        try:
+            # The lock is ours, so preflight must ignore its own update marker.
+            try:
+                self.lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            preflight = self.preflight()
+            if not self._acquire_lock(request_id, expected_current, expected_target):
+                raise HTTPException(status_code=409, detail="update_in_progress")
+
+            if preflight.current_head != expected_current or preflight.target_head != expected_target:
+                raise HTTPException(status_code=409, detail="update_target_changed")
+            if not preflight.update_allowed or not preflight.update_available:
+                detail = preflight.reason or ("already_up_to_date" if preflight.status == "up_to_date" else "update_not_allowed")
+                raise HTTPException(status_code=409, detail=detail)
+            if self.command_path.exists():
+                raise HTTPException(status_code=409, detail="runtime_command_busy")
+
+            command = {
+                "schemaVersion": 1,
+                "action": "update_panel",
+                "expectedCurrentHead": expected_current,
+                "expectedTargetHead": expected_target,
+                "requestId": request_id,
+                "requestedAt": _iso_now(),
+            }
+            _atomic_write_json(self.command_path, command)
+            self._write_state("updating")
+            return {"accepted": True, "status": "updating"}
+        except Exception:
+            self._release_lock(request_id)
+            raise
+
+
+def _require_intent(intent: str) -> None:
+    if intent != "panel-update":
+        raise HTTPException(status_code=403, detail="panel_update_intent_required")
+
+
+def build_system_update_router(
+    access_policy: AccessPolicyStore,
+    service: PanelUpdateService | None = None,
+) -> APIRouter:
+    router = APIRouter(prefix="/api/v1/system/update", tags=["system"])
+    update_service = service or PanelUpdateService.from_environment()
+
+    def require_service() -> PanelUpdateService:
+        if update_service is None or not update_service.enabled:
+            raise HTTPException(status_code=409, detail="panel_update_disabled")
+        return update_service
+
+    @router.post("/check")
+    def check_update(
+        response: Response,
+        x_panel_intent: str = Header(default=""),
+    ) -> dict:
+        _require_intent(x_panel_intent)
+        current = require_service()
+        current._write_state("checking")
+        result = current.preflight()
+        current._write_state("idle")
+        response.headers["Cache-Control"] = "no-store"
+        return result.as_dict()
+
+    @router.get("/status")
+    def update_status(response: Response) -> dict:
+        current = require_service()
+        response.headers["Cache-Control"] = "no-store"
+        return current.owner_state()
+
+    @router.post("/apply", status_code=status.HTTP_202_ACCEPTED)
+    def apply_update(
+        payload: PanelUpdateApplyRequest,
+        response: Response,
+        x_panel_intent: str = Header(default=""),
+    ) -> dict:
+        _require_intent(x_panel_intent)
+        current = require_service()
+        if access_policy.effective_profile() != "full":
+            access_policy.audit_capability("system.panel.update", result="full_access_required")
+            raise HTTPException(status_code=403, detail="full_access_required")
+        result = current.apply(payload.expectedCurrentHead, payload.expectedTargetHead)
+        access_policy.audit_capability("system.panel.update", result="accepted")
+        response.headers["Cache-Control"] = "no-store"
+        return result
+
+    return router
