@@ -85,6 +85,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("avalar_main_deploy", "Развёртывание AVALAR Main", "Инфраструктурное разрешение развёртывания Main.", "Инфраструктура", "PANEL_AVALAR_MAIN_DEPLOY_ENABLED", "immediate", "none"),
     CapabilityDefinition("rog_g703", "Инфраструктура ROG G703", "Управление зарегистрированной инфраструктурой ROG.", "Инфраструктура", "PANEL_ROG_G703_ENABLED", "immediate", "none"),
     CapabilityDefinition("kiosk_controls", "Управление киоском", "Разрешение владельцу скрывать или останавливать киоск панели.", "Системные действия", "PANEL_KIOSK_CONTROLS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("panel_update_controls", "Обновление панели", "Разрешение проверять и устанавливать обновление самой панели через фиксированный системный механизм.", "Системные действия", "PANEL_UPDATE_CONTROLS_ENABLED", "immediate", "none"),
 )
 REGISTRY_BY_ID = {entry.id: entry for entry in CAPABILITY_REGISTRY}
 
