@@ -72,17 +72,19 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
     if (!spec) return { confirmed: false };
 
     activeRef.current = true;
-    // Confirmation waiver is security-sensitive: never use the normal
-    // cached AccessStatus snapshot for this decision.
     const currentStatus = await refresh();
     if (!guardMutation()) {
       activeRef.current = false;
       return { confirmed: false };
     }
 
-    // Only the server-owned policy can waive the ceremony. Missing metadata
-    // fails closed so old fixtures cannot accidentally broaden access.
-    if (currentStatus?.confirmationPolicy?.actionConfirmationRequired === false) {
+    // The server policy may waive ordinary ceremonies, but a small explicit
+    // catalog of mandatory actions (currently full panel shutdown) cannot be
+    // waived by Full access or a relaxed confirmation policy.
+    if (
+      !spec.alwaysConfirm
+      && currentStatus?.confirmationPolicy?.actionConfirmationRequired === false
+    ) {
       activeRef.current = false;
       return { confirmed: true };
     }
