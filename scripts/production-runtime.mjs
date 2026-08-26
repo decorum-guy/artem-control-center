@@ -266,6 +266,34 @@ export function isSafePanelUpdateCommand(command) {
   );
 }
 
+export const UPDATE_HANDOFF_MAX_AGE_MS = 2 * 60_000;
+
+export function activePanelUpdateLease(
+  payload,
+  { nowMs = Date.now(), ownerAlive = () => false } = {}
+) {
+  if (
+    !payload
+    || payload.schemaVersion !== 1
+    || payload.status !== "updating"
+    || typeof payload.requestId !== "string"
+    || !/^[a-f0-9]{24}$/.test(payload.requestId)
+  ) {
+    return null;
+  }
+  const updatedAt = Date.parse(payload.updatedAt);
+  if (!Number.isFinite(updatedAt)) return null;
+
+  if (payload.ownerPid !== undefined && payload.ownerPid !== null) {
+    if (!Number.isInteger(payload.ownerPid) || payload.ownerPid <= 0) return null;
+    return ownerAlive(payload.ownerPid, payload.requestId) ? payload : null;
+  }
+
+  const ageMs = nowMs - updatedAt;
+  if (ageMs < 0 || ageMs > UPDATE_HANDOFF_MAX_AGE_MS) return null;
+  return payload;
+}
+
 export function capabilityStoreRevision(path) {
   try {
     const payload = JSON.parse(readFileSync(path, "utf8"));
@@ -330,6 +358,25 @@ function closeKioskWindow(edgeProfileDir, log) {
     { encoding: "utf8", windowsHide: true }
   );
   if (result.status !== 0) log("WARN", "Unable to close the panel-owned Edge profile");
+}
+
+function updaterOwnerProcessAlive(ownerPid, requestId) {
+  if (process.platform !== "win32" || !Number.isInteger(ownerPid) || ownerPid <= 0) return false;
+  if (typeof requestId !== "string" || !/^[a-f0-9]{24}$/.test(requestId)) return false;
+  const script = [
+    `$process = Get-CimInstance Win32_Process -Filter \"ProcessId = ${ownerPid}\" -ErrorAction SilentlyContinue`,
+    "if ($null -ne $process",
+    "-and $process.Name -in @('powershell.exe','pwsh.exe')",
+    "-and $process.CommandLine -like '*update-production.ps1*'",
+    `-and $process.CommandLine -like '*${requestId}*') { exit 0 }`,
+    "exit 1"
+  ].join(" ");
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    { encoding: "utf8", windowsHide: true }
+  );
+  return result.status === 0;
 }
 
 async function probeHealth(url, timeoutMs = 3_000) {
@@ -439,18 +486,7 @@ export async function runProductionRuntime() {
   function activeUpdateLock() {
     try {
       const payload = JSON.parse(readFileSync(updateLockPath, "utf8"));
-      const updatedAt = Date.parse(payload?.updatedAt);
-      if (
-        payload?.schemaVersion !== 1
-        || payload?.status !== "updating"
-        || typeof payload?.requestId !== "string"
-        || !/^[a-f0-9]{24}$/.test(payload.requestId)
-        || !Number.isFinite(updatedAt)
-        || Date.now() - updatedAt > 60 * 60_000
-      ) {
-        return null;
-      }
-      return payload;
+      return activePanelUpdateLease(payload, { ownerAlive: updaterOwnerProcessAlive });
     } catch {
       return null;
     }
