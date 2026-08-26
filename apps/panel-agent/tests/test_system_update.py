@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -12,11 +13,14 @@ from panel_agent.system_update import (
     GitCommandResult,
     PanelUpdateService,
     build_system_update_router,
+    capability_apply_active,
+    software_update_active,
 )
 
 CURRENT = "a" * 40
 TARGET = "b" * 40
 CHANGED_TARGET = "c" * 40
+REQUEST = "0" * 24
 
 
 class FakeGit:
@@ -57,12 +61,13 @@ class FakeGit:
         return GitCommandResult(2, "")
 
 
-def make_service(tmp_path: Path, fake_git) -> PanelUpdateService:
+def make_service(tmp_path: Path, fake_git, *, owner_alive=None) -> PanelUpdateService:
     return PanelUpdateService(
         repo_root=tmp_path / "repo",
         command_path=tmp_path / "runtime" / "runtime-command.json",
         capability_apply_state_path=tmp_path / "runtime" / "capability-apply-state.json",
         git_runner=fake_git,
+        update_owner_alive=owner_alive,
     )
 
 
@@ -83,16 +88,32 @@ def make_client(
     profile="full",
     *,
     update_enabled=True,
+    owner_alive=None,
 ) -> tuple[TestClient, PanelUpdateService]:
     monkeypatch.setenv("PANEL_KIOSK_CONTROLS_ENABLED", "true")
     monkeypatch.setenv(
         "PANEL_UPDATE_CONTROLS_ENABLED",
         "true" if update_enabled else "false",
     )
-    service = make_service(tmp_path, fake_git)
+    service = make_service(tmp_path, fake_git, owner_alive=owner_alive)
     app = FastAPI()
     app.include_router(build_system_update_router(make_policy(tmp_path, profile), service))
     return TestClient(app), service
+
+
+def write_update_lock(path: Path, *, updated_at: str, owner_pid=None, request_id=REQUEST) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schemaVersion": 1,
+        "status": "updating",
+        "requestId": request_id,
+        "expectedCurrentHead": CURRENT,
+        "expectedTargetHead": TARGET,
+        "updatedAt": updated_at,
+    }
+    if owner_pid is not None:
+        payload["ownerPid"] = owner_pid
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_update_check_uses_only_canonical_main_and_allows_fast_forward(monkeypatch, tmp_path):
@@ -204,7 +225,7 @@ def test_apply_requires_full_access_and_exact_narrow_payload(monkeypatch, tmp_pa
     assert not full_service.command_path.exists()
 
 
-def test_apply_writes_only_fixed_update_command_and_holds_lock(monkeypatch, tmp_path):
+def test_apply_writes_only_fixed_update_command_and_holds_handoff_lock(monkeypatch, tmp_path):
     client, service = make_client(monkeypatch, tmp_path, FakeGit(), profile="full")
     response = client.post(
         "/api/v1/system/update/apply",
@@ -227,6 +248,7 @@ def test_apply_writes_only_fixed_update_command_and_holds_lock(monkeypatch, tmp_
     assert command["expectedTargetHead"] == TARGET
     lock = json.loads(service.lock_path.read_text(encoding="utf-8"))
     assert lock["requestId"] == command["requestId"]
+    assert "ownerPid" not in lock
     assert "shell" not in json.dumps(command).lower()
     assert "path" not in command
     assert "branch" not in command
@@ -253,17 +275,70 @@ def test_changed_target_is_rejected_before_runtime_command(monkeypatch, tmp_path
     assert not service.lock_path.exists()
 
 
-def test_concurrent_update_and_capability_apply_are_rejected(monkeypatch, tmp_path):
-    client, service = make_client(monkeypatch, tmp_path, FakeGit(), profile="full")
-    service.runtime_root.mkdir(parents=True, exist_ok=True)
-    service.lock_path.write_text(
+def test_live_owner_pid_is_authoritative_even_with_old_heartbeat(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    now = datetime(2026, 8, 26, 14, 0, tzinfo=timezone.utc)
+    write_update_lock(
+        runtime_root / "update-lock.json",
+        updated_at=(now - timedelta(hours=4)).isoformat(),
+        owner_pid=4242,
+    )
+    assert software_update_active(
+        runtime_root,
+        now=now,
+        owner_alive=lambda pid, request_id: pid == 4242 and request_id == REQUEST,
+    )
+
+
+def test_dead_owner_pid_is_recoverable_immediately(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    now = datetime(2026, 8, 26, 14, 0, tzinfo=timezone.utc)
+    write_update_lock(
+        runtime_root / "update-lock.json",
+        updated_at=now.isoformat(),
+        owner_pid=4242,
+    )
+    assert not software_update_active(
+        runtime_root,
+        now=now,
+        owner_alive=lambda _pid, _request_id: False,
+    )
+
+
+def test_pre_owner_handoff_is_short_bounded_and_future_timestamp_is_stale(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    lock_path = runtime_root / "update-lock.json"
+    now = datetime(2026, 8, 26, 14, 0, tzinfo=timezone.utc)
+
+    write_update_lock(lock_path, updated_at=(now - timedelta(minutes=1)).isoformat())
+    assert software_update_active(runtime_root, now=now)
+
+    write_update_lock(lock_path, updated_at=(now - timedelta(minutes=3)).isoformat())
+    assert not software_update_active(runtime_root, now=now)
+
+    write_update_lock(lock_path, updated_at=(now + timedelta(days=1)).isoformat())
+    assert not software_update_active(runtime_root, now=now)
+
+
+def test_future_capability_apply_state_is_not_active(tmp_path):
+    state_path = tmp_path / "capability-apply-state.json"
+    state_path.write_text(
         json.dumps({
             "schemaVersion": 1,
-            "status": "updating",
-            "requestId": "0" * 24,
+            "status": "building",
             "updatedAt": "2999-01-01T00:00:00+00:00",
         }),
         encoding="utf-8",
+    )
+    assert not capability_apply_active(state_path)
+
+
+def test_concurrent_update_and_capability_apply_are_rejected(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(), profile="full")
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_lock(
+        service.lock_path,
+        updated_at=datetime.now(timezone.utc).isoformat(),
     )
     second = client.post(
         "/api/v1/system/update/apply",
@@ -279,7 +354,7 @@ def test_concurrent_update_and_capability_apply_are_rejected(monkeypatch, tmp_pa
         json.dumps({
             "schemaVersion": 1,
             "status": "building",
-            "updatedAt": "2999-01-01T00:00:00+00:00",
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
         }),
         encoding="utf-8",
     )
@@ -291,6 +366,21 @@ def test_concurrent_update_and_capability_apply_are_rejected(monkeypatch, tmp_pa
     assert blocked.status_code == 409
     assert blocked.json()["detail"] == "capability_apply_active"
     assert not service.command_path.exists()
+
+
+def test_future_or_abandoned_handoff_lock_is_recovered_before_new_apply(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(), profile="full")
+    write_update_lock(service.lock_path, updated_at="2999-01-01T00:00:00+00:00")
+
+    response = client.post(
+        "/api/v1/system/update/apply",
+        headers={"x-panel-intent": "panel-update"},
+        json={"expectedCurrentHead": CURRENT, "expectedTargetHead": TARGET},
+    )
+    assert response.status_code == 202
+    replacement = json.loads(service.lock_path.read_text(encoding="utf-8"))
+    assert replacement["requestId"] != REQUEST
+    assert "ownerPid" not in replacement
 
 
 def test_apply_service_rejects_exact_target_change_without_releasing_to_another_writer(tmp_path):
