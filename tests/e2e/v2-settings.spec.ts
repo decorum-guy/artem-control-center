@@ -165,16 +165,25 @@ async function mockCoffeeSettings(
 }
 
 async function mockAISettings(page: Page) {
-  const inventory = {
+  let inventory = {
     schemaVersion: "ai.provider-settings.v1", revision: 4, available: true, enabled: true, writesEnabled: true, selectedProvider: "gigachat",
     warnings: [], providers: [
       { id: "gigachat", model: "GigaChat-2", models: ["GigaChat-2"], credentialPresent: true, configured: true, state: "configured" },
       { id: "yandex", model: "yandexgpt/latest", models: ["yandexgpt/latest"], credentialPresent: false, configured: false, state: "not_configured" },
-      { id: "deepseek", model: "deepseek-chat", models: ["deepseek-chat"], credentialPresent: false, configured: false, state: "not_configured" },
-      { id: "local", model: "local-text", models: ["local-text"], credentialPresent: false, configured: false, state: "not_configured" }
+      { id: "deepseek", model: "deepseek-v4-flash", models: ["deepseek-v4-flash", "deepseek-v4-pro"], credentialPresent: false, configured: false, state: "not_configured" },
+      { id: "local", model: "fixture-local-model", models: ["fixture-local-model"], credentialPresent: false, configured: true, state: "configured" }
     ]
   };
   await page.route("**/api/v1/settings/ai", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(inventory) }));
+  await page.route("**/api/v1/settings/ai/selection", async (route) => {
+    const payload = route.request().postDataJSON() as { expectedRevision: number; providerId: string; modelId: string };
+    if (payload.providerId === "local" && payload.modelId !== "fixture-local-model") {
+      await route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ detail: "provider_or_model_unknown" }) });
+      return;
+    }
+    inventory = { ...inventory, revision: inventory.revision + 1, selectedProvider: payload.providerId };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(inventory) });
+  });
 }
 
 async function openSettings(page: Page) {
@@ -276,6 +285,17 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(secret).toHaveValue("");
     await expect(page.locator("body")).not.toContainText("giga-secret-canary");
     await expectNoDocumentOverflow(page);
+  });
+
+  test("AI Settings selects Local without exposing a browser model selector", async ({ page }) => {
+    await mockCoffeeSettings(page);
+    await mockAISettings(page);
+    await openSettings(page);
+    await page.getByTestId("settings-summary-ai").click();
+    const sheet = page.getByTestId("settings-ai-sheet");
+    await sheet.getByRole("combobox", { name: "Провайдер текстового AI" }).selectOption("local");
+    await expect(sheet).toContainText("Модель на сервере: fixture-local-model");
+    await expect(sheet.getByRole("combobox", { name: "Модель текстового AI" })).toHaveCount(0);
   });
 
   test("Appearance controls are direct, reachable, and persist through route navigation", async ({ page }) => {

@@ -22,8 +22,7 @@ PROVIDER_IDS = ("gigachat", "yandex", "deepseek", "local")
 MODELS = {
     "gigachat": ("GigaChat-2", "GigaChat-2-Pro", "GigaChat-2-Max"),
     "yandex": ("yandexgpt/latest",),
-    "deepseek": ("deepseek-chat",),
-    "local": ("local-text",),
+    "deepseek": ("deepseek-v4-flash", "deepseek-v4-pro"),
 }
 
 class AISettingsError(ValueError): pass
@@ -86,17 +85,28 @@ class AIProviderSettingsStore:
             credential_present = provider_id in snapshot.credentials
             configured = local_enabled if provider_id == "local" else (credential_present and (provider_id != "yandex" or yandex_folder_configured))
             state = "disabled" if not enabled else ("configured" if configured else "not_configured")
-            providers.append({"id": provider_id, "model": local_model if provider_id == "local" and local_model else snapshot.selected_models[provider_id], "models": list(MODELS[provider_id]) if provider_id != "local" else [local_model or "local-text"], "credentialPresent": credential_present, "configured": configured, "state": state})
+            if provider_id == "local":
+                provider_model = local_model
+                provider_models = [local_model] if local_model else []
+            else:
+                provider_model = snapshot.selected_models[provider_id]
+                provider_models = list(MODELS[provider_id])
+            providers.append({"id": provider_id, "model": provider_model, "models": provider_models, "credentialPresent": credential_present, "configured": configured, "state": state})
         return {"schemaVersion": SCHEMA_VERSION, "revision": snapshot.revision, "available": available, "enabled": enabled, "writesEnabled": writes_enabled, "selectedProvider": snapshot.selected_provider, "providers": providers, "warnings": [] if available else ["stored_settings_unavailable"]}
 
-    def select(self, *, expected_revision: int, provider_id: str, model: str) -> None:
-        if provider_id not in PROVIDER_IDS or model not in MODELS[provider_id]: raise AISettingsError("provider_or_model_unknown")
+    def select(self, *, expected_revision: int, provider_id: str, model: str | None = None) -> None:
+        if provider_id not in PROVIDER_IDS: raise AISettingsError("provider_or_model_unknown")
+        if provider_id == "local":
+            if model is not None: raise AISettingsError("provider_or_model_unknown")
+        elif model not in MODELS[provider_id]:
+            raise AISettingsError("provider_or_model_unknown")
         with self._lock:
             document, available = self._load()
             if not available: raise AISettingsError("stored_settings_unavailable")
             if document["revision"] != expected_revision: raise AISettingsConflict("revision_conflict")
             document["selectedProvider"] = provider_id
-            document["selectedModels"][provider_id] = model
+            if provider_id != "local":
+                document["selectedModels"][provider_id] = model
             document["revision"] += 1
             self._write(document)
 

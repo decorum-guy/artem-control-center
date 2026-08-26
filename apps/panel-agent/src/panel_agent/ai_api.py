@@ -44,8 +44,18 @@ def build_ai_router(
     @router.patch("/api/v1/settings/ai/selection")
     def select(payload: ProviderSelectionPatch, response: Response) -> dict:
         if not writes_allowed(): raise HTTPException(status_code=403, detail="ai_settings_write_disabled")
-        if payload.providerId not in MODELS or payload.modelId not in MODELS[payload.providerId]: raise HTTPException(status_code=422, detail="provider_or_model_unknown")
-        try: store.select(expected_revision=payload.expectedRevision, provider_id=payload.providerId, model=payload.modelId)
+        if payload.providerId == "local":
+            # Local model and endpoint are deployment configuration, never a
+            # browser-selectable registry entry. The echoed value is accepted
+            # only as a guard against a stale or tampered browser request.
+            if not settings.ai_local_model or payload.modelId != settings.ai_local_model:
+                raise HTTPException(status_code=422, detail="provider_or_model_unknown")
+            stored_model = None
+        elif payload.providerId not in MODELS or payload.modelId not in MODELS[payload.providerId]:
+            raise HTTPException(status_code=422, detail="provider_or_model_unknown")
+        else:
+            stored_model = payload.modelId
+        try: store.select(expected_revision=payload.expectedRevision, provider_id=payload.providerId, model=stored_model)
         except ValueError as exc: raise HTTPException(status_code=409 if str(exc) == "revision_conflict" else 422, detail=str(exc))
         response.headers["Cache-Control"] = "no-store"
         return store.public(enabled=settings.ai_text_enabled, writes_enabled=writes_allowed(), local_enabled=settings.ai_local_enabled, local_model=settings.ai_local_model, yandex_folder_configured=bool(settings.ai_yandex_folder_id))

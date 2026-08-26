@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -22,10 +24,11 @@ from .planning import PlanningProjection
 from .settings import IntegrationSettings
 
 ProviderId = Literal["gigachat", "yandex", "deepseek", "local"]
-ErrorCategory = Literal["not_configured", "disabled", "authentication_failed", "rate_limited", "timeout", "transport_error", "provider_error", "malformed_response", "context_unavailable", "fallback_unavailable"]
+ErrorCategory = Literal["not_configured", "disabled", "authentication_failed", "rate_limited", "timeout", "transport_error", "provider_error", "malformed_response", "configuration_error", "context_unavailable", "fallback_unavailable"]
 
 TIER1_PHRASES = {"acknowledged": "Слушаю.", "completed": "Готово.", "command_failed": "Не удалось выполнить команду."}
 FALLBACK_ERRORS = frozenset({"timeout", "transport_error", "provider_error", "rate_limited"})
+MAX_GIGACHAT_CA_BUNDLE_BYTES = 4 * 1024 * 1024
 
 @dataclass(frozen=True)
 class AITextRequest:
@@ -81,12 +84,15 @@ class TextProvider:
         snapshot, _ = self.store.snapshot()
         return bool(snapshot.credentials.get(self.id))
     async def generate(self, request: AITextRequest, model: str) -> str: raise NotImplementedError
+    @property
+    def tls_verify(self) -> bool | ssl.SSLContext:
+        return True
     async def _post(self, url: str, *, headers: dict[str, str], payload: dict[str, Any], form: dict[str, str] | None = None) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(timeout=self.settings.ai_request_timeout_seconds, transport=self.transport, follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=self.settings.ai_request_timeout_seconds, transport=self.transport, verify=self.tls_verify, follow_redirects=False) as client:
                 response = await client.post(url, headers=headers, json=None if form else payload, data=form)
         except httpx.TimeoutException as exc: raise ProviderFailure("timeout") from exc
-        except httpx.HTTPError as exc: raise ProviderFailure("transport_error") from exc
+        except (httpx.HTTPError, OSError, ssl.SSLError) as exc: raise ProviderFailure("transport_error") from exc
         if response.status_code >= 400: raise ProviderFailure(_error(response.status_code))
         try:
             value = response.json()
@@ -96,8 +102,26 @@ class TextProvider:
 
 class GigaChatProvider(TextProvider):
     id: ProviderId = "gigachat"
-    _token: str | None = None
-    _expires_at: float = 0
+    def __init__(self, settings: IntegrationSettings, store: AIProviderSettingsStore, transport: httpx.AsyncBaseTransport | None = None):
+        super().__init__(settings, store, transport)
+        self._token: str | None = None
+        self._expires_at: float = 0
+        self._ssl_context: ssl.SSLContext | None = None
+
+    @property
+    def tls_verify(self) -> ssl.SSLContext:
+        if self._ssl_context is not None:
+            return self._ssl_context
+        bundle_path = self.settings.ai_gigachat_ca_bundle_path.strip()
+        try:
+            path = Path(bundle_path)
+            if not bundle_path or "\x00" in bundle_path or not path.is_file() or path.stat().st_size <= 0 or path.stat().st_size > MAX_GIGACHAT_CA_BUNDLE_BYTES:
+                raise ValueError
+            self._ssl_context = ssl.create_default_context(cafile=str(path))
+        except (OSError, ssl.SSLError, ValueError, TypeError) as exc:
+            raise ProviderFailure("configuration_error") from exc
+        return self._ssl_context
+
     async def _token_for_request(self) -> str:
         if self._token and self._expires_at - time.time() > 30: return self._token
         snapshot, _ = self.store.snapshot(); credential = snapshot.credentials.get(self.id)
@@ -122,6 +146,11 @@ class OpenAICompatibleProvider(TextProvider):
 
 class DeepSeekProvider(OpenAICompatibleProvider):
     id: ProviderId = "deepseek"; endpoint = "https://api.deepseek.com/chat/completions"
+    async def generate(self, request: AITextRequest, model: str) -> str:
+        snapshot, _ = self.store.snapshot(); credential = snapshot.credentials.get(self.id)
+        if not credential: raise ProviderFailure("not_configured")
+        result = await self._post(self.endpoint, headers={"Authorization": f"Bearer {credential}", "Content-Type": "application/json"}, payload={"model": model, "messages": [{"role": "system", "content": request.instruction}, {"role": "user", "content": _prompt(request)}], "max_tokens": 400, "stream": False, "thinking": {"type": "disabled"}})
+        return _completion_text(result)
 
 class YandexProvider(TextProvider):
     id: ProviderId = "yandex"
@@ -140,10 +169,10 @@ class YandexProvider(TextProvider):
 
 class LocalProvider(TextProvider):
     id: ProviderId = "local"
-    def configured(self) -> bool: return self.settings.ai_local_enabled
+    def configured(self) -> bool: return self.settings.ai_local_enabled and bool(self.settings.ai_local_model)
     async def generate(self, request: AITextRequest, model: str) -> str:
         if not self.configured(): raise ProviderFailure("not_configured")
-        result = await self._post(self.settings.ai_local_base_url, headers={"Content-Type": "application/json"}, payload={"model": self.settings.ai_local_model, "prompt": _prompt(request), "stream": False})
+        result = await self._post(self.settings.ai_local_base_url, headers={"Content-Type": "application/json"}, payload={"model": model, "prompt": _prompt(request), "stream": False})
         return _bounded_text(result.get("response"))
 
 def _bounded_text(value: Any) -> str:
@@ -172,10 +201,10 @@ class AITextService:
         async with self._lock:
             snapshot, available = self.store.snapshot()
             if not available: return AITextResult(None, None, None, "failed", "not_configured")
-            selected = snapshot.selected_provider; model = snapshot.selected_models[selected]
+            selected = snapshot.selected_provider; model = self.settings.ai_local_model if selected == "local" else snapshot.selected_models[selected]
             result = await self._call(selected, model, request)
             if result.error_category in FALLBACK_ERRORS and selected != "local":
-                fallback_model = snapshot.selected_models["local"]
+                fallback_model = self.settings.ai_local_model
                 fallback = await self._call("local", fallback_model, request, fallback=True)
                 if fallback.status == "completed": return fallback
                 return AITextResult(None, selected, model, "failed", "fallback_unavailable")

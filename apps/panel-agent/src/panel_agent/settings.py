@@ -90,6 +90,7 @@ class IntegrationSettings:
     ai_local_base_url: str = "http://127.0.0.1:11434/api/generate"
     ai_local_model: str = "local-text"
     ai_yandex_folder_id: str = ""
+    ai_gigachat_ca_bundle_path: str = ""
 
     @classmethod
     def from_env(cls) -> "IntegrationSettings":
@@ -345,6 +346,7 @@ class IntegrationSettings:
             ).strip(),
             ai_local_model=os.getenv("PANEL_AI_LOCAL_MODEL", "local-text").strip(),
             ai_yandex_folder_id=os.getenv("PANEL_AI_YANDEX_FOLDER_ID", "").strip(),
+            ai_gigachat_ca_bundle_path=os.getenv("PANEL_AI_GIGACHAT_CA_BUNDLE_PATH", "").strip(),
         )
         if settings.panel_planning_enabled:
             _validate_planning_settings(settings)
