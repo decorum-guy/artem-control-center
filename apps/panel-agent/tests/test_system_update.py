@@ -20,7 +20,16 @@ CHANGED_TARGET = "c" * 40
 
 
 class FakeGit:
-    def __init__(self, *, current=CURRENT, target=TARGET, branch="main", dirty="", fetch_code=0, ancestor_code=0):
+    def __init__(
+        self,
+        *,
+        current=CURRENT,
+        target=TARGET,
+        branch="main",
+        dirty="",
+        fetch_code=0,
+        ancestor_code=0,
+    ):
         self.current = current
         self.target = target
         self.branch = branch
@@ -48,7 +57,7 @@ class FakeGit:
         return GitCommandResult(2, "")
 
 
-def make_service(tmp_path: Path, fake_git: FakeGit) -> PanelUpdateService:
+def make_service(tmp_path: Path, fake_git) -> PanelUpdateService:
     return PanelUpdateService(
         repo_root=tmp_path / "repo",
         command_path=tmp_path / "runtime" / "runtime-command.json",
@@ -67,8 +76,19 @@ def make_policy(tmp_path: Path, profile: str) -> AccessPolicyStore:
     return AccessPolicyStore(policy_path)
 
 
-def make_client(monkeypatch, tmp_path: Path, fake_git: FakeGit, profile="full") -> tuple[TestClient, PanelUpdateService]:
+def make_client(
+    monkeypatch,
+    tmp_path: Path,
+    fake_git,
+    profile="full",
+    *,
+    update_enabled=True,
+) -> tuple[TestClient, PanelUpdateService]:
     monkeypatch.setenv("PANEL_KIOSK_CONTROLS_ENABLED", "true")
+    monkeypatch.setenv(
+        "PANEL_UPDATE_CONTROLS_ENABLED",
+        "true" if update_enabled else "false",
+    )
     service = make_service(tmp_path, fake_git)
     app = FastAPI()
     app.include_router(build_system_update_router(make_policy(tmp_path, profile), service))
@@ -78,7 +98,10 @@ def make_client(monkeypatch, tmp_path: Path, fake_git: FakeGit, profile="full") 
 def test_update_check_uses_only_canonical_main_and_allows_fast_forward(monkeypatch, tmp_path):
     fake = FakeGit()
     client, _ = make_client(monkeypatch, tmp_path, fake)
-    response = client.post("/api/v1/system/update/check", headers={"x-panel-intent": "panel-update"})
+    response = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    )
 
     assert response.status_code == 200
     assert response.json() == {
@@ -93,7 +116,11 @@ def test_update_check_uses_only_canonical_main_and_allows_fast_forward(monkeypat
     assert ("fetch", "origin", "main") in fake.calls
     assert ("rev-parse", "HEAD") in fake.calls
     assert ("rev-parse", "origin/main") in fake.calls
-    assert all("shell" not in part and "command" not in part for call in fake.calls for part in call)
+    assert all(
+        "shell" not in part and "command" not in part
+        for call in fake.calls
+        for part in call
+    )
 
 
 @pytest.mark.parametrize(
@@ -107,7 +134,10 @@ def test_update_check_uses_only_canonical_main_and_allows_fast_forward(monkeypat
 )
 def test_update_check_blocks_invalid_checkout_states(monkeypatch, tmp_path, kwargs, reason):
     client, _ = make_client(monkeypatch, tmp_path, FakeGit(**kwargs))
-    response = client.post("/api/v1/system/update/check", headers={"x-panel-intent": "panel-update"})
+    response = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    )
     assert response.status_code == 200
     assert response.json()["updateAllowed"] is False
     assert response.json()["reason"] == reason
@@ -117,10 +147,29 @@ def test_update_check_blocks_invalid_checkout_states(monkeypatch, tmp_path, kwar
 
 def test_same_sha_reports_latest_version(monkeypatch, tmp_path):
     client, _ = make_client(monkeypatch, tmp_path, FakeGit(target=CURRENT))
-    response = client.post("/api/v1/system/update/check", headers={"x-panel-intent": "panel-update"})
+    response = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    )
     assert response.json()["status"] == "up_to_date"
     assert response.json()["updateAvailable"] is False
     assert response.json()["updateAllowed"] is False
+
+
+def test_update_uses_dedicated_gate_not_kiosk_control_permission(monkeypatch, tmp_path):
+    client, service = make_client(
+        monkeypatch,
+        tmp_path,
+        FakeGit(),
+        update_enabled=False,
+    )
+    response = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "panel_update_disabled"
+    assert not service.command_path.exists()
 
 
 def test_apply_requires_full_access_and_exact_narrow_payload(monkeypatch, tmp_path):
@@ -134,7 +183,12 @@ def test_apply_requires_full_access_and_exact_narrow_payload(monkeypatch, tmp_pa
     assert denied.json()["detail"] == "full_access_required"
     assert not service.command_path.exists()
 
-    full_client, full_service = make_client(monkeypatch, tmp_path / "full", FakeGit(), profile="full")
+    full_client, full_service = make_client(
+        monkeypatch,
+        tmp_path / "full",
+        FakeGit(),
+        profile="full",
+    )
     arbitrary = full_client.post(
         "/api/v1/system/update/apply",
         headers={"x-panel-intent": "panel-update"},
@@ -161,7 +215,12 @@ def test_apply_writes_only_fixed_update_command_and_holds_lock(monkeypatch, tmp_
     assert response.json() == {"accepted": True, "status": "updating"}
     command = json.loads(service.command_path.read_text(encoding="utf-8"))
     assert set(command) == {
-        "schemaVersion", "action", "expectedCurrentHead", "expectedTargetHead", "requestId", "requestedAt"
+        "schemaVersion",
+        "action",
+        "expectedCurrentHead",
+        "expectedTargetHead",
+        "requestId",
+        "requestedAt",
     }
     assert command["action"] == "update_panel"
     assert command["expectedCurrentHead"] == CURRENT
@@ -176,7 +235,10 @@ def test_apply_writes_only_fixed_update_command_and_holds_lock(monkeypatch, tmp_
 def test_changed_target_is_rejected_before_runtime_command(monkeypatch, tmp_path):
     fake = FakeGit()
     client, service = make_client(monkeypatch, tmp_path, fake, profile="full")
-    checked = client.post("/api/v1/system/update/check", headers={"x-panel-intent": "panel-update"}).json()
+    checked = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    ).json()
     assert checked["targetHead"] == TARGET
     fake.target = CHANGED_TARGET
 
@@ -212,6 +274,7 @@ def test_concurrent_update_and_capability_apply_are_rejected(monkeypatch, tmp_pa
     assert second.json()["detail"] == "update_in_progress"
 
     service.lock_path.unlink()
+    service.capability_apply_state_path.parent.mkdir(parents=True, exist_ok=True)
     service.capability_apply_state_path.write_text(
         json.dumps({
             "schemaVersion": 1,
@@ -239,3 +302,46 @@ def test_apply_service_rejects_exact_target_change_without_releasing_to_another_
     assert exc.value.detail == "update_target_changed"
     assert not service.command_path.exists()
     assert not service.lock_path.exists()
+
+
+def test_check_failure_returns_fixed_safe_error_without_exception_or_environment(monkeypatch, tmp_path):
+    def failing_git(_arguments):
+        raise RuntimeError("SECRET_TOKEN=C:/private/repo fatal: credential leaked")
+
+    client, service = make_client(monkeypatch, tmp_path, failing_git)
+    response = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "update_check_failed"}
+    assert "SECRET_TOKEN" not in response.text
+    assert "private" not in response.text
+    assert service.owner_state()["status"] == "idle"
+
+
+def test_owner_status_whitelists_result_and_never_exposes_local_fields(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "failed",
+            "updatedAt": "2026-08-26T00:00:00+00:00",
+            "result": "SECRET=C:/owner/repo",
+            "stderr": "fatal: private data",
+            "environment": {"TOKEN": "secret"},
+        }),
+        encoding="utf-8",
+    )
+    response = client.get("/api/v1/system/update/status")
+    assert response.status_code == 200
+    assert response.json() == {
+        "schemaVersion": 1,
+        "status": "failed",
+        "updatedAt": "2026-08-26T00:00:00+00:00",
+    }
+    serialized = response.text
+    assert "SECRET" not in serialized
+    assert "stderr" not in serialized
+    assert "environment" not in serialized
