@@ -16,7 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from .access_policy import AccessPolicyStore
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-UPDATE_LOCK_MAX_AGE = timedelta(hours=1)
+REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
+UPDATE_HANDOFF_MAX_AGE = timedelta(minutes=2)
 CAPABILITY_APPLY_MAX_AGE = timedelta(minutes=15)
 SAFE_OWNER_RESULTS = frozenset({
     "up_to_date",
@@ -76,7 +77,12 @@ def _recent_state(path: Path, statuses: set[str], max_age: timedelta) -> bool:
     if payload.get("status") not in statuses:
         return False
     updated = _parse_time(payload.get("updatedAt"))
-    return updated is not None and _utc_now() - updated <= max_age
+    if updated is None:
+        return False
+    now = _utc_now()
+    if updated > now:
+        return False
+    return now - updated <= max_age
 
 
 def capability_apply_active(path: Path | None) -> bool:
@@ -86,8 +92,73 @@ def capability_apply_active(path: Path | None) -> bool:
     )
 
 
-def software_update_active(runtime_root: Path) -> bool:
-    return _recent_state(runtime_root / "update-lock.json", {"updating"}, UPDATE_LOCK_MAX_AGE)
+UpdateOwnerAlive = Callable[[int, str], bool]
+
+
+def _updater_owner_alive(owner_pid: int, request_id: str) -> bool:
+    if os.name != "nt" or owner_pid <= 0 or not REQUEST_ID_PATTERN.fullmatch(request_id):
+        return False
+    script = (
+        f'$process = Get-CimInstance Win32_Process -Filter "ProcessId = {owner_pid}" '
+        '-ErrorAction SilentlyContinue; '
+        'if ($null -ne $process '
+        "-and $process.Name -in @('powershell.exe','pwsh.exe') "
+        "-and $process.CommandLine -like '*update-production.ps1*' "
+        f"-and $process.CommandLine -like '*{request_id}*') {{ exit 0 }}; exit 1"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def _update_lock_active(
+    payload: dict | None,
+    *,
+    now: datetime | None = None,
+    owner_alive: UpdateOwnerAlive | None = None,
+) -> bool:
+    if not payload or payload.get("schemaVersion") != 1 or payload.get("status") != "updating":
+        return False
+    request_id = payload.get("requestId")
+    if not isinstance(request_id, str) or not REQUEST_ID_PATTERN.fullmatch(request_id):
+        return False
+    updated = _parse_time(payload.get("updatedAt"))
+    if updated is None:
+        return False
+
+    owner_pid = payload.get("ownerPid")
+    if owner_pid is not None:
+        if isinstance(owner_pid, bool) or not isinstance(owner_pid, int) or owner_pid <= 0:
+            return False
+        checker = owner_alive or _updater_owner_alive
+        return checker(owner_pid, request_id)
+
+    current = now or _utc_now()
+    if updated > current:
+        return False
+    return current - updated <= UPDATE_HANDOFF_MAX_AGE
+
+
+def software_update_active(
+    runtime_root: Path,
+    *,
+    now: datetime | None = None,
+    owner_alive: UpdateOwnerAlive | None = None,
+) -> bool:
+    return _update_lock_active(
+        _read_json(runtime_root / "update-lock.json"),
+        now=now,
+        owner_alive=owner_alive,
+    )
 
 
 def _bool_env(name: str) -> bool:
@@ -138,6 +209,7 @@ class PanelUpdateService:
         command_path: Path,
         capability_apply_state_path: Path | None = None,
         git_runner: GitRunner | None = None,
+        update_owner_alive: UpdateOwnerAlive | None = None,
     ) -> None:
         self.repo_root = repo_root
         self.command_path = command_path
@@ -146,6 +218,7 @@ class PanelUpdateService:
         self.lock_path = self.runtime_root / "update-lock.json"
         self.state_path = self.runtime_root / "update-state.json"
         self._git_runner = git_runner or self._run_git
+        self._update_owner_alive = update_owner_alive
 
     @classmethod
     def from_environment(cls) -> "PanelUpdateService | None":
@@ -190,7 +263,10 @@ class PanelUpdateService:
         return UpdatePreflight(current, target, False, False, "blocked", reason)
 
     def preflight(self, *, ignore_update_lock: bool = False) -> UpdatePreflight:
-        if not ignore_update_lock and software_update_active(self.runtime_root):
+        if not ignore_update_lock and software_update_active(
+            self.runtime_root,
+            owner_alive=self._update_owner_alive,
+        ):
             return self._blocked("update_in_progress")
         if capability_apply_active(self.capability_apply_state_path):
             return self._blocked("capability_apply_active")
@@ -261,8 +337,7 @@ class PanelUpdateService:
 
     def _clear_stale_lock(self) -> None:
         payload = _read_json(self.lock_path)
-        updated = _parse_time(payload.get("updatedAt")) if payload else None
-        if not payload or updated is None or _utc_now() - updated > UPDATE_LOCK_MAX_AGE:
+        if not _update_lock_active(payload, owner_alive=self._update_owner_alive):
             try:
                 self.lock_path.unlink(missing_ok=True)
             except OSError:
