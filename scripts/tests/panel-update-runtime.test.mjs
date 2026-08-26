@@ -98,7 +98,7 @@ test("supervisor handoff is wired to the fixed canonical updater script and owne
   assert.match(source, /"-ExpectedTargetHead"[\s\S]*command\.expectedTargetHead/);
   assert.match(source, /"-RequestId"[\s\S]*command\.requestId/);
   assert.match(source, /CommandLine -like '\*update-production\.ps1\*'/);
-  assert.match(source, /CommandLine -like `\*\$\{requestId\}\*'/);
+  assert.match(source, /CommandLine -like '\*\$\{requestId\}\*'/);
   assert.doesNotMatch(source, /command\.(?:shell|path|branch|environment|args)/);
 });
 
