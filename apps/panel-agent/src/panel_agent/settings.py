@@ -82,6 +82,15 @@ class IntegrationSettings:
     panel_planning_response_limit_bytes: int = 256 * 1024
     panel_planning_timezone: str = "Europe/Moscow"
     panel_planning_fixture_scenario: str = "healthy"
+    ai_text_enabled: bool = False
+    ai_settings_writes_enabled: bool = False
+    ai_settings_path: str = ".cache/ai-provider-settings.json"
+    ai_request_timeout_seconds: int = 20
+    ai_local_enabled: bool = False
+    ai_local_base_url: str = "http://127.0.0.1:11434/api/generate"
+    ai_local_model: str = "local-text"
+    ai_yandex_folder_id: str = ""
+    ai_gigachat_ca_bundle_path: str = ""
 
     @classmethod
     def from_env(cls) -> "IntegrationSettings":
@@ -320,6 +329,24 @@ class IntegrationSettings:
                 "PANEL_PLANNING_FIXTURE_SCENARIO",
                 "healthy",
             ).strip(),
+            ai_text_enabled=_bool_env("PANEL_AI_TEXT_ENABLED", False),
+            ai_settings_writes_enabled=_bool_env("PANEL_AI_SETTINGS_WRITES_ENABLED", False),
+            ai_settings_path=os.getenv(
+                "PANEL_AI_SETTINGS_PATH",
+                ".cache/ai-provider-settings.json",
+            ).strip(),
+            ai_request_timeout_seconds=max(
+                3,
+                min(60, int(os.getenv("PANEL_AI_REQUEST_TIMEOUT_SECONDS", "20"))),
+            ),
+            ai_local_enabled=_bool_env("PANEL_AI_LOCAL_ENABLED", False),
+            ai_local_base_url=os.getenv(
+                "PANEL_AI_LOCAL_BASE_URL",
+                "http://127.0.0.1:11434/api/generate",
+            ).strip(),
+            ai_local_model=os.getenv("PANEL_AI_LOCAL_MODEL", "local-text").strip(),
+            ai_yandex_folder_id=os.getenv("PANEL_AI_YANDEX_FOLDER_ID", "").strip(),
+            ai_gigachat_ca_bundle_path=os.getenv("PANEL_AI_GIGACHAT_CA_BUNDLE_PATH", "").strip(),
         )
         if settings.panel_planning_enabled:
             _validate_planning_settings(settings)

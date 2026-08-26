@@ -54,6 +54,9 @@ from .capabilities import (
     CapabilityRevisionConflict,
     CapabilityStoreError,
 )
+from .ai_settings import AIProviderSettingsStore
+from .ai_text import AITextService
+from .ai_api import build_ai_router
 
 
 def configured_mode() -> PanelMode:
@@ -85,6 +88,8 @@ calendar_display_preferences_store = CalendarDisplayPreferencesStore(
     writes_enabled=SETTINGS.calendar_display_color_writes_enabled and SETTINGS.writes_enabled,
 )
 capability_override_store = CapabilityOverrideStore()
+ai_provider_settings_store = AIProviderSettingsStore(SETTINGS.ai_settings_path)
+ai_text_service = AITextService(SETTINGS, ai_provider_settings_store)
 
 
 @asynccontextmanager
@@ -113,6 +118,15 @@ app.include_router(
     build_planning_router(
         runtime.planning,
         calendar_read_observer=diagnostics_collector.observe_calendar_read,
+    )
+)
+app.include_router(
+    build_ai_router(
+        SETTINGS,
+        ai_provider_settings_store,
+        ai_text_service,
+        planning_provider=lambda: runtime.planning.projection,
+        writes_allowed=lambda: _ai_settings_write_allowed(),
     )
 )
 app.include_router(
@@ -172,6 +186,7 @@ def ready() -> dict:
             "rogG703": SETTINGS.rog_g703_enabled,
             "weather": True,
             "planning": runtime.planning.enabled,
+            "aiText": SETTINGS.ai_text_enabled,
         },
     }
 
@@ -278,6 +293,10 @@ def _calendar_display_write_allowed() -> bool:
     return _write_allowed(_immediate_capability_enabled("calendar_display_colors"))
 
 
+def _ai_settings_write_allowed() -> bool:
+    return _write_allowed(SETTINGS.ai_settings_writes_enabled and SETTINGS.ai_text_enabled)
+
+
 def _calendar_display_known_identities() -> set[tuple[str, str]]:
     projection = runtime.planning.projection
     if projection is None:
@@ -347,6 +366,9 @@ def _immediate_capability_enabled(capability_id: str) -> bool:
 def _read_only_capability_enabled(capability_id: str) -> bool:
     return {
         "planning_integration": SETTINGS.panel_planning_enabled,
+        "ai_text": SETTINGS.ai_text_enabled,
+        "ai_provider_settings": SETTINGS.ai_settings_writes_enabled,
+        "ai_local_fallback": SETTINGS.ai_local_enabled,
         "planning_reminder_mutations": SETTINGS.panel_planning_reminder_mutations_enabled,
         "planning_task_mutations": SETTINGS.panel_planning_task_mutations_enabled,
         "planning_calendar_mutations": SETTINGS.panel_planning_calendar_mutations_enabled,

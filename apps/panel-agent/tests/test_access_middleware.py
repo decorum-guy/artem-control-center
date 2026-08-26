@@ -18,6 +18,10 @@ def build_client(tmp_path):
     def mutate():
         return {"ok": True}
 
+    @app.patch("/api/v1/settings/ai/selection")
+    def ai_selection():
+        return {"ok": True}
+
     return store, TestClient(app)
 
 
@@ -34,6 +38,16 @@ def test_direct_mutation_is_structured_denial_not_server_error(tmp_path):
     accepted = client.post("/api/v1/actions/home/coffee")
     assert accepted.status_code == 200
     assert accepted.json() == {"ok": True}
+
+
+def test_ai_provider_settings_are_a_registered_standard_capability(tmp_path):
+    store, client = build_client(tmp_path)
+    denied = client.patch("/api/v1/settings/ai/selection")
+    assert denied.status_code == 403
+    store.set_pin("2468")
+    store.set_profile("standard")
+    assert client.patch("/api/v1/settings/ai/selection").status_code == 200
+    assert capability_for_request("PATCH", "/api/v1/settings/ai/providers/gigachat/credential") == "settings.ai.providers"
 
 
 def build_planning_client(tmp_path):

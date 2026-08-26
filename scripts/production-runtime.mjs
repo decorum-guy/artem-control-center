@@ -207,6 +207,7 @@ export function buildAgentEnvironment({
   dashboardDist,
   stateCachePath,
   calendarDisplayColorPath,
+  aiSettingsPath,
   capabilityOverridesPath,
   capabilityApplyStatePath,
   buildRevision = "unknown"
@@ -221,6 +222,7 @@ export function buildAgentEnvironment({
     PANEL_DASHBOARD_DIST: dashboardDist,
     PANEL_STATE_CACHE_PATH: stateCachePath,
     PANEL_CALENDAR_DISPLAY_COLOR_PATH: calendarDisplayColorPath,
+    PANEL_AI_SETTINGS_PATH: aiSettingsPath,
     PANEL_CAPABILITY_OVERRIDES_PATH: capabilityOverridesPath,
     PANEL_CAPABILITY_APPLY_STATE_PATH: capabilityApplyStatePath,
     PANEL_CAPABILITY_APPLY_ENABLED: "true"
@@ -447,6 +449,7 @@ export async function runProductionRuntime() {
     dashboardDist,
     stateCachePath: fileEnv.PANEL_STATE_CACHE_PATH || join(runtimeDir, "panel-state-cache.json"),
     calendarDisplayColorPath: fileEnv.PANEL_CALENDAR_DISPLAY_COLOR_PATH || join(runtimeDir, "calendar-display-colors.json"),
+    aiSettingsPath: fileEnv.PANEL_AI_SETTINGS_PATH || join(runtimeDir, "ai-provider-settings.json"),
     capabilityOverridesPath,
     capabilityApplyStatePath
   });

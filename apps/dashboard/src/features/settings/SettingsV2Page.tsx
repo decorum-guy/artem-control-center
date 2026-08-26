@@ -19,11 +19,12 @@ import { calendarDisplayPalette, calendarDisplayOverrideColor, calendarSourceDis
 import { RouteHeader } from "../../ShellPrimitives";
 import { SettingsSummaryColumn, SettingsSummaryRow } from "./SettingsSummaryRow";
 import { CapabilitySettingsSheet, capabilityStateLabel, capabilitySummary, useCapabilities, type CapabilitiesController } from "./CapabilitySettings";
+import { AIProviderSettingsSheet, aiStateLabel, aiSummary, useAIProviderSettings, type AIProviderSettingsController } from "./AIProviderSettings";
 import "./settingsV2.css";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
-type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities";
+type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai";
 
 const motionLabels: Record<MotionMode, string> = {
   full: "Полное",
@@ -56,6 +57,7 @@ export function SettingsV2Page({
   const runtime = useRuntimeStatus();
   const calendarPreferences = useCalendarDisplayPreferences();
   const capabilities = useCapabilities();
+  const ai = useAIProviderSettings();
   const [openSheet, setOpenSheet] = useState<SettingsSheet | null>(null);
 
   return (
@@ -109,6 +111,14 @@ export function SettingsV2Page({
 
       <div className="settings-v2-summary-grid">
         <SettingsSummaryColumn>
+          <SettingsSummaryRow
+            title="Текстовый AI"
+            summary={aiSummary(ai)}
+            stateLabel={aiStateLabel(ai)}
+            stateTone={ai.inventory?.enabled ? "neutral" : "unavailable"}
+            testId="settings-summary-ai"
+            onClick={() => setOpenSheet("ai")}
+          />
           <SettingsSummaryRow
             title="Календари"
             summary={calendarSummary(calendarSources, calendarPreferences.loading, calendarPreferences.preferences)}
@@ -168,6 +178,7 @@ export function SettingsV2Page({
           coffee={coffee}
           calendarSources={calendarSources}
           capabilities={capabilities}
+          ai={ai}
           onClose={() => setOpenSheet(null)}
         />
       )}
@@ -180,16 +191,19 @@ function SettingsSheet({
   coffee,
   calendarSources,
   capabilities,
+  ai,
   onClose
 }: {
   kind: SettingsSheet;
   coffee: CoffeeSettingsController;
   calendarSources: PlanningCalendarSource[];
   capabilities: CapabilitiesController;
+  ai: AIProviderSettingsController;
   onClose: () => void;
 }) {
   if (kind === "calendars") return <CalendarSettingsSheet sources={calendarSources} onClose={onClose} />;
   if (kind === "capabilities") return <CapabilitySettingsSheet onClose={onClose} capabilities={capabilities} />;
+  if (kind === "ai") return <AIProviderSettingsSheet onClose={onClose} controller={ai} />;
   if (kind === "coffee") {
     return (
       <Sheet
