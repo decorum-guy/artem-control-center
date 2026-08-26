@@ -3,7 +3,7 @@
 }
 
 .runtime-controls-copy {
-  max-width: 680px;
+  max-width: 620px;
 }
 
 .runtime-controls-status {
@@ -18,26 +18,33 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px;
 }
 
 .runtime-control-actions button {
   min-height: 48px;
-  padding: 0 18px;
+  padding: 0 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   font-weight: 700;
+  white-space: nowrap;
   transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
 }
 
-.runtime-hide-button {
+.runtime-hide-button,
+.runtime-update-button {
   color: var(--text);
   background: var(--surface-inline);
 }
 
-.runtime-hide-button:hover:not(:disabled) {
+.runtime-hide-button:hover:not(:disabled),
+.runtime-update-button:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--surface-hover);
+}
+
+.runtime-update-button {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
 }
 
 .runtime-shutdown-button {
@@ -52,6 +59,47 @@
   background: color-mix(in srgb, var(--danger-soft) 72%, var(--danger));
 }
 
+.runtime-update-dialog {
+  width: min(560px, calc(100vw - 40px));
+}
+
+.runtime-update-versions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.runtime-update-versions > div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-inline);
+}
+
+.runtime-update-versions span,
+.runtime-update-versions strong {
+  display: block;
+}
+
+.runtime-update-versions span {
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.runtime-update-versions strong {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.runtime-update-message {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
 @media (max-width: 760px) {
   .runtime-control-actions {
     width: 100%;
@@ -59,6 +107,10 @@
   }
 
   .runtime-control-actions button {
-    flex: 1 1 190px;
+    flex: 1 1 180px;
+  }
+
+  .runtime-update-versions {
+    grid-template-columns: 1fr;
   }
 }
