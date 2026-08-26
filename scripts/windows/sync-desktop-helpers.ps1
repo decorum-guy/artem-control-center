@@ -22,7 +22,13 @@ foreach ($name in $obsolete) {
 @"
 @echo off
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$($paths.OpenKioskScript)"
-if errorlevel 1 pause
+set "exitCode=%ERRORLEVEL%"
+if not "%exitCode%"=="0" (
+  echo.
+  echo Open Control Center failed with exit code %exitCode%.
+  pause
+)
+exit /b %exitCode%
 "@ | Set-Content -LiteralPath (Join-Path $desktop "Open Control Center.cmd") -Encoding ASCII
 
 @"
