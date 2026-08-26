@@ -49,6 +49,18 @@ function Sync-ArtemDesktopHelpers {
     }
 }
 
+function Open-ArtemKioskBestEffort {
+    param([Parameter(Mandatory)]$Paths)
+    try {
+        & $Paths.OpenKioskScript -AssumeRuntimeReady
+    }
+    catch {
+        # Runtime health is the start contract. Open Control Center.cmd remains
+        # strict because it invokes open-kiosk.ps1 directly after a -NoKiosk start.
+        Write-Warning "Control Center runtime is healthy, but kiosk recovery failed: $($_.Exception.Message)"
+    }
+}
+
 $paths = Get-ArtemRuntimePaths
 $taskName = "Artem Control Center Runtime"
 Initialize-ArtemRuntimeDirectories -Paths $paths
@@ -80,7 +92,7 @@ if (Test-ArtemRuntimeProcess -Paths $paths) {
     if (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 20) {
         Start-ArtemConnectivityIfConfigured
         if (-not $NoKiosk) {
-            & $paths.OpenKioskScript -AssumeRuntimeReady
+            Open-ArtemKioskBestEffort -Paths $paths
         }
         Write-Host "Artem Control Center is already running."
         exit 0
@@ -133,7 +145,7 @@ if (-not $AutoStart -and -not $UpdateRequestId) {
         }
         Start-ArtemConnectivityIfConfigured
         if (-not $NoKiosk) {
-            & $paths.OpenKioskScript -AssumeRuntimeReady
+            Open-ArtemKioskBestEffort -Paths $paths
         }
         Write-Host "Artem Control Center production runtime started through Task Scheduler."
         Write-Host "URL: $($paths.PanelUrl)"
@@ -167,7 +179,7 @@ if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 60)) {
 
 Start-ArtemConnectivityIfConfigured
 if (-not $NoKiosk) {
-    & $paths.OpenKioskScript -AssumeRuntimeReady
+    Open-ArtemKioskBestEffort -Paths $paths
 }
 
 Write-Host "Artem Control Center production runtime started."

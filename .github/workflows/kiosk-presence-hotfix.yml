@@ -1,0 +1,26 @@
+name: Kiosk presence hotfix
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kiosk-presence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-kiosk-presence:
+    name: Windows dashboard presence regression
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run deterministic kiosk presence regression
+        shell: powershell
+        run: ./scripts/windows/test-kiosk-presence.ps1

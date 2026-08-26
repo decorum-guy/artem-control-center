@@ -339,8 +339,8 @@ function Get-ArtemKioskProcesses {
     return @(Get-ArtemOwnedEdgeProcesses -Paths $Paths)
 }
 
-# Visible kiosk authority: any actual top-level HWND on a member of the current
-# panel-owned Edge tree is valid. A profile root merely existing is never enough.
+# Legacy diagnostic only. Real Samsung Edge kiosk windows report HWND 0 for every
+# msedge process, so application heartbeat below is the visibility authority.
 function Get-ArtemVisibleKioskProcesses {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -437,6 +437,8 @@ function Start-ArtemKioskWatcher {
         -WindowStyle Hidden | Out-Null
 }
 
+# Legacy fallback. kiosk-presence.ps1 is sourced at the end of this file and
+# replaces both visibility functions with application-heartbeat authority.
 function Ensure-ArtemKioskVisible {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -448,8 +450,6 @@ function Ensure-ArtemKioskVisible {
         return
     }
 
-    # Edge can retain a complete background process tree after its visible kiosk
-    # dies. Clear the dedicated panel tree before launching one fresh kiosk.
     if (Test-ArtemKioskRunning -Paths $Paths) {
         $cleanupDeadline = (Get-Date).AddSeconds(5)
         while ((Get-Date) -lt $cleanupDeadline -and (Test-ArtemKioskRunning -Paths $Paths)) {
@@ -570,4 +570,9 @@ function Assert-ArtemProductionPrerequisites {
         throw "Dashboard build is missing. Run npm run build."
     }
     $null = Get-Command node.exe -ErrorAction Stop
+}
+
+$kioskPresenceScript = Join-Path $PSScriptRoot "kiosk-presence.ps1"
+if (Test-Path -LiteralPath $kioskPresenceScript) {
+    . $kioskPresenceScript
 }
