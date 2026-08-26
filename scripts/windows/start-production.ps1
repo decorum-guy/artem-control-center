@@ -65,15 +65,36 @@ if (-not $AutoStart) {
 Assert-ArtemProductionPrerequisites -Paths $paths
 
 if (Test-ArtemRuntimeProcess -Paths $paths) {
-    if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 20)) {
-        throw "Production runtime process exists but is not ready"
+    if (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 20) {
+        Start-ArtemConnectivityIfConfigured
+        if (-not $NoKiosk) {
+            & $paths.OpenKioskScript -AssumeRuntimeReady
+        }
+        Write-Host "Artem Control Center is already running."
+        exit 0
     }
-    Start-ArtemConnectivityIfConfigured
-    if (-not $NoKiosk) {
-        & $paths.OpenKioskScript -AssumeRuntimeReady
+
+    # A live supervisor with an unavailable Panel Agent is a recoverable state.
+    # Previously the interactive Open path stopped here with
+    # "Production runtime process exists but is not ready", which is why a
+    # manual Stop -> Open sequence appeared to fix the panel. Repair the same
+    # state automatically without creating a manual-stop marker, then continue
+    # through the canonical Scheduled Task/direct launch path below.
+    $staleState = Get-ArtemRuntimeState -Paths $paths
+    $stalePid = if ($null -ne $staleState -and $null -ne $staleState.supervisorPid) {
+        [string]$staleState.supervisorPid
     }
-    Write-Host "Artem Control Center is already running."
-    exit 0
+    else {
+        "unknown"
+    }
+    Write-Warning "Production runtime supervisor $stalePid is alive but the panel is not ready. Restarting the runtime automatically."
+    Stop-ArtemRuntime -Paths $paths -Manual:$false -TimeoutSeconds 20
+    Remove-Item -LiteralPath $paths.State -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $paths.Command -Force -ErrorAction SilentlyContinue
+
+    if (Test-ArtemRuntimeProcess -Paths $paths) {
+        throw "Unable to recover the unhealthy production runtime"
+    }
 }
 
 if (-not $AutoStart) {
