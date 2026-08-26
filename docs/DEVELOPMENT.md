@@ -213,6 +213,8 @@ PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED
 PANEL_COFFEE_ACTIONS_ENABLED
 PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED
 PANEL_OVERVIEW_LAYOUT_PATH
+PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED
+PANEL_CALENDAR_DISPLAY_COLOR_PATH
 PANEL_SSE_HEARTBEAT_SECONDS
 ```
 
@@ -232,6 +234,15 @@ The dashboard obtains its initial state from `/api/v1/snapshot`, listens for
 revision hints on `/api/v1/events`, and always reconciles through another full
 snapshot GET. SSE is non-durable; fallback polling and visibility restore make
 missed events safe.
+
+Calendar display colours are Panel-owned preferences, not provider mutations.
+`PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED=false` remains subject to the
+global `PANEL_WRITES_ENABLED` gate and the standard owner access capability.
+The default development document is `.cache/calendar-display-colors.json`.
+The Windows production runtime injects a durable default under
+`%LOCALAPPDATA%\\ArtemControlCenter\\calendar-display-colors.json`, so ordinary
+source updates do not replace it. The bounded file contains only safe
+provider/calendar identity pairs and canonical `#RRGGBB` colours.
 
 The development gallery visibly identifies non-production mode. Ordinary user
 routes do not expose development mode or fixture controls.

@@ -71,6 +71,7 @@ import { useNoticeCenter } from "./NoticeCenter";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { useInteractionLock } from "./InteractionLock";
+import { useCalendarDisplayPreferences } from "./CalendarDisplayPreferences";
 import { Icon } from "./icons";
 import type { ActionConfirmationId } from "./actionConfirmationCatalog";
 import {
@@ -1019,6 +1020,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const [liveNow, setLiveNow] = useState(() => new Date());
   const { status: accessStatus, ensureCapability } = useAccess();
   const { guardMutation } = useInteractionLock();
+  const { preferences: calendarDisplayPreferences } = useCalendarDisplayPreferences();
   const { confirmAction } = useActionConfirmation();
   const deletePendingRef = useRef(false);
   const calendarRefreshStartedRef = useRef(false);
@@ -1269,7 +1271,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
               <div className="calendar-month__grid">
                 {monthDates.map((localDate) => {
                   const dayEvents = calendarEventsForLocalDay(events, localDate, DEFAULT_PLANNING_TIME_ZONE);
-                  const colors = [...new Set(dayEvents.map((event) => calendarEventColor(event, sources)))];
+                  const colors = [...new Set(dayEvents.map((event) => calendarEventColor(event, sources, calendarDisplayPreferences?.overrides ?? [])))];
                   const inMonth = localDate.startsWith(`${visibleMonthKey}-`);
                   const dateLabel = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
                     .format(new Date(`${localDate}T12:00:00Z`));
@@ -1320,14 +1322,14 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
                       <p className="calendar-band__label">Весь день</p>
                       {selectedDayEvents.filter((event) => event.allDay).map((event) => {
                         const source = providerSourceForEvent(event, sources);
-                        return <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} accentColor={calendarEventColor(event, sources)} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
+                        return <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} accentColor={calendarEventColor(event, sources, calendarDisplayPreferences?.overrides ?? [])} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
                       })}
                     </div>
                   )}
                   <div className="calendar-timed-list">
                     {selectedDayEvents.filter((event) => !event.allDay).map((event) => {
                       const source = providerSourceForEvent(event, sources);
-                      return <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} accentColor={calendarEventColor(event, sources)} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
+                      return <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} accentColor={calendarEventColor(event, sources, calendarDisplayPreferences?.overrides ?? [])} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
                     })}
                   </div>
                 </div>

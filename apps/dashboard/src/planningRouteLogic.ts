@@ -1,4 +1,5 @@
 import type {
+  CalendarDisplayColorOverride,
   PlanningCalendarEvent,
   PlanningProject,
   PlanningReminder,
@@ -8,7 +9,7 @@ import type {
 import type { CalendarRange } from "./calendarRange";
 import { calendarDayRangeUtc, DEFAULT_PLANNING_TIME_ZONE, localDateForInstant } from "./calendarRange";
 import type { PlanningCalendarSource } from "@artem/contracts";
-import { calendarIdentityForEvent } from "./planningIdentity";
+import { calendarEventDisplayColor } from "./calendarDisplayColors";
 
 export const taskViewLabels: Record<"today" | "overdue" | "upcoming", string> = {
   today: "Сегодня",
@@ -185,27 +186,12 @@ export function calendarEventsForLocalDay(
   });
 }
 
-const localCalendarColor = "#5B6EE1";
-const fallbackCalendarColors = ["#2F8F83", "#B47718", "#8B5FBF", "#B14C62"];
-
-function stableColorIndex(value: string): number {
-  let hash = 0;
-  for (const character of value) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return hash % fallbackCalendarColors.length;
-}
-
 export function calendarEventColor(
   event: PlanningCalendarEvent,
-  sources: PlanningCalendarSource[]
+  sources: PlanningCalendarSource[],
+  overrides: readonly CalendarDisplayColorOverride[] = []
 ): string {
-  const identity = calendarIdentityForEvent(event);
-  const source = sources.find((candidate) => candidate.id === identity.providerId);
-  const sourceCalendar = source?.calendars.find((calendar) => calendar.id === identity.calendarId);
-  if (sourceCalendar?.color && /^#[0-9A-Fa-f]{6,8}$/.test(sourceCalendar.color)) return sourceCalendar.color;
-  if (event.localOnlyMutable || identity.providerId === "local-planning" || identity.providerId === "native-planning") {
-    return localCalendarColor;
-  }
-  return fallbackCalendarColors[stableColorIndex(`${identity.providerId}:${identity.calendarId}`)];
+  return calendarEventDisplayColor(event, sources, overrides);
 }
 
 function addLocalDate(localDate: string, days: number): string {

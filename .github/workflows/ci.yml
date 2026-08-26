@@ -249,6 +249,22 @@ jobs:
           path: artifacts/issue-112-calendar-review
           if-no-files-found: error
 
+      - name: "Run focused #112 B2.1 Calendar Settings gate"
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          ISSUE_112_B2_CALENDAR_SETTINGS_ARTIFACT_DIR: artifacts/issue-112-b2-calendar-settings-review
+        run: npm run test:e2e -- tests/e2e/issue-112-b2-calendar-settings.spec.ts
+
+      - name: Upload #112 B2.1 Calendar Settings review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-112-b2-calendar-settings-review-${{ github.sha }}
+          path: artifacts/issue-112-b2-calendar-settings-review
+          if-no-files-found: error
+
       - name: "Run focused #116 owner-facing copy gate"
         if: runner.os == 'Linux'
         env:

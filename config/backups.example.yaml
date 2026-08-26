@@ -33,7 +33,8 @@ backup_profiles:
       adapter: config_only
       paths:
         - .cache/overview-layout.json
-      note: Dedicated Overview layout JSON; no secrets, credentials, endpoints, or runtime snapshots.
+        - .cache/calendar-display-colors.json
+      note: Dedicated Panel-owned layout and Calendar display-preference JSON; no secrets, credentials, endpoints, or runtime snapshots.
     destinations:
       - id: laptop-primary
         mode: always
@@ -43,7 +44,7 @@ backup_profiles:
       checksum: sha256
       manifest_required: true
     restore:
-      semantics: Place the file at PANEL_OVERVIEW_LAYOUT_PATH; Panel Agent validates and recovers without overwriting bytes until an explicit save.
+      semantics: Place files at PANEL_OVERVIEW_LAYOUT_PATH and PANEL_CALENDAR_DISPLAY_COLOR_PATH; Panel Agent validates and recovers without overwriting bytes until an explicit save.
 
   - id: home-assistant-native
     project_id: home-stack

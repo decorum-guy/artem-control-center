@@ -68,6 +68,8 @@ const runtimeEnvironment = {
   PANEL_ACCESS_POLICY_PATH: accessPolicyPath,
   PANEL_ACCESS_AUDIT_DIR: join(runtimeRoot, "audit"),
   PANEL_OVERVIEW_LAYOUT_PATH: join(runtimeRoot, "overview-layout.json"),
+  PANEL_CALENDAR_DISPLAY_COLOR_PATH: join(runtimeRoot, "calendar-display-colors.json"),
+  PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED: "true",
   PANEL_PLANNING_CACHE_PATH: join(runtimeRoot, "planning-cache.json")
 };
 const runtime = spawn(process.execPath, ["scripts/production-runtime.mjs"], {

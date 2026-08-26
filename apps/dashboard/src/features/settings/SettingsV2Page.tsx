@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { PlanningCalendarSource } from "@artem/contracts";
 import type { AccessStatus } from "../../accessApi";
 import {
   AccessSettingsPanel,
@@ -12,13 +13,16 @@ import {
 } from "../../CoffeeSettings";
 import { RuntimeControls, useRuntimeStatus } from "../../RuntimeControls";
 import { Sheet } from "../../Sheet";
+import { useInteractionLock } from "../../InteractionLock";
+import { useCalendarDisplayPreferences } from "../../CalendarDisplayPreferences";
+import { calendarDisplayPalette, calendarDisplayOverrideColor, calendarSourceDisplayColor, normalizedCalendarColor } from "../../calendarDisplayColors";
 import { RouteHeader } from "../../ShellPrimitives";
 import { SettingsSummaryColumn, SettingsSummaryRow } from "./SettingsSummaryRow";
 import "./settingsV2.css";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
-type SettingsSheet = "coffee" | "notifications" | "access" | "runtime";
+type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars";
 
 const motionLabels: Record<MotionMode, string> = {
   full: "Полное",
@@ -36,17 +40,20 @@ const accessLabels: Record<AccessStatus["effectiveProfile"], string> = {
 export function SettingsV2Page({
   theme,
   motion,
+  calendarSources,
   onThemeChange,
   onMotionChange
 }: {
   theme: Theme;
   motion: MotionMode;
+  calendarSources: PlanningCalendarSource[];
   onThemeChange: (theme: Theme) => void;
   onMotionChange: (motion: MotionMode) => void;
 }) {
   const coffee = useCoffeeSettings();
   const { status: accessStatus, available: accessAvailable } = useAccess();
   const runtime = useRuntimeStatus();
+  const calendarPreferences = useCalendarDisplayPreferences();
   const [openSheet, setOpenSheet] = useState<SettingsSheet | null>(null);
 
   return (
@@ -101,6 +108,14 @@ export function SettingsV2Page({
       <div className="settings-v2-summary-grid">
         <SettingsSummaryColumn>
           <SettingsSummaryRow
+            title="Календари"
+            summary={calendarSummary(calendarSources, calendarPreferences.loading, calendarPreferences.preferences)}
+            stateLabel={calendarStateLabel(calendarPreferences.loading, calendarPreferences.preferences)}
+            stateTone={calendarPreferences.preferences?.available === false ? "unavailable" : "neutral"}
+            testId="settings-summary-calendars"
+            onClick={() => setOpenSheet("calendars")}
+          />
+          <SettingsSummaryRow
             title="Кофемашина"
             summary={coffeeSummary(coffee)}
             stateLabel={coffeeStateLabel(coffee)}
@@ -141,6 +156,7 @@ export function SettingsV2Page({
         <SettingsSheet
           kind={openSheet}
           coffee={coffee}
+          calendarSources={calendarSources}
           onClose={() => setOpenSheet(null)}
         />
       )}
@@ -151,12 +167,15 @@ export function SettingsV2Page({
 function SettingsSheet({
   kind,
   coffee,
+  calendarSources,
   onClose
 }: {
   kind: SettingsSheet;
   coffee: CoffeeSettingsController;
+  calendarSources: PlanningCalendarSource[];
   onClose: () => void;
 }) {
+  if (kind === "calendars") return <CalendarSettingsSheet sources={calendarSources} onClose={onClose} />;
   if (kind === "coffee") {
     return (
       <Sheet
@@ -220,6 +239,88 @@ function SettingsSheet({
       </div>
     </Sheet>
   );
+}
+
+function CalendarSettingsSheet({ sources, onClose }: { sources: PlanningCalendarSource[]; onClose: () => void }) {
+  const { preferences, loading, save } = useCalendarDisplayPreferences();
+  const { guardMutation } = useInteractionLock();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const calendars = sources.flatMap((source) => source.calendars.map((calendar) => ({ source, calendar })));
+
+  async function setColor(source: PlanningCalendarSource, calendar: PlanningCalendarSource["calendars"][number], color: string | null) {
+    if (!guardMutation()) {
+      setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
+      return;
+    }
+    if (!preferences?.writesEnabled) {
+      setNotice("Изменения цветов сейчас недоступны.");
+      return;
+    }
+    const key = `${source.id}:${calendar.id}`;
+    setPending(key);
+    setNotice(null);
+    try {
+      await save({ providerId: source.id, calendarId: calendar.id, color });
+      setEditing(null);
+    } catch {
+      setNotice("Не удалось сохранить цвет. Показан подтверждённый цвет.");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <Sheet testId="settings-calendars-sheet" eyebrow="Расписание" title="Календари" description="Цвета действуют только внутри Control Center и не меняют источник." onClose={onClose}>
+      <div className="settings-v2-sheet-content settings-calendar-settings" data-testid="settings-calendar-list">
+        {loading && <p className="settings-notice" role="status">Проверяем сохранённые цвета…</p>}
+        {!loading && !preferences && <p className="settings-notice" role="status">Настройки цветов временно недоступны. В календаре используются цвета источника.</p>}
+        {preferences && !preferences.available && <p className="settings-notice" role="status">Сохранённые настройки цветов временно недоступны. В календаре используются цвета источника.</p>}
+        {!loading && calendars.length === 0 && <p className="settings-notice">Календари пока не получены. Обновление списка источников выполняется отдельно.</p>}
+        {calendars.map(({ source, calendar }) => {
+          const key = `${source.id}:${calendar.id}`;
+          const override = preferences ? calendarDisplayOverrideColor(source.id, calendar.id, preferences.overrides) : null;
+          const effective = calendarSourceDisplayColor(source, calendar, preferences?.overrides ?? []);
+          const provider = normalizedCalendarColor(calendar.color);
+          const canWrite = preferences?.writesEnabled === true && pending === null;
+          return (
+            <article className="settings-calendar-row" key={key} data-testid="settings-calendar-row" data-calendar-label={calendar.label}>
+              <button type="button" className="settings-calendar-row__main" aria-expanded={editing === key} onClick={() => setEditing(editing === key ? null : key)} disabled={pending === key}>
+                <span className="settings-calendar-row__swatch" data-testid="settings-calendar-effective-swatch" style={{ backgroundColor: effective }} aria-label={`Цвет панели ${effective}`} />
+                <span className="settings-calendar-row__copy">
+                  <strong>{calendar.label}</strong>
+                  <small>{source.label}{calendar.status !== "current" ? " · сохранённые данные" : ""}</small>
+                  <small>Источник: {provider ?? "цвет по умолчанию"}{override ? " · цвет панели задан" : ""}</small>
+                </span>
+                <span className="settings-calendar-row__action">{pending === key ? "Сохраняем…" : "Цвет"}</span>
+              </button>
+              {editing === key && (
+                <div className="settings-calendar-palette" role="group" aria-label={`Цвет для ${calendar.label}`}>
+                  {calendarDisplayPalette.map((color) => <button key={color} type="button" className="settings-calendar-palette__color" aria-label={`Выбрать ${color}`} aria-pressed={effective === color} disabled={!canWrite} style={{ backgroundColor: color }} onClick={() => void setColor(source, calendar, color)} />)}
+                  <button type="button" className="planning-secondary-button settings-calendar-palette__reset" disabled={!canWrite || !override} onClick={() => void setColor(source, calendar, null)}>Цвет источника</button>
+                </div>
+              )}
+            </article>
+          );
+        })}
+        {notice && <p className="settings-notice" role="status">{notice}</p>}
+      </div>
+    </Sheet>
+  );
+}
+
+function calendarSummary(sources: PlanningCalendarSource[], loading: boolean, preferences: ReturnType<typeof useCalendarDisplayPreferences>["preferences"]): string {
+  const count = sources.reduce((total, source) => total + source.calendars.length, 0);
+  if (loading && !preferences) return "Проверяем цвета панели…";
+  if (!preferences) return count ? `${count} календарей · цвета источника` : "Календари временно недоступны";
+  return `${count} ${count === 1 ? "календарь" : "календарей"} · цвета панели`;
+}
+
+function calendarStateLabel(loading: boolean, preferences: ReturnType<typeof useCalendarDisplayPreferences>["preferences"]): string {
+  if (loading && !preferences) return "Проверяем";
+  if (!preferences || !preferences.available) return "Недоступно";
+  return preferences.writesEnabled ? "Доступно" : "Только чтение";
 }
 
 function coffeeSummary(settings: CoffeeSettingsController): string {
