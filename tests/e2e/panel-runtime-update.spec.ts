@@ -17,6 +17,12 @@ type UpdateCheck = {
   reason: string | null;
 };
 
+type UpdateOwnerState = {
+  schemaVersion: 1;
+  status: "idle" | "checking" | "updating" | "success" | "failed";
+  result?: string;
+};
+
 function available(target = TARGET): UpdateCheck {
   return {
     schemaVersion: "panel-update.v1",
@@ -63,8 +69,10 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
   let currentProfile = profile;
   let nextCheck: UpdateCheck = available();
   let checkQueue: UpdateCheck[] = [];
+  let statusQueue: UpdateOwnerState[] = [];
   let checkDelayMs = 0;
   let checkCount = 0;
+  let statusCount = 0;
   let applyCount = 0;
   let shutdownCount = 0;
   let hideCount = 0;
@@ -93,10 +101,14 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
       return;
     }
     if (path === "/api/v1/system/update/status" && request.method() === "GET") {
+      statusCount += 1;
+      const payload = statusQueue.length
+        ? statusQueue.shift()!
+        : { schemaVersion: 1 as const, status: "idle" as const };
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ schemaVersion: 1, status: "idle" })
+        body: JSON.stringify(payload)
       });
       return;
     }
@@ -147,9 +159,11 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
     setProfile: (next: "standard" | "full") => { currentProfile = next; },
     setCheck: (next: UpdateCheck) => { nextCheck = next; checkQueue = []; },
     queueChecks: (...checks: UpdateCheck[]) => { checkQueue = [...checks]; },
+    queueStatuses: (...states: UpdateOwnerState[]) => { statusQueue = [...states]; },
     setCheckDelay: (milliseconds: number) => { checkDelayMs = milliseconds; },
     conflictNextApply: () => { applyConflictOnce = true; },
     getCheckCount: () => checkCount,
+    getStatusCount: () => statusCount,
     getApplyCount: () => applyCount,
     getShutdownCount: () => shutdownCount,
     getHideCount: () => hideCount,
@@ -271,7 +285,32 @@ test.describe("Control Center runtime update UX", () => {
 
     await expect.poll(api.getApplyCount).toBe(1);
     expect(api.getLastApplyBody()).toEqual({ expectedCurrentHead: CURRENT, expectedTargetHead: TARGET });
-    await expect(dialog).toContainText(/Запускаем обновление/);
+    await expect(dialog).toContainText(/Запускаем обновление|Обновление выполняется/);
+  });
+
+  test("accepted apply that later fails becomes actionable and polling is cleaned up", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await expect(dialog.getByRole("button", { name: "Обновить", exact: true })).toBeEnabled();
+
+    api.queueStatuses(
+      { schemaVersion: 1, status: "updating" },
+      { schemaVersion: 1, status: "failed", result: "updater_unavailable" }
+    );
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+
+    await expect.poll(api.getApplyCount).toBe(1);
+    await expect(dialog).toContainText("Обновление не завершено");
+    await expect(dialog).not.toContainText("Запускаем…");
+    await expect(dialog.getByRole("button", { name: "Отмена" })).toBeEnabled();
+    expect(await dialog.textContent()).not.toMatch(/stderr|fatal:|C:\\|\/home\/|update-production\.ps1/i);
+
+    const statusCountBeforeClose = api.getStatusCount();
+    await closeUpdateDialog(page);
+    await page.waitForTimeout(1_000);
+    expect(api.getStatusCount()).toBe(statusCountBeforeClose);
   });
 
   test("changed target conflict rechecks instead of silently applying the new target", async ({ page }) => {
