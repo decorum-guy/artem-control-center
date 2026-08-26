@@ -120,12 +120,35 @@ Register-ScheduledTask `
     -Force | Out-Null
 
 $desktop = [Environment]::GetFolderPath("Desktop")
-$startShortcut = Join-Path $desktop "Start Control Center.cmd"
-$openShortcut = Join-Path $desktop "Open Control Center.cmd"
-$stopShortcut = Join-Path $desktop "Stop Control Center.cmd"
-$updateShortcut = Join-Path $desktop "Update Control Center.cmd"
-$statusShortcut = Join-Path $desktop "Control Center Status.cmd"
-$pinShortcut = Join-Path $desktop "Set Control Center PIN.cmd"
+$documents = [Environment]::GetFolderPath("MyDocuments")
+if ([string]::IsNullOrWhiteSpace($documents)) {
+    throw "Unable to resolve the current user's Documents folder"
+}
+New-Item -ItemType Directory -Force -Path $documents | Out-Null
+
+# Installation owns the helper .cmd files, but not any owner-created .lnk shortcuts.
+# Remove legacy/generated desktop CMD files so future installs keep the desktop clean.
+$desktopGenerated = @(
+    "Start Control Center.cmd",
+    "Open Control Center.cmd",
+    "Update Control Center.cmd",
+    "Stop Control Center.cmd",
+    "Control Center Status.cmd",
+    "Set Control Center PIN.cmd",
+    "Repair Home Connection.cmd",
+    "Start Control Center Test.cmd",
+    "Stop Control Center Test.cmd"
+)
+foreach ($name in $desktopGenerated) {
+    Remove-Item -LiteralPath (Join-Path $desktop $name) -Force -ErrorAction SilentlyContinue
+}
+
+$startShortcut = Join-Path $documents "Start Control Center.cmd"
+$openShortcut = Join-Path $documents "Open Control Center.cmd"
+$stopShortcut = Join-Path $documents "Stop Control Center.cmd"
+$updateShortcut = Join-Path $documents "Update Control Center.cmd"
+$statusShortcut = Join-Path $documents "Control Center Status.cmd"
+$pinShortcut = Join-Path $documents "Set Control Center PIN.cmd"
 $statusScript = Join-Path $PSScriptRoot "status-production.ps1"
 $pinScript = Join-Path $PSScriptRoot "set-access-pin.ps1"
 
@@ -169,8 +192,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$pinScript" -Profile st
 pause
 "@ | Set-Content -LiteralPath $pinShortcut -Encoding ASCII
 
-Remove-Item -LiteralPath (Join-Path $desktop "Start Control Center Test.cmd") -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $desktop "Stop Control Center Test.cmd") -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $paths.ManualStop -Force -ErrorAction SilentlyContinue
 
 $currentHead = (& git.exe rev-parse HEAD).Trim()
@@ -190,7 +211,7 @@ Write-Host "Artem Control Center production runtime installed."
 Write-Host "Scheduled task: $taskName"
 Write-Host "Runtime config: $($paths.RuntimeEnv)"
 Write-Host "Logs: $($paths.Logs)"
-Write-Host "Desktop shortcuts:"
+Write-Host "Documents helpers: $documents"
 Write-Host "  Start Control Center.cmd"
 Write-Host "  Open Control Center.cmd"
 Write-Host "  Stop Control Center.cmd"
