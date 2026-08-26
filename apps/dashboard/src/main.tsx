@@ -10,6 +10,7 @@ import { App } from "./App";
 import { NoticeCenterProvider } from "./NoticeCenter";
 import { InteractionLockProvider } from "./InteractionLock";
 import { CalendarDisplayPreferencesProvider } from "./CalendarDisplayPreferences";
+import { KioskPresenceHeartbeat } from "./KioskPresenceHeartbeat";
 import "./InteractionLock.css";
 import "./ActionConfirmations.css";
 import "./AvalarActions.css";
@@ -26,6 +27,7 @@ import "./features/system/systemV2.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
+    <KioskPresenceHeartbeat />
     <NoticeCenterProvider>
       <InteractionLockProvider>
         <CalendarDisplayPreferencesProvider>
