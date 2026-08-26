@@ -362,10 +362,10 @@
 
 .calendar-groups { display: grid; gap: var(--space-5); }
 .calendar-day-group > h2 { margin: 0 0 9px; color: var(--text-secondary); font-size: 15px; text-transform: capitalize; }
-.calendar-band { display: grid; gap: 0; margin-bottom: 9px; padding-bottom: 8px; border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--border-soft)); border-left: 3px solid var(--warning); background: var(--warning-soft); }
+.calendar-band { display: grid; gap: 0; margin-bottom: 9px; padding-bottom: 8px; border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--border-soft)); border-left: 3px solid var(--warning); border-radius: var(--radius-control); background: var(--warning-soft); overflow: hidden; }
 .calendar-band__label { margin: 0; padding: 8px 16px 5px; color: var(--warning); font-size: 11px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
 .calendar-band .planning-route-row { background: transparent; }
-.calendar-band .calendar-event-row { width: calc(100% - 10px); margin-inline-start: 10px; }
+.calendar-band .calendar-event-row { width: calc(100% - 10px); margin-inline-start: 10px; border-radius: var(--radius-control); }
 .calendar-timed-list { display: grid; gap: 7px; }
 .calendar-timed-list .planning-route-row { border: 1px solid var(--border-soft); border-radius: var(--radius-control); }
 .calendar-timed-list .calendar-event-row { border-left: 4px solid var(--calendar-event-accent, var(--accent)); }

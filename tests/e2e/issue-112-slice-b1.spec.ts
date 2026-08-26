@@ -281,6 +281,47 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     const rowBox = await allDayRow.boundingBox();
     expect((rowBox?.x ?? 0)).toBeGreaterThan((bandBox?.x ?? 0));
     expect(await allDayBand.evaluate((element) => getComputedStyle(element).paddingBottom)).toBe("8px");
+    const radiusEvidence = await allDayBand.evaluate((band) => {
+      const row = band.querySelector<HTMLElement>(".calendar-event-row");
+      const timed = document.querySelector<HTMLElement>(".calendar-timed-list .calendar-event-row");
+      if (!row || !timed) throw new Error("Calendar radius fixtures are incomplete");
+      const bandStyle = getComputedStyle(band);
+      const rowStyle = getComputedStyle(row);
+      const timedStyle = getComputedStyle(timed);
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas color normalization is unavailable");
+      const normalizeColor = (value: string) => {
+        context.fillStyle = value;
+        return context.fillStyle.toLowerCase();
+      };
+      const bandRect = band.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const rowChildrenFit = [...row.querySelectorAll<HTMLElement>("*")].every((child) => {
+        const childRect = child.getBoundingClientRect();
+        return childRect.left >= rowRect.left - 1 && childRect.right <= rowRect.right + 1;
+      });
+      return {
+        bandRadius: bandStyle.borderTopLeftRadius,
+        rowRadius: rowStyle.borderTopLeftRadius,
+        timedRadius: timedStyle.borderTopLeftRadius,
+        rowAccent: normalizeColor(rowStyle.getPropertyValue("--calendar-event-accent").trim()),
+        rowBorderColor: normalizeColor(rowStyle.borderLeftColor),
+        rowBorderWidth: rowStyle.borderLeftWidth,
+        rowInset: rowRect.left - bandRect.left,
+        rowChildrenFit,
+        pageHasHorizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+      };
+    });
+    expect(radiusEvidence.bandRadius).not.toBe("0px");
+    expect(radiusEvidence.rowRadius).toBe(radiusEvidence.timedRadius);
+    expect(radiusEvidence.rowRadius).not.toBe("0px");
+    expect(radiusEvidence.rowBorderWidth).toBe("4px");
+    expect(radiusEvidence.rowBorderColor).toBe(radiusEvidence.rowAccent);
+    expect(radiusEvidence.rowBorderColor).toBe(allDayEvidence?.accent);
+    expect(radiusEvidence.rowInset).toBeGreaterThan(0);
+    expect(radiusEvidence.rowChildrenFit).toBe(true);
+    expect(radiusEvidence.pageHasHorizontalOverflow).toBe(false);
     await capture(page, testInfo, "calendar-normal-selected-day.png");
     await capture(page, testInfo, "calendar-all-day-multiple-source-colors.png");
 

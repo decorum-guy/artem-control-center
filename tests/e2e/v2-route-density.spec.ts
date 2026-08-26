@@ -129,6 +129,56 @@ function setKettleHealth(snapshot: Snapshot, health: "healthy" | "stale" | "offl
   };
 }
 
+type RogLayout = {
+  card: { top: number; bottom: number; left: number; right: number; width: number; height: number };
+  header: { top: number; bottom: number; left: number; right: number };
+  title: { top: number; bottom: number; left: number; right: number };
+  status: { top: number; bottom: number; left: number; right: number };
+  detail: { top: number; bottom: number; left: number; right: number };
+  footer: { top: number; bottom: number; left: number; right: number };
+  titleInPrimaryState: boolean;
+  noInternalOverflow: boolean;
+};
+
+async function measureRogLayout(page: Page): Promise<RogLayout> {
+  return page.getByTestId("system-rog-g703").evaluate((root) => {
+    const rect = (element: Element | null) => {
+      if (!element) throw new Error("ROG layout element is missing");
+      const box = element.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height };
+    };
+    const title = root.querySelector<HTMLElement>("#system-rog-g703-title");
+    const status = root.querySelector<HTMLElement>(".system-rog-detail__state strong");
+    const detail = root.querySelector<HTMLElement>(".system-rog-detail__state span");
+    const state = title?.closest(".system-rog-detail__state");
+    if (!title || !status || !detail || !state) throw new Error("ROG title/state geometry is incomplete");
+    return {
+      card: rect(root),
+      header: rect(root.querySelector(".system-rog-detail__header")),
+      title: rect(title),
+      status: rect(status),
+      detail: rect(detail),
+      footer: rect(root.querySelector(".system-rog-detail__footer")),
+      titleInPrimaryState: true,
+      noInternalOverflow: root.scrollHeight <= root.clientHeight && root.scrollWidth <= root.clientWidth
+    };
+  });
+}
+
+function assertRogLayout(layout: RogLayout): void {
+  expect(layout.titleInPrimaryState).toBe(true);
+  expect(Math.abs(layout.title.left - layout.status.left)).toBeLessThanOrEqual(1);
+  expect(layout.title.top - layout.header.bottom).toBeGreaterThanOrEqual(8);
+  expect(layout.status.top - layout.title.bottom).toBeGreaterThanOrEqual(8);
+  expect(layout.detail.top - layout.status.bottom).toBeGreaterThanOrEqual(0);
+  expect(layout.footer.top - layout.detail.bottom).toBeGreaterThanOrEqual(8);
+  expect(layout.title.top).toBeGreaterThanOrEqual(layout.header.bottom);
+  expect(layout.status.top).toBeGreaterThanOrEqual(layout.title.bottom);
+  expect(layout.detail.top).toBeGreaterThanOrEqual(layout.status.bottom);
+  expect(layout.footer.top).toBeGreaterThanOrEqual(layout.detail.bottom);
+  expect(layout.noInternalOverflow).toBe(true);
+}
+
 function longRussianServices(snapshot: Snapshot): Snapshot {
   return {
     ...snapshot,
@@ -321,7 +371,9 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(page.getByTestId("system-diagnostic-fixture-multi-action")).toContainText("Multi-action Service");
     await expect(page.getByTestId("system-diagnostic-fixture-multi-action")).toContainText("Требует внимания");
     await expect(page.getByTestId("system-rog-g703")).toContainText("В сети");
+    await expect(page.getByTestId("system-rog-g703")).toContainText("ASUS отвечает");
     await expect(page.getByTestId("system-rog-action")).toHaveText("Гибернация");
+    assertRogLayout(await measureRogLayout(page));
     await expect(page.getByTestId("system-runtime-zone")).toBeVisible();
     await expect(page.getByTestId("system-fact-update")).toContainText("Обновления");
     await expect(page.getByTestId("system-fact-update")).not.toContainText("Обновления и runtime");
@@ -331,31 +383,24 @@ test.describe("Control Center V2 PR7 route density", () => {
     await installSnapshotMock(page, (snapshot) => addRog(snapshot, "offline"));
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Не в сети");
+    await expect(page.getByTestId("system-rog-g703")).toContainText("Устройство не отвечает");
     await expect(page.getByTestId("system-rog-action")).toHaveText("Включить");
-    const rogGeometry = await page.getByTestId("system-rog-g703").evaluate((root) => {
-      const title = root.querySelector<HTMLElement>("#system-rog-g703-title");
-      const status = root.querySelector<HTMLElement>(".system-rog-detail__state strong");
-      const state = title?.closest(".system-rog-detail__state");
-      if (!title || !status) throw new Error("ROG title/state geometry is incomplete");
-      const titleBox = title.getBoundingClientRect();
-      const statusBox = status.getBoundingClientRect();
-      return {
-        titleLeft: titleBox.left,
-        statusLeft: statusBox.left,
-        titleBottom: titleBox.bottom,
-        statusTop: statusBox.top,
-        titleInPrimaryState: Boolean(state)
-      };
-    });
-    expect(rogGeometry.titleInPrimaryState).toBe(true);
-    expect(Math.abs(rogGeometry.titleLeft - rogGeometry.statusLeft)).toBeLessThanOrEqual(1);
-    expect(rogGeometry.statusTop - rogGeometry.titleBottom).toBeGreaterThanOrEqual(8);
+    assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");
     await installSnapshotMock(page, (snapshot) => addRog(snapshot, "waking"));
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Пробуждение");
+    await expect(page.getByTestId("system-rog-g703")).toContainText("Ждём, когда ASUS появится в сети");
     await expect(page.getByTestId("system-rog-action")).toBeDisabled();
+    assertRogLayout(await measureRogLayout(page));
+
+    await page.unroute("**/api/v1/snapshot**");
+    await installSnapshotMock(page, (snapshot) => addRog(snapshot, "hibernating"));
+    await page.goto("/system");
+    await expect(page.getByTestId("system-rog-g703")).toContainText("Гибернация");
+    await expect(page.getByTestId("system-rog-action")).toBeDisabled();
+    assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");
     await installSnapshotMock(page, (snapshot) => addRog(snapshot, "unavailable"));
@@ -434,7 +479,11 @@ test.describe("Control Center V2 PR7 route density", () => {
     await capture("system-default.png", "/system", (snapshot) => addRog(snapshot, "online"));
     await capture("system-rog-online.png", "/system", (snapshot) => addRog(snapshot, "online"));
     await capture("system-rog-offline.png", "/system", (snapshot) => addRog(snapshot, "offline"));
+    await page.getByTestId("system-rog-g703").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(artifactDir, "system-rog-offline-focus.png"), animations: "disabled" });
     await capture("system-rog-transition.png", "/system", (snapshot) => addRog(snapshot, "waking"));
+    await page.getByTestId("system-rog-g703").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(artifactDir, "system-rog-transition-focus.png"), animations: "disabled" });
     await capture("system-runtime-attention.png", "/system", (snapshot) => ({
       ...addRog(snapshot, "online"),
       services: [...addRog(snapshot, "online").services, runtimeService("degraded")]
