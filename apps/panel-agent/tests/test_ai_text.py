@@ -18,12 +18,6 @@ def settings(tmp_path, **overrides):
     return IntegrationSettings(ai_text_enabled=True, ai_settings_path=str(tmp_path / "ai.json"), **overrides)
 
 
-def system_ca_bundle() -> str:
-    path = ssl.get_default_verify_paths().cafile
-    assert path
-    return path
-
-
 def request():
     return AITextRequest(purpose="planning_today", instruction="Только факты.", user_text="Что у меня сегодня?", facts={"calendar": {"availability": "current", "items": []}, "tasks": {"availability": "current", "items": []}, "reminders": {"availability": "current", "items": []}})
 
@@ -41,7 +35,7 @@ def test_store_never_returns_plaintext_and_keeps_other_credentials(tmp_path):
     assert store.snapshot()[0].credentials == {"gigachat": "giga-secret-canary"}
 
 
-def test_gigachat_exchanges_and_caches_token_then_normalizes_response(tmp_path):
+def test_gigachat_exchanges_and_caches_token_then_normalizes_response(tmp_path, monkeypatch):
     calls = []
     def handler(req: httpx.Request):
         calls.append(req)
@@ -52,20 +46,24 @@ def test_gigachat_exchanges_and_caches_token_then_normalizes_response(tmp_path):
         assert "giga-secret-canary" not in req.content.decode()
         return httpx.Response(200, json={"choices": [{"message": {"content": "Сегодня свободно."}}]})
     store = AIProviderSettingsStore(str(tmp_path / "ai.json")); store.credential(expected_revision=0, provider_id="gigachat", value="giga-secret-canary")
-    service = AITextService(settings(tmp_path, ai_gigachat_ca_bundle_path=system_ca_bundle()), store, transport=httpx.MockTransport(handler))
+    bundle = tmp_path / "russian-trusted-root.pem"; bundle.write_text("configured-ca", encoding="utf-8")
+    monkeypatch.setattr("panel_agent.ai_text.ssl.create_default_context", lambda cafile: object())
+    service = AITextService(settings(tmp_path, ai_gigachat_ca_bundle_path=str(bundle)), store, transport=httpx.MockTransport(handler))
     first = asyncio.run(service.generate(request())); second = asyncio.run(service.generate(request()))
     assert first.text == "Сегодня свободно." and second.status == "completed"
     assert len(calls) == 3
 
 
-def test_tier1_bypasses_transport_and_cloud_failure_uses_local_fallback(tmp_path):
+def test_tier1_bypasses_transport_and_cloud_failure_uses_local_fallback(tmp_path, monkeypatch):
     calls = []
     def handler(req: httpx.Request):
         calls.append(str(req.url))
         if req.url.host == "ngw.devices.sberbank.ru": return httpx.Response(503)
         return httpx.Response(200, json={"response": "Локальный ответ."})
     store = AIProviderSettingsStore(str(tmp_path / "ai.json")); store.credential(expected_revision=0, provider_id="gigachat", value="key")
-    service = AITextService(settings(tmp_path, ai_local_enabled=True, ai_local_model="fixture-local-model", ai_gigachat_ca_bundle_path=system_ca_bundle()), store, transport=httpx.MockTransport(handler))
+    bundle = tmp_path / "russian-trusted-root.pem"; bundle.write_text("configured-ca", encoding="utf-8")
+    monkeypatch.setattr("panel_agent.ai_text.ssl.create_default_context", lambda cafile: object())
+    service = AITextService(settings(tmp_path, ai_local_enabled=True, ai_local_model="fixture-local-model", ai_gigachat_ca_bundle_path=str(bundle)), store, transport=httpx.MockTransport(handler))
     tier1 = asyncio.run(service.generate(AITextRequest(purpose="tier1", instruction="", user_text="", facts={}, tier1_key="acknowledged")))
     result = asyncio.run(service.generate(request()))
     assert tier1.tier1 is True and calls == ["https://ngw.devices.sberbank.ru:9443/api/v2/oauth", "http://127.0.0.1:11434/api/generate"]
