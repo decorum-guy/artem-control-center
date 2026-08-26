@@ -40,6 +40,75 @@ function Test-ArtemKioskVisible {
     )
 }
 
+# A single failed presence probe must never close a physically valid kiosk:
+# heartbeats are 1s against a 5s max age and CIM process snapshots can be
+# transient, so sustained absence is judged over this bounded grace window.
+$script:ArtemKioskWatcherPresenceLossGraceSeconds = 15
+
+function Invoke-ArtemKioskWatcherLoop {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [int]$StartupTimeoutSeconds = 20,
+        [int]$PresenceLossGraceSeconds = $script:ArtemKioskWatcherPresenceLossGraceSeconds,
+        [int]$PollIntervalMilliseconds = 250,
+        [scriptblock]$Clock = { Get-Date }
+    )
+
+    $closeRequestPath = Join-Path $Paths.RuntimeRoot "kiosk-close-request.json"
+
+    # Startup confirmation stays strict: the steady-state loop below only runs
+    # after a fresh heartbeat has confirmed the kiosk on the dedicated profile.
+    $startupDeadline = (& $Clock).AddSeconds($StartupTimeoutSeconds)
+    $seenVisibleKiosk = $false
+    while ((& $Clock) -lt $startupDeadline) {
+        if (Test-ArtemKioskVisible -Paths $Paths) {
+            $seenVisibleKiosk = $true
+            break
+        }
+        Start-Sleep -Milliseconds $PollIntervalMilliseconds
+    }
+
+    if (-not $seenVisibleKiosk) {
+        # Do not leave stale background processes from the dedicated profile around;
+        # they must never become a future false "already open" signal.
+        Stop-ArtemKiosk -Paths $Paths
+        return [pscustomobject]@{ Outcome = "startup-not-confirmed" }
+    }
+
+    $presenceLostSince = $null
+    while ($true) {
+        # Explicit stop requests stay prompt and destructive.
+        if ((Test-Path -LiteralPath $closeRequestPath) -or (Test-Path -LiteralPath $Paths.ManualStop)) {
+            Remove-Item -LiteralPath $closeRequestPath -Force -ErrorAction SilentlyContinue
+            Stop-ArtemKiosk -Paths $Paths
+            return [pscustomobject]@{ Outcome = "explicit-stop"; PresenceLostSince = $presenceLostSince }
+        }
+
+        if (Test-ArtemKioskVisible -Paths $Paths) {
+            $presenceLostSince = $null
+        }
+        else {
+            $now = & $Clock
+            if ($null -eq $presenceLostSince) {
+                $presenceLostSince = $now
+            }
+            elseif (($now - $presenceLostSince).TotalSeconds -ge $PresenceLossGraceSeconds) {
+                # Sustained absence still does not prove the kiosk closed; a stale
+                # heartbeat next to live panel Edge is exactly what fresh Open owns
+                # recovering via stale-heartbeat removal and dedicated-profile cleanup.
+                # Exit non-destructively so valid Edge windows can never be killed here.
+                return [pscustomobject]@{
+                    Outcome = "presence-lost"
+                    PresenceLostSince = $presenceLostSince
+                    ExitedAt = $now
+                }
+            }
+        }
+
+        Start-Sleep -Milliseconds $PollIntervalMilliseconds
+    }
+}
+
 function Ensure-ArtemKioskVisible {
     param(
         [Parameter(Mandatory)]$Paths,

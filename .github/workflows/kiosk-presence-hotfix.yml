@@ -24,3 +24,7 @@ jobs:
       - name: Run deterministic kiosk presence regression
         shell: powershell
         run: ./scripts/windows/test-kiosk-presence.ps1
+
+      - name: Run deterministic kiosk watcher regression
+        shell: powershell
+        run: ./scripts/windows/test-kiosk-watcher.ps1

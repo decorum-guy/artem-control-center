@@ -196,8 +196,17 @@ try {
     $watcherText = Get-Content `
         -LiteralPath (Join-Path $PSScriptRoot "watch-kiosk.ps1") `
         -Raw
-    if ($watcherText -notmatch 'ManualStop' -or $watcherText -notmatch 'Stop-ArtemKiosk') {
+    if ($watcherText -notmatch 'Invoke-ArtemKioskWatcherLoop') {
+        throw "Kiosk watcher entrypoint must delegate to the shared watcher loop"
+    }
+    $kioskPresenceText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "kiosk-presence.ps1") `
+        -Raw
+    if ($kioskPresenceText -notmatch 'ManualStop' -or $kioskPresenceText -notmatch 'Stop-ArtemKiosk') {
         throw "Kiosk watcher must close the dedicated profile after manual shutdown"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot "test-kiosk-watcher.ps1"))) {
+        throw "Deterministic kiosk watcher regression must exist beside the watcher policy"
     }
 
     # Exercise the real AVALAR runtime.env updater against an isolated LOCALAPPDATA.
