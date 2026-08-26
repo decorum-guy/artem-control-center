@@ -49,3 +49,10 @@ test("supervisor handoff is wired to the fixed canonical updater script", () => 
   assert.match(source, /"-RequestId"[\s\S]*command\.requestId/);
   assert.doesNotMatch(source, /command\.(?:shell|path|branch|environment|args)/);
 });
+
+test("canonical Windows launcher enables the separately classified update gate", () => {
+  const source = readFileSync(resolve("scripts/windows/start-production.ps1"), "utf8");
+  assert.match(source, /\$env:PANEL_UPDATE_CONTROLS_ENABLED\s*=\s*"true"/);
+  assert.match(source, /Get-ArtemSoftwareUpdateLock/);
+  assert.match(source, /-not\s+\$UpdateRequestId/);
+});
