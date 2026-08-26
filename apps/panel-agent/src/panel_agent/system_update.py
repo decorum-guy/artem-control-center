@@ -104,7 +104,7 @@ def _updater_owner_alive(owner_pid: int, request_id: str) -> bool:
         'if ($null -ne $process '
         "-and $process.Name -in @('powershell.exe','pwsh.exe') "
         "-and $process.CommandLine -like '*update-production.ps1*' "
-        f"-and $process.CommandLine -like '*{request_id}*') {{ exit 0 }}; exit 1"
+        f"-and ($process.CommandLine -notlike '*-RequestId*' -or $process.CommandLine -like '*{request_id}*')) {{ exit 0 }}; exit 1"
     )
     try:
         result = subprocess.run(
