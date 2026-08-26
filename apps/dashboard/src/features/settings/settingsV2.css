@@ -259,6 +259,14 @@
   padding: 0;
 }
 
+.ai-provider-settings { display: grid; gap: 16px; }
+.ai-provider-settings__field { display: grid; gap: 6px; color: var(--cc-text-secondary); font-size: var(--cc-type-short-label-size); }
+.ai-provider-settings__field select,
+.ai-provider-settings__field input { width: 100%; min-width: 0; min-height: 48px; padding: 8px 12px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-control); color: var(--cc-text); background: var(--cc-surface-2); font: inherit; }
+.ai-provider-settings__credential { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--cc-divider); }
+.ai-provider-settings__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.ai-provider-settings__actions button { min-height: 48px; }
+
 .settings-calendar-settings { display: grid; gap: 10px; }
 .settings-calendar-row { min-width: 0; overflow: hidden; border: 1px solid var(--cc-divider); border-radius: var(--cc-radius-control); background: var(--cc-surface-1); }
 .settings-calendar-row__main { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; width: 100%; min-height: 70px; gap: 12px; padding: 10px 12px; border: 0; border-radius: 0; color: var(--cc-text); background: transparent; text-align: left; }

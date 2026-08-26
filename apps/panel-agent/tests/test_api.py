@@ -85,6 +85,23 @@ def test_read_only_mode_disables_narrow_writes_even_if_env_gates_are_true(monkey
     ).status_code == 403
 
 
+def test_ai_settings_readback_is_secret_free_and_unknown_provider_is_rejected(monkeypatch, tmp_path):
+    monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_FIXTURE_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_AI_TEXT_ENABLED", "true")
+    monkeypatch.setenv("PANEL_AI_SETTINGS_WRITES_ENABLED", "true")
+    monkeypatch.setenv("PANEL_AI_SETTINGS_PATH", str(tmp_path / "ai-provider-settings.json"))
+    module = load_app(monkeypatch, "fixtures")
+    client = TestClient(module.app)
+    saved = client.patch("/api/v1/settings/ai/providers/gigachat/credential", json={"expectedRevision": 0, "credential": "super-secret-ai-canary"})
+    assert saved.status_code == 200
+    assert "super-secret-ai-canary" not in saved.text
+    readback = client.get("/api/v1/settings/ai")
+    assert readback.status_code == 200
+    assert "super-secret-ai-canary" not in readback.text
+    assert client.patch("/api/v1/settings/ai/selection", json={"expectedRevision": 1, "providerId": "not-a-provider", "modelId": "http://internal"}).status_code == 422
+
+
 def test_required_fixture_catalog_is_complete(monkeypatch):
     module = load_app(monkeypatch, "fixtures")
     client = TestClient(module.app)

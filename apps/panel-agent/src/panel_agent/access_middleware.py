@@ -12,6 +12,7 @@ _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
     ("PATCH", "/api/v1/settings/coffee/timing"): "home.coffee.settings.timing",
     ("PATCH", "/api/v1/settings/notifications/coffee"): "home.coffee.settings.notifications",
     ("PATCH", "/api/v1/settings/calendar/display-colors"): "settings.calendar.colors",
+    ("PATCH", "/api/v1/settings/ai/selection"): "settings.ai.providers",
     ("PATCH", "/api/v1/settings/capabilities"): "settings.capabilities.manage",
     ("POST", "/api/v1/system/runtime/apply-capabilities"): "settings.capabilities.manage",
     ("POST", "/api/v1/actions/home/coffee"): "home.coffee.control",
@@ -60,6 +61,8 @@ def _planning_capability(method: str, path: str) -> str | None:
 
 def capability_for_request(method: str, path: str) -> str | None:
     """Resolve the fixed access capability for a registered mutation route."""
+    if method == "PATCH" and path.startswith("/api/v1/settings/ai/providers/") and path.endswith("/credential"):
+        return "settings.ai.providers"
     return _MUTATION_CAPABILITIES.get((method, path)) or _planning_capability(method, path)
 
 

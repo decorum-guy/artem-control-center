@@ -164,6 +164,19 @@ async function mockCoffeeSettings(
   });
 }
 
+async function mockAISettings(page: Page) {
+  const inventory = {
+    schemaVersion: "ai.provider-settings.v1", revision: 4, available: true, enabled: true, writesEnabled: true, selectedProvider: "gigachat",
+    warnings: [], providers: [
+      { id: "gigachat", model: "GigaChat-2", models: ["GigaChat-2"], credentialPresent: true, configured: true, state: "configured" },
+      { id: "yandex", model: "yandexgpt/latest", models: ["yandexgpt/latest"], credentialPresent: false, configured: false, state: "not_configured" },
+      { id: "deepseek", model: "deepseek-chat", models: ["deepseek-chat"], credentialPresent: false, configured: false, state: "not_configured" },
+      { id: "local", model: "local-text", models: ["local-text"], credentialPresent: false, configured: false, state: "not_configured" }
+    ]
+  };
+  await page.route("**/api/v1/settings/ai", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(inventory) }));
+}
+
 async function openSettings(page: Page) {
   await page.goto("/settings");
   await expect(page.getByTestId("route-settings")).toBeVisible();
@@ -249,6 +262,19 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     expect(appearance?.height).toBeGreaterThanOrEqual(100);
     expect(appearance?.height).toBeLessThanOrEqual(140);
     expect(columns[1]).toBeGreaterThan(columns[0]);
+    await expectNoDocumentOverflow(page);
+  });
+
+  test("AI Settings masks saved credentials and fits the Samsung viewport", async ({ page }) => {
+    await mockCoffeeSettings(page);
+    await mockAISettings(page);
+    await openSettings(page);
+    await expect(page.getByTestId("settings-summary-ai")).toContainText("GigaChat");
+    await page.getByTestId("settings-summary-ai").click();
+    await expect(page.getByTestId("settings-ai-sheet")).toBeVisible();
+    const secret = page.getByTestId("ai-credential-input");
+    await expect(secret).toHaveValue("");
+    await expect(page.locator("body")).not.toContainText("giga-secret-canary");
     await expectNoDocumentOverflow(page);
   });
 
@@ -420,7 +446,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     expect(await longLabel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBeTruthy();
   });
 
-  test("Settings render no credential fields", async ({ page }) => {
+  test("non-AI Settings surfaces never render credential fields", async ({ page }) => {
     await mockCoffeeSettings(page);
     await openSettings(page);
     const sensitiveInputs = page.locator("input[type=password], input[name*='token' i], input[name*='secret' i], input[name*='password' i], textarea[name*='token' i], textarea[name*='secret' i]");
