@@ -35,6 +35,40 @@ def test_runtime_control_status_and_intent_gate(monkeypatch, tmp_path):
     assert not close_request_path.exists()
 
 
+def test_kiosk_presence_writes_only_bounded_local_heartbeat(monkeypatch, tmp_path):
+    command_path = tmp_path / "runtime-command.json"
+    presence_path = tmp_path / "kiosk-presence.json"
+    module = load_app(monkeypatch, command_path, enabled=True)
+    client = TestClient(module.app)
+
+    rejected = client.post(
+        "/api/v1/system/runtime/kiosk-presence",
+        json={"pageId": "0123456789abcdef01234567"},
+    )
+    assert rejected.status_code == 403
+    assert not presence_path.exists()
+
+    accepted = client.post(
+        "/api/v1/system/runtime/kiosk-presence",
+        headers={"x-panel-intent": "kiosk-presence"},
+        json={"pageId": "0123456789abcdef01234567"},
+    )
+    assert accepted.status_code == 204
+    assert accepted.headers["cache-control"] == "no-store"
+    heartbeat = json.loads(presence_path.read_text(encoding="utf-8"))
+    assert heartbeat["schemaVersion"] == 1
+    assert heartbeat["pageId"] == "0123456789abcdef01234567"
+    assert isinstance(heartbeat["observedAt"], str)
+    assert set(heartbeat) == {"schemaVersion", "pageId", "observedAt"}
+
+    malformed = client.post(
+        "/api/v1/system/runtime/kiosk-presence",
+        headers={"x-panel-intent": "kiosk-presence"},
+        json={"pageId": "not-bounded", "extra": True},
+    )
+    assert malformed.status_code == 422
+
+
 def test_runtime_control_writes_only_narrow_commands(monkeypatch, tmp_path):
     command_path = tmp_path / "runtime-command.json"
     close_request_path = tmp_path / "kiosk-close-request.json"
