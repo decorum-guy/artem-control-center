@@ -211,17 +211,11 @@ function Get-ArtemEdgeExecutable {
     throw "Microsoft Edge executable was not found"
 }
 
-# Broad panel-owned Edge process group. This is deliberately profile-scoped and
-# is the cleanup/shutdown boundary, including background processes with no window.
-function Get-ArtemKioskProcesses {
-    param([Parameter(Mandatory)]$Paths)
+function Get-ArtemEdgeProcessSnapshot {
     try {
         return @(
             Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
-                Where-Object {
-                    $null -ne $_.CommandLine -and
-                    $_.CommandLine -like "*$($Paths.EdgeProfile)*"
-                }
+                Select-Object ProcessId, ParentProcessId, CommandLine, CreationDate
         )
     }
     catch {
@@ -229,16 +223,152 @@ function Get-ArtemKioskProcesses {
     }
 }
 
-# Visible kiosk authority. A process is eligible only after it has crossed the
-# dedicated Edge-profile boundary, then it must own an actual top-level window.
+# Only an Edge process whose own command line carries the exact dedicated
+# --user-data-dir value can seed panel ownership. Descendants inherit ownership
+# through the live process tree; unrelated/personal Edge roots never do.
+function Test-ArtemEdgeProfileRoot {
+    param(
+        [Parameter(Mandatory)]$Process,
+        [Parameter(Mandatory)]$Paths
+    )
+    if ($null -eq $Process.CommandLine) { return $false }
+    $profile = "$($Paths.EdgeProfile)"
+    if ([string]::IsNullOrWhiteSpace($profile)) { return $false }
+    $escapedProfile = [regex]::Escape($profile)
+    $pattern = '(?i)(?:^|\s|")--user-data-dir=(?:"?' + $escapedProfile + '"?)(?=\s|$|")'
+    return [regex]::IsMatch([string]$Process.CommandLine, $pattern)
+}
+
+function Get-ArtemProcessCreationTimeUtc {
+    param([Parameter(Mandatory)]$Process)
+    if ($null -eq $Process.CreationDate) { return $null }
+    try {
+        if ($Process.CreationDate -is [DateTimeOffset]) {
+            return $Process.CreationDate.ToUniversalTime()
+        }
+        if ($Process.CreationDate -is [DateTime]) {
+            return [DateTimeOffset]::new($Process.CreationDate.ToUniversalTime())
+        }
+        return [DateTimeOffset]::Parse([string]$Process.CreationDate).ToUniversalTime()
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-ArtemEdgeChildOfCurrentParent {
+    param(
+        [Parameter(Mandatory)]$Parent,
+        [Parameter(Mandatory)]$Child
+    )
+    if ([int]$Child.ParentProcessId -ne [int]$Parent.ProcessId) { return $false }
+
+    # ParentProcessId alone can be misleading after PID reuse. When both CIM
+    # creation times are available, reject a child that predates the supposed
+    # current parent process.
+    $parentCreated = Get-ArtemProcessCreationTimeUtc -Process $Parent
+    $childCreated = Get-ArtemProcessCreationTimeUtc -Process $Child
+    if ($null -ne $parentCreated -and $null -ne $childCreated -and $childCreated -lt $parentCreated) {
+        return $false
+    }
+    return $true
+}
+
+function Get-ArtemOwnedEdgeProcesses {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$Processes
+    )
+
+    if (-not $PSBoundParameters.ContainsKey('Processes')) {
+        $Processes = Get-ArtemEdgeProcessSnapshot
+    }
+    $current = @($Processes | Where-Object { $null -ne $_ -and $null -ne $_.ProcessId })
+    if ($current.Count -eq 0) { return @() }
+
+    $owned = @{}
+    $depth = @{}
+    $queue = New-Object System.Collections.Queue
+
+    foreach ($candidate in $current) {
+        if (-not (Test-ArtemEdgeProfileRoot -Process $candidate -Paths $Paths)) { continue }
+        $key = [string][int]$candidate.ProcessId
+        if ($owned.ContainsKey($key)) { continue }
+        $owned[$key] = $candidate
+        $depth[$key] = 0
+        $queue.Enqueue($candidate)
+    }
+
+    while ($queue.Count -gt 0) {
+        $parent = $queue.Dequeue()
+        $parentKey = [string][int]$parent.ProcessId
+        foreach ($candidate in $current) {
+            $childKey = [string][int]$candidate.ProcessId
+            if ($owned.ContainsKey($childKey)) { continue }
+            if (-not (Test-ArtemEdgeChildOfCurrentParent -Parent $parent -Child $candidate)) { continue }
+            $owned[$childKey] = $candidate
+            $depth[$childKey] = [int]$depth[$parentKey] + 1
+            $queue.Enqueue($candidate)
+        }
+    }
+
+    $result = @()
+    foreach ($key in $owned.Keys) {
+        $process = $owned[$key]
+        $result += [pscustomobject]@{
+            ProcessId = [int]$process.ProcessId
+            ParentProcessId = [int]$process.ParentProcessId
+            CommandLine = $process.CommandLine
+            CreationDate = $process.CreationDate
+            OwnershipDepth = [int]$depth[$key]
+        }
+    }
+    return @($result | Sort-Object OwnershipDepth, ProcessId)
+}
+
+# Broad panel-owned Edge process tree. The exact profile-bearing process is only
+# the root seed; cleanup/shutdown includes every current descendant in that tree.
+function Get-ArtemKioskProcesses {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$Processes
+    )
+    if ($PSBoundParameters.ContainsKey('Processes')) {
+        return @(Get-ArtemOwnedEdgeProcesses -Paths $Paths -Processes $Processes)
+    }
+    return @(Get-ArtemOwnedEdgeProcesses -Paths $Paths)
+}
+
+# Visible kiosk authority: any actual top-level HWND on a member of the current
+# panel-owned Edge tree is valid. A profile root merely existing is never enough.
 function Get-ArtemVisibleKioskProcesses {
-    param([Parameter(Mandatory)]$Paths)
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$Processes,
+        [scriptblock]$WindowHandleResolver
+    )
+
+    $owned = if ($PSBoundParameters.ContainsKey('Processes')) {
+        @(Get-ArtemKioskProcesses -Paths $Paths -Processes $Processes)
+    }
+    else {
+        @(Get-ArtemKioskProcesses -Paths $Paths)
+    }
+    if ($null -eq $WindowHandleResolver) {
+        $WindowHandleResolver = {
+            param($ProcessId)
+            (Get-Process -Id $ProcessId -ErrorAction Stop).MainWindowHandle
+        }
+    }
+
     $visible = @()
-    foreach ($owned in @(Get-ArtemKioskProcesses -Paths $Paths)) {
+    foreach ($process in $owned) {
         try {
-            $process = Get-Process -Id $owned.ProcessId -ErrorAction Stop
-            if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
-                $visible += $owned
+            $handle = & $WindowHandleResolver ([int]$process.ProcessId)
+            if ($null -eq $handle) { continue }
+            $handleValue = if ($handle -is [IntPtr]) { $handle.ToInt64() } else { [int64]$handle }
+            if ($handleValue -ne 0) {
+                $visible += $process
             }
         }
         catch {
@@ -259,12 +389,35 @@ function Test-ArtemKioskVisible {
 }
 
 function Stop-ArtemKiosk {
-    param([Parameter(Mandatory)]$Paths)
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$Processes,
+        [scriptblock]$ProcessStopper
+    )
     try {
-        Get-ArtemKioskProcesses -Paths $Paths |
-            ForEach-Object {
-                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        $owned = if ($PSBoundParameters.ContainsKey('Processes')) {
+            @(Get-ArtemKioskProcesses -Paths $Paths -Processes $Processes)
+        }
+        else {
+            @(Get-ArtemKioskProcesses -Paths $Paths)
+        }
+        if ($null -eq $ProcessStopper) {
+            $ProcessStopper = {
+                param($ProcessId)
+                Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
             }
+        }
+
+        # Stop deepest descendants first so killing the profile root cannot orphan
+        # a still-running kiosk child before it has been included in cleanup.
+        $ordered = @(
+            $owned | Sort-Object -Property `
+                @{ Expression = { [int]$_.OwnershipDepth }; Descending = $true }, `
+                @{ Expression = { [int]$_.ProcessId }; Descending = $true }
+        )
+        foreach ($process in $ordered) {
+            & $ProcessStopper ([int]$process.ProcessId)
+        }
     }
     catch {
         Write-Warning "Unable to close the panel-owned Edge kiosk: $($_.Exception.Message)"
@@ -295,12 +448,12 @@ function Ensure-ArtemKioskVisible {
         return
     }
 
-    # Edge can retain background profile processes after its visible kiosk dies.
-    # Clear only the dedicated panel profile before launching one fresh window.
+    # Edge can retain a complete background process tree after its visible kiosk
+    # dies. Clear the dedicated panel tree before launching one fresh kiosk.
     if (Test-ArtemKioskRunning -Paths $Paths) {
-        Stop-ArtemKiosk -Paths $Paths
         $cleanupDeadline = (Get-Date).AddSeconds(5)
         while ((Get-Date) -lt $cleanupDeadline -and (Test-ArtemKioskRunning -Paths $Paths)) {
+            Stop-ArtemKiosk -Paths $Paths
             Start-Sleep -Milliseconds 200
         }
         if (Test-ArtemKioskRunning -Paths $Paths) {
@@ -323,7 +476,10 @@ function Ensure-ArtemKioskVisible {
         "--disable-session-crashed-bubble",
         "--disable-features=msEdgeSidebarV2"
     )
-    Start-Process -FilePath $edge -ArgumentList $edgeArguments | Out-Null
+    Start-Process `
+        -FilePath $edge `
+        -ArgumentList $edgeArguments `
+        -WindowStyle Maximized | Out-Null
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
