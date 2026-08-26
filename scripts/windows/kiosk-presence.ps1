@@ -29,11 +29,15 @@ function Test-ArtemKioskPresenceRecent {
     }
 }
 
-# Override the old HWND heuristic after runtime-common.ps1 is loaded. Presence is
-# authoritative; Edge process ownership remains cleanup authority only.
+# Visibility is a conjunction: the rendered page is actively reporting that the
+# document is visible, and the dedicated Control Center Edge profile exists. This
+# prevents an ordinary browser tab from impersonating the kiosk while avoiding HWND.
 function Test-ArtemKioskVisible {
     param([Parameter(Mandatory)]$Paths)
-    return Test-ArtemKioskPresenceRecent -Paths $Paths
+    return (
+        (Test-ArtemKioskRunning -Paths $Paths) -and
+        (Test-ArtemKioskPresenceRecent -Paths $Paths)
+    )
 }
 
 function Ensure-ArtemKioskVisible {
