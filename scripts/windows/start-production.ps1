@@ -114,7 +114,11 @@ elseif (Test-ArtemCapabilityApplyActive -Paths $paths) {
     throw "Control Center capability Apply is still active; a competing runtime start was not attempted"
 }
 
-if (-not $AutoStart) {
+# Interactive desktop starts prefer Task Scheduler so the normal user-session
+# environment is preserved. An updater-owned restart must stay in this process,
+# though: the Scheduled Task cannot carry UpdateRequestId and would correctly
+# reject the updater's active lock as a competing software update.
+if (-not $AutoStart -and -not $UpdateRequestId) {
     $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($scheduledTask) {
         if ($scheduledTask.State -eq "Running") {
