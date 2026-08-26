@@ -63,6 +63,82 @@ export class RestartBudget {
   }
 }
 
+export function planRestart(budget, { allowBeyondBudget = false, now = Date.now() } = {}) {
+  const recorded = budget.record(now);
+  const count = budget.count(now);
+  return {
+    accepted: recorded || allowBeyondBudget,
+    recorded,
+    delayMs: Math.min(1_000 * 2 ** Math.max(0, count - 1), 15_000)
+  };
+}
+
+export const CAPABILITY_APPLY_MAX_RECOVERY_FAILURES = 3;
+
+/**
+ * Keep the candidate-bundle transaction separate from the ordinary runtime
+ * restart budget.  The production supervisor owns the callbacks; this small
+ * state machine keeps acceptance and recovery semantics directly testable.
+ */
+export function createCapabilityApplyLifecycle({ onSuccess, onRestart, onRollback }) {
+  let activeApply = null;
+  let appliedRevision = null;
+
+  function clear() {
+    appliedRevision = null;
+    activeApply = null;
+  }
+
+  return {
+    get activeApply() {
+      return activeApply;
+    },
+    get appliedRevision() {
+      return appliedRevision;
+    },
+    activate({ revision, backup }) {
+      activeApply = { revision, backup, recoveryFailures: 0 };
+      appliedRevision = revision;
+      onRestart("capabilities applied", { allowBeyondBudget: true });
+    },
+    acceptHealth() {
+      if (appliedRevision === null) return false;
+      const revision = appliedRevision;
+      onSuccess(revision);
+      clear();
+      return true;
+    },
+    handleAgentExit() {
+      if (!activeApply) {
+        onRestart("agent process exited unexpectedly");
+        return "normal_restart";
+      }
+
+      activeApply.recoveryFailures += 1;
+      if (activeApply.recoveryFailures >= CAPABILITY_APPLY_MAX_RECOVERY_FAILURES) {
+        const pendingApply = activeApply;
+        clear();
+        onRollback("new_runtime_exited", pendingApply);
+        return "rollback";
+      }
+
+      onRestart("agent process exited during capability apply", { allowBeyondBudget: true });
+      return "recovery_restart";
+    },
+    handleHealthFailure() {
+      if (!activeApply) {
+        onRestart("three consecutive health failures");
+        return "normal_restart";
+      }
+
+      const pendingApply = activeApply;
+      clear();
+      onRollback("new_runtime_health_failed", pendingApply);
+      return "rollback";
+    }
+  };
+}
+
 export function shouldCreateManualStop(command) {
   return command?.action === "shutdown" && command.manual !== false;
 }
@@ -317,8 +393,6 @@ export async function runProductionRuntime() {
   let healthTimer = null;
   let restartTimer = null;
   let applyingCapabilities = false;
-  let appliedCapabilityRevision = null;
-  let activeCapabilityApply = null;
 
   function writeCapabilityApplyState(status, extra = {}) {
     atomicWriteJson(capabilityApplyStatePath, {
@@ -380,23 +454,15 @@ export async function runProductionRuntime() {
         `Panel Agent exited pid=${child.pid} code=${code ?? "null"} signal=${signal ?? "none"}`
       );
       if (!shuttingDown && !expected) {
-        if (activeCapabilityApply) {
-          activeCapabilityApply.recoveryFailures += 1;
-          if (activeCapabilityApply.recoveryFailures >= 3) {
-            rollbackCapabilityApply("new_runtime_exited");
-          } else {
-            requestRestart("agent process exited during capability apply");
-          }
-        } else {
-          requestRestart("agent process exited unexpectedly");
-        }
+        capabilityApplyLifecycle.handleAgentExit();
       }
     });
   }
 
   function requestRestart(reason, { allowBeyondBudget = false } = {}) {
     if (shuttingDown || restartPending) return;
-    if (!restartBudget.record() && !allowBeyondBudget) {
+    const restartPlan = planRestart(restartBudget, { allowBeyondBudget });
+    if (!restartPlan.accepted) {
       log("ERROR", `Restart budget exhausted after: ${reason}`);
       writeState("failed", { lastError: "restart_budget_exhausted" });
       void shutdown(1);
@@ -408,18 +474,15 @@ export async function runProductionRuntime() {
     if (previous?.pid) expectedExitPids.add(previous.pid);
     stopProcessTree(previous, log);
     agent = null;
-    const delay = Math.min(1_000 * 2 ** Math.max(0, restartBudget.count() - 1), 15_000);
+    const delay = restartPlan.delayMs;
     restartTimer = setTimeout(() => {
       restartPending = false;
       spawnAgent();
     }, delay);
   }
 
-  function rollbackCapabilityApply(reason) {
-    const pendingApply = activeCapabilityApply;
+  function rollbackCapabilityApply(reason, pendingApply) {
     if (!pendingApply) return;
-    activeCapabilityApply = null;
-    appliedCapabilityRevision = null;
     log("ERROR", `Capability apply health acceptance failed: ${reason}`);
     if (agent?.pid) expectedExitPids.add(agent.pid);
     stopProcessTree(agent, log);
@@ -436,6 +499,12 @@ export async function runProductionRuntime() {
     writeCapabilityApplyState("failed", { revision: pendingApply.revision, code: "new_runtime_unhealthy" });
     requestRestart("capability rollback to known-good dashboard", { allowBeyondBudget: true });
   }
+
+  const capabilityApplyLifecycle = createCapabilityApplyLifecycle({
+    onSuccess: (revision) => writeCapabilityApplyState("success", { revision }),
+    onRestart: (reason, options) => requestRestart(reason, options),
+    onRollback: (reason, pendingApply) => rollbackCapabilityApply(reason, pendingApply)
+  });
 
   async function shutdown(exitCode) {
     if (shuttingDown) return;
@@ -497,9 +566,7 @@ export async function runProductionRuntime() {
       }
       writeCapabilityApplyState("restarting", { revision: command.expectedRevision });
       activateStagedDashboard({ active: dashboardDist, staging, backup });
-      activeCapabilityApply = { revision: command.expectedRevision, backup, recoveryFailures: 0 };
-      appliedCapabilityRevision = command.expectedRevision;
-      requestRestart("capabilities applied");
+      capabilityApplyLifecycle.activate({ revision: command.expectedRevision, backup });
     } catch (error) {
       log("ERROR", `Capability apply failed: ${error?.message || error}`);
       writeCapabilityApplyState("failed", { revision: command.expectedRevision, code: "apply_failed" });
@@ -571,16 +638,12 @@ export async function runProductionRuntime() {
         if (healthFailures > 0) log("INFO", "Panel Agent health recovered");
         healthFailures = 0;
         writeState("running");
-        if (appliedCapabilityRevision !== null) {
-          writeCapabilityApplyState("success", { revision: appliedCapabilityRevision });
-          appliedCapabilityRevision = null;
-        }
+        capabilityApplyLifecycle.acceptHealth();
       } else {
         healthFailures += 1;
         log("WARN", `Panel Agent health failure ${healthFailures}/3`);
         if (healthFailures >= 3) {
-          if (activeCapabilityApply) rollbackCapabilityApply("new_runtime_health_failed");
-          else requestRestart("three consecutive health failures");
+          capabilityApplyLifecycle.handleHealthFailure();
         }
       }
     } finally {

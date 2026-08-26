@@ -2,44 +2,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import subprocess
 import threading
+from dataclasses import fields
+from pathlib import Path
+from typing import get_type_hints
 
 from fastapi.testclient import TestClient
-
-
-EXPECTED_CURRENT_PRODUCT_FLAGS = {
-    "PANEL_AVALAR_SSH_ENABLED",
-    "PANEL_AVALAR_ACTIONS_ENABLED",
-    "PANEL_AVALAR_SMOKE_ENABLED",
-    "PANEL_AVALAR_STAGE_RESTART_ENABLED",
-    "PANEL_AVALAR_MAIN_RESTART_ENABLED",
-    "PANEL_AVALAR_STAGE_DEPLOY_ENABLED",
-    "PANEL_AVALAR_MAIN_DEPLOY_ENABLED",
-    "PANEL_ROG_G703_ENABLED",
-    "PANEL_WRITES_ENABLED",
-    "PANEL_COFFEE_TIMING_WRITES_ENABLED",
-    "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED",
-    "PANEL_COFFEE_ACTIONS_ENABLED",
-    "PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED",
-    "PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED",
-    "PANEL_PLANNING_ENABLED",
-    "PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED",
-    "PANEL_PLANNING_TASK_MUTATIONS_ENABLED",
-    "PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED",
-    "PANEL_KIOSK_CONTROLS_ENABLED",
-    "VITE_V2_VISUAL_SHELL",
-    "VITE_OVERVIEW_V2_ENABLED",
-    "VITE_OVERVIEW_EDITOR_ENABLED",
-    "VITE_PLANNING_OVERVIEW_ENABLED",
-    "VITE_PLANNING_TASKS_ROUTE_ENABLED",
-    "VITE_PLANNING_CALENDAR_ROUTE_ENABLED",
-    "VITE_PLANNING_REMINDERS_ROUTE_ENABLED",
-    "VITE_PLANNING_REMINDER_MUTATIONS_ENABLED",
-    "VITE_PLANNING_TASK_MUTATIONS_ENABLED",
-    "VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED",
-    "VITE_TOUCH_INPUT_LOCK_ENABLED",
-    "VITE_TOUCH_INPUT_LOCK_START_LOCKED",
-}
 
 
 def _manifest(dist, *, active=None, baseline=None):
@@ -77,10 +46,10 @@ def _manifest(dist, *, active=None, baseline=None):
     (dist / "dashboard-capabilities.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _load(monkeypatch, tmp_path, *, writes=True):
+def _load(monkeypatch, tmp_path, *, writes=True, active=None, baseline=None):
     store = tmp_path / "capability-overrides.json"
     dist = tmp_path / "dist"
-    _manifest(dist)
+    _manifest(dist, active=active, baseline=baseline)
     monkeypatch.setenv("PANEL_AGENT_MODE", "fixtures")
     monkeypatch.setenv("PANEL_FIXTURE_WRITES_ENABLED", "true")
     monkeypatch.setenv("PANEL_WRITES_ENABLED", "true" if writes else "false")
@@ -110,6 +79,42 @@ def _entry(payload, capability_id):
     return next(entry for entry in payload["entries"] if entry["id"] == capability_id)
 
 
+def _declared_runtime_product_flags():
+    from panel_agent.settings import IntegrationSettings
+
+    hints = get_type_hints(IntegrationSettings)
+    flags = set()
+    for field in fields(IntegrationSettings):
+        if hints.get(field.name) is not bool:
+            continue
+        name = field.name.upper()
+        flags.add(name if field.name.startswith("panel_") else f"PANEL_{name}")
+    flags.add("PANEL_KIOSK_CONTROLS_ENABLED")
+    return flags
+
+
+def _declared_production_build_flags():
+    repository = Path(__file__).resolve().parents[3]
+    profile = repository / "scripts" / "production-build-profile.mjs"
+    module_url = json.dumps(profile.as_uri())
+    result = subprocess.run(
+        [
+            "node",
+            "--input-type=module",
+            "-e",
+            f'import {{ productionBuildProfile }} from {module_url}; process.stdout.write(JSON.stringify(Object.keys(productionBuildProfile)));',
+        ],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    keys = json.loads(result.stdout)
+    assert isinstance(keys, list)
+    return set(keys)
+
+
 def test_inventory_is_explicit_safe_and_two_behaviors_only(tmp_path, monkeypatch):
     module, _ = _load(monkeypatch, tmp_path)
     with TestClient(module.app) as client:
@@ -125,11 +130,15 @@ def test_inventory_is_explicit_safe_and_two_behaviors_only(tmp_path, monkeypatch
 
 
 def test_current_product_gate_set_has_explicit_registry_classification():
-    """A newly introduced product bool requires a deliberate inventory choice."""
+    """A newly introduced product gate requires a deliberate inventory choice."""
     from panel_agent.capabilities import CAPABILITY_REGISTRY
 
     classified = {definition.technical_flag for definition in CAPABILITY_REGISTRY}
-    assert classified == EXPECTED_CURRENT_PRODUCT_FLAGS
+    expected = (
+        _declared_runtime_product_flags()
+        | _declared_production_build_flags()
+    )
+    assert classified == expected
     assert "PANEL_FIXTURE_WRITES_ENABLED" not in classified
     assert "PANEL_CAPABILITY_APPLY_ENABLED" not in classified
 
@@ -162,6 +171,38 @@ def test_delayed_desired_state_is_pending_until_manifest_changes(tmp_path, monke
         assert entry["activeEnabled"] is True
         assert entry["desiredEnabled"] is False
         assert entry["pending"] is True
+
+
+def test_delayed_configured_baseline_is_explicit_and_reset_uses_it(tmp_path, monkeypatch):
+    baseline = {
+        "planning_overview": True,
+        "planning_tasks_route": True,
+        "planning_calendar_route": False,
+        "planning_reminders_route": True,
+    }
+    active = {**baseline, "planning_calendar_route": True}
+    module, store = _load(monkeypatch, tmp_path, active=active, baseline=baseline)
+    store.write_text(json.dumps({
+        "schemaVersion": "capability-overrides.v1",
+        "revision": 0,
+        "updatedAt": "2026-08-26T00:00:00Z",
+        "overrides": {"planning_calendar_route": True},
+    }), encoding="utf-8")
+
+    with TestClient(module.app) as client:
+        initial = _get(client)
+        assert _entry(initial, "calendar_display_colors")["configuredEnabled"] is True
+        delayed = _entry(initial, "planning_calendar_route")
+        assert delayed["configuredEnabled"] is False
+        assert delayed["activeEnabled"] is True
+        assert delayed["desiredEnabled"] is True
+
+        reset = _patch(client, initial["revision"], "planning_calendar_route", None)
+        assert reset.status_code == 200
+        reset_entry = _entry(reset.json(), "planning_calendar_route")
+        assert reset_entry["configuredEnabled"] is False
+        assert reset_entry["desiredEnabled"] is False
+        assert reset_entry["pending"] is True
 
 
 def test_invalid_and_read_only_ids_are_rejected_by_typed_contract(tmp_path, monkeypatch):

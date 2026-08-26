@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { mkdtempSync } from "node:fs";
@@ -67,11 +68,11 @@ test("normal production build resolves the Panel-owned LOCALAPPDATA store and an
   mkdirSync(join(localAppData, "ArtemControlCenter"), { recursive: true });
   writeFileSync(canonical, JSON.stringify({
     schemaVersion: "capability-overrides.v1", revision: 2, updatedAt: "2026-08-26T00:00:00Z",
-    overrides: { planning_calendar_route: false }
+    overrides: { calendar_display_colors: false, planning_calendar_route: false }
   }));
   writeFileSync(explicit, JSON.stringify({
     schemaVersion: "capability-overrides.v1", revision: 3, updatedAt: "2026-08-26T00:00:00Z",
-    overrides: { planning_tasks_route: false }
+    overrides: { overview_layout_editor: false, planning_tasks_route: false }
   }));
 
   assert.equal(resolveCapabilityOverridesPath({ LOCALAPPDATA: localAppData }), canonical);
@@ -80,7 +81,65 @@ test("normal production build resolves the Panel-owned LOCALAPPDATA store and an
     loadProductionCapabilityOverrides({ LOCALAPPDATA: localAppData, PANEL_CAPABILITY_OVERRIDES_PATH: explicit }),
     { planning_tasks_route: false }
   );
-  assert.deepEqual(loadProductionCapabilityOverrides({}), {});
+  assert.deepEqual(
+    loadProductionCapabilityOverrides({ LOCALAPPDATA: join(root, "missing-local-app-data") }),
+    {}
+  );
+  assert.deepEqual(productionBuildCapabilities({}).active, productionBuildCapabilities({}).baseline);
+});
+
+test("a present capability store must be canonical before production build consumption", () => {
+  const valid = () => ({
+    schemaVersion: "capability-overrides.v1",
+    revision: 0,
+    updatedAt: "2026-08-26T00:00:00Z",
+    overrides: {}
+  });
+  const invalidDocuments = [
+    ["wrong schema", { ...valid(), schemaVersion: "wrong" }],
+    ["missing schema", (() => { const value = valid(); delete value.schemaVersion; return value; })()],
+    ["negative revision", { ...valid(), revision: -5 }],
+    ["non-integer revision", { ...valid(), revision: 1.5 }],
+    ["string revision", { ...valid(), revision: "1" }],
+    ["missing updatedAt", (() => { const value = valid(); delete value.updatedAt; return value; })()],
+    ["non-string updatedAt", { ...valid(), updatedAt: 0 }],
+    ["missing overrides", (() => { const value = valid(); delete value.overrides; return value; })()],
+    ["array overrides", { ...valid(), overrides: [] }],
+    ["null overrides", { ...valid(), overrides: null }],
+    ["unknown persisted ID", { ...valid(), overrides: { planning_calendar_route: false, unknown: true } }],
+    ["non-boolean known ID", { ...valid(), overrides: { planning_calendar_route: "false" } }],
+    ["invalid JSON", "not json"]
+  ];
+
+  for (const [label, document] of invalidDocuments) {
+    const root = mkdtempSync(join(tmpdir(), "artem-invalid-production-store-"));
+    const path = join(root, "capability-overrides.json");
+    writeFileSync(path, typeof document === "string" ? document : JSON.stringify(document));
+    assert.throws(
+      () => loadProductionCapabilityOverrides({ PANEL_CAPABILITY_OVERRIDES_PATH: path }),
+      /Capability override store is invalid; refusing production build/,
+      label
+    );
+  }
+});
+
+test("the production build entry point refuses a malformed present store", () => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "artem-invalid-production-build-"));
+  const path = join(temporaryRoot, "capability-overrides.json");
+  writeFileSync(path, JSON.stringify({
+    schemaVersion: "capability-overrides.v1",
+    revision: 4,
+    updatedAt: "2026-08-26T00:00:00Z",
+    overrides: { planning_calendar_route: false, unknown: true }
+  }));
+  const result = spawnSync(process.execPath, [resolve(root, "scripts/build-production.mjs")], {
+    cwd: root,
+    env: { ...process.env, PANEL_CAPABILITY_OVERRIDES_PATH: path },
+    encoding: "utf8",
+    windowsHide: true
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}\n${result.stderr}`, /Capability override store is invalid/);
 });
 
 test("the package exposes the production build command and Windows workflow invokes it", () => {

@@ -9,7 +9,10 @@ import {
   activateStagedDashboard,
   restoreDashboardBackup,
   capabilityStoreRevision,
-  isSafeCapabilityApplyCommand
+  isSafeCapabilityApplyCommand,
+  planRestart,
+  createCapabilityApplyLifecycle,
+  CAPABILITY_APPLY_MAX_RECOVERY_FAILURES
 } from "../production-runtime.mjs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -45,6 +48,101 @@ test("RestartBudget enforces a bounded rolling window", () => {
   assert.equal(budget.count(900), 2);
   assert.equal(budget.record(1_501), true);
   assert.equal(budget.count(1_501), 1);
+});
+
+test("accepted capability apply closes before a later ordinary Agent exit", () => {
+  const root = mkdtempSync(join(tmpdir(), "artem-capability-lifecycle-"));
+  const active = join(root, "dist");
+  const staging = join(root, "staging");
+  const backup = join(root, "backup");
+  mkdirSync(active); mkdirSync(staging);
+  writeFileSync(join(active, "index.html"), "known-good");
+  writeFileSync(join(staging, "index.html"), "candidate");
+  activateStagedDashboard({ active, staging, backup });
+
+  const order = [];
+  const restarts = [];
+  const rollbacks = [];
+  let lifecycle;
+  lifecycle = createCapabilityApplyLifecycle({
+    onSuccess: (revision) => order.push(["success", revision]),
+    onRestart: (reason, options) => {
+      order.push(["restart", reason, options]);
+      restarts.push({ reason, options });
+    },
+    onRollback: (...args) => rollbacks.push(args)
+  });
+
+  lifecycle.activate({ revision: 7, backup });
+  assert.equal(lifecycle.activeApply.revision, 7);
+  assert.equal(lifecycle.appliedRevision, 7);
+  assert.equal(restarts[0].options.allowBeyondBudget, true);
+
+  assert.equal(lifecycle.acceptHealth(), true);
+  assert.deepEqual(order.map(([kind, value]) => [kind, value]), [
+    ["restart", "capabilities applied"],
+    ["success", 7]
+  ]);
+  assert.equal(lifecycle.activeApply, null);
+  assert.equal(lifecycle.appliedRevision, null);
+  assert.equal(existsSync(backup), true, "accepted Apply keeps a passive last-known-good backup");
+
+  assert.equal(lifecycle.handleAgentExit(), "normal_restart");
+  assert.equal(rollbacks.length, 0);
+  assert.equal(restarts[1].reason, "agent process exited unexpectedly");
+  assert.equal(restarts[1].options, undefined);
+  assert.equal(readFileSync(join(active, "index.html"), "utf8"), "candidate");
+});
+
+test("capability Apply bypasses an exhausted ordinary budget only for bounded candidate recovery", () => {
+  const root = mkdtempSync(join(tmpdir(), "artem-capability-budget-"));
+  const active = join(root, "dist");
+  const staging = join(root, "staging");
+  const backup = join(root, "backup");
+  mkdirSync(active); mkdirSync(staging);
+  writeFileSync(join(active, "index.html"), "known-good");
+  writeFileSync(join(staging, "index.html"), "candidate");
+  activateStagedDashboard({ active, staging, backup });
+
+  const budget = new RestartBudget({ maximum: 1, windowMs: 1_000 });
+  assert.equal(budget.record(0), true, "ordinary runtime budget starts exhausted");
+  const restartAttempts = [];
+  let shutdowns = 0;
+  const rollbacks = [];
+  const requestRestart = (reason, options) => {
+    const plan = planRestart(budget, { ...(options ?? {}), now: 1 });
+    restartAttempts.push({ reason, options, plan });
+    if (!plan.accepted) shutdowns += 1;
+  };
+  const lifecycle = createCapabilityApplyLifecycle({
+    onSuccess: () => {},
+    onRestart: requestRestart,
+    onRollback: (reason, pendingApply) => {
+      rollbacks.push({ reason, pendingApply });
+      restoreDashboardBackup({ active, backup });
+      requestRestart("capability rollback to known-good dashboard", { allowBeyondBudget: true });
+    }
+  });
+
+  lifecycle.activate({ revision: 9, backup });
+  assert.equal(restartAttempts[0].plan.accepted, true);
+  assert.equal(restartAttempts[0].plan.recorded, false);
+  assert.equal(shutdowns, 0);
+
+  for (let attempt = 0; attempt < CAPABILITY_APPLY_MAX_RECOVERY_FAILURES; attempt += 1) {
+    lifecycle.handleAgentExit();
+  }
+
+  assert.equal(shutdowns, 0, "an exhausted unrelated budget cannot abandon Apply");
+  assert.equal(rollbacks.length, 1);
+  assert.equal(rollbacks[0].reason, "new_runtime_exited");
+  assert.equal(rollbacks[0].pendingApply.recoveryFailures, CAPABILITY_APPLY_MAX_RECOVERY_FAILURES);
+  assert.equal(lifecycle.activeApply, null);
+  assert.equal(lifecycle.appliedRevision, null);
+  assert.equal(readFileSync(join(active, "index.html"), "utf8"), "known-good");
+  assert.equal(restartAttempts.length, CAPABILITY_APPLY_MAX_RECOVERY_FAILURES + 1);
+  assert.ok(restartAttempts.every(({ plan }) => plan.accepted));
+  assert.equal(restartAttempts.at(-1).reason, "capability rollback to known-good dashboard");
 });
 
 test("only a manual shutdown creates a persistent stop marker", () => {

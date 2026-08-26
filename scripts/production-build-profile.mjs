@@ -26,6 +26,15 @@ export const productionBuildProfile = Object.freeze({
 
 export const productionBuildProfileName = "accepted-v2";
 
+export const PERSISTED_CAPABILITY_IDS = Object.freeze([
+  "calendar_display_colors",
+  "overview_layout_editor",
+  "planning_overview",
+  "planning_tasks_route",
+  "planning_calendar_route",
+  "planning_reminders_route"
+]);
+
 /** Resolve the Panel-owned durable store without reading a developer file. */
 export function resolveCapabilityOverridesPath(environment = process.env) {
   const explicit = environment.PANEL_CAPABILITY_OVERRIDES_PATH?.trim();
@@ -40,6 +49,28 @@ export const delayedBuildCapabilityVariables = Object.freeze({
   planning_calendar_route: "VITE_PLANNING_CALENDAR_ROUTE_ENABLED",
   planning_reminders_route: "VITE_PLANNING_REMINDERS_ROUTE_ENABLED"
 });
+
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+export function isCanonicalCapabilityOverrideDocument(value) {
+  if (
+    !isPlainObject(value)
+    || value.schemaVersion !== "capability-overrides.v1"
+    || !Number.isInteger(value.revision)
+    || value.revision < 0
+    || typeof value.updatedAt !== "string"
+    || !isPlainObject(value.overrides)
+  ) {
+    return false;
+  }
+  return Object.keys(value.overrides).every(
+    (id) => PERSISTED_CAPABILITY_IDS.includes(id) && typeof value.overrides[id] === "boolean"
+  );
+}
 
 export function safeDelayedCapabilityOverrides(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -62,7 +93,11 @@ export function loadProductionCapabilityOverrides(environment = process.env) {
   const path = resolveCapabilityOverridesPath(environment);
   if (!path || !existsSync(path)) return {};
   try {
-    return safeDelayedCapabilityOverrides(JSON.parse(readFileSync(path, "utf8")));
+    const document = JSON.parse(readFileSync(path, "utf8"));
+    if (!isCanonicalCapabilityOverrideDocument(document)) {
+      throw new Error("invalid_document");
+    }
+    return safeDelayedCapabilityOverrides(document.overrides);
   } catch {
     throw new Error("Capability override store is invalid; refusing production build");
   }

@@ -45,7 +45,7 @@ backup_profiles:
       checksum: sha256
       manifest_required: true
     restore:
-      semantics: Place files at PANEL_OVERVIEW_LAYOUT_PATH, PANEL_CALENDAR_DISPLAY_COLOR_PATH, and %LOCALAPPDATA%/ArtemControlCenter/capability-overrides.json (or PANEL_CAPABILITY_OVERRIDES_PATH when explicitly configured); Panel Agent validates and recovers without overwriting bytes until an explicit save or capability Apply.
+      semantics: Place files at PANEL_OVERVIEW_LAYOUT_PATH, PANEL_CALENDAR_DISPLAY_COLOR_PATH, and %LOCALAPPDATA%/ArtemControlCenter/capability-overrides.json; Panel Agent validates and recovers without overwriting bytes until an explicit save or capability Apply.
 
   - id: home-assistant-native
     project_id: home-stack

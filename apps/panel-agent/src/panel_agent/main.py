@@ -373,13 +373,15 @@ def _capability_inventory() -> dict:
     build_flags, flags_available = active_build_flags()
     entries = []
     for definition in CAPABILITY_REGISTRY:
+        configured = None
         if definition.id in {"calendar_display_colors", "overview_layout_editor"}:
-            baseline = _immediate_baseline(definition.id)
-            effective = overrides.get(definition.id, baseline)
+            configured = _immediate_baseline(definition.id)
+            effective = overrides.get(definition.id, configured)
             active = desired = effective
         elif definition.id in active_build:
+            configured = baseline_build[definition.id]
             active = active_build[definition.id]
-            desired = overrides.get(definition.id, baseline_build[definition.id])
+            desired = overrides.get(definition.id, configured)
         elif definition.technical_flag.startswith("VITE_"):
             active = desired = build_flags[definition.technical_flag]
         else:
@@ -400,7 +402,7 @@ def _capability_inventory() -> dict:
             "operationalBlockedReason": blocked,
         }
         if definition.mutable:
-            entry["configuredEnabled"] = baseline
+            entry["configuredEnabled"] = configured
             entry["overrideEnabled"] = overrides.get(definition.id)
         entries.append(entry)
     return {
