@@ -45,6 +45,19 @@ const updateReasonCopy: Record<string, string> = {
   update_in_progress: "Обновление панели уже выполняется."
 };
 
+const UPDATE_STATUS_POLL_MS = 750;
+const UPDATE_STATUS_MAX_POLLS = 80;
+
+function updateFailureCopy(result?: string): string {
+  if (result === "rollback_restored") {
+    return "Обновление не установлено. Предыдущая версия восстановлена.";
+  }
+  if (result === "rollback_failed") {
+    return "Обновление завершилось ошибкой. Нужна проверка установки.";
+  }
+  return "Обновление не завершено. Повторите попытку или проверьте установку панели.";
+}
+
 function shortSha(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
 }
@@ -110,6 +123,7 @@ export function RuntimeControls({
   const [updateDialog, setUpdateDialog] = useState<UpdateDialogState>("closed");
   const [updateCheck, setUpdateCheck] = useState<PanelUpdateCheck | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [updateAccepted, setUpdateAccepted] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -132,11 +146,83 @@ export function RuntimeControls({
 
   useEffect(() => {
     if (locked && updateDialog !== "closed") {
+      setUpdateAccepted(false);
       setUpdateDialog("closed");
       setUpdateCheck(null);
       setUpdateMessage(null);
     }
   }, [locked, updateDialog]);
+
+  useEffect(() => {
+    if (!updateAccepted || updateDialog !== "applying") return;
+
+    let disposed = false;
+    let pollCount = 0;
+    let timer: number | null = null;
+    let controller: AbortController | null = null;
+
+    const schedule = () => {
+      if (!disposed) timer = window.setTimeout(() => void poll(), UPDATE_STATUS_POLL_MS);
+    };
+
+    const poll = async () => {
+      if (disposed) return;
+      pollCount += 1;
+      controller = new AbortController();
+      try {
+        const response = await fetch("/api/v1/system/update/status", {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error("update_status_failed");
+        const state = await response.json() as PanelUpdateOwnerState;
+        if (disposed) return;
+
+        if (state.status === "failed") {
+          setUpdateAccepted(false);
+          setUpdateDialog("error");
+          setUpdateMessage(updateFailureCopy(state.result));
+          return;
+        }
+        if (state.status === "success") {
+          setUpdateAccepted(false);
+          setUpdateDialog("closed");
+          setUpdateCheck(null);
+          setUpdateMessage(null);
+          setNotice(
+            state.result === "up_to_date"
+              ? "Установлена последняя версия панели."
+              : "Обновление панели завершено."
+          );
+          return;
+        }
+        if (state.status === "checking" || state.status === "updating") {
+          setUpdateMessage("Обновление выполняется… Панель откроется снова после завершения.");
+        }
+      } catch (error) {
+        if (disposed || (error instanceof DOMException && error.name === "AbortError")) return;
+        // Runtime disappearance is the normal update path: the kiosk should close
+        // and the updated runtime will reopen it. Stop polling this old page rather
+        // than waiting for the complete multi-minute updater transaction here.
+        return;
+      }
+
+      if (pollCount >= UPDATE_STATUS_MAX_POLLS) {
+        setUpdateAccepted(false);
+        setUpdateDialog("error");
+        setUpdateMessage("Обновление выполняется дольше обычного. Проверьте состояние панели.");
+        return;
+      }
+      schedule();
+    };
+
+    timer = window.setTimeout(() => void poll(), 250);
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [updateAccepted, updateDialog]);
 
   async function runAction(action: RuntimeAction) {
     if (!guardMutation()) return;
@@ -193,6 +279,7 @@ export function RuntimeControls({
   }
 
   async function checkForUpdate() {
+    setUpdateAccepted(false);
     setUpdateDialog("checking");
     setUpdateCheck(null);
     setUpdateMessage(null);
@@ -235,6 +322,7 @@ export function RuntimeControls({
       return;
     }
 
+    setUpdateAccepted(false);
     setUpdateDialog("applying");
     setUpdateMessage("Запускаем обновление…");
     try {
@@ -258,8 +346,10 @@ export function RuntimeControls({
         }
       }
       if (!response.ok) throw new Error("update_apply_failed");
+      setUpdateAccepted(true);
       setUpdateMessage("Запускаем обновление… Панель откроется снова после завершения.");
     } catch {
+      setUpdateAccepted(false);
       setUpdateDialog("error");
       setUpdateMessage("Не удалось запустить обновление. Панель не была изменена.");
     }
@@ -343,6 +433,7 @@ export function RuntimeControls({
                 className="action-confirmation__cancel"
                 disabled={updateDialog === "applying"}
                 onClick={() => {
+                  setUpdateAccepted(false);
                   setUpdateDialog("closed");
                   setUpdateCheck(null);
                   setUpdateMessage(null);
