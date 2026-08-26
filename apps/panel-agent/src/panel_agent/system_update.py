@@ -18,6 +18,17 @@ from .access_policy import AccessPolicyStore
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 UPDATE_LOCK_MAX_AGE = timedelta(hours=1)
 CAPABILITY_APPLY_MAX_AGE = timedelta(minutes=15)
+SAFE_OWNER_RESULTS = frozenset({
+    "up_to_date",
+    "updated",
+    "rollback_restored",
+    "rollback_failed",
+    "pre_update_failed",
+    "invalid_update_command",
+    "updater_unavailable",
+    "capability_apply_active",
+    "update_lock_mismatch",
+})
 
 
 def _utc_now() -> datetime:
@@ -77,6 +88,10 @@ def capability_apply_active(path: Path | None) -> bool:
 
 def software_update_active(runtime_root: Path) -> bool:
     return _recent_state(runtime_root / "update-lock.json", {"updating"}, UPDATE_LOCK_MAX_AGE)
+
+
+def _bool_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -147,8 +162,9 @@ class PanelUpdateService:
 
     @property
     def enabled(self) -> bool:
-        raw = os.getenv("PANEL_KIOSK_CONTROLS_ENABLED", "").strip().lower()
-        return raw in {"1", "true", "yes", "on"}
+        # Deliberately independent from PANEL_KIOSK_CONTROLS_ENABLED. Hiding or
+        # shutting down the kiosk must not implicitly grant software-update authority.
+        return _bool_env("PANEL_UPDATE_CONTROLS_ENABLED")
 
     def _run_git(self, arguments: tuple[str, ...]) -> GitCommandResult:
         result = subprocess.run(
@@ -165,7 +181,12 @@ class PanelUpdateService:
     def _git(self, *arguments: str) -> GitCommandResult:
         return self._git_runner(tuple(arguments))
 
-    def _blocked(self, reason: str, current: str | None = None, target: str | None = None) -> UpdatePreflight:
+    def _blocked(
+        self,
+        reason: str,
+        current: str | None = None,
+        target: str | None = None,
+    ) -> UpdatePreflight:
         return UpdatePreflight(current, target, False, False, "blocked", reason)
 
     def preflight(self, *, ignore_update_lock: bool = False) -> UpdatePreflight:
@@ -228,9 +249,14 @@ class PanelUpdateService:
         safe_status = payload.get("status")
         if safe_status not in {"idle", "checking", "updating", "success", "failed"}:
             return {"schemaVersion": 1, "status": "idle"}
-        result = {"schemaVersion": 1, "status": safe_status, "updatedAt": payload.get("updatedAt")}
-        if isinstance(payload.get("result"), str):
-            result["result"] = payload["result"]
+        result = {
+            "schemaVersion": 1,
+            "status": safe_status,
+            "updatedAt": payload.get("updatedAt"),
+        }
+        safe_result = payload.get("result")
+        if isinstance(safe_result, str) and safe_result in SAFE_OWNER_RESULTS:
+            result["result"] = safe_result
         return result
 
     def _clear_stale_lock(self) -> None:
@@ -253,9 +279,15 @@ class PanelUpdateService:
             "expectedTargetHead": target_head,
             "updatedAt": _iso_now(),
         }
-        encoded = (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        encoded = (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+        ).encode("utf-8")
         try:
-            descriptor = os.open(self.lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            descriptor = os.open(
+                self.lock_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
         except FileExistsError:
             return False
         with os.fdopen(descriptor, "wb") as handle:
@@ -280,12 +312,19 @@ class PanelUpdateService:
             raise HTTPException(status_code=409, detail="update_in_progress")
 
         try:
+            # Keep the exclusive update lock held while re-fetching/revalidating.
+            # This closes the check/apply TOCTOU window without opening a second-writer gap.
             preflight = self.preflight(ignore_update_lock=True)
-            if preflight.current_head != expected_current or preflight.target_head != expected_target:
+            if (
+                preflight.current_head != expected_current
+                or preflight.target_head != expected_target
+            ):
                 raise HTTPException(status_code=409, detail="update_target_changed")
             if not preflight.update_allowed or not preflight.update_available:
                 detail = preflight.reason or (
-                    "already_up_to_date" if preflight.status == "up_to_date" else "update_not_allowed"
+                    "already_up_to_date"
+                    if preflight.status == "up_to_date"
+                    else "update_not_allowed"
                 )
                 raise HTTPException(status_code=409, detail=detail)
             if self.command_path.exists():
@@ -327,11 +366,20 @@ def build_system_update_router(
         return update_service
 
     @router.post("/check")
-    def check_update(response: Response, x_panel_intent: str = Header(default="")) -> dict:
+    def check_update(
+        response: Response,
+        x_panel_intent: str = Header(default=""),
+    ) -> dict:
         _require_intent(x_panel_intent)
         current = require_service()
         current._write_state("checking")
-        result = current.preflight()
+        try:
+            result = current.preflight()
+        except Exception as exc:
+            # The UI receives only a fixed owner-safe failure, never git stderr,
+            # a local path, environment values, or arbitrary exception text.
+            current._write_state("idle")
+            raise HTTPException(status_code=503, detail="update_check_failed") from exc
         current._write_state("idle")
         response.headers["Cache-Control"] = "no-store"
         return result.as_dict()
@@ -351,7 +399,10 @@ def build_system_update_router(
         _require_intent(x_panel_intent)
         current = require_service()
         if access_policy.effective_profile() != "full":
-            access_policy.audit_capability("system.panel.update", result="full_access_required")
+            access_policy.audit_capability(
+                "system.panel.update",
+                result="full_access_required",
+            )
             raise HTTPException(status_code=403, detail="full_access_required")
         result = current.apply(payload.expectedCurrentHead, payload.expectedTargetHead)
         access_policy.audit_capability("system.panel.update", result="accepted")
