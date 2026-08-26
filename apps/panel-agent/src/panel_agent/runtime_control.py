@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .capabilities import CapabilityOverrideStore
+from .system_update import software_update_active
 
 from fastapi import APIRouter, Header, HTTPException, Response, status
 
@@ -149,6 +150,8 @@ def apply_capabilities(
     path = _command_path()
     if not _capability_apply_enabled() or path is None:
         raise HTTPException(status_code=409, detail="capability_apply_disabled")
+    if software_update_active(path.parent):
+        raise HTTPException(status_code=409, detail="software_update_active")
     document, available = CapabilityOverrideStore().read()
     if not available:
         raise HTTPException(status_code=409, detail="capability_store_unavailable")
