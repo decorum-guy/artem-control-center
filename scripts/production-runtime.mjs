@@ -365,10 +365,11 @@ function updaterOwnerProcessAlive(ownerPid, requestId) {
   if (typeof requestId !== "string" || !/^[a-f0-9]{24}$/.test(requestId)) return false;
   const script = [
     `$process = Get-CimInstance Win32_Process -Filter \"ProcessId = ${ownerPid}\" -ErrorAction SilentlyContinue`,
+    "$hasRequestArgument = $null -ne $process -and $process.CommandLine -like '*-RequestId*'",
     "if ($null -ne $process",
     "-and $process.Name -in @('powershell.exe','pwsh.exe')",
     "-and $process.CommandLine -like '*update-production.ps1*'",
-    `-and $process.CommandLine -like '*${requestId}*') { exit 0 }`,
+    `-and (-not $hasRequestArgument -or $process.CommandLine -like '*${requestId}*')) { exit 0 }`,
     "exit 1"
   ].join(" ");
   const result = spawnSync(
