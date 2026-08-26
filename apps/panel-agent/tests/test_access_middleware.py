@@ -126,6 +126,12 @@ def test_planning_capabilities_are_fixed_standard_catalog_entries():
     assert all(CAPABILITIES[capability] == "standard" for capability in capabilities)
 
 
+def test_capability_settings_are_a_fixed_full_access_mutation():
+    assert CAPABILITIES["settings.capabilities.manage"] == "full"
+    assert capability_for_request("PATCH", "/api/v1/settings/capabilities") == "settings.capabilities.manage"
+    assert capability_for_request("POST", "/api/v1/system/runtime/apply-capabilities") == "settings.capabilities.manage"
+
+
 def test_planning_route_matching_is_fixed_and_unknown_actions_are_unregistered():
     reminder_id = "not-a-uuid-but-one-path-segment"
     assert capability_for_request("POST", "/api/v1/planning/reminders") == "planning.reminders.create"

@@ -23,9 +23,43 @@ export const productionBuildProfile = Object.freeze({
 
 export const productionBuildProfileName = "accepted-v2";
 
-export function productionBuildEnvironment(baseEnvironment = process.env) {
+export const delayedBuildCapabilityVariables = Object.freeze({
+  planning_overview: "VITE_PLANNING_OVERVIEW_ENABLED",
+  planning_tasks_route: "VITE_PLANNING_TASKS_ROUTE_ENABLED",
+  planning_calendar_route: "VITE_PLANNING_CALENDAR_ROUTE_ENABLED",
+  planning_reminders_route: "VITE_PLANNING_REMINDERS_ROUTE_ENABLED"
+});
+
+export function safeDelayedCapabilityOverrides(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const raw = value.overrides && typeof value.overrides === "object" && !Array.isArray(value.overrides)
+    ? value.overrides
+    : value;
+  return Object.fromEntries(
+    Object.keys(delayedBuildCapabilityVariables)
+      .filter((key) => typeof raw[key] === "boolean")
+      .map((key) => [key, raw[key]])
+  );
+}
+
+export function productionBuildCapabilities(overrides = {}) {
+  const safe = safeDelayedCapabilityOverrides(overrides);
+  const baseline = Object.fromEntries(
+    Object.entries(delayedBuildCapabilityVariables).map(([id, variable]) => [id, productionBuildProfile[variable] === "true"])
+  );
+  return {
+    baseline,
+    active: { ...baseline, ...safe }
+  };
+}
+
+export function productionBuildEnvironment(baseEnvironment = process.env, overrides = {}) {
+  const capabilities = productionBuildCapabilities(overrides);
   return {
     ...baseEnvironment,
-    ...productionBuildProfile
+    ...productionBuildProfile,
+    ...Object.fromEntries(
+      Object.entries(delayedBuildCapabilityVariables).map(([id, variable]) => [variable, String(capabilities.active[id])])
+    )
   };
 }

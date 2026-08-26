@@ -38,7 +38,14 @@ export function OverviewV2Page({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [appearanceInstanceId, setAppearanceInstanceId] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [capabilityRevision, setCapabilityRevision] = useState(0);
   const etagRef = useRef('"0"');
+
+  useEffect(() => {
+    const onCapabilitiesChanged = () => setCapabilityRevision((current) => current + 1);
+    window.addEventListener("artem-capabilities-changed", onCapabilitiesChanged);
+    return () => window.removeEventListener("artem-capabilities-changed", onCapabilitiesChanged);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,7 +70,7 @@ export function OverviewV2Page({
         if (!controller.signal.aborted) setLayoutLoading(false);
       });
     return () => controller.abort();
-  }, [fixtureMode]);
+  }, [fixtureMode, capabilityRevision]);
 
   const editMode = editor.mode !== "normal";
   const saving = editor.mode === "saving";

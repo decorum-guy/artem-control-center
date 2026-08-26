@@ -136,6 +136,8 @@ export function buildAgentEnvironment({
   dashboardDist,
   stateCachePath,
   calendarDisplayColorPath,
+  capabilityOverridesPath,
+  capabilityApplyStatePath,
   buildRevision = "unknown"
 }) {
   return {
@@ -147,8 +149,50 @@ export function buildAgentEnvironment({
     PANEL_RUNTIME_COMMAND_PATH: commandPath,
     PANEL_DASHBOARD_DIST: dashboardDist,
     PANEL_STATE_CACHE_PATH: stateCachePath,
-    PANEL_CALENDAR_DISPLAY_COLOR_PATH: calendarDisplayColorPath
+    PANEL_CALENDAR_DISPLAY_COLOR_PATH: calendarDisplayColorPath,
+    PANEL_CAPABILITY_OVERRIDES_PATH: capabilityOverridesPath,
+    PANEL_CAPABILITY_APPLY_STATE_PATH: capabilityApplyStatePath,
+    PANEL_CAPABILITY_APPLY_ENABLED: "true"
   };
+}
+
+export function isSafeCapabilityApplyCommand(command) {
+  return Boolean(
+    command
+    && command.schemaVersion === 1
+    && command.action === "apply_capabilities"
+    && Number.isInteger(command.expectedRevision)
+    && command.expectedRevision >= 0
+    && typeof command.requestId === "string"
+    && /^[a-f0-9]{24}$/.test(command.requestId)
+  );
+}
+
+export function capabilityStoreRevision(path) {
+  try {
+    const payload = JSON.parse(readFileSync(path, "utf8"));
+    return payload?.schemaVersion === "capability-overrides.v1" && Number.isInteger(payload.revision)
+      ? payload.revision
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function activateStagedDashboard({ active, staging, backup }) {
+  if (!existsSync(join(staging, "index.html"))) throw new Error("staged_dashboard_missing_index");
+  if (existsSync(backup)) rmSync(backup, { recursive: true, force: true });
+  let activeMoved = false;
+  try {
+    if (existsSync(active)) {
+      renameSync(active, backup);
+      activeMoved = true;
+    }
+    renameSync(staging, active);
+  } catch (error) {
+    if (activeMoved && !existsSync(active) && existsSync(backup)) renameSync(backup, active);
+    throw error;
+  }
 }
 
 function stopProcessTree(child, log) {
@@ -213,6 +257,8 @@ export async function runProductionRuntime() {
   const manualStopPath = join(runtimeDir, "manual-stop.json");
   const edgeProfileDir = join(runtimeDir, "edge-profile");
   const dashboardDist = resolve(root, "apps", "dashboard", "dist");
+  const capabilityOverridesPath = join(runtimeDir, "capability-overrides.json");
+  const capabilityApplyStatePath = join(runtimeDir, "capability-apply-state.json");
   const venvPython = resolve(root, ".venv", isWindows ? "Scripts/python.exe" : "bin/python");
   const log = createLogger(logDir);
 
@@ -245,7 +291,9 @@ export async function runProductionRuntime() {
     commandPath,
     dashboardDist,
     stateCachePath: fileEnv.PANEL_STATE_CACHE_PATH || join(runtimeDir, "panel-state-cache.json"),
-    calendarDisplayColorPath: fileEnv.PANEL_CALENDAR_DISPLAY_COLOR_PATH || join(runtimeDir, "calendar-display-colors.json")
+    calendarDisplayColorPath: fileEnv.PANEL_CALENDAR_DISPLAY_COLOR_PATH || join(runtimeDir, "calendar-display-colors.json"),
+    capabilityOverridesPath,
+    capabilityApplyStatePath
   });
 
   process.title = "artem-control-center-runtime";
@@ -261,6 +309,17 @@ export async function runProductionRuntime() {
   let commandTimer = null;
   let healthTimer = null;
   let restartTimer = null;
+  let applyingCapabilities = false;
+  let appliedCapabilityRevision = null;
+
+  function writeCapabilityApplyState(status, extra = {}) {
+    atomicWriteJson(capabilityApplyStatePath, {
+      schemaVersion: 1,
+      status,
+      updatedAt: new Date().toISOString(),
+      ...extra
+    });
+  }
 
   function writeState(status, extra = {}) {
     atomicWriteJson(statePath, {
@@ -354,6 +413,59 @@ export async function runProductionRuntime() {
     process.exit(exitCode);
   }
 
+  function currentCheckoutIsBuildSafe() {
+    const inside = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: root, encoding: "utf8", windowsHide: true });
+    if (inside.status !== 0 || inside.stdout.trim() !== "true") return false;
+    const changes = spawnSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: root, encoding: "utf8", windowsHide: true });
+    return changes.status === 0 && changes.stdout.trim() === "";
+  }
+
+  function applyCapabilities(command) {
+    if (applyingCapabilities) return;
+    applyingCapabilities = true;
+    writeCapabilityApplyState("queued", { revision: command.expectedRevision });
+    try {
+      if (!isSafeCapabilityApplyCommand(command)) throw new Error("invalid_capability_apply_command");
+      if (capabilityStoreRevision(capabilityOverridesPath) !== command.expectedRevision) throw new Error("capability_revision_changed");
+      if (!currentCheckoutIsBuildSafe()) throw new Error("production_checkout_not_build_safe");
+
+      const staging = join(runtimeDir, `dashboard-staging-${command.requestId}`);
+      const backup = join(runtimeDir, "dashboard-last-known-good");
+      rmSync(staging, { recursive: true, force: true });
+      writeCapabilityApplyState("building", { revision: command.expectedRevision });
+      const npmCli = process.env.npm_execpath;
+      const commandName = npmCli ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
+      const commandArgs = npmCli ? [npmCli, "run", "build:production"] : ["run", "build:production"];
+      const build = spawnSync(commandName, commandArgs, {
+        cwd: root,
+        env: {
+          ...process.env,
+          PANEL_CAPABILITY_OVERRIDES_PATH: capabilityOverridesPath,
+          PANEL_PRODUCTION_BUILD_OUT_DIR: staging
+        },
+        encoding: "utf8",
+        windowsHide: true
+      });
+      if (build.status !== 0 || !existsSync(join(staging, "index.html")) || !existsSync(join(staging, "dashboard-capabilities.json"))) {
+        rmSync(staging, { recursive: true, force: true });
+        throw new Error("capability_build_failed");
+      }
+      if (capabilityStoreRevision(capabilityOverridesPath) !== command.expectedRevision) {
+        rmSync(staging, { recursive: true, force: true });
+        throw new Error("capability_revision_changed");
+      }
+      writeCapabilityApplyState("restarting", { revision: command.expectedRevision });
+      activateStagedDashboard({ active: dashboardDist, staging, backup });
+      appliedCapabilityRevision = command.expectedRevision;
+      requestRestart("capabilities applied");
+    } catch (error) {
+      log("ERROR", `Capability apply failed: ${error?.message || error}`);
+      writeCapabilityApplyState("failed", { revision: command.expectedRevision, code: "apply_failed" });
+    } finally {
+      applyingCapabilities = false;
+    }
+  }
+
   function consumeRuntimeCommand() {
     if (shuttingDown || !existsSync(commandPath)) return;
     let command;
@@ -387,6 +499,10 @@ export async function runProductionRuntime() {
       void shutdown(0);
       return;
     }
+    if (command.action === "apply_capabilities") {
+      applyCapabilities(command);
+      return;
+    }
     log("WARN", `Rejected unsupported runtime action: ${String(command?.action)}`);
   }
 
@@ -413,6 +529,10 @@ export async function runProductionRuntime() {
         if (healthFailures > 0) log("INFO", "Panel Agent health recovered");
         healthFailures = 0;
         writeState("running");
+        if (appliedCapabilityRevision !== null) {
+          writeCapabilityApplyState("success", { revision: appliedCapabilityRevision });
+          appliedCapabilityRevision = null;
+        }
       } else {
         healthFailures += 1;
         log("WARN", `Panel Agent health failure ${healthFailures}/3`);

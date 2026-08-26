@@ -340,6 +340,23 @@ class CalendarDisplayPreferencesResponse(BaseModel):
     writesEnabled: bool = False
 
 
+class CapabilityPatch(BaseModel):
+    """The browser may name only an explicit registry capability ID."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expectedRevision: int = Field(ge=0, le=2_147_483_647)
+    capabilityId: Literal[
+        "calendar_display_colors",
+        "overview_layout_editor",
+        "planning_overview",
+        "planning_tasks_route",
+        "planning_calendar_route",
+        "planning_reminders_route",
+    ]
+    enabled: Optional[bool] = None
+
+
 class OverviewPlacement(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

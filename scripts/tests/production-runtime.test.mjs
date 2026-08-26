@@ -5,8 +5,15 @@ import {
   parseEnvText,
   RestartBudget,
   shouldCreateManualStop,
-  buildAgentEnvironment
+  buildAgentEnvironment,
+  activateStagedDashboard,
+  capabilityStoreRevision,
+  isSafeCapabilityApplyCommand
 } from "../production-runtime.mjs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 test("parseEnvText accepts comments, export and quoted values", () => {
   assert.deepEqual(
@@ -76,4 +83,33 @@ test("production runtime uses an honest unknown revision when Git cannot provide
   });
 
   assert.equal(environment.PANEL_AGENT_BUILD_REVISION, "unknown");
+});
+
+test("capability apply accepts only its fixed schema and revision metadata", () => {
+  assert.equal(isSafeCapabilityApplyCommand({ schemaVersion: 1, action: "apply_capabilities", expectedRevision: 4, requestId: "0123456789abcdef01234567" }), true);
+  assert.equal(isSafeCapabilityApplyCommand({ schemaVersion: 1, action: "apply_capabilities", expectedRevision: 4, requestId: "bad" }), false);
+  assert.equal(isSafeCapabilityApplyCommand({ schemaVersion: 1, action: "update", expectedRevision: 4, requestId: "0123456789abcdef01234567", shell: "git pull" }), false);
+});
+
+test("capability apply activates only a validated staged dashboard and retains rollback", () => {
+  const root = mkdtempSync(join(tmpdir(), "artem-capability-runtime-"));
+  const active = join(root, "dist");
+  const staging = join(root, "staging");
+  const backup = join(root, "backup");
+  mkdirSync(active); mkdirSync(staging);
+  writeFileSync(join(active, "index.html"), "old");
+  writeFileSync(join(staging, "index.html"), "new");
+  activateStagedDashboard({ active, staging, backup });
+  assert.equal(readFileSync(join(active, "index.html"), "utf8"), "new");
+  assert.equal(readFileSync(join(backup, "index.html"), "utf8"), "old");
+  assert.equal(existsSync(staging), false);
+});
+
+test("capability revision reader fails closed on malformed state", () => {
+  const root = mkdtempSync(join(tmpdir(), "artem-capability-revision-"));
+  const path = join(root, "capabilities.json");
+  writeFileSync(path, JSON.stringify({ schemaVersion: "capability-overrides.v1", revision: 7 }));
+  assert.equal(capabilityStoreRevision(path), 7);
+  writeFileSync(path, "not json");
+  assert.equal(capabilityStoreRevision(path), null);
 });

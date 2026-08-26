@@ -5,7 +5,9 @@ import { resolve } from "node:path";
 import {
   productionBuildEnvironment,
   productionBuildProfile,
-  productionBuildProfileName
+  productionBuildProfileName,
+  productionBuildCapabilities,
+  safeDelayedCapabilityOverrides
 } from "../production-build-profile.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -38,6 +40,19 @@ test("the accepted-v2 profile is complete and cannot be overridden by inherited 
     expectedProfile
   );
   assert.equal(environment.PANEL_WRITES_ENABLED, "false");
+});
+
+test("only the four explicitly allowlisted capability IDs overlay the accepted baseline", () => {
+  const overrides = safeDelayedCapabilityOverrides({ overrides: {
+    planning_calendar_route: false,
+    VITE_TOUCH_INPUT_LOCK_ENABLED: false,
+    arbitrary: false
+  } });
+  assert.deepEqual(overrides, { planning_calendar_route: false });
+  const capabilities = productionBuildCapabilities(overrides);
+  assert.equal(capabilities.baseline.planning_calendar_route, true);
+  assert.equal(capabilities.active.planning_calendar_route, false);
+  assert.equal(Object.keys(capabilities.active).length, 4);
 });
 
 test("the package exposes the production build command and Windows workflow invokes it", () => {
