@@ -16,7 +16,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from .access_policy import AccessPolicyStore
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
 UPDATE_LOCK_MAX_AGE = timedelta(hours=1)
 CAPABILITY_APPLY_MAX_AGE = timedelta(minutes=15)
 
@@ -72,20 +71,12 @@ def _recent_state(path: Path, statuses: set[str], max_age: timedelta) -> bool:
 def capability_apply_active(path: Path | None) -> bool:
     return bool(
         path
-        and _recent_state(
-            path,
-            {"queued", "building", "restarting"},
-            CAPABILITY_APPLY_MAX_AGE,
-        )
+        and _recent_state(path, {"queued", "building", "restarting"}, CAPABILITY_APPLY_MAX_AGE)
     )
 
 
 def software_update_active(runtime_root: Path) -> bool:
-    return _recent_state(
-        runtime_root / "update-lock.json",
-        {"updating"},
-        UPDATE_LOCK_MAX_AGE,
-    )
+    return _recent_state(runtime_root / "update-lock.json", {"updating"}, UPDATE_LOCK_MAX_AGE)
 
 
 @dataclass(frozen=True)
@@ -177,8 +168,8 @@ class PanelUpdateService:
     def _blocked(self, reason: str, current: str | None = None, target: str | None = None) -> UpdatePreflight:
         return UpdatePreflight(current, target, False, False, "blocked", reason)
 
-    def preflight(self) -> UpdatePreflight:
-        if software_update_active(self.runtime_root):
+    def preflight(self, *, ignore_update_lock: bool = False) -> UpdatePreflight:
+        if not ignore_update_lock and software_update_active(self.runtime_root):
             return self._blocked("update_in_progress")
         if capability_apply_active(self.capability_apply_state_path):
             return self._blocked("capability_apply_active")
@@ -214,14 +205,7 @@ class PanelUpdateService:
             return self._blocked("invalid_repository")
 
         if current_head == target_head:
-            return UpdatePreflight(
-                current_head,
-                target_head,
-                False,
-                False,
-                "up_to_date",
-                None,
-            )
+            return UpdatePreflight(current_head, target_head, False, False, "up_to_date")
 
         ancestor = self._git("merge-base", "--is-ancestor", current_head, target_head)
         if ancestor.returncode == 1:
@@ -229,24 +213,12 @@ class PanelUpdateService:
         if ancestor.returncode != 0:
             return self._blocked("invalid_repository", current_head, target_head)
 
-        return UpdatePreflight(
-            current_head,
-            target_head,
-            True,
-            True,
-            "update_available",
-            None,
-        )
+        return UpdatePreflight(current_head, target_head, True, True, "update_available")
 
     def _write_state(self, state: str, **fields: object) -> None:
         _atomic_write_json(
             self.state_path,
-            {
-                "schemaVersion": 1,
-                "status": state,
-                "updatedAt": _iso_now(),
-                **fields,
-            },
+            {"schemaVersion": 1, "status": state, "updatedAt": _iso_now(), **fields},
         )
 
     def owner_state(self) -> dict:
@@ -256,11 +228,7 @@ class PanelUpdateService:
         safe_status = payload.get("status")
         if safe_status not in {"idle", "checking", "updating", "success", "failed"}:
             return {"schemaVersion": 1, "status": "idle"}
-        result = {
-            "schemaVersion": 1,
-            "status": safe_status,
-            "updatedAt": payload.get("updatedAt"),
-        }
+        result = {"schemaVersion": 1, "status": safe_status, "updatedAt": payload.get("updatedAt")}
         if isinstance(payload.get("result"), str):
             result["result"] = payload["result"]
         return result
@@ -312,32 +280,28 @@ class PanelUpdateService:
             raise HTTPException(status_code=409, detail="update_in_progress")
 
         try:
-            # The lock is ours, so preflight must ignore its own update marker.
-            try:
-                self.lock_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            preflight = self.preflight()
-            if not self._acquire_lock(request_id, expected_current, expected_target):
-                raise HTTPException(status_code=409, detail="update_in_progress")
-
+            preflight = self.preflight(ignore_update_lock=True)
             if preflight.current_head != expected_current or preflight.target_head != expected_target:
                 raise HTTPException(status_code=409, detail="update_target_changed")
             if not preflight.update_allowed or not preflight.update_available:
-                detail = preflight.reason or ("already_up_to_date" if preflight.status == "up_to_date" else "update_not_allowed")
+                detail = preflight.reason or (
+                    "already_up_to_date" if preflight.status == "up_to_date" else "update_not_allowed"
+                )
                 raise HTTPException(status_code=409, detail=detail)
             if self.command_path.exists():
                 raise HTTPException(status_code=409, detail="runtime_command_busy")
 
-            command = {
-                "schemaVersion": 1,
-                "action": "update_panel",
-                "expectedCurrentHead": expected_current,
-                "expectedTargetHead": expected_target,
-                "requestId": request_id,
-                "requestedAt": _iso_now(),
-            }
-            _atomic_write_json(self.command_path, command)
+            _atomic_write_json(
+                self.command_path,
+                {
+                    "schemaVersion": 1,
+                    "action": "update_panel",
+                    "expectedCurrentHead": expected_current,
+                    "expectedTargetHead": expected_target,
+                    "requestId": request_id,
+                    "requestedAt": _iso_now(),
+                },
+            )
             self._write_state("updating")
             return {"accepted": True, "status": "updating"}
         except Exception:
@@ -363,10 +327,7 @@ def build_system_update_router(
         return update_service
 
     @router.post("/check")
-    def check_update(
-        response: Response,
-        x_panel_intent: str = Header(default=""),
-    ) -> dict:
+    def check_update(response: Response, x_panel_intent: str = Header(default="")) -> dict:
         _require_intent(x_panel_intent)
         current = require_service()
         current._write_state("checking")
