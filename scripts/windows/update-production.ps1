@@ -25,7 +25,8 @@ function Invoke-CheckedCommand {
 function Invoke-IsolatedValidation {
     param(
         [Parameter(Mandatory)]$Paths,
-        [Parameter(Mandatory)][string]$Timestamp
+        [Parameter(Mandatory)][string]$Timestamp,
+        [Parameter(Mandatory)][string]$LockRequestId
     )
 
     $validationRoot = Join-Path $Paths.RuntimeRoot ("validation-temp\{0}" -f $Timestamp)
@@ -47,14 +48,17 @@ function Invoke-IsolatedValidation {
             "$previousPytestAddopts $isolatedArgs"
         }
 
+        Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
         Invoke-CheckedCommand `
             -FilePath "npm.cmd" `
             -Arguments @("run", "check") `
             -Description "full validation"
+        Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
         Invoke-CheckedCommand `
             -FilePath "npm.cmd" `
             -Arguments @("run", "build:production") `
             -Description "accepted V2 production dashboard build"
+        Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
     }
     finally {
         $env:TEMP = $previousTemp
@@ -137,6 +141,68 @@ function New-ArtemUpdateLock {
     catch [System.IO.IOException] {
         throw "Another Control Center software update is already in progress"
     }
+}
+
+function Claim-ArtemUpdateLock {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string]$LockRequestId,
+        [string]$Current,
+        [string]$Target
+    )
+    $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+    if (
+        $null -eq $existing -or
+        $existing.schemaVersion -ne 1 -or
+        [string]$existing.status -ne "updating" -or
+        [string]$existing.requestId -ne $LockRequestId
+    ) {
+        throw "Software update lease disappeared before updater claim"
+    }
+    if ($Current -and [string]$existing.expectedCurrentHead -ne $Current) {
+        throw "Software update current revision changed before updater claim"
+    }
+    if ($Target -and [string]$existing.expectedTargetHead -ne $Target) {
+        throw "Software update target revision changed before updater claim"
+    }
+
+    $payload = @{
+        schemaVersion = 1
+        status = "updating"
+        requestId = $LockRequestId
+        expectedCurrentHead = [string]$existing.expectedCurrentHead
+        expectedTargetHead = [string]$existing.expectedTargetHead
+        ownerPid = $PID
+        updatedAt = [DateTime]::UtcNow.ToString("o")
+    }
+    Write-ArtemUpdateJson -Path $Paths.UpdateLock -Payload $payload
+}
+
+function Refresh-ArtemUpdateLock {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string]$LockRequestId
+    )
+    $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+    if (
+        $null -eq $existing -or
+        $existing.schemaVersion -ne 1 -or
+        [string]$existing.status -ne "updating" -or
+        [string]$existing.requestId -ne $LockRequestId -or
+        [int]$existing.ownerPid -ne $PID
+    ) {
+        throw "Software update lease ownership was lost"
+    }
+    $payload = @{
+        schemaVersion = 1
+        status = "updating"
+        requestId = $LockRequestId
+        expectedCurrentHead = [string]$existing.expectedCurrentHead
+        expectedTargetHead = [string]$existing.expectedTargetHead
+        ownerPid = $PID
+        updatedAt = [DateTime]::UtcNow.ToString("o")
+    }
+    Write-ArtemUpdateJson -Path $Paths.UpdateLock -Payload $payload
 }
 
 function Remove-ArtemUpdateLock {
@@ -226,16 +292,27 @@ else {
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $transcriptPath = Join-Path $paths.Logs "update-$timestamp.log"
-Start-Transcript -Path $transcriptPath -Force | Out-Null
-
+$transcriptStarted = $false
 $currentHead = $null
 $targetHead = $null
 $transactionStarted = $false
 $rollbackRestored = $false
 
 try {
+    # From the first instruction after lock acquisition onward, every exit is
+    # protected by the finally below. This includes transcript startup failure.
+    Claim-ArtemUpdateLock `
+        -Paths $paths `
+        -LockRequestId $RequestId `
+        -Current $ExpectedCurrentHead `
+        -Target $ExpectedTargetHead
+    Start-Transcript -Path $transcriptPath -Force | Out-Null
+    $transcriptStarted = $true
+
     Write-ArtemUpdateState -Paths $paths -Status "checking"
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $preflight = Get-ArtemUpdatePreflight -Paths $paths
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $currentHead = $preflight.Current
     $targetHead = $preflight.Target
 
@@ -247,7 +324,9 @@ try {
     }
 
     if ($currentHead -eq $targetHead) {
+        Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
         Ensure-ArtemHealthyVisiblePanel -Paths $paths -LockRequestId $RequestId
+        Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
         Set-Content -LiteralPath $paths.LastKnownGood -Value $currentHead -Encoding ASCII
         Write-ArtemUpdateState -Paths $paths -Status "success" -Result "up_to_date"
         Write-Host "Artem Control Center is already up to date: $currentHead"
@@ -263,6 +342,7 @@ try {
     # Any failure before this flag is set must fail without stopping or rolling
     # back a checkout that was never modified.
     $transactionStarted = $true
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     Stop-ArtemRuntime -Paths $paths -Manual $false
     Set-Content -LiteralPath $paths.RollbackHead -Value $currentHead -Encoding ASCII
 
@@ -271,9 +351,12 @@ try {
         -FilePath "git.exe" `
         -Arguments @("merge", "--ff-only", $targetHead) `
         -Description "fast-forward update"
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
 
     Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("ci") -Description "npm ci"
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("run", "setup") -Description "project setup"
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
 
     $env:PANEL_AGENT_MODE = "read_only"
     $env:PANEL_WRITES_ENABLED = "false"
@@ -282,8 +365,10 @@ try {
     $env:PANEL_COFFEE_ACTIONS_ENABLED = "false"
     $env:PANEL_KIOSK_CONTROLS_ENABLED = "false"
 
-    Invoke-IsolatedValidation -Paths $paths -Timestamp $timestamp
+    Invoke-IsolatedValidation -Paths $paths -Timestamp $timestamp -LockRequestId $RequestId
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     Ensure-ArtemHealthyVisiblePanel -Paths $paths -LockRequestId $RequestId
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
 
     Set-Content -LiteralPath $paths.LastKnownGood -Value $targetHead -Encoding ASCII
     Write-ArtemUpdateState -Paths $paths -Status "success" -Result "updated"
@@ -295,13 +380,19 @@ catch {
 
     if ($transactionStarted -and $currentHead) {
         try {
+            Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Stop-ArtemRuntime -Paths $paths -Manual $false
             Set-Location -LiteralPath $paths.RepoRoot
             Invoke-CheckedCommand -FilePath "git.exe" -Arguments @("reset", "--hard", $currentHead) -Description "git rollback"
+            Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("ci") -Description "rollback npm ci"
+            Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("run", "setup") -Description "rollback setup"
+            Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("run", "build:production") -Description "rollback production build"
+            Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Ensure-ArtemHealthyVisiblePanel -Paths $paths -LockRequestId $RequestId
+            Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Set-Content -LiteralPath $paths.LastKnownGood -Value $currentHead -Encoding ASCII
             $rollbackRestored = $true
             Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "rollback_restored"
@@ -320,6 +411,8 @@ catch {
 }
 finally {
     Remove-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
-    Stop-Transcript | Out-Null
-    Write-Host "Update log: $transcriptPath"
+    if ($transcriptStarted) {
+        Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
+        Write-Host "Update log: $transcriptPath"
+    }
 }
