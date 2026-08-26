@@ -144,6 +144,11 @@ if (-not $AutoStart -and -not $UpdateRequestId) {
 Remove-Item -LiteralPath $paths.State -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $paths.Command -Force -ErrorAction SilentlyContinue
 
+# The software updater has a separate read-only/config-managed product gate.
+# Set it only in the canonical production launcher so the Panel Agent does not
+# inherit update permission merely because kiosk hide/shutdown controls exist.
+$env:PANEL_UPDATE_CONTROLS_ENABLED = "true"
+
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $argumentLine = "`"$($paths.RuntimeScript)`""
 $runtimeProcess = Start-Process `
