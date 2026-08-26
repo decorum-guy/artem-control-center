@@ -132,7 +132,7 @@ class CapabilityOverrideStore:
         if raw is None or raw.get("schemaVersion") != SCHEMA_VERSION:
             return None
         revision, updated_at, overrides = raw.get("revision"), raw.get("updatedAt"), raw.get("overrides")
-        if not isinstance(revision, int) or revision < 0 or not isinstance(updated_at, str) or not isinstance(overrides, dict):
+        if type(revision) is not int or revision < 0 or not isinstance(updated_at, str) or not isinstance(overrides, dict):
             return None
         if set(overrides) - MUTABLE_IDS or any(type(value) is not bool for value in overrides.values()):
             return None

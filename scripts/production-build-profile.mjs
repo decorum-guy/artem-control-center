@@ -6,7 +6,7 @@
  * updater invokes build:production, which applies this complete profile and
  * does not depend on a Samsung-local VITE environment.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const productionBuildProfile = Object.freeze({
@@ -34,6 +34,8 @@ export const PERSISTED_CAPABILITY_IDS = Object.freeze([
   "planning_calendar_route",
   "planning_reminders_route"
 ]);
+
+export const MAX_CAPABILITY_OVERRIDE_FILE_BYTES = 16 * 1024;
 
 /** Resolve the Panel-owned durable store without reading a developer file. */
 export function resolveCapabilityOverridesPath(environment = process.env) {
@@ -93,6 +95,9 @@ export function loadProductionCapabilityOverrides(environment = process.env) {
   const path = resolveCapabilityOverridesPath(environment);
   if (!path || !existsSync(path)) return {};
   try {
+    if (statSync(path).size > MAX_CAPABILITY_OVERRIDE_FILE_BYTES) {
+      throw new Error("capability_store_too_large");
+    }
     const document = JSON.parse(readFileSync(path, "utf8"));
     if (!isCanonicalCapabilityOverrideDocument(document)) {
       throw new Error("invalid_document");

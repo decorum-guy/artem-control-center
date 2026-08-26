@@ -12,7 +12,8 @@ import {
   productionBuildCapabilities,
   safeDelayedCapabilityOverrides,
   loadProductionCapabilityOverrides,
-  resolveCapabilityOverridesPath
+  resolveCapabilityOverridesPath,
+  MAX_CAPABILITY_OVERRIDE_FILE_BYTES
 } from "../production-build-profile.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -121,6 +122,23 @@ test("a present capability store must be canonical before production build consu
       label
     );
   }
+});
+
+test("an oversized present capability store refuses production build consumption", () => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "artem-oversized-production-store-"));
+  const path = join(temporaryRoot, "capability-overrides.json");
+  writeFileSync(path, JSON.stringify({
+    schemaVersion: "capability-overrides.v1",
+    revision: 4,
+    updatedAt: "2026-08-26T00:00:00Z",
+    overrides: {},
+    padding: "x".repeat(MAX_CAPABILITY_OVERRIDE_FILE_BYTES)
+  }));
+
+  assert.throws(
+    () => loadProductionCapabilityOverrides({ PANEL_CAPABILITY_OVERRIDES_PATH: path }),
+    /Capability override store is invalid; refusing production build/
+  );
 });
 
 test("the production build entry point refuses a malformed present store", () => {

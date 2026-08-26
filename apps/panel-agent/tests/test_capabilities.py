@@ -213,6 +213,22 @@ def test_invalid_and_read_only_ids_are_rejected_by_typed_contract(tmp_path, monk
         assert _patch(client, revision, "panel_writes", True).status_code == 422
 
 
+def test_boolean_revision_is_rejected_as_non_canonical(tmp_path):
+    from panel_agent.capabilities import CapabilityOverrideStore
+
+    path = tmp_path / "capability-overrides.json"
+    path.write_text(json.dumps({
+        "schemaVersion": "capability-overrides.v1",
+        "revision": True,
+        "updatedAt": "2026-08-26T00:00:00Z",
+        "overrides": {},
+    }), encoding="utf-8")
+
+    document, available = CapabilityOverrideStore(path).read()
+    assert available is False
+    assert document["revision"] == 0
+
+
 def test_store_serializes_same_revision_writers(tmp_path):
     from panel_agent.capabilities import CapabilityOverrideStore, CapabilityRevisionConflict
 
