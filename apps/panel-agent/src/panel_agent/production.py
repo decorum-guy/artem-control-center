@@ -12,6 +12,7 @@ from .connectivity_actions import (
 from .main import SETTINGS, app, runtime
 from .rog_g703_power import RogG703ActionExecutor, build_rog_g703_action_router
 from .static_dashboard import install_dashboard_routes
+from .system_update import build_system_update_router
 
 logging.getLogger("uvicorn.access").disabled = True
 
@@ -40,4 +41,5 @@ app.include_router(build_access_router(access_policy))
 app.include_router(build_avalar_action_router(avalar_actions))
 app.include_router(build_connectivity_action_router(connectivity_actions))
 app.include_router(build_rog_g703_action_router(rog_g703_actions))
+app.include_router(build_system_update_router(access_policy))
 install_dashboard_routes(app)

@@ -7,11 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+from fastapi import APIRouter, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from .capabilities import CapabilityOverrideStore
-
-from fastapi import APIRouter, Header, HTTPException, Response, status
+from .system_update import software_update_active
 
 RuntimeAction = Literal["hide", "shutdown", "apply_capabilities"]
 
@@ -35,7 +35,7 @@ def _enabled() -> bool:
 
 
 def _capability_apply_enabled() -> bool:
-    # Applying a persisted delayed override is a write operation too.  Keeping
+    # Applying a persisted delayed override is a write operation too. Keeping
     # this check here makes a previously staged command fail closed when the
     # global master is disabled after staging but before Apply.
     return (
@@ -109,7 +109,11 @@ def _apply_state() -> dict:
         status_value = payload.get("status")
         if status_value not in {"idle", "queued", "building", "restarting", "success", "failed"}:
             raise ValueError("invalid")
-        return {"status": status_value, "revision": payload.get("revision"), "updatedAt": payload.get("updatedAt")}
+        return {
+            "status": status_value,
+            "revision": payload.get("revision"),
+            "updatedAt": payload.get("updatedAt"),
+        }
     except (OSError, ValueError, json.JSONDecodeError):
         return {"status": "idle"}
 
@@ -126,16 +130,12 @@ def runtime_status(response: Response) -> dict:
 
 
 @router.post("/hide", status_code=status.HTTP_202_ACCEPTED)
-def hide_runtime(
-    x_panel_intent: str = Header(default=""),
-) -> dict:
+def hide_runtime(x_panel_intent: str = Header(default="")) -> dict:
     return _request_action("hide", x_panel_intent)
 
 
 @router.post("/shutdown", status_code=status.HTTP_202_ACCEPTED)
-def shutdown_runtime(
-    x_panel_intent: str = Header(default=""),
-) -> dict:
+def shutdown_runtime(x_panel_intent: str = Header(default="")) -> dict:
     return _request_action("shutdown", x_panel_intent)
 
 
@@ -149,24 +149,56 @@ def apply_capabilities(
     path = _command_path()
     if not _capability_apply_enabled() or path is None:
         raise HTTPException(status_code=409, detail="capability_apply_disabled")
+    if software_update_active(path.parent):
+        raise HTTPException(status_code=409, detail="software_update_active")
+
     document, available = CapabilityOverrideStore().read()
     if not available:
         raise HTTPException(status_code=409, detail="capability_store_unavailable")
     if document["revision"] != payload.expectedRevision:
         raise HTTPException(status_code=409, detail="revision_conflict")
-    state_path = os.getenv("PANEL_CAPABILITY_APPLY_STATE_PATH", "").strip()
-    if state_path:
-        _write_command(Path(state_path), {
+
+    state_path_raw = os.getenv("PANEL_CAPABILITY_APPLY_STATE_PATH", "").strip()
+    state_path = Path(state_path_raw) if state_path_raw else None
+    requested_at = datetime.now(timezone.utc).isoformat()
+    if state_path is not None:
+        # Claim the Apply maintenance window before the final updater re-check.
+        # An update that races us will now either see queued and yield, or will
+        # already own update-lock and make this Apply yield below.
+        _write_command(state_path, {
             "schemaVersion": 1,
             "status": "queued",
             "revision": payload.expectedRevision,
-            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "updatedAt": requested_at,
         })
+
+    if software_update_active(path.parent):
+        if state_path is not None:
+            _write_command(state_path, {
+                "schemaVersion": 1,
+                "status": "failed",
+                "revision": payload.expectedRevision,
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "code": "software_update_active",
+            })
+        raise HTTPException(status_code=409, detail="software_update_active")
+
+    if path.exists():
+        if state_path is not None:
+            _write_command(state_path, {
+                "schemaVersion": 1,
+                "status": "failed",
+                "revision": payload.expectedRevision,
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "code": "runtime_command_busy",
+            })
+        raise HTTPException(status_code=409, detail="runtime_command_busy")
+
     _write_command(path, {
         "schemaVersion": 1,
         "action": "apply_capabilities",
         "expectedRevision": payload.expectedRevision,
         "requestId": secrets.token_hex(12),
-        "requestedAt": datetime.now(timezone.utc).isoformat(),
+        "requestedAt": requested_at,
     })
     return {"accepted": True, "action": "apply_capabilities"}

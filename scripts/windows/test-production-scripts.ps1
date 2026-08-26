@@ -81,12 +81,25 @@ try {
     $installerText = Get-Content `
         -LiteralPath (Join-Path $PSScriptRoot "install-production.ps1") `
         -Raw
-    if ($installerText -notmatch 'npm\.cmd[\s\S]*?build:production') {
-        throw "Production installer must use the deterministic accepted V2 build profile"
-    }
+    $syncHelpersText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "sync-desktop-helpers.ps1") `
+        -Raw
+    $runtimeCommonText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "runtime-common.ps1") `
+        -Raw
+    $startText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "start-production.ps1") `
+        -Raw
+    $openText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "open-kiosk.ps1") `
+        -Raw
     $updaterText = Get-Content `
         -LiteralPath (Join-Path $PSScriptRoot "update-production.ps1") `
         -Raw
+
+    if ($installerText -notmatch 'npm\.cmd[\s\S]*?build:production') {
+        throw "Production installer must use the deterministic accepted V2 build profile"
+    }
     if ($updaterText -notmatch 'npm\.cmd[\s\S]*?build:production') {
         throw "Production updater must rebuild the dashboard with the deterministic accepted V2 profile"
     }
@@ -97,9 +110,6 @@ try {
         throw "Production installer must register the Scheduled Task with the resolved user SID"
     }
 
-    $runtimeCommonText = Get-Content `
-        -LiteralPath (Join-Path $PSScriptRoot "runtime-common.ps1") `
-        -Raw
     if ($runtimeCommonText -notmatch 'function Get-ArtemKioskProcesses') {
         throw "Kiosk process matching must be centralized"
     }
@@ -108,6 +118,79 @@ try {
     }
     if ($runtimeCommonText -match 'CommandLine\s+-like\s+"\*--kiosk\*"') {
         throw "Kiosk shutdown must not depend on the transient --kiosk flag"
+    }
+    if ($runtimeCommonText -notmatch 'function Get-ArtemVisibleKioskProcesses') {
+        throw "Visible kiosk detection must be distinct from the broad Edge profile process group"
+    }
+    if ($runtimeCommonText -notmatch 'MainWindowHandle') {
+        throw "Visible kiosk detection must require a real Edge top-level window"
+    }
+    if ($runtimeCommonText -notmatch 'function Ensure-ArtemKioskVisible') {
+        throw "Visible kiosk restoration must use one canonical idempotent helper"
+    }
+    if ($runtimeCommonText -notmatch 'Stop-ArtemKiosk[\s\S]*?Start-Process') {
+        throw "Stale/background panel Edge must be cleared before relaunching the kiosk"
+    }
+    if ($openText -notmatch 'Ensure-ArtemKioskVisible') {
+        throw "Open must prove that a visible kiosk exists"
+    }
+
+    if ($startText -notmatch 'Wait-ArtemPanelReady\s+-Paths\s+\$paths\s+-TimeoutSeconds\s+20') {
+        throw "Existing runtime must receive a bounded readiness recovery grace window"
+    }
+    if ($startText -notmatch 'Test-ArtemCapabilityApplyActive') {
+        throw "Open recovery must protect a legitimate capability Apply"
+    }
+    if ($startText -notmatch 'Get-ArtemSoftwareUpdateLock') {
+        throw "Open must not compete with an active software update"
+    }
+    if ($startText -notmatch 'Stop-ArtemRuntime\s+-Paths\s+\$paths\s+-Manual:\$false') {
+        throw "Automatic unhealthy-runtime recovery must remain non-manual"
+    }
+    if ($startText -notmatch '-not\s+\$UpdateRequestId') {
+        throw "Updater-owned restart must bypass the Scheduled Task path so its update lock identity is preserved"
+    }
+
+    foreach ($helperText in @($installerText, $syncHelpersText)) {
+        if ($helperText -notmatch 'set "exitCode=%ERRORLEVEL%"') {
+            throw "Open Control Center.cmd must preserve the PowerShell exit code"
+        }
+        if ($helperText -notmatch 'if not "%exitCode%"=="0"') {
+            throw "Open Control Center.cmd must expose non-zero failures"
+        }
+        if ($helperText -notmatch 'pause') {
+            throw "Open Control Center.cmd must pause after a real failure"
+        }
+        if ($helperText -notmatch 'exit /b %exitCode%') {
+            throw "Open Control Center.cmd must return the original PowerShell exit code"
+        }
+    }
+
+    foreach ($parameter in @('ExpectedCurrentHead', 'ExpectedTargetHead', 'RequestId')) {
+        if ($updaterText -notmatch $parameter) {
+            throw "Updater is missing exact-target handoff field: $parameter"
+        }
+    }
+    if ($updaterText -notmatch 'git\.exe[\s\S]*?fetch[\s\S]*?origin[\s\S]*?main') {
+        throw "Updater must re-fetch the canonical origin/main before shutdown"
+    }
+    if ($updaterText -notmatch '\$currentHead\s+-ne\s+\$ExpectedCurrentHead[\s\S]*?\$targetHead\s+-ne\s+\$ExpectedTargetHead') {
+        throw "Updater must reject an exact-target mismatch before production shutdown"
+    }
+    if ($updaterText -notmatch '\$transactionStarted\s*=\s*\$true[\s\S]*?Stop-ArtemRuntime') {
+        throw "Updater rollback ownership must begin only when the production transaction starts"
+    }
+    if ($updaterText -notmatch 'merge[\s\S]*?--ff-only[\s\S]*?\$targetHead') {
+        throw "Updater must merge the exact checked target rather than a moving branch ref"
+    }
+    if (($updaterText | Select-String -Pattern 'Ensure-ArtemHealthyVisiblePanel' -AllMatches).Matches.Count -lt 4) {
+        throw "No-op, success and rollback updater paths must all restore a healthy visible panel"
+    }
+    if ($updaterText -notmatch 'Test-ArtemCapabilityApplyActive') {
+        throw "Software updater must not start during capability Apply"
+    }
+    if ($updaterText -notmatch 'New-ArtemUpdateLock') {
+        throw "Software updater must serialize concurrent update transactions"
     }
 
     $watcherText = Get-Content `
@@ -175,4 +258,4 @@ finally {
     Remove-Item -LiteralPath $rolloutRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime ACLs, Scheduled Task SID, profile-scoped kiosk shutdown and AVALAR rollout configuration."
+Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime ACLs, visible kiosk/open recovery, exact-target updater, Scheduled Task SID and AVALAR rollout configuration."

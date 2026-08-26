@@ -75,11 +75,6 @@ export function planRestart(budget, { allowBeyondBudget = false, now = Date.now(
 
 export const CAPABILITY_APPLY_MAX_RECOVERY_FAILURES = 3;
 
-/**
- * Keep the candidate-bundle transaction separate from the ordinary runtime
- * restart budget.  The production supervisor owns the callbacks; this small
- * state machine keeps acceptance and recovery semantics directly testable.
- */
 export function createCapabilityApplyLifecycle({ onSuccess, onRestart, onRollback }) {
   let activeApply = null;
   let appliedRevision = null;
@@ -244,6 +239,61 @@ export function isSafeCapabilityApplyCommand(command) {
   );
 }
 
+export function isSafePanelUpdateCommand(command) {
+  if (!command || typeof command !== "object") return false;
+  const keys = Object.keys(command).sort();
+  const allowed = [
+    "action",
+    "expectedCurrentHead",
+    "expectedTargetHead",
+    "requestId",
+    "requestedAt",
+    "schemaVersion"
+  ].sort();
+  if (keys.length !== allowed.length || keys.some((key, index) => key !== allowed[index])) return false;
+  return Boolean(
+    command.schemaVersion === 1
+    && command.action === "update_panel"
+    && typeof command.expectedCurrentHead === "string"
+    && /^[a-f0-9]{40}$/.test(command.expectedCurrentHead)
+    && typeof command.expectedTargetHead === "string"
+    && /^[a-f0-9]{40}$/.test(command.expectedTargetHead)
+    && command.expectedCurrentHead !== command.expectedTargetHead
+    && typeof command.requestId === "string"
+    && /^[a-f0-9]{24}$/.test(command.requestId)
+    && typeof command.requestedAt === "string"
+    && Number.isFinite(Date.parse(command.requestedAt))
+  );
+}
+
+export const UPDATE_HANDOFF_MAX_AGE_MS = 2 * 60_000;
+
+export function activePanelUpdateLease(
+  payload,
+  { nowMs = Date.now(), ownerAlive = () => false } = {}
+) {
+  if (
+    !payload
+    || payload.schemaVersion !== 1
+    || payload.status !== "updating"
+    || typeof payload.requestId !== "string"
+    || !/^[a-f0-9]{24}$/.test(payload.requestId)
+  ) {
+    return null;
+  }
+  const updatedAt = Date.parse(payload.updatedAt);
+  if (!Number.isFinite(updatedAt)) return null;
+
+  if (payload.ownerPid !== undefined && payload.ownerPid !== null) {
+    if (!Number.isInteger(payload.ownerPid) || payload.ownerPid <= 0) return null;
+    return ownerAlive(payload.ownerPid, payload.requestId) ? payload : null;
+  }
+
+  const ageMs = nowMs - updatedAt;
+  if (ageMs < 0 || ageMs > UPDATE_HANDOFF_MAX_AGE_MS) return null;
+  return payload;
+}
+
 export function capabilityStoreRevision(path) {
   try {
     const payload = JSON.parse(readFileSync(path, "utf8"));
@@ -271,7 +321,6 @@ export function activateStagedDashboard({ active, staging, backup }) {
   }
 }
 
-/** Restore the only retained known-good dashboard after failed acceptance. */
 export function restoreDashboardBackup({ active, backup }) {
   if (!existsSync(backup)) throw new Error("dashboard_backup_missing");
   rmSync(active, { recursive: true, force: true });
@@ -300,7 +349,7 @@ function closeKioskWindow(edgeProfileDir, log) {
   const script = [
     `$profile = '${escaped}'`,
     "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\"",
-    "| Where-Object { $_.CommandLine -like '*--kiosk*' -and $_.CommandLine -like ('*' + $profile + '*') }",
+    "| Where-Object { $_.CommandLine -like ('*' + $profile + '*') }",
     "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
   ].join(" ");
   const result = spawnSync(
@@ -308,7 +357,27 @@ function closeKioskWindow(edgeProfileDir, log) {
     ["-NoProfile", "-NonInteractive", "-Command", script],
     { encoding: "utf8", windowsHide: true }
   );
-  if (result.status !== 0) log("WARN", "Unable to close the panel-owned Edge kiosk window");
+  if (result.status !== 0) log("WARN", "Unable to close the panel-owned Edge profile");
+}
+
+function updaterOwnerProcessAlive(ownerPid, requestId) {
+  if (process.platform !== "win32" || !Number.isInteger(ownerPid) || ownerPid <= 0) return false;
+  if (typeof requestId !== "string" || !/^[a-f0-9]{24}$/.test(requestId)) return false;
+  const script = [
+    `$process = Get-CimInstance Win32_Process -Filter \"ProcessId = ${ownerPid}\" -ErrorAction SilentlyContinue`,
+    "$hasRequestArgument = $null -ne $process -and $process.CommandLine -like '*-RequestId*'",
+    "if ($null -ne $process",
+    "-and $process.Name -in @('powershell.exe','pwsh.exe')",
+    "-and $process.CommandLine -like '*update-production.ps1*'",
+    `-and (-not $hasRequestArgument -or $process.CommandLine -like '*${requestId}*')) { exit 0 }`,
+    "exit 1"
+  ].join(" ");
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    { encoding: "utf8", windowsHide: true }
+  );
+  return result.status === 0;
 }
 
 async function probeHealth(url, timeoutMs = 3_000) {
@@ -342,6 +411,9 @@ export async function runProductionRuntime() {
   const dashboardDist = resolve(root, "apps", "dashboard", "dist");
   const capabilityOverridesPath = join(runtimeDir, "capability-overrides.json");
   const capabilityApplyStatePath = join(runtimeDir, "capability-apply-state.json");
+  const updateLockPath = join(runtimeDir, "update-lock.json");
+  const updateStatePath = join(runtimeDir, "update-state.json");
+  const updaterPath = resolve(root, "scripts", "windows", "update-production.ps1");
   const venvPython = resolve(root, ".venv", isWindows ? "Scripts/python.exe" : "bin/python");
   const log = createLogger(logDir);
 
@@ -401,6 +473,31 @@ export async function runProductionRuntime() {
       updatedAt: new Date().toISOString(),
       ...extra
     });
+  }
+
+  function writeUpdateState(status, result) {
+    atomicWriteJson(updateStatePath, {
+      schemaVersion: 1,
+      status,
+      updatedAt: new Date().toISOString(),
+      ...(result ? { result } : {})
+    });
+  }
+
+  function activeUpdateLock() {
+    try {
+      const payload = JSON.parse(readFileSync(updateLockPath, "utf8"));
+      return activePanelUpdateLease(payload, { ownerAlive: updaterOwnerProcessAlive });
+    } catch {
+      return null;
+    }
+  }
+
+  function rejectUpdateHandoff(command, reason) {
+    log("WARN", `Rejected panel update handoff: ${reason}`);
+    writeUpdateState("failed", reason);
+    const lock = activeUpdateLock();
+    if (lock?.requestId === command?.requestId) rmSync(updateLockPath, { force: true });
   }
 
   function writeState(status, extra = {}) {
@@ -494,8 +591,6 @@ export async function runProductionRuntime() {
       writeCapabilityApplyState("failed", { revision: pendingApply.revision, code: "rollback_failed" });
       return;
     }
-    // Failed desired state remains in capability-overrides.json. The restored
-    // bundle is the active state; a later owner retry may build it again.
     writeCapabilityApplyState("failed", { revision: pendingApply.revision, code: "new_runtime_unhealthy" });
     requestRestart("capability rollback to known-good dashboard", { allowBeyondBudget: true });
   }
@@ -536,6 +631,7 @@ export async function runProductionRuntime() {
     writeCapabilityApplyState("queued", { revision: command.expectedRevision });
     try {
       if (!isSafeCapabilityApplyCommand(command)) throw new Error("invalid_capability_apply_command");
+      if (activeUpdateLock()) throw new Error("software_update_active");
       if (capabilityStoreRevision(capabilityOverridesPath) !== command.expectedRevision) throw new Error("capability_revision_changed");
       if (!currentCheckoutIsBuildSafe()) throw new Error("production_checkout_not_build_safe");
 
@@ -575,6 +671,57 @@ export async function runProductionRuntime() {
     }
   }
 
+  function launchPanelUpdate(command) {
+    if (!isSafePanelUpdateCommand(command)) {
+      rejectUpdateHandoff(command, "invalid_update_command");
+      return;
+    }
+    if (!isWindows || !existsSync(updaterPath)) {
+      rejectUpdateHandoff(command, "updater_unavailable");
+      return;
+    }
+    if (applyingCapabilities || capabilityApplyLifecycle.activeApply) {
+      rejectUpdateHandoff(command, "capability_apply_active");
+      return;
+    }
+    const lock = activeUpdateLock();
+    if (
+      !lock
+      || lock.requestId !== command.requestId
+      || lock.expectedCurrentHead !== command.expectedCurrentHead
+      || lock.expectedTargetHead !== command.expectedTargetHead
+    ) {
+      rejectUpdateHandoff(command, "update_lock_mismatch");
+      return;
+    }
+
+    const updater = spawn(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        updaterPath,
+        "-ExpectedCurrentHead",
+        command.expectedCurrentHead,
+        "-ExpectedTargetHead",
+        command.expectedTargetHead,
+        "-RequestId",
+        command.requestId
+      ],
+      {
+        cwd: root,
+        detached: true,
+        windowsHide: true,
+        stdio: "ignore"
+      }
+    );
+    updater.unref();
+    log("INFO", `Panel update handoff accepted requestId=${command.requestId}`);
+  }
+
   function consumeRuntimeCommand() {
     if (shuttingDown || !existsSync(commandPath)) return;
     let command;
@@ -610,6 +757,10 @@ export async function runProductionRuntime() {
     }
     if (command.action === "apply_capabilities") {
       applyCapabilities(command);
+      return;
+    }
+    if (command.action === "update_panel") {
+      launchPanelUpdate(command);
       return;
     }
     log("WARN", `Rejected unsupported runtime action: ${String(command?.action)}`);

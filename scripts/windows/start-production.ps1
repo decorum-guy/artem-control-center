@@ -1,7 +1,9 @@
 param(
     [switch]$AutoStart,
     [switch]$NoKiosk,
-    [switch]$Wait
+    [switch]$Wait,
+    [ValidatePattern('^[0-9a-f]{24}$')]
+    [string]$UpdateRequestId
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +55,16 @@ Initialize-ArtemRuntimeDirectories -Paths $paths
 Update-ArtemProcessPath
 Sync-ArtemDesktopHelpers
 
+$activeUpdate = Get-ArtemSoftwareUpdateLock -Paths $paths
+$ownsUpdate = (
+    $null -ne $activeUpdate -and
+    $UpdateRequestId -and
+    [string]$activeUpdate.requestId -eq $UpdateRequestId
+)
+if ($null -ne $activeUpdate -and -not $ownsUpdate) {
+    throw "Control Center software update is in progress"
+}
+
 if ($AutoStart -and (Test-Path -LiteralPath $paths.ManualStop)) {
     Write-Host "Artem Control Center remains stopped by manual request."
     exit 0
@@ -65,18 +77,48 @@ if (-not $AutoStart) {
 Assert-ArtemProductionPrerequisites -Paths $paths
 
 if (Test-ArtemRuntimeProcess -Paths $paths) {
-    if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 20)) {
-        throw "Production runtime process exists but is not ready"
+    if (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 20) {
+        Start-ArtemConnectivityIfConfigured
+        if (-not $NoKiosk) {
+            & $paths.OpenKioskScript -AssumeRuntimeReady
+        }
+        Write-Host "Artem Control Center is already running."
+        exit 0
     }
-    Start-ArtemConnectivityIfConfigured
-    if (-not $NoKiosk) {
-        & $paths.OpenKioskScript -AssumeRuntimeReady
+
+    # B2.2 Apply owns a bounded maintenance window. A temporary readiness gap
+    # during building/restarting must never be treated as a stale supervisor.
+    if (Test-ArtemCapabilityApplyActive -Paths $paths) {
+        throw "Control Center capability Apply is still active; runtime recovery was not started"
     }
-    Write-Host "Artem Control Center is already running."
-    exit 0
+
+    # A live supervisor with an unavailable Panel Agent is otherwise recoverable.
+    # This deliberately remains a non-manual stop so no manual-stop marker is made.
+    $staleState = Get-ArtemRuntimeState -Paths $paths
+    $stalePid = if ($null -ne $staleState -and $null -ne $staleState.supervisorPid) {
+        [string]$staleState.supervisorPid
+    }
+    else {
+        "unknown"
+    }
+    Write-Warning "Production runtime supervisor $stalePid is alive but the panel is not ready. Restarting the runtime automatically."
+    Stop-ArtemRuntime -Paths $paths -Manual:$false -TimeoutSeconds 20
+    Remove-Item -LiteralPath $paths.State -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $paths.Command -Force -ErrorAction SilentlyContinue
+
+    if (Test-ArtemRuntimeProcess -Paths $paths) {
+        throw "Unable to recover the unhealthy production runtime"
+    }
+}
+elseif (Test-ArtemCapabilityApplyActive -Paths $paths) {
+    throw "Control Center capability Apply is still active; a competing runtime start was not attempted"
 }
 
-if (-not $AutoStart) {
+# Interactive desktop starts prefer Task Scheduler so the normal user-session
+# environment is preserved. An updater-owned restart must stay in this process,
+# though: the Scheduled Task cannot carry UpdateRequestId and would correctly
+# reject the updater's active lock as a competing software update.
+if (-not $AutoStart -and -not $UpdateRequestId) {
     $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($scheduledTask) {
         if ($scheduledTask.State -eq "Running") {
@@ -101,6 +143,11 @@ if (-not $AutoStart) {
 
 Remove-Item -LiteralPath $paths.State -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $paths.Command -Force -ErrorAction SilentlyContinue
+
+# The software updater has a separate read-only/config-managed product gate.
+# Set it only in the canonical production launcher so the Panel Agent does not
+# inherit update permission merely because kiosk hide/shutdown controls exist.
+$env:PANEL_UPDATE_CONTROLS_ENABLED = "true"
 
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $argumentLine = "`"$($paths.RuntimeScript)`""

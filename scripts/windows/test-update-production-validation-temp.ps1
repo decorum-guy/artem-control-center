@@ -13,8 +13,11 @@ if (-not $updaterText.Contains('--basetemp=`"$pytestTempForPytest`"')) {
 if ($updaterText.Contains('--basetemp=$pytestTemp -p no:cacheprovider')) {
     throw "Updater must not place a raw Windows path in PYTEST_ADDOPTS"
 }
-if (-not $updaterText.Contains('Production checkout has local changes; update aborted')) {
-    throw "Updater dirty-worktree guard must remain enabled"
+if (-not $updaterText.Contains('git.exe status --porcelain --untracked-files=no')) {
+    throw "Updater must reject tracked checkout changes without treating untracked validation files as source changes"
+}
+if (-not $updaterText.Contains('Production checkout has tracked local changes')) {
+    throw "Updater tracked dirty-worktree guard must remain enabled"
 }
 if (-not $updaterText.Contains('Remove-Item -LiteralPath $validationRoot -Recurse -Force -ErrorAction SilentlyContinue')) {
     throw "Updater must clean the isolated validation root in finally"
@@ -105,4 +108,6 @@ finally {
     Remove-Item -LiteralPath $regressionRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated Windows-safe pytest basetemp parsing, repo cleanliness, cleanup contract and dirty-worktree guard."
+& (Join-Path $PSScriptRoot "test-update-maintenance-lease.ps1")
+
+Write-Host "Validated Windows-safe pytest basetemp parsing, repo cleanliness, cleanup contract, tracked dirty-worktree guard and update maintenance lease recovery."

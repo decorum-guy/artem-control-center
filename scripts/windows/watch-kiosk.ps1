@@ -4,17 +4,20 @@ $ErrorActionPreference = "SilentlyContinue"
 $paths = Get-ArtemRuntimePaths
 $closeRequest = Join-Path $paths.RuntimeRoot "kiosk-close-request.json"
 $startupDeadline = (Get-Date).AddSeconds(20)
-$seenKiosk = $false
+$seenVisibleKiosk = $false
 
 while ((Get-Date) -lt $startupDeadline) {
-    if (Test-ArtemKioskRunning -Paths $paths) {
-        $seenKiosk = $true
+    if (Test-ArtemKioskVisible -Paths $paths) {
+        $seenVisibleKiosk = $true
         break
     }
     Start-Sleep -Milliseconds 250
 }
 
-if (-not $seenKiosk) {
+if (-not $seenVisibleKiosk) {
+    # Do not leave stale background processes from the dedicated profile around;
+    # they must never become a future false "already open" signal.
+    Stop-ArtemKiosk -Paths $paths
     exit 0
 }
 
@@ -25,7 +28,8 @@ while ($true) {
         exit 0
     }
 
-    if (-not (Test-ArtemKioskRunning -Paths $paths)) {
+    if (-not (Test-ArtemKioskVisible -Paths $paths)) {
+        Stop-ArtemKiosk -Paths $paths
         exit 0
     }
 

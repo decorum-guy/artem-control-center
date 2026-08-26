@@ -26,6 +26,7 @@ export interface ActionConfirmationSpec {
   description: string;
   confirmLabel: string;
   requiredPhrase?: string;
+  alwaysConfirm?: boolean;
 }
 
 export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfirmationSpec> = {
@@ -99,7 +100,8 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     target: "Локальная панель Windows",
     environment: "система",
     description: "Закроем панель и локальные процессы. Скрытие панели остаётся отдельной командой.",
-    confirmLabel: "Полностью закрыть"
+    confirmLabel: "Полностью закрыть",
+    alwaysConfirm: true
   },
   "system.rog_g703.hibernate": {
     id: "system.rog_g703.hibernate",
