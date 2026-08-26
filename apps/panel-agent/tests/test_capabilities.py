@@ -90,6 +90,7 @@ def _declared_runtime_product_flags():
         name = field.name.upper()
         flags.add(name if field.name.startswith("panel_") else f"PANEL_{name}")
     flags.add("PANEL_KIOSK_CONTROLS_ENABLED")
+    flags.add("PANEL_UPDATE_CONTROLS_ENABLED")
     return flags
 
 
@@ -124,6 +125,7 @@ def test_inventory_is_explicit_safe_and_two_behaviors_only(tmp_path, monkeypatch
     assert _entry(payload, "calendar_display_colors")["mutable"] is True
     assert _entry(payload, "planning_calendar_route")["mutable"] is True
     assert _entry(payload, "panel_writes")["mutable"] is False
+    assert _entry(payload, "panel_update_controls")["mutable"] is False
     serialized = json.dumps(payload)
     for forbidden in ("PANEL_HA_TOKEN", "PANEL_PLANNING_SECRET", "runtime.env", "password", "http://"):
         assert forbidden not in serialized
