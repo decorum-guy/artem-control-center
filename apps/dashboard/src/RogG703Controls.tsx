@@ -144,15 +144,13 @@ export function RogG703DetailControl({ service }: { service: ServiceSnapshot }) 
       <header className="system-rog-detail__header">
         <div className="system-rog-detail__identity">
           <span className="system-rog-detail__icon" aria-hidden="true"><Icon name="system" /></span>
-          <div>
-            <p className="section-kicker">Хост · ASUS</p>
-            <h2 id="system-rog-g703-title">{service.title}</h2>
-          </div>
+          <p className="section-kicker">Хост · ASUS</p>
         </div>
         <StatusText label={controller.display.label} tone={rogG703Tone(status)} />
       </header>
 
       <div className="system-rog-detail__state" role="status" aria-live="polite">
+        <h2 id="system-rog-g703-title">{service.title}</h2>
         <strong>{controller.display.label}</strong>
         <span>{controller.display.detail}</span>
       </div>

@@ -102,16 +102,52 @@ test.describe("Issue #112 Calendar Slice A", () => {
     await expect(page.getByTestId("planning-calendar-header-controls")).toHaveCSS("display", "grid");
     await expect(page.getByTestId("planning-calendar-month-controls").getByRole("button", { name: "Сегодня" })).toHaveCount(0);
     await expect(page.getByTestId("planning-calendar-today-control").getByRole("button", { name: "Сегодня" })).toBeVisible();
+    const monthPager = await page.getByTestId("planning-calendar-month-controls").evaluate((element) => {
+      const previous = element.querySelector<HTMLButtonElement>('[aria-label="Предыдущий месяц"]');
+      const next = element.querySelector<HTMLButtonElement>('[aria-label="Следующий месяц"]');
+      const label = element.querySelector<HTMLElement>("[data-testid='planning-calendar-month-heading']");
+      if (!previous || !next || !label) throw new Error("Month pager geometry is incomplete");
+      const rect = (item: Element) => {
+        const box = item.getBoundingClientRect();
+        return { left: box.left, right: box.right, width: box.width, height: box.height };
+      };
+      return { previous: rect(previous), label: rect(label), next: rect(next), gap: getComputedStyle(element).gap, whiteSpace: getComputedStyle(label).whiteSpace };
+    });
+    expect(monthPager.previous.width).toBeCloseTo(48, 3);
+    expect(monthPager.previous.height).toBeCloseTo(48, 3);
+    expect(monthPager.next.width).toBeCloseTo(monthPager.previous.width, 3);
+    expect(monthPager.next.height).toBeCloseTo(monthPager.previous.height, 3);
+    expect(monthPager.gap).toBe("4px");
+    expect(monthPager.whiteSpace).toBe("nowrap");
+    expect(Math.abs((monthPager.label.left - monthPager.previous.right) - (monthPager.next.left - monthPager.label.right))).toBeLessThanOrEqual(0.5);
+    expect(monthPager.label.width).toBeCloseTo(144, 3);
+    const longestMonthLabelWidth = await page.getByTestId("planning-calendar-month-heading").evaluate((element) => {
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas text measurement is unavailable");
+      context.font = getComputedStyle(element).font;
+      return Math.max(...Array.from({ length: 12 }, (_, index) => {
+        const month = new Intl.DateTimeFormat("ru-RU", { month: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2026, index, 1)));
+        const label = `${month.slice(0, 1).toLocaleUpperCase("ru-RU")}${month.slice(1)} 2026`;
+        return context.measureText(label).width;
+      }));
+    });
+    expect(longestMonthLabelWidth).toBeLessThanOrEqual(monthPager.label.width);
+    const augustLabelWidth = monthPager.label.width;
     const monthControlsBox = await page.getByTestId("planning-calendar-month-controls").boundingBox();
     const todayControlBox = await page.getByTestId("planning-calendar-today-control").boundingBox();
     const monthColumnBox = await page.locator(".calendar-month").boundingBox();
     const selectedDayColumnBox = await page.getByTestId("planning-calendar-selected-day").boundingBox();
+    const todayButtonBox = await page.getByTestId("planning-calendar-today-control").getByRole("button", { name: "Сегодня" }).boundingBox();
+    const refreshButtonBox = await page.getByTestId("planning-calendar-refresh").boundingBox();
     expect(todayControlBox?.x).toBeGreaterThan((monthControlsBox?.x ?? 0) + (monthControlsBox?.width ?? 0));
     expect(Math.abs((monthControlsBox?.x ?? 0) - (monthColumnBox?.x ?? 0))).toBeLessThanOrEqual(1);
     expect(monthControlsBox?.width ?? 0).toBeLessThan((monthColumnBox?.width ?? 0) * 0.5);
     const todayRight = (todayControlBox?.x ?? 0) + (todayControlBox?.width ?? 0);
     const selectedDayRight = (selectedDayColumnBox?.x ?? 0) + (selectedDayColumnBox?.width ?? 0);
     expect(Math.abs(todayRight - selectedDayRight)).toBeLessThanOrEqual(1);
+    expect(todayButtonBox?.width).toBeCloseTo(112, 3);
+    expect(refreshButtonBox?.width).toBeCloseTo(48, 3);
     await expect(page.getByTestId("route-calendar")).not.toContainText("Planning read API");
     await expect(page.getByTestId("route-calendar")).not.toContainText("Выбранный день");
 
@@ -154,6 +190,7 @@ test.describe("Issue #112 Calendar Slice A", () => {
     await colorDay.click();
     await page.getByRole("button", { name: "Следующий месяц" }).click();
     await expect(page.getByTestId("planning-calendar-month-heading")).toHaveText("Сентябрь 2026");
+    await expect.poll(async () => (await page.getByTestId("planning-calendar-month-heading").boundingBox())?.width ?? 0).toBeCloseTo(augustLabelWidth, 3);
     await page.getByRole("button", { name: "Сегодня" }).click();
     await expect(page.getByTestId("planning-calendar-month-heading")).toHaveText("Август 2026");
     await expect(page.locator('[data-testid="planning-calendar-month-cell"][data-date="2026-08-12"]')).toHaveAttribute("aria-selected", "true");
@@ -166,7 +203,50 @@ test.describe("Issue #112 Calendar Slice A", () => {
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Работа в субботу" })).toBeVisible();
 
     const overflow = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, width: document.documentElement.clientWidth }));
-    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.width + 1);
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.width);
     expect(methods.every((method) => method === "GET")).toBe(true);
+  });
+
+  test("centers one- and two-digit current dates inside the same thin ring", async ({ page }) => {
+    await installCalendarFixture(page);
+    await page.goto("/calendar");
+
+    const inspectCurrentDate = async (date: string) => page.locator(`[data-testid="planning-calendar-month-cell"][data-date="${date}"]`).evaluate((cell) => {
+      const dateBox = cell.querySelector<HTMLElement>(".calendar-month-cell__date");
+      if (!dateBox) throw new Error("Missing current-date box");
+      const box = dateBox.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(dateBox);
+      const numeral = range.getClientRects()[0];
+      if (!numeral) throw new Error("Missing current-date numeral bounds");
+      const style = getComputedStyle(dateBox);
+      return {
+        box: { left: box.x, top: box.y, right: box.x + box.width, bottom: box.y + box.height, width: box.width, height: box.height },
+        numeral: { left: numeral.x, top: numeral.y, right: numeral.x + numeral.width, bottom: numeral.y + numeral.height, width: numeral.width, height: numeral.height },
+        borderWidth: style.borderTopWidth,
+        selected: cell.getAttribute("aria-selected"),
+        current: cell.getAttribute("aria-current"),
+        selectionShadow: getComputedStyle(cell).boxShadow
+      };
+    });
+
+    const twoDigit = await inspectCurrentDate("2026-08-12");
+    expect(twoDigit.box.width).toBeCloseTo(30, 3);
+    expect(twoDigit.box.height).toBeCloseTo(30, 3);
+    expect(twoDigit.borderWidth).toBe("1px");
+    expect(Math.abs((twoDigit.numeral.left - twoDigit.box.left) - (twoDigit.box.right - twoDigit.numeral.right))).toBeLessThanOrEqual(1);
+    expect(Math.abs((twoDigit.numeral.top - twoDigit.box.top) - (twoDigit.box.bottom - twoDigit.numeral.bottom))).toBeLessThanOrEqual(1);
+    expect(twoDigit.selected).toBe("true");
+    expect(twoDigit.current).toBe("date");
+    expect(twoDigit.selectionShadow).toContain("inset");
+
+    await page.clock.setFixedTime("2026-08-01T12:00:00Z");
+    await page.reload();
+    await expect(page.locator('[data-testid="planning-calendar-month-cell"][data-date="2026-08-01"]')).toHaveAttribute("data-current", "true");
+    const oneDigit = await inspectCurrentDate("2026-08-01");
+    expect(oneDigit.box).toMatchObject({ width: twoDigit.box.width, height: twoDigit.box.height });
+    expect(oneDigit.borderWidth).toBe("1px");
+    expect(Math.abs((oneDigit.numeral.left - oneDigit.box.left) - (oneDigit.box.right - oneDigit.numeral.right))).toBeLessThanOrEqual(1);
+    expect(Math.abs((oneDigit.numeral.top - oneDigit.box.top) - (oneDigit.box.bottom - oneDigit.numeral.bottom))).toBeLessThanOrEqual(1);
   });
 });
