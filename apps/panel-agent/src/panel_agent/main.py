@@ -363,6 +363,7 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "avalar_main_deploy": SETTINGS.avalar_main_deploy_enabled,
         "rog_g703": SETTINGS.rog_g703_enabled,
         "kiosk_controls": _bool_env("PANEL_KIOSK_CONTROLS_ENABLED"),
+        "panel_update_controls": _bool_env("PANEL_UPDATE_CONTROLS_ENABLED"),
     }[capability_id]
 
 
