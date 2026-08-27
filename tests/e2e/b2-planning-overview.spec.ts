@@ -110,6 +110,58 @@ test.describe("B2 Planning Overview", () => {
     await expect(eventRow).not.toContainText("Утреннее совещание");
   });
 
+  test("shows the source calendar color marker and applies the Control Center override", async ({ page }) => {
+    const coloredPlanning = structuredClone(planningFixtures.healthy);
+    coloredPlanning.providerStatuses = [{
+      ...coloredPlanning.providerStatuses[0],
+      id: "calendar-provider",
+      calendars: [{
+        id: "primary",
+        label: "Основной календарь",
+        color: "#A1B2C3",
+        enabled: true,
+        status: "current",
+        lastSyncedAt: null,
+        observedAt: null
+      }]
+    }];
+    let overrides: Array<{ providerId: string; calendarId: string; color: string }> = [];
+    await page.route("**/api/v1/settings/calendar/display-colors", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          schemaVersion: "calendar.display-preferences.v1",
+          revision: overrides.length,
+          updatedAt: "2026-08-12T12:00:00Z",
+          overrides,
+          available: true,
+          warnings: [],
+          writesEnabled: false
+        })
+      });
+    });
+    await mockPlanning(page, coloredPlanning);
+    await page.goto("/overview?theme=day");
+
+    const marker = page.getByTestId("planning-overview-calendar-marker");
+    await expect(marker).toHaveAttribute("data-color", "#A1B2C3");
+    await expect(marker).toHaveCSS("background-color", "rgb(161, 178, 195)");
+    const rowGeometry = await page.getByTestId("planning-event-row").evaluate((element) => ({
+      row: element.getBoundingClientRect().toJSON(),
+      copy: element.querySelector(".planning-row__copy")?.getBoundingClientRect().toJSON(),
+      marker: element.querySelector("[data-testid='planning-overview-calendar-marker']")?.getBoundingClientRect().toJSON()
+    }));
+    expect(rowGeometry.marker?.width).toBe(4);
+    expect(rowGeometry.marker?.height).toBeLessThan(rowGeometry.row.height);
+    expect(rowGeometry.copy?.left).toBeGreaterThan(rowGeometry.row.left + 8);
+
+    overrides = [{ providerId: "calendar-provider", calendarId: "primary", color: "#D65A4A" }];
+    await page.reload();
+    await expect(page.getByTestId("planning-overview-calendar-marker")).toHaveAttribute("data-color", "#D65A4A");
+    await expect(page.getByTestId("planning-overview-calendar-marker")).toHaveCSS("background-color", "rgb(214, 90, 74)");
+  });
+
   test("orders upcoming events by local day before all-day type", async ({ page }) => {
     await mockPlanning(page, planningFixtures.upcomingTimedBeforeLaterAllDay);
     await page.goto("/overview?theme=day");

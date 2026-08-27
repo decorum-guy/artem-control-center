@@ -400,6 +400,32 @@ async function setCoffeeScale(page: Page, value: string): Promise<void> {
   await sheet.getByRole("button", { name: "Закрыть" }).click();
 }
 
+async function readCoffeeTransform(page: Page) {
+  return page.locator(".coffee-panel--overview").evaluate((panel) => {
+    const visual = panel.querySelector<HTMLElement>(".coffee-asset__visual")!;
+    const image = panel.querySelector<HTMLImageElement>(".coffee-asset__image")!;
+    const asset = panel.querySelector<HTMLElement>(".coffee-asset")!;
+    const imageRect = image.getBoundingClientRect();
+    const origin = getComputedStyle(visual).transformOrigin.split(" ").map(Number);
+    return {
+      scale: panel.getAttribute("data-image-scale"),
+      x: panel.getAttribute("data-image-x"),
+      y: panel.getAttribute("data-image-y"),
+      image: { left: imageRect.left, top: imageRect.top, width: imageRect.width, height: imageRect.height },
+      imageCenter: { x: imageRect.left + imageRect.width / 2, y: imageRect.top + imageRect.height / 2 },
+      visual: {
+        transform: getComputedStyle(visual).transform,
+        transformOrigin: getComputedStyle(visual).transformOrigin,
+        originX: origin[0],
+        originY: origin[1],
+        layoutWidth: visual.offsetWidth,
+        layoutHeight: visual.offsetHeight
+      },
+      assetTransform: getComputedStyle(asset).transform
+    };
+  });
+}
+
 test.describe("Overview V2 Edit mode and persistence", () => {
   test.beforeEach(() => {
     test.skip(!overviewV2Enabled || !overviewEditorEnabled, "Run with V2 and the Overview editor flags enabled.");
@@ -598,6 +624,50 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await setCoffeeScale(page, "100");
     await assertCoffeeContentGeometry(page, "selected coffee-warming scale 100");
     await captureArtifact(page, testInfo, "overview-edit-coffee-warming-scale-100-selected.png");
+  });
+
+  test("scales the coffee image around its visual center without changing position", async ({ page }) => {
+    const routeState = await installLayoutRoute(page);
+    await openEditor(page, "/overview?scenario=coffee-off&theme=night");
+    await selectFrame(page, "fixture.coffee");
+    const frame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+    await frame.getByRole("button", { name: "Настройки виджета" }).click();
+    const appearance = page.getByTestId("overview-widget-appearance");
+    await appearance.getByLabel("Размер изображения").fill("70");
+    await appearance.getByLabel("По горизонтали").fill("-2");
+    await appearance.getByLabel("По вертикали").fill("1");
+    await appearance.getByRole("button", { name: "Закрыть" }).click();
+
+    const at70 = await readCoffeeTransform(page);
+    expect(at70).toMatchObject({ scale: "70", x: "-2", y: "1" });
+    expect(at70.visual.originX).toBeCloseTo(at70.visual.layoutWidth / 2, 0);
+    expect(at70.visual.originY).toBeCloseTo(at70.visual.layoutHeight / 2, 0);
+    expect(at70.visual.transform).toMatch(/^matrix\(0\.7, 0, 0, 0\.7, 0, 0\)$/);
+    expect(at70.assetTransform).toMatch(/^matrix\(1, 0, 0, 1, /);
+
+    await setCoffeeScale(page, "120");
+    const at120 = await readCoffeeTransform(page);
+    expect(at120).toMatchObject({ scale: "120", x: "-2", y: "1", assetTransform: at70.assetTransform });
+    expect(at120.visual.transform).toMatch(/^matrix\(1\.2, 0, 0, 1\.2, 0, 0\)$/);
+    expect(Math.abs(at120.imageCenter.x - at70.imageCenter.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(at120.imageCenter.y - at70.imageCenter.y)).toBeLessThanOrEqual(1);
+
+    await setCoffeeScale(page, "70");
+    const at70Again = await readCoffeeTransform(page);
+    expect(at70Again).toMatchObject({ scale: "70", x: "-2", y: "1", assetTransform: at70.assetTransform });
+    expect(Math.abs(at70Again.image.left - at70.image.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(at70Again.image.top - at70.image.top)).toBeLessThanOrEqual(1);
+    expect(Math.abs(at70Again.image.width - at70.image.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(at70Again.image.height - at70.image.height)).toBeLessThanOrEqual(1);
+    expect(routeState.patchCount).toBe(0);
+
+    await page.getByTestId("overview-save").click();
+    await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "normal");
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config).toMatchObject({
+      imageScalePct: 70,
+      imageXStep: -2,
+      imageYStep: 1
+    });
   });
 
   test("adds bounded widgets and sends one complete canonical save", async ({ page }, testInfo) => {
