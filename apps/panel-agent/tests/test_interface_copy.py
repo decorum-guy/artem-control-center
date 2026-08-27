@@ -140,7 +140,7 @@ def test_invalid_store_recovery_has_deterministic_revision_and_no_delete_or_path
     assert path.exists()
     import panel_agent.main as main_module
 
-    assert not any(route.path == "/api/v1/settings/interface-copy/{path}" for route in main_module.app.routes)
+    assert not any(getattr(route, "path", None) == "/api/v1/settings/interface-copy/{path}" for route in main_module.app.routes)
 
 
 def test_fixture_copy_scenarios_and_endpoint_round_trip(tmp_path, monkeypatch):
