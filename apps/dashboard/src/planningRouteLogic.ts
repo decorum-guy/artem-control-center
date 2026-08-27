@@ -11,10 +11,11 @@ import { calendarDayRangeUtc, DEFAULT_PLANNING_TIME_ZONE, localDateForInstant } 
 import type { PlanningCalendarSource } from "@artem/contracts";
 import { calendarEventDisplayColor } from "./calendarDisplayColors";
 
-export const taskViewLabels: Record<"today" | "overdue" | "upcoming", string> = {
+export const taskViewLabels: Record<"today" | "overdue" | "upcoming" | "undated", string> = {
   today: "Сегодня",
   overdue: "Просрочено",
-  upcoming: "Скоро"
+  upcoming: "Скоро",
+  undated: "Без срока"
 };
 
 export const reminderViewLabels: Record<"upcoming" | "overdue" | "delivery", string> = {
@@ -72,7 +73,7 @@ function formatDateTime(value: string, timeZone: string): string {
 }
 
 export function formatTaskDueForRoute(task: PlanningTask): string {
-  if (!task.dueDate) return "Срок не задан";
+  if (!task.dueDate) return "Без срока";
   const date = formatDateOnly(task.dueDate);
   if (!task.dueTime) return `Срок ${date}`;
   return `Срок ${date} · ${task.dueTime.slice(0, 5)} · ${task.timezone ?? "часовой пояс неизвестен"}`;

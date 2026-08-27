@@ -28,7 +28,8 @@ import {
   readPlanningProjects,
   readPlanningReminders,
   readPlanningTasks,
-  usePlanningRead
+  usePlanningRead,
+  type TaskRouteView
 } from "./planningReadClient";
 import {
   deliveryAttentionRank,
@@ -116,10 +117,10 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TasksSegments({ view, onChange }: { view: "today" | "overdue" | "upcoming"; onChange: (view: "today" | "overdue" | "upcoming") => void }) {
+function TasksSegments({ view, onChange }: { view: TaskRouteView; onChange: (view: TaskRouteView) => void }) {
   return (
     <div className="planning-segmented" role="group" aria-label="Представление задач">
-      {(Object.keys(taskViewLabels) as Array<"today" | "overdue" | "upcoming">).map((value) => (
+      {(Object.keys(taskViewLabels) as TaskRouteView[]).map((value) => (
         <button key={value} type="button" aria-pressed={view === value} onClick={() => onChange(value)}>
           {taskViewLabels[value]}
         </button>
@@ -209,6 +210,7 @@ function taskMutationAllowed(
 ): boolean {
   return planningTasksRouteEnabled
     && planningTaskMutationsEnabled
+    && planning?.taskMutationsEnabled === true
     && planning?.sourceStatus === "current"
     && Boolean(planning?.capabilities.tasks[capability]);
 }
@@ -389,7 +391,7 @@ function TaskRow({ task, projectName, onOpen }: { task: PlanningTask; projectNam
 }
 
 export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
-  const [view, setView] = useState<"today" | "overdue" | "upcoming">("today");
+  const [view, setView] = useState<TaskRouteView>("today");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [projectPage, setProjectPage] = useState(0);
@@ -398,7 +400,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   const [mutationSheet, setMutationSheet] = useState<TaskMutationSheetMode | null>(null);
   const [retry, setRetry] = useState(0);
   const { showNotice } = useNoticeCenter();
-  const { status: accessStatus, ensureCapability } = useAccess();
+  const { status: accessStatus, available: accessAvailable, ensureCapability } = useAccess();
   const { guardMutation } = useInteractionLock();
   const { confirmAction } = useActionConfirmation();
   const lifecyclePendingRef = useRef(false);
@@ -420,7 +422,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   );
   const planning = snapshot.planning ?? null;
   const fallback = planning && page === 0 && projectId === null
-    ? previewEnvelope("task", planning.tasks[view], planning)
+    ? previewEnvelope("task", view === "undated" ? (planning.tasks.undated ?? []) : planning.tasks[view], planning)
     : null;
   const envelope = routeRead.data ?? fallback;
   const preview = !routeRead.data && Boolean(fallback) && Boolean(routeRead.error);
@@ -429,9 +431,29 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   const projectMap = new Map(projects.map((project) => [project.id, project.name]));
   const projectFilterLabel = projectId ? (projectMap.get(projectId) ?? "Проект недоступен") : "Все проекты";
   const accessAllows = (action: keyof typeof planningTaskAccessCapabilities): boolean => {
-    if (!accessStatus) return true;
+    if (!accessAvailable || !accessStatus) return false;
     return Boolean(accessStatus.capabilities[planningTaskAccessCapabilities[action]]?.allowed);
   };
+  const currentPlanning = planning?.sourceStatus === "current";
+  const taskFrontendWriterDisabled = !planningTaskMutationsEnabled;
+  const taskServerWriterDisabled = currentPlanning
+    && planningTaskMutationsEnabled
+    && planning?.taskMutationsEnabled === false;
+  const taskWriterGateMetadataUnavailable = currentPlanning
+    && planningTaskMutationsEnabled
+    && planning?.taskMutationsEnabled === undefined;
+  const taskAccessUnavailable = currentPlanning
+    && !taskFrontendWriterDisabled
+    && !taskServerWriterDisabled
+    && !taskWriterGateMetadataUnavailable
+    && (!accessAvailable || !accessStatus);
+  const taskAccessBlocked = currentPlanning
+    && !taskFrontendWriterDisabled
+    && !taskServerWriterDisabled
+    && !taskWriterGateMetadataUnavailable
+    && accessAvailable
+    && Boolean(accessStatus)
+    && !(Object.keys(planningTaskAccessCapabilities) as Array<keyof typeof planningTaskAccessCapabilities>).some(accessAllows);
   const canCreate = taskMutationAllowed(planning, "create") && accessAllows("create");
   const canEdit = taskMutationAllowed(planning, "edit")
     && accessAllows("edit")
@@ -447,8 +469,44 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
     action: keyof typeof planningTaskAccessCapabilities,
     title: string
   ): Promise<boolean> {
+    if (taskFrontendWriterDisabled) {
+      showNotice({
+        id: `planning.task.frontend-gate.${action}`,
+        severity: "warning",
+        title: "Изменения задач отключены в этой сборке",
+        detail: "Интерфейс записи задач отключён. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (taskServerWriterDisabled) {
+      showNotice({
+        id: `planning.task.server-gate.${action}`,
+        severity: "warning",
+        title: "Изменения задач отключены сервером",
+        detail: "Серверный gate записи задач отключён. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (taskWriterGateMetadataUnavailable) {
+      showNotice({
+        id: `planning.task.gate-unavailable.${action}`,
+        severity: "warning",
+        title: "Серверный gate не подтверждён",
+        detail: "Серверный gate записи задач не подтверждён. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (!accessAvailable || !accessStatus) {
+      showNotice({
+        id: `planning.task.access.unavailable.${action}`,
+        severity: "warning",
+        title: "Проверка доступа недоступна",
+        detail: "Профиль доступа не подтверждён. Запрос не отправлен."
+      });
+      return false;
+    }
     const capability = planningTaskAccessCapabilities[action];
-    if (accessStatus && !accessStatus.capabilities[capability]) {
+    if (!accessStatus.capabilities[capability]) {
       showNotice({
         id: `planning.task.access.${action}`,
         severity: "warning",
@@ -505,13 +563,32 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         });
         return;
       }
+      const mutationError = error instanceof PlanningMutationError ? error : null;
+      const conflict = mutationError?.mutationCode === "conflict";
+      const disabled = mutationError?.mutationCode === "disabled";
+      const notFound = mutationError?.mutationCode === "not_found";
+      if (notFound) {
+        setSelectedTask(null);
+        setMutationSheet(null);
+        setRetry((value) => value + 1);
+      }
       showNotice({
         id: `planning.task.uncertain.${target?.id ?? "create"}`,
-        severity: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "warning" : "error",
-        title: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "Задача изменилась" : "Результат не подтверждён",
-        detail: error instanceof PlanningMutationError && error.mutationCode === "conflict"
+        severity: conflict || disabled || notFound ? "warning" : "error",
+        title: conflict
+          ? "Задача изменилась"
+          : disabled
+            ? "Изменения задач отключены"
+            : notFound
+              ? "Задача больше не найдена"
+              : "Результат не подтверждён",
+        detail: conflict
           ? "Запись уже изменилась. Сначала перечитайте её."
-          : "Результат не подтверждён. Повторите чтение перед новой попыткой."
+          : disabled
+            ? "Серверный gate записи задач отключён. Запрос не отправлен повторно."
+            : notFound
+              ? "Актуальная запись не найдена. Список обновлён."
+              : "Результат не подтверждён. Повторите чтение перед новой попыткой."
       });
     }
   }
@@ -556,11 +633,31 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
         });
         return;
       }
+      const mutationError = error instanceof PlanningMutationError ? error : null;
+      const conflict = mutationError?.mutationCode === "conflict";
+      const disabled = mutationError?.mutationCode === "disabled";
+      const notFound = mutationError?.mutationCode === "not_found";
+      if (notFound) {
+        setSelectedTask(null);
+        setRetry((value) => value + 1);
+      }
       showNotice({
         id: `planning.task.action-uncertain.${target.id}`,
-        severity: "error",
-        title: "Результат не подтверждён",
-        detail: "Результат не подтверждён. Повторите чтение перед новой попыткой."
+        severity: conflict || disabled || notFound ? "warning" : "error",
+        title: conflict
+          ? "Задача изменилась"
+          : disabled
+            ? "Изменения задач отключены"
+            : notFound
+              ? "Задача больше не найдена"
+              : "Результат не подтверждён",
+        detail: conflict
+          ? "Запись уже изменилась. Сначала перечитайте её."
+          : disabled
+            ? "Серверный gate записи задач отключён."
+            : notFound
+              ? "Актуальная запись не найдена. Список обновлён."
+              : "Результат не подтверждён. Перечитайте запись перед повторной попыткой."
       });
     } finally {
       lifecyclePendingRef.current = false;
@@ -589,6 +686,31 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
             <button type="button" className="planning-secondary-button" onClick={() => setFilterOpen(true)}>{projectFilterLabel === "Все проекты" ? "Проект" : projectFilterLabel}</button>
             {planningRemindersRouteEnabled && <button type="button" className="planning-secondary-button" onClick={() => onNavigate("/reminders")}>Напоминания</button>}
           </RouteControls>
+          {taskFrontendWriterDisabled && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-task-mutation-frontend-gate">
+              Запись задач отключена в этой сборке. Доступ к профилю этого не меняет.
+            </span>
+          )}
+          {taskServerWriterDisabled && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-task-mutation-gate">
+              Запись задач отключена серверным gate. Доступ к профилю этого не меняет.
+            </span>
+          )}
+          {taskWriterGateMetadataUnavailable && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-task-mutation-gate-unavailable">
+              Серверный gate записи задач не подтверждён. Запись временно заблокирована.
+            </span>
+          )}
+          {taskAccessBlocked && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-task-access-blocked">
+              Текущий профиль не разрешает изменять задачи. Запрос не отправляется.
+            </span>
+          )}
+          {taskAccessUnavailable && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-task-access-unavailable">
+              Проверка профиля доступа недоступна. Запись задач временно заблокирована.
+            </span>
+          )}
         </>
       )}
       futureAction={canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать задачу</button> : undefined}

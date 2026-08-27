@@ -875,6 +875,7 @@ class PlanningTaskLists(StrictPlanningModel):
     today: list[TaskProjection] = Field(max_length=20)
     overdue: list[TaskProjection] = Field(max_length=20)
     upcoming: list[TaskProjection] = Field(max_length=20)
+    undated: list[TaskProjection] = Field(default_factory=list, max_length=20)
     projects: list[ProjectProjection] = Field(max_length=20)
 
 
@@ -889,6 +890,7 @@ class PlanningProjection(StrictPlanningModel):
     generatedAt: StrictStr
     sourceStatus: PlanningSourceStatus
     reminderMutationsEnabled: StrictBool = False
+    taskMutationsEnabled: StrictBool = False
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     reminders: PlanningReminderLists
@@ -905,6 +907,7 @@ class PlanningStatusProjection(StrictPlanningModel):
     generatedAt: StrictStr
     sourceStatus: PlanningSourceStatus
     reminderMutationsEnabled: StrictBool = False
+    taskMutationsEnabled: StrictBool = False
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     capabilities: PlanningCapabilities
@@ -1027,10 +1030,11 @@ def empty_planning_projection(
         generatedAt=generated_at,
         sourceStatus=source_status,
         reminderMutationsEnabled=False,
+        taskMutationsEnabled=False,
         lastSyncedAt=last_synced_at,
         staleAfter=stale_after,
         reminders=PlanningReminderLists(upcoming=[], overdue=[], deliveryFailures=[]),
-        tasks=PlanningTaskLists(today=[], overdue=[], upcoming=[], projects=[]),
+        tasks=PlanningTaskLists(today=[], overdue=[], upcoming=[], undated=[], projects=[]),
         calendar=PlanningCalendarLists(today=[], upcoming=[], conflicts=[]),
         capabilities=PlanningCapabilities(),
         providerStatuses=[
@@ -1055,6 +1059,7 @@ def status_projection(projection: PlanningProjection) -> PlanningStatusProjectio
         generatedAt=projection.generatedAt,
         sourceStatus=projection.sourceStatus,
         reminderMutationsEnabled=projection.reminderMutationsEnabled,
+        taskMutationsEnabled=projection.taskMutationsEnabled,
         lastSyncedAt=projection.lastSyncedAt,
         staleAfter=projection.staleAfter,
         capabilities=projection.capabilities,

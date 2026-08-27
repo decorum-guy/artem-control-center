@@ -68,8 +68,10 @@ export interface PlanningParsePreview {
 }
 
 export type ReminderMonitorView = "upcoming" | "overdue" | "delivery";
-export type TaskRouteView = "today" | "overdue" | "upcoming";
+export type TaskRouteView = "today" | "overdue" | "upcoming" | "undated";
 export type CalendarReadView = "today" | "agenda";
+
+const taskRouteViews = new Set<TaskRouteView>(["today", "overdue", "upcoming", "undated"]);
 
 export interface PlanningCalendarSourcesRefresh {
   schemaVersion: "planning.calendar-sources.refresh.v1";
@@ -577,6 +579,7 @@ export function readPlanningTasks(
   offset = 0,
   signal?: AbortSignal
 ): Promise<PlanningReadEnvelope<PlanningTask>> {
+  if (!taskRouteViews.has(view)) throw new PlanningReadError("Task route view is invalid", "contract");
   const params = boundedPage(limit, offset);
   params.set("view", view);
   if (projectId) params.set("projectId", projectId);

@@ -653,6 +653,23 @@ describe("fixed Planning read client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps task not-found and version conflict distinct from the disabled gate", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "planning_task_not_found" }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "planning_version_conflict" }), { status: 409 }));
+    const request = {
+      action: "edit" as const,
+      idempotencyKey: "b4-task-error-classification",
+      taskId: task.id,
+      expectedVersion: 1,
+      body: { title: "Обновить" }
+    };
+
+    await expect(mutatePlanningTask(request)).rejects.toMatchObject({ mutationCode: "not_found", status: 404 });
+    await expect(mutatePlanningTask({ ...request, idempotencyKey: "b4-task-conflict" })).rejects.toMatchObject({ mutationCode: "conflict", status: 409 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a create uncertain when canonical idempotency replay remains in progress", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new Error("response lost"))
@@ -695,6 +712,21 @@ describe("fixed Planning read client", () => {
     expect(String(input)).toBe("/api/v1/planning/tasks?limit=20&offset=20&view=today&projectId=00000000-0000-4000-8000-000000000601");
     expect(init).toMatchObject({ method: "GET", cache: "no-store" });
     expect(init).not.toHaveProperty("headers");
+  });
+
+  it("accepts the fixed undated task view and forwards its project filter", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(envelope({
+      items: [{ ...task, dueDate: null, dueTime: null, timezone: null, projectId: "00000000-0000-4000-8000-000000000601" }]
+    })), { status: 200 }));
+    const result = await readPlanningTasks("undated", "00000000-0000-4000-8000-000000000601");
+    expect(result.items[0].dueDate).toBeNull();
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/v1/planning/tasks?limit=20&offset=0&view=undated&projectId=00000000-0000-4000-8000-000000000601");
+  });
+
+  it("rejects an unknown task route view before any request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    expect(() => readPlanningTasks("inbox" as never, null)).toThrow("Task route view is invalid");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("uses fixed Calendar create/edit/delete routes and preserves canonical shapes", async () => {

@@ -82,6 +82,8 @@ _IDS = {
     "today_task": "00000000-0000-4000-8000-000000000003",
     "overdue_task": "00000000-0000-4000-8000-000000000004",
     "upcoming_task": "00000000-0000-4000-8000-000000000005",
+    "undated_no_project": "00000000-0000-4000-8000-000000000014",
+    "undated_project": "00000000-0000-4000-8000-000000000015",
     "project": "00000000-0000-4000-8000-000000000006",
     "timed_event": "00000000-0000-4000-8000-000000000007",
     "all_day_event": "00000000-0000-4000-8000-000000000008",
@@ -362,6 +364,11 @@ def _filter_reminders(
 
 
 def _route_tasks(view: str, *, b3: bool = False) -> list[dict[str, Any]]:
+    if view == "undated":
+        return [
+            _task("undated_no_project", None, "normal", project_id=None),
+            _task("undated_project", None, "low"),
+        ]
     due_date = {
         "today": "2026-08-12",
         "overdue": "2026-08-11",
@@ -551,6 +558,11 @@ def _reminder_variant(
 
 
 def _b3_tasks(view: str, *, long_russian: bool = False) -> list[dict[str, Any]]:
+    if view == "undated":
+        return [
+            _task("undated_no_project", None, "normal", project_id=None),
+            _task("undated_project", None, "low"),
+        ]
     if view == "today":
         return [
             _task("today_task", "2026-08-12", "high", due_time="10:30", timezone_name="Europe/Moscow"),
@@ -576,15 +588,15 @@ def _b3_tasks(view: str, *, long_russian: bool = False) -> list[dict[str, Any]]:
 
 
 def _b3_paged_tasks(view: str) -> list[dict[str, Any]]:
-    due_date = {"today": "2026-08-12", "overdue": "2026-08-11", "upcoming": "2026-08-15"}.get(view, "2026-08-12")
+    due_date = {"today": "2026-08-12", "overdue": "2026-08-11", "upcoming": "2026-08-15"}.get(view)
     return [
         _task(
             "today_task",
             due_date,
             ("high", "normal", "low", "none")[index % 4],
             object_id=_synthetic_uuid(5200 + index),
-            due_time=(None if index % 5 == 0 else "10:00"),
-            timezone_name=(None if index % 5 == 0 else "Europe/Moscow"),
+            due_time=(None if due_date is None or index % 5 == 0 else "10:00"),
+            timezone_name=(None if due_date is None or index % 5 == 0 else "Europe/Moscow"),
             project_id=(None if index % 4 == 0 else _IDS["project"]),
         )
         for index in range(60)
@@ -688,6 +700,10 @@ def _task_items(scenario: str, view: str) -> list[dict[str, Any]]:
         "today": [_task("today_task", "2026-08-12", "high")],
         "overdue": [_task("overdue_task", "2026-08-11", "normal")],
         "upcoming": [_task("upcoming_task", "2026-08-15", "low")],
+        "undated": [
+            _task("undated_no_project", None, "normal", project_id=None),
+            _task("undated_project", None, "low"),
+        ],
     }.get(view, [])
 
 
@@ -956,7 +972,7 @@ def _cancelled_reminder() -> dict[str, Any]:
 
 def _task(
     identifier: str,
-    due_date: str,
+    due_date: str | None,
     priority: str,
     *,
     object_id: str | None = None,

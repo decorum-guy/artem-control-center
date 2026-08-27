@@ -246,6 +246,8 @@ def test_b42_task_gate_is_false_by_default_and_dst_wall_times_are_rejected(tmp_p
     blocked, nonexistent = asyncio.run(exercise())
     assert blocked.status_code == 404
     assert nonexistent.status_code == 422
+    assert adapter.projection is not None
+    assert adapter.projection.taskMutationsEnabled is False
     assert transport.writes == []
 
 
@@ -272,3 +274,27 @@ def test_b42_task_envelope_preserves_canonical_fields(tmp_path):
     assert parsed.object.dueDate is None
     assert parsed.object.dueTime is None
     assert parsed.object.timezone is None
+
+
+def test_b42_task_gate_is_projected_to_snapshot_and_status(tmp_path):
+    transport = TaskMutationTransport()
+    adapter = _build_adapter(tmp_path, transport, mutations=True)
+
+    async def exercise():
+        await adapter.start()
+        projection = adapter.projection
+        status = adapter.status_projection()
+        app = FastAPI()
+        app.include_router(build_planning_router(adapter))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://panel.test") as client:
+            status_response = await client.get("/api/v1/planning/status")
+        await adapter.close()
+        return projection, status, status_response
+
+    projection, status, status_response = asyncio.run(exercise())
+    assert projection is not None
+    assert projection.taskMutationsEnabled is True
+    assert status is not None
+    assert status.taskMutationsEnabled is True
+    assert status_response.status_code == 200
+    assert status_response.json()["taskMutationsEnabled"] is True

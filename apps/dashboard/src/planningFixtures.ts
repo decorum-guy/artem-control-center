@@ -1,5 +1,6 @@
 import type {
   PlanningCalendarEvent,
+  PlanningProject,
   PlanningReminder,
   PlanningSnapshot,
   PlanningTask
@@ -18,6 +19,9 @@ const ids = {
   normalTask: "00000000-0000-4000-8000-000000000011",
   lowTask: "00000000-0000-4000-8000-000000000012",
   noneTask: "00000000-0000-4000-8000-000000000013",
+  undatedNoProject: "00000000-0000-4000-8000-000000000014",
+  undatedProject: "00000000-0000-4000-8000-000000000015",
+  project: "00000000-0000-4000-8000-000000000016",
   timedEvent: "00000000-0000-4000-8000-000000000020",
   allDayEvent: "00000000-0000-4000-8000-000000000021",
   endedMorning: "00000000-0000-4000-8000-000000000022",
@@ -77,8 +81,9 @@ function task(
   id: string,
   title: string,
   priority: PlanningTask["priority"],
-  dueDate = "2026-08-11",
-  dueTime: string | null = "15:20"
+  dueDate: string | null = "2026-08-11",
+  dueTime: string | null = "15:20",
+  projectId: string | null = null
 ): PlanningTask {
   return {
     id,
@@ -92,13 +97,26 @@ function task(
     dueDate,
     dueTime,
     timezone: dueTime ? "Europe/Moscow" : null,
-    projectId: null,
+    projectId,
     sourceRef: null,
     completedAt: null,
     archivedAt: null,
     deletedAt: null,
     createdAt: FIXTURE_SYNCED_AT,
     updatedAt: FIXTURE_SYNCED_AT
+  };
+}
+
+function project(overrides: Partial<PlanningProject> = {}): PlanningProject {
+  return {
+    id: ids.project,
+    version: 1,
+    source: "alice",
+    sourceLabel: "AliceTG Bot",
+    name: "Домашние дела",
+    createdAt: FIXTURE_SYNCED_AT,
+    updatedAt: FIXTURE_SYNCED_AT,
+    ...overrides
   };
 }
 
@@ -138,6 +156,7 @@ function planning(overrides: Partial<PlanningSnapshot> = {}): PlanningSnapshot {
     generatedAt: FIXTURE_NOW,
     sourceStatus: "current",
     reminderMutationsEnabled: false,
+    taskMutationsEnabled: false,
     lastSyncedAt: FIXTURE_SYNCED_AT,
     staleAfter: "2026-08-12T12:05:00Z",
     reminders: {
@@ -149,7 +168,11 @@ function planning(overrides: Partial<PlanningSnapshot> = {}): PlanningSnapshot {
       today: [],
       overdue: [task(ids.highTask, "Подготовить отчёт", "high")],
       upcoming: [],
-      projects: []
+      undated: [
+        task(ids.undatedNoProject, "Позвонить без срока", "normal", null, null),
+        task(ids.undatedProject, "Разобрать документы без срока", "low", null, null, ids.project)
+      ],
+      projects: [project()]
     },
     calendar: {
       today: [calendarEvent()],
@@ -189,7 +212,7 @@ export const emptyPlanningFixture: PlanningSnapshot = {
     lastSyncedAt: null,
     staleAfter: null,
     reminders: { upcoming: [], overdue: [], deliveryFailures: [] },
-    tasks: { today: [], overdue: [], upcoming: [], projects: [] },
+    tasks: { today: [], overdue: [], upcoming: [], undated: [], projects: [] },
     calendar: { today: [], upcoming: [], conflicts: [] },
     providerStatuses: [
       {
@@ -211,7 +234,7 @@ export const planningFixtures = {
   healthy: planning(),
   empty: planning({
     reminders: { upcoming: [], overdue: [], deliveryFailures: [] },
-    tasks: { today: [], overdue: [], upcoming: [], projects: [] },
+    tasks: { today: [], overdue: [], upcoming: [], undated: [], projects: [] },
     calendar: { today: [], upcoming: [], conflicts: [] }
   }),
   reminderSoon: planning({
@@ -227,6 +250,7 @@ export const planningFixtures = {
         task(ids.highTask, "Высокий приоритет", "high", "2026-08-12")
       ],
       upcoming: [],
+      undated: [],
       projects: []
     }
   }),
@@ -495,6 +519,7 @@ export const planningFixtures = {
         "high"
       )],
       upcoming: [],
+      undated: [],
       projects: []
     },
     calendar: {
@@ -506,7 +531,7 @@ export const planningFixtures = {
     }
   }),
   exactlyTwentyOverdueTasks: planning({
-    tasks: { today: [], overdue: Array.from({ length: 20 }, (_, index) => boundedTask(index)), upcoming: [], projects: [] }
+    tasks: { today: [], overdue: Array.from({ length: 20 }, (_, index) => boundedTask(index)), upcoming: [], undated: [], projects: [] }
   }),
   sseBefore: planning(),
   sseAfter: planning({
