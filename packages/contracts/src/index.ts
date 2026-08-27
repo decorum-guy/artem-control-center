@@ -83,6 +83,8 @@ export interface InterfaceCopyOverrides {
 export interface InterfaceCopySettings {
   schemaVersion: "interface.copy-settings.v1";
   revision: number;
+  /** 0 only when persisted data is unavailable and resetAll is recovery-gated. */
+  recoveryRevision: number | null;
   updatedAt: string;
   defaults: InterfaceCopyCatalog;
   overrides: InterfaceCopyOverrides;

@@ -79,8 +79,8 @@ function overrides(value: unknown): InterfaceCopyOverrides {
 
 export function parseInterfaceCopy(value: unknown): InterfaceCopySettings {
   const raw = object(value, "interface_copy");
-  exactKeys(raw, ["schemaVersion", "revision", "updatedAt", "defaults", "overrides", "effective", "available", "warnings", "writesEnabled"], "interface_copy");
-  if (raw.schemaVersion !== "interface.copy-settings.v1" || !Number.isSafeInteger(raw.revision) || (raw.revision as number) < 0 || typeof raw.updatedAt !== "string" || typeof raw.available !== "boolean" || typeof raw.writesEnabled !== "boolean" || !Array.isArray(raw.warnings)) throw new Error("invalid_interface_copy");
+  exactKeys(raw, ["schemaVersion", "revision", "recoveryRevision", "updatedAt", "defaults", "overrides", "effective", "available", "warnings", "writesEnabled"], "interface_copy");
+  if (raw.schemaVersion !== "interface.copy-settings.v1" || !Number.isSafeInteger(raw.revision) || (raw.revision as number) < 0 || (raw.recoveryRevision !== null && (!Number.isSafeInteger(raw.recoveryRevision) || (raw.recoveryRevision as number) < 0)) || typeof raw.updatedAt !== "string" || typeof raw.available !== "boolean" || typeof raw.writesEnabled !== "boolean" || !Array.isArray(raw.warnings) || (raw.available && raw.recoveryRevision !== null) || (!raw.available && raw.recoveryRevision !== 0)) throw new Error("invalid_interface_copy");
   if (!raw.warnings.every((warning) => warning === "stored_copy_settings_unavailable")) throw new Error("invalid_interface_copy_warnings");
   const defaults = catalog(raw.defaults);
   const parsedOverrides = overrides(raw.overrides);
@@ -88,6 +88,7 @@ export function parseInterfaceCopy(value: unknown): InterfaceCopySettings {
   return {
     schemaVersion: "interface.copy-settings.v1",
     revision: raw.revision as number,
+    recoveryRevision: raw.recoveryRevision as number | null,
     updatedAt: raw.updatedAt as string,
     defaults,
     overrides: parsedOverrides,

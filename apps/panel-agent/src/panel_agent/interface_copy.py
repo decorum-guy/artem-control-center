@@ -33,6 +33,8 @@ FIXTURE_INTERFACE_COPY_SCENARIOS = (
     "removed-subtitle",
     "revision-conflict",
     "malformed",
+    "unsupported",
+    "oversized",
     "unavailable",
 )
 
@@ -214,6 +216,7 @@ def _effective_catalog(overrides: InterfaceCopyOverrides) -> InterfaceCopyCatalo
 def _response(
     *,
     revision: int,
+    recovery_revision: int | None = None,
     updated_at: str,
     overrides: InterfaceCopyOverrides,
     available: bool,
@@ -223,6 +226,7 @@ def _response(
     return InterfaceCopySettingsResponse(
         schemaVersion=SCHEMA_VERSION,
         revision=revision,
+        recoveryRevision=recovery_revision,
         updatedAt=updated_at,
         defaults=DEFAULT_CATALOG,
         overrides=overrides,
@@ -276,6 +280,7 @@ class InterfaceCopySettingsStore:
             exists = self.path.exists()
             return _response(
                 revision=0,
+                recovery_revision=0 if exists else None,
                 updated_at=_utc_now(),
                 overrides=_empty_overrides(),
                 available=not exists,
@@ -296,7 +301,30 @@ class InterfaceCopySettingsStore:
         with self._write_lock:
             current = self.read()
             if not current.available:
-                raise InterfaceCopyStoreError("stored_copy_settings_unavailable")
+                # A corrupt/unsupported document cannot be used as a source
+                # of revision truth.  The sole recovery mutation is the
+                # explicit owner-confirmed global reset against recovery
+                # revision 0; it replaces the fixed store atomically.
+                if not patch.resetAll:
+                    raise InterfaceCopyStoreError("stored_copy_settings_unavailable")
+                if current.recoveryRevision is None or patch.expectedRevision != current.recoveryRevision:
+                    raise InterfaceCopyRevisionConflict("revision_conflict")
+                overrides = _empty_overrides()
+                document = {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "revision": 1,
+                    "updatedAt": _utc_now(),
+                    "overrides": overrides.model_dump(exclude_none=True),
+                }
+                self._atomic_write(document)
+                return _response(
+                    revision=document["revision"],
+                    updated_at=document["updatedAt"],
+                    overrides=overrides,
+                    available=True,
+                    warnings=[],
+                    writes_enabled=self.writes_enabled,
+                )
             if current.revision != patch.expectedRevision:
                 raise InterfaceCopyRevisionConflict("revision_conflict")
             if patch.resetAll:
@@ -371,11 +399,12 @@ def fixture_interface_copy_response(scenario: str) -> InterfaceCopySettingsRespo
         revision = 4
     elif scenario == "revision-conflict":
         revision = 7
-    elif scenario in {"malformed", "unavailable"}:
+    elif scenario in {"malformed", "unsupported", "oversized", "unavailable"}:
         available = False
         warnings = ["stored_copy_settings_unavailable"]
     return _response(
         revision=revision,
+        recovery_revision=0 if not available else None,
         updated_at="2026-08-27T00:00:00Z",
         overrides=overrides,
         available=available,

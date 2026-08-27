@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from panel_agent.contracts import InterfaceCopyPatch
-from panel_agent.interface_copy import InterfaceCopyRevisionConflict, InterfaceCopySettingsStore
+from panel_agent.interface_copy import MAX_FILE_BYTES, InterfaceCopyRevisionConflict, InterfaceCopySettingsStore
 
 
 def test_default_document_and_effective_copy_are_shared_and_typed(tmp_path):
@@ -74,17 +74,73 @@ def test_revision_conflict_reset_one_and_reset_all_are_isolated(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
-def test_reload_and_malformed_or_unsupported_documents_fail_closed(tmp_path):
+@pytest.mark.parametrize(
+    ("document", "write_bytes"),
+    [
+        ("{not-json", False),
+        (json.dumps({"schemaVersion": "interface.copy-settings.v0"}), False),
+        (None, True),
+    ],
+    ids=["malformed-json", "unsupported-schema", "oversized"],
+)
+def test_invalid_documents_fail_closed_and_recover_only_through_global_reset(tmp_path, document, write_bytes):
     path = tmp_path / "copy.json"
     store = InterfaceCopySettingsStore(path, writes_enabled=True)
     store.write(InterfaceCopyPatch(expectedRevision=0, field="navigation.calendar", value="Расписание"))
     reloaded = InterfaceCopySettingsStore(path, writes_enabled=True).read()
     assert reloaded.revision == 1
     assert reloaded.effective.navigation.calendar == "Расписание"
-    path.write_text(json.dumps({"schemaVersion": "interface.copy-settings.v0"}), encoding="utf-8")
+    if write_bytes:
+        path.write_bytes(b"x" * (MAX_FILE_BYTES + 1))
+    else:
+        path.write_text(document, encoding="utf-8")
     malformed = InterfaceCopySettingsStore(path, writes_enabled=True).read()
     assert malformed.available is False
     assert malformed.warnings == ["stored_copy_settings_unavailable"]
+    assert malformed.revision == 0
+    assert malformed.recoveryRevision == 0
+    assert malformed.effective.navigation.calendar == "Календарь"
+    with pytest.raises(ValueError, match="stored_copy_settings_unavailable"):
+        store.write(InterfaceCopyPatch(expectedRevision=0, field="navigation.calendar", value="Расписание"))
+
+    unrelated = tmp_path / "unrelated.json"
+    unrelated.write_text("keep", encoding="utf-8")
+    recovered = store.write(InterfaceCopyPatch(expectedRevision=0, resetAll=True))
+    assert recovered.available is True
+    assert recovered.recoveryRevision is None
+    assert recovered.revision == 1
+    assert recovered.overrides.navigation.calendar is None
+    assert recovered.effective.navigation.calendar == "Календарь"
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert set(on_disk) == {"schemaVersion", "revision", "updatedAt", "overrides"}
+    assert on_disk["schemaVersion"] == "interface.copy-settings.v1"
+    assert on_disk["revision"] == 1
+    assert on_disk["overrides"] == {
+        "navigation": {},
+        "navigationGroup": {},
+        "page": {
+            "overview": {}, "weather": {}, "home": {}, "services": {},
+            "calendar": {}, "tasks": {}, "reminders": {}, "backups": {},
+            "apps": {}, "system": {}, "settings": {}
+        },
+    }
+    post_recovery = store.write(InterfaceCopyPatch(expectedRevision=1, field="navigation.calendar", value="Расписание"))
+    assert post_recovery.effective.navigation.calendar == "Расписание"
+    assert unrelated.read_text(encoding="utf-8") == "keep"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_invalid_store_recovery_has_deterministic_revision_and_no_delete_or_path_surface(tmp_path):
+    path = tmp_path / "copy.json"
+    path.write_text("not-json", encoding="utf-8")
+    store = InterfaceCopySettingsStore(path, writes_enabled=True)
+    assert store.read().recoveryRevision == 0
+    with pytest.raises(ValidationError):
+        InterfaceCopyPatch.model_validate({"expectedRevision": 0, "resetAll": True, "path": "/tmp/other.json"})
+    assert path.exists()
+    import panel_agent.main as main_module
+
+    assert not any(route.path == "/api/v1/settings/interface-copy/{path}" for route in main_module.app.routes)
 
 
 def test_fixture_copy_scenarios_and_endpoint_round_trip(tmp_path, monkeypatch):
@@ -114,3 +170,32 @@ def test_fixture_copy_scenarios_and_endpoint_round_trip(tmp_path, monkeypatch):
             "value": "Расписание",
         })
         assert conflict.status_code == 409
+
+        module.interface_copy_store.path.write_text("{not-json", encoding="utf-8")
+        invalid = client.get("/api/v1/settings/interface-copy")
+        assert invalid.status_code == 200
+        assert invalid.json()["available"] is False
+        assert invalid.json()["recoveryRevision"] == 0
+        blocked = client.patch("/api/v1/settings/interface-copy", json={
+            "expectedRevision": 0,
+            "field": "navigation.overview",
+            "value": "Главная",
+        })
+        assert blocked.status_code == 503
+        recovered = client.patch("/api/v1/settings/interface-copy", json={
+            "expectedRevision": invalid.json()["recoveryRevision"],
+            "resetAll": True,
+        })
+        assert recovered.status_code == 200
+        assert recovered.json()["available"] is True
+        assert recovered.json()["recoveryRevision"] is None
+        assert recovered.json()["overrides"]["navigation"]["overview"] is None
+        assert recovered.json()["effective"]["navigation"]["overview"] == "Обзор"
+        post_recovery = client.patch("/api/v1/settings/interface-copy", json={
+            "expectedRevision": recovered.json()["revision"],
+            "field": "navigation.overview",
+            "value": "Главная",
+        })
+        assert post_recovery.status_code == 200
+        assert post_recovery.json()["effective"]["navigation"]["overview"] == "Главная"
+        assert client.delete("/api/v1/settings/interface-copy").status_code == 405

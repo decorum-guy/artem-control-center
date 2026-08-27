@@ -101,6 +101,7 @@ function defaultSettings(): InterfaceCopySettings {
   return {
     schemaVersion: "interface.copy-settings.v1",
     revision: 0,
+    recoveryRevision: null,
     updatedAt: "1970-01-01T00:00:00Z",
     defaults: defaultInterfaceCopyCatalog,
     overrides: {
@@ -158,7 +159,8 @@ export function InterfaceCopyProvider({ children }: { children: ReactNode }) {
 
   const mutate = useCallback(async (field: InterfaceCopyField | "reset-all", value: string | null, resetAll = false) => {
     if (pending) throw new Error("interface_copy_write_pending");
-    if (!settings.available || !settings.writesEnabled) throw new Error("interface_copy_write_disabled");
+    const recoveryReset = resetAll && !settings.available && settings.recoveryRevision !== null;
+    if (!settings.writesEnabled || (!settings.available && !recoveryReset)) throw new Error("interface_copy_write_disabled");
     setPending(field);
     try {
       const next = await patchInterfaceCopy({

@@ -363,6 +363,9 @@ class InterfaceCopySettingsResponse(BaseModel):
 
     schemaVersion: Literal["interface.copy-settings.v1"]
     revision: int = Field(ge=0)
+    # Invalid persisted data cannot provide a trusted revision.  In that
+    # state the API exposes the deterministic recovery revision 0 instead.
+    recoveryRevision: Optional[int] = Field(default=None, ge=0)
     updatedAt: str
     defaults: InterfaceCopyCatalog
     overrides: InterfaceCopyOverrides
@@ -370,6 +373,14 @@ class InterfaceCopySettingsResponse(BaseModel):
     available: bool
     warnings: List[Literal["stored_copy_settings_unavailable"]] = Field(default_factory=list, max_length=1)
     writesEnabled: bool = False
+
+    @model_validator(mode="after")
+    def _recovery_shape(self) -> "InterfaceCopySettingsResponse":
+        if self.available and self.recoveryRevision is not None:
+            raise ValueError("recoveryRevision is only valid for unavailable stores")
+        if not self.available and self.recoveryRevision != 0:
+            raise ValueError("unavailable stores require recoveryRevision 0")
+        return self
 
 
 class InterfaceCopyPatch(BaseModel):

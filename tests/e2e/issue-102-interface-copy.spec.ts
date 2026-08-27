@@ -4,13 +4,16 @@ const v2Enabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 
 type CopyState = Record<string, any>;
 
-async function mockInterfaceCopy(page: Page, scenario: "defaults-only" | "custom-navigation" | "removed-subtitle" = "defaults-only") {
+async function mockInterfaceCopy(page: Page, scenario: "defaults-only" | "custom-navigation" | "removed-subtitle" | "malformed" | "unsupported" | "oversized" = "defaults-only") {
   const seed = await page.request.get(`/api/v1/settings/interface-copy?fixtureScenario=${scenario}`);
   expect(seed.ok()).toBeTruthy();
   const state = await seed.json() as CopyState;
   state.writesEnabled = true;
-  state.available = true;
-  state.warnings = [];
+  if (!(["malformed", "unsupported", "oversized"] as string[]).includes(scenario)) {
+    state.available = true;
+    state.recoveryRevision = null;
+    state.warnings = [];
+  }
 
   await page.route("**/api/v1/settings/interface-copy", async (route) => {
     if (route.request().method() === "GET") {
@@ -29,7 +32,14 @@ async function mockInterfaceCopy(page: Page, scenario: "defaults-only" | "custom
           page: { overview: {}, weather: {}, home: {}, services: {}, calendar: {}, tasks: {}, reminders: {}, backups: {}, apps: {}, system: {}, settings: {} }
         };
         state.effective = structuredClone(state.defaults);
+        state.available = true;
+        state.recoveryRevision = null;
+        state.warnings = [];
       } else if (payload.field) {
+        if (!state.available) {
+          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "stored_copy_settings_unavailable" }) });
+          return;
+        }
         const parts = payload.field.split(".");
         const scope = parts[0] === "navigationGroup" ? "navigationGroup" : parts[0] === "navigation" ? "navigation" : "page";
         const pageName = scope === "page" ? parts[1] : null;
@@ -90,6 +100,10 @@ test.describe("Issue #102 owner-configurable interface copy", () => {
     await expect(page.getByTestId("route-settings")).toBeVisible();
     await page.getByTestId("settings-summary-interface-copy").click();
     await expect(page.getByTestId("settings-interface-copy-sheet")).toBeVisible();
+    await expect(page.getByTestId("interface-copy-field-navigation-backups")).toBeVisible();
+    await expect(page.getByTestId("interface-copy-field-navigation-apps")).toBeVisible();
+    await expect(page.getByTestId("interface-copy-field-page-backups-title")).toBeVisible();
+    await expect(page.getByTestId("interface-copy-field-page-apps-title")).toBeVisible();
     const title = page.getByTestId("interface-copy-input-page-overview-title");
     await title.fill("Мой день");
     await page.getByTestId("interface-copy-field-page-overview-title").getByRole("button", { name: "Сохранить" }).click();
@@ -125,5 +139,24 @@ test.describe("Issue #102 owner-configurable interface copy", () => {
     }));
     expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
     expect(geometry.links).toBeTruthy();
+  });
+
+  test("corrupt saved copy can be recovered through the owner settings UI", async ({ page }) => {
+    await mockInterfaceCopy(page, "malformed");
+    await page.goto("/settings");
+    await page.getByTestId("settings-summary-interface-copy").click();
+    await expect(page.getByTestId("settings-interface-copy-sheet")).toBeVisible();
+    await expect(page.getByText("Сохранённые названия не удалось прочитать. Используются стандартные; поля заблокированы до восстановления.")).toBeVisible();
+    await expect(page.getByTestId("interface-copy-input-navigation-overview")).toBeDisabled();
+    const reset = page.getByRole("button", { name: "Восстановить стандартные названия" });
+    await expect(reset).toBeEnabled();
+    await reset.click();
+    await expect(page.getByTestId("action-confirmation")).toBeVisible();
+    await page.getByTestId("action-confirmation").getByRole("button", { name: "Вернуть стандартные названия" }).click();
+    await expect(page.getByText("Все стандартные названия восстановлены.")).toBeVisible();
+    await expect(page.getByTestId("interface-copy-input-navigation-overview")).toBeEnabled();
+    await page.getByTestId("interface-copy-input-navigation-overview").fill("Главная");
+    await page.getByTestId("interface-copy-field-navigation-overview").getByRole("button", { name: "Сохранить" }).click();
+    await expect(page.getByText("Название сохранено.")).toBeVisible();
   });
 });

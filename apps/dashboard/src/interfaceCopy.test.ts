@@ -13,6 +13,7 @@ function response(overrides: unknown = {
   return {
     schemaVersion: "interface.copy-settings.v1",
     revision: 0,
+    recoveryRevision: null,
     updatedAt: "2026-08-27T00:00:00Z",
     defaults: defaultInterfaceCopyCatalog,
     overrides,
@@ -53,5 +54,16 @@ describe("interface copy contract", () => {
         reminders: {}, backups: {}, apps: {}, system: {}, settings: {}
       }
     }))).toThrow();
+  });
+
+  it("accepts the explicit recovery revision for an unavailable store", () => {
+    const parsed = parseInterfaceCopy({
+      ...response(),
+      available: false,
+      recoveryRevision: 0,
+      warnings: ["stored_copy_settings_unavailable"]
+    });
+    expect(parsed.recoveryRevision).toBe(0);
+    expect(parsed.available).toBe(false);
   });
 });

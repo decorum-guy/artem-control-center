@@ -19,6 +19,8 @@ const navigationFields: CopyFieldDefinition[] = [
   ["calendar", "Календарь"],
   ["tasks", "Задачи"],
   ["reminders", "Напоминания"],
+  ["backups", "Резервные копии"],
+  ["apps", "Приложения"],
   ["system", "Система"],
   ["settings", "Настройки"]
 ].map(([key, label]) => ({ key: `navigation.${key}` as InterfaceCopyField, label, optional: false }));
@@ -31,6 +33,8 @@ const pageFields: CopyFieldDefinition[] = ([
   ["calendar", "Календарь"],
   ["tasks", "Задачи"],
   ["reminders", "Напоминания"],
+  ["backups", "Резервные копии"],
+  ["apps", "Приложения"],
   ["system", "Система"],
   ["settings", "Настройки"]
 ] as [InterfaceCopyPageKey, string][]).flatMap(([key, label]) => [
@@ -48,6 +52,10 @@ function mutationMessage(error: unknown): string {
   const code = error instanceof Error ? error.message : "unknown";
   if (code === "revision_conflict") return "Настройки изменились в другом окне. Загружено актуальное состояние.";
   if (code === "interface_copy_write_disabled") return "Изменения названий сейчас недоступны.";
+  if (code === "stored_copy_settings_unavailable") return "Сохранённые названия недоступны. Восстановите стандартные названия.";
+  if (code === "copy_value_blank") return "Обязательное поле не может быть пустым.";
+  if (code === "copy_value_too_long") return "Текст слишком длинный для этого поля.";
+  if (code === "copy_value_markup_not_allowed" || code === "copy_value_control_character") return "Используйте обычный текст без разметки или служебных символов.";
   if (code === "invalid_interface_copy_value") return "Введите допустимый текст без служебных символов.";
   if (code === "invalid_interface_copy_field") return "Это поле больше не поддерживается.";
   return "Не удалось сохранить названия. Показано подтверждённое состояние.";
@@ -136,12 +144,14 @@ export function InterfaceCopySettingsPanel() {
     }
   }
 
-  const writeDisabled = pending !== null || !settings.available || !settings.writesEnabled;
+  const fieldWriteDisabled = pending !== null || !settings.available || !settings.writesEnabled;
+  const globalResetDisabled = pending !== null || !settings.writesEnabled || (!settings.available && settings.recoveryRevision === null);
+  const recoveryAvailable = !settings.available && settings.recoveryRevision !== null;
   return (
     <div className="settings-v2-sheet-content interface-copy-settings" data-testid="interface-copy-settings">
       {loading && <p className="settings-notice" role="status">Загружаем сохранённые названия…</p>}
       {error && <p className="settings-notice" role="status">Стандартные названия используются до восстановления связи.</p>}
-      {!settings.available && <p className="settings-notice" role="status">Сохранённые названия временно недоступны. Используются стандартные.</p>}
+      {!settings.available && <p className="settings-notice" role="status">Сохранённые названия не удалось прочитать. Используются стандартные; поля заблокированы до восстановления.</p>}
       {!settings.writesEnabled && <p className="settings-notice" role="status">Изменения недоступны в режиме только чтения.</p>}
 
       <section className="interface-copy-group" aria-labelledby="interface-copy-navigation-title">
@@ -158,7 +168,7 @@ export function InterfaceCopySettingsPanel() {
               field={field}
               value={drafts[field.key] ?? copy(field.key)}
               overridden={copyOverrideValue(settings.overrides, field.key) !== null}
-              disabled={writeDisabled}
+              disabled={fieldWriteDisabled}
               pending={pending === field.key}
               onChange={(value) => setDrafts((current) => ({ ...current, [field.key]: value }))}
               onSave={() => void saveField(field)}
@@ -182,7 +192,7 @@ export function InterfaceCopySettingsPanel() {
               field={field}
               value={drafts[field.key] ?? copy(field.key)}
               overridden={copyOverrideValue(settings.overrides, field.key) !== null}
-              disabled={writeDisabled}
+              disabled={fieldWriteDisabled}
               pending={pending === field.key}
               onChange={(value) => setDrafts((current) => ({ ...current, [field.key]: value }))}
               onSave={() => void saveField(field)}
@@ -193,8 +203,8 @@ export function InterfaceCopySettingsPanel() {
       </section>
 
       <div className="interface-copy-actions">
-        <button type="button" className="planning-secondary-button" disabled={writeDisabled} onClick={() => void resetEverything()}>
-          {pending === "reset-all" ? "Сбрасываем…" : "Вернуть стандартные названия"}
+        <button type="button" className="planning-secondary-button" disabled={globalResetDisabled} onClick={() => void resetEverything()}>
+          {pending === "reset-all" ? "Сбрасываем…" : recoveryAvailable ? "Восстановить стандартные названия" : "Вернуть стандартные названия"}
         </button>
         {pending && <span role="status">Сохраняем…</span>}
       </div>
