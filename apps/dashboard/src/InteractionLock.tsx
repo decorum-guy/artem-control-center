@@ -240,7 +240,7 @@ export function InteractionLockControl() {
             aria-valuemax={100}
             aria-valuenow={Math.round(holdProgress * 100)}
           >
-            <span data-testid="interaction-lock-progress-fill" style={{ transform: `scaleX(${holdProgress})` }} />
+            <span data-testid="interaction-lock-progress-fill" style={{ transform: `scaleY(${holdProgress})` }} />
           </span>
         )}
       </button>

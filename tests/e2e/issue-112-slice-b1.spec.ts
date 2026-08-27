@@ -675,6 +675,26 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     const beforeHold = await control.boundingBox();
     await control.hover();
     await page.mouse.down();
+    const progress = control.getByRole("progressbar");
+    await expect(progress).toBeVisible();
+    const progressGeometry = await progress.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        width: style.width,
+        height: style.height,
+        left: style.left,
+        right: style.right,
+        top: style.top,
+        bottom: style.bottom,
+        renderedWidth: rect.width,
+        renderedHeight: rect.height
+      };
+    });
+    expect(progressGeometry.width).toBe("4px");
+    expect(progressGeometry.renderedHeight).toBeGreaterThan(progressGeometry.renderedWidth);
+    expect(progressGeometry).toMatchObject({ left: "5px", top: "5px", bottom: "5px" });
+    await expect(control.getByTestId("interaction-lock-progress-fill")).toHaveAttribute("style", /scaleY\(/);
     const duringHold = await control.boundingBox();
     expect(duringHold?.width).toBe(beforeHold?.width);
     expect(duringHold?.height).toBe(beforeHold?.height);
