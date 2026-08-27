@@ -40,6 +40,7 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "home.coffee.settings.timing": "standard",
     "home.coffee.settings.notifications": "standard",
     "settings.calendar.colors": "standard",
+    "planning.calendar_sources.refresh": "standard",
     "settings.ai.providers": "standard",
     "settings.capabilities.manage": "full",
     "planning.reminders.create": "standard",

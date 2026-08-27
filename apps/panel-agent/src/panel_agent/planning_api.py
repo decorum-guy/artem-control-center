@@ -15,6 +15,7 @@ from .planning import (
     PlanningTaskObjectEnvelope,
     PlanningParsePreview,
     PlanningReadEnvelope,
+    PlanningCalendarSourcesRefresh,
     PlanningStatusProjection,
     validate_timezone,
     validate_date,
@@ -302,6 +303,19 @@ def build_planning_router(
         _enabled(adapter)
         _no_store(response)
         return adapter.read_status()
+
+    @router.post("/calendar-sources/refresh", response_model=PlanningCalendarSourcesRefresh)
+    async def planning_refresh_calendar_sources(
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningCalendarSourcesRefresh:
+        _enabled(adapter)
+        _no_store(response)
+        await _require_empty_body(raw_request)
+        try:
+            return await adapter.refresh_calendar_sources()
+        except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
+            raise _read_unavailable(detail="calendar_source_refresh_unavailable") from exc
 
     @router.get("/reminders", response_model=PlanningReadEnvelope)
     async def planning_reminders(request: Request, response: Response) -> PlanningReadEnvelope:

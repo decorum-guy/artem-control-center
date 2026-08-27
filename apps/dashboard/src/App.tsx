@@ -114,6 +114,10 @@ export function App() {
     () => snapshotCoordinator.current?.refresh() ?? Promise.resolve(false),
     []
   );
+  const reconcileSnapshotAfterAction = useCallback(
+    () => snapshotCoordinator.current?.refreshAfterCurrent() ?? Promise.resolve(false),
+    []
+  );
 
   useEffect(() => {
     const onPopState = () => setRoute(routeFromLocation());
@@ -376,6 +380,7 @@ export function App() {
                 calendarSources={snapshot?.planning?.providerStatuses ?? []}
                 onThemeChange={setTheme}
                 onMotionChange={setMotion}
+                onRefreshCalendarMetadata={reconcileSnapshotAfterAction}
               />
             ) : (
               <SettingsPage

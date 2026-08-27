@@ -43,6 +43,21 @@ async function install(page: Page, options: { failFirstWrite?: boolean } = {}) {
       : [...preferences.overrides.filter((entry) => !(entry.providerId === body.providerId && entry.calendarId === body.calendarId)), { providerId: body.providerId, calendarId: body.calendarId, color: body.color.toUpperCase() }] };
     return route.fulfill({ json: preferences });
   });
+  await page.route("**/api/v1/planning/calendar-sources/refresh", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    return route.fulfill({ json: {
+      schemaVersion: "planning.calendar-sources.refresh.v1",
+      kind: "calendar_sources_refresh",
+      result: "success",
+      status: "current",
+      observedAt: "2026-08-27T09:00:00Z",
+      lastSuccessfulSyncAt: "2026-08-27T09:00:00Z",
+      calendarsSeen: sources[0].calendars.length,
+      eventsSeen: events.length,
+      errorCode: null,
+      correlation_id: "00000000-0000-4000-8000-000000000097"
+    } });
+  });
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const payload = await response.json() as Record<string, unknown>;
@@ -115,5 +130,22 @@ test.describe("Issue #112 B2.1 Calendar Settings", () => {
     await expect(first.getByTestId("settings-calendar-effective-swatch")).toHaveCSS("background-color", "rgb(161, 178, 195)");
     await expect(page.getByRole("status")).toContainText("Не удалось сохранить цвет");
     await expect(page.getByText("temporary_unavailable", { exact: true })).toHaveCount(0);
+  });
+
+  test("refreshes source discovery from Settings, suppresses duplicate taps, and reloads metadata", async ({ page }) => {
+    const refreshRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/calendar-sources/refresh")) refreshRequests.push(request.method());
+    });
+    await install(page);
+    await page.goto("/settings");
+    await page.getByTestId("settings-summary-calendars").click();
+    const refresh = page.getByTestId("settings-calendar-refresh");
+    await expect(refresh).toHaveText("Обновить список календарей");
+    await Promise.all([refresh.dispatchEvent("click"), refresh.dispatchEvent("click")]);
+    await expect(refresh).toHaveText("Обновить список календарей");
+    await expect(page.getByRole("status")).toContainText("Список календарей обновлён");
+    expect(refreshRequests).toEqual(["POST"]);
+    await expect(page.getByTestId("settings-calendar-row")).toHaveCount(13);
   });
 });

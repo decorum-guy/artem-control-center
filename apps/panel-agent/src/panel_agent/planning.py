@@ -380,6 +380,25 @@ class UpstreamPlanningSource(StrictPlanningModel):
         return self
 
 
+class PlanningCalendarSourcesRefresh(StrictPlanningModel):
+    """Bounded result of the explicit server-owned source discovery action."""
+
+    schemaVersion: Literal["planning.calendar-sources.refresh.v1"]
+    kind: Literal["calendar_sources_refresh"]
+    result: Literal["success", "failure"]
+    status: PlanningProviderFreshnessStatus
+    observedAt: StrictStr
+    lastSuccessfulSyncAt: StrictStr | None = None
+    calendarsSeen: StrictInt = Field(ge=0, le=32)
+    eventsSeen: StrictInt = Field(ge=0, le=100_000)
+    errorCode: StrictStr | None = Field(default=None, max_length=128)
+    correlation_id: StrictStr = Field(min_length=36, max_length=36)
+
+    _timestamps = _timestamp_fields("observedAt", "lastSuccessfulSyncAt")
+    _error = field_validator("errorCode")(validate_error_code)
+    _correlation = field_validator("correlation_id")(validate_uuid4)
+
+
 class UpstreamProject(StrictPlanningModel):
     id: StrictStr = Field(min_length=36, max_length=36)
     domain: Literal["project"]

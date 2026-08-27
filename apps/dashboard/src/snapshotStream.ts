@@ -83,6 +83,12 @@ export class SnapshotCoordinator {
     return this.inFlight;
   }
 
+  refreshAfterCurrent(): Promise<boolean> {
+    const current = this.inFlight;
+    if (!current) return this.refresh();
+    return current.then(() => this.refresh());
+  }
+
   private async fetchSnapshot(signal: AbortSignal): Promise<boolean> {
     try {
       const response = await fetch(

@@ -71,6 +71,19 @@ export type ReminderMonitorView = "upcoming" | "overdue" | "delivery";
 export type TaskRouteView = "today" | "overdue" | "upcoming";
 export type CalendarReadView = "today" | "agenda";
 
+export interface PlanningCalendarSourcesRefresh {
+  schemaVersion: "planning.calendar-sources.refresh.v1";
+  kind: "calendar_sources_refresh";
+  result: "success" | "failure";
+  status: PlanningProviderFreshnessStatus;
+  observedAt: string;
+  lastSuccessfulSyncAt: string | null;
+  calendarsSeen: number;
+  eventsSeen: number;
+  errorCode: string | null;
+  correlation_id: string;
+}
+
 export class PlanningReadError extends Error {
   readonly status: number | null;
   readonly code: "aborted" | "network" | "http" | "malformed" | "contract";
@@ -196,6 +209,15 @@ function timestampValue(value: unknown, label: string): string {
 
 function nullableTimestamp(value: unknown, label: string): string | null {
   return value === null ? null : timestampValue(value, label);
+}
+
+function nullableErrorCode(value: unknown, label: string): string | null {
+  if (value === null) return null;
+  const result = stringValue(value, label, 1, 128);
+  if (!/^[a-z][a-z0-9_.-]{0,127}$/.test(result)) {
+    throw new PlanningReadError(`${label} is invalid`, "contract");
+  }
+  return result;
 }
 
 function dateValue(value: unknown, label: string): string {
@@ -615,6 +637,90 @@ export function readPlanningEvents(
   params.set("to", toUtc);
   if (view) params.set("view", view);
   return getRead("/api/v1/planning/events", params, "calendar_event", parseCalendarEvent, signal);
+}
+
+function parseCalendarSourcesRefresh(value: unknown): PlanningCalendarSourcesRefresh {
+  const envelope = record(value, "planning calendar source refresh");
+  exactKeys(
+    envelope,
+    [
+      "schemaVersion",
+      "kind",
+      "result",
+      "status",
+      "observedAt",
+      "lastSuccessfulSyncAt",
+      "calendarsSeen",
+      "eventsSeen",
+      "errorCode",
+      "correlation_id"
+    ],
+    "planning calendar source refresh"
+  );
+  if (envelope.schemaVersion !== "planning.calendar-sources.refresh.v1" || envelope.kind !== "calendar_sources_refresh") {
+    throw new PlanningReadError("planning calendar source refresh schema is invalid", "contract");
+  }
+  return {
+    schemaVersion: "planning.calendar-sources.refresh.v1",
+    kind: "calendar_sources_refresh",
+    result: enumValue(envelope.result, new Set(["success", "failure"] as const), "planning calendar source refresh.result"),
+    status: enumValue(envelope.status, providerFreshnessValues, "planning calendar source refresh.status"),
+    observedAt: timestampValue(envelope.observedAt, "planning calendar source refresh.observedAt"),
+    lastSuccessfulSyncAt: nullableTimestamp(envelope.lastSuccessfulSyncAt, "planning calendar source refresh.lastSuccessfulSyncAt"),
+    calendarsSeen: integerValue(envelope.calendarsSeen, "planning calendar source refresh.calendarsSeen", 0, 32),
+    eventsSeen: integerValue(envelope.eventsSeen, "planning calendar source refresh.eventsSeen", 0, 100_000),
+    errorCode: nullableErrorCode(envelope.errorCode, "planning calendar source refresh.errorCode"),
+    correlation_id: uuidValue(envelope.correlation_id, "planning calendar source refresh.correlation_id")
+  };
+}
+
+export async function refreshPlanningCalendarSources(
+  signal?: AbortSignal,
+  timeoutMs = 15_000
+): Promise<PlanningCalendarSourcesRefresh> {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) {
+    throw new PlanningReadError("Calendar source refresh timeout is invalid", "contract");
+  }
+  const controller = new AbortController();
+  let timedOut = false;
+  const forwardAbort = () => controller.abort();
+  const timeout = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  signal?.addEventListener("abort", forwardAbort, { once: true });
+  try {
+    let response: Response;
+    try {
+      response = await fetch("/api/v1/planning/calendar-sources/refresh", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        signal: controller.signal
+      });
+    } catch (reason) {
+      if (signal?.aborted) throw new PlanningReadError("Calendar source refresh aborted", "aborted");
+      if (timedOut) throw new PlanningReadError("Calendar source refresh timed out", "network");
+      throw new PlanningReadError(
+        reason instanceof Error ? reason.message : "Calendar source refresh unavailable",
+        "network"
+      );
+    }
+    if (!response.ok) {
+      throw new PlanningReadError("Calendar source refresh is unavailable", "http", response.status);
+    }
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new PlanningReadError("Calendar source refresh response is malformed", "malformed", response.status);
+    }
+    return parseCalendarSourcesRefresh(payload);
+  } finally {
+    globalThis.clearTimeout(timeout);
+    signal?.removeEventListener("abort", forwardAbort);
+  }
 }
 
 export interface PlanningCalendarRangeEnvelope extends PlanningReadEnvelope<PlanningCalendarEvent> {
