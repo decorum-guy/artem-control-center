@@ -162,6 +162,42 @@ async function mockCoffeeSettings(
 
     await route.continue();
   });
+
+  let reminderDelivery = {
+    schemaVersion: "reminder.delivery-settings.v1",
+    revision: 0,
+    updatedAt: "2026-08-15T00:00:00Z",
+    spokenEndpoint: "alice",
+    phoneChannels: ["telegram"],
+    channelHealth: {
+      spoken: {
+        alice: { status: "available", code: null },
+        jarvis: { status: "unavailable", code: "jarvis_runtime_unavailable" }
+      },
+      phone: {
+        telegram: { status: "available", code: null },
+        home_assistant: { status: "available", code: null }
+      }
+    }
+  };
+  await page.route("**/api/v1/settings/reminders/delivery", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...reminderDelivery, sourceMode: "fixture", writesEnabled: true }) });
+      return;
+    }
+    const payload = route.request().postDataJSON() as { expectedRevision: number; spokenEndpoint: string; phoneChannels: string[] };
+    if (payload.expectedRevision !== reminderDelivery.revision) {
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "revision_conflict" }) });
+      return;
+    }
+    reminderDelivery = {
+      ...reminderDelivery,
+      revision: reminderDelivery.revision + 1,
+      spokenEndpoint: payload.spokenEndpoint,
+      phoneChannels: payload.phoneChannels
+    };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...reminderDelivery, sourceMode: "fixture", writesEnabled: true }) });
+  });
 }
 
 async function mockAISettings(page: Page) {
@@ -228,6 +264,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(page.getByText("Appearance", { exact: true })).toHaveCount(0);
     await expect(page.getByTestId("settings-summary-coffee")).toBeVisible();
     await expect(page.getByTestId("settings-summary-notifications")).toBeVisible();
+    await expect(page.getByTestId("settings-summary-reminder-delivery")).toBeVisible();
     await expect(page.getByTestId("settings-summary-access")).toBeVisible();
     await expect(page.getByTestId("settings-summary-runtime")).toBeVisible();
 
@@ -321,6 +358,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     for (const [row, sheet] of [
       ["settings-summary-coffee", "settings-coffee-sheet"],
       ["settings-summary-notifications", "settings-notifications-sheet"],
+      ["settings-summary-reminder-delivery", "settings-reminder-delivery-sheet"],
       ["settings-summary-access", "settings-access-sheet"],
       ["settings-summary-runtime", "settings-runtime-sheet"]
     ] as const) {
@@ -329,6 +367,21 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
       await expect(page.locator(".cc-sheet")).toHaveCount(1);
       await closeSheet(page);
     }
+  });
+
+  test("Reminder delivery keeps voice endpoint separate from multi-select phone channels", async ({ page }) => {
+    await mockCoffeeSettings(page);
+    await openSettings(page);
+    await page.getByTestId("settings-summary-reminder-delivery").click();
+    const sheet = page.getByTestId("settings-reminder-delivery-sheet");
+    await expect(sheet.getByRole("heading", { name: "Голос", exact: true })).toBeVisible();
+    await expect(sheet.getByRole("heading", { name: "Телефон", exact: true })).toBeVisible();
+    await sheet.getByLabel("Jarvis").check();
+    await sheet.getByLabel("Home Assistant").check();
+    await sheet.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(sheet).toContainText("Выбранный речевой канал сейчас недоступен");
+    await expect(sheet.getByLabel("Telegram")).toBeChecked();
+    await expect(sheet.getByLabel("Home Assistant")).toBeChecked();
   });
 
   test("Coffee summary keeps timing controls and Save semantics inside its Sheet", async ({ page }) => {

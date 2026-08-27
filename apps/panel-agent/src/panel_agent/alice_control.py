@@ -52,6 +52,16 @@ class AliceControlClient:
             payload,
         )
 
+    async def get_reminder_delivery(self) -> tuple[dict[str, Any], str]:
+        return await self._get_cached("/internal/reminders/delivery-settings")
+
+    async def patch_reminder_delivery(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._request(
+            "PATCH",
+            "/internal/reminders/delivery-settings",
+            payload,
+        )
+
     async def coffee_action(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request(
             "POST",

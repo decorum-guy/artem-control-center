@@ -21,11 +21,12 @@ import { RouteHeader } from "../../ShellPrimitives";
 import { SettingsSummaryColumn, SettingsSummaryRow } from "./SettingsSummaryRow";
 import { CapabilitySettingsSheet, capabilityStateLabel, capabilitySummary, useCapabilities, type CapabilitiesController } from "./CapabilitySettings";
 import { AIProviderSettingsSheet, aiStateLabel, aiSummary, useAIProviderSettings, type AIProviderSettingsController } from "./AIProviderSettings";
+import { ReminderDeliverySettingsSheet, reminderDeliveryStateLabel, reminderDeliverySummary, useReminderDeliverySettings, type ReminderDeliverySettingsController } from "./ReminderDeliverySettings";
 import "./settingsV2.css";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
-type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai";
+type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery";
 
 const motionLabels: Record<MotionMode, string> = {
   full: "Полное",
@@ -61,6 +62,7 @@ export function SettingsV2Page({
   const calendarPreferences = useCalendarDisplayPreferences();
   const capabilities = useCapabilities();
   const ai = useAIProviderSettings();
+  const reminderDelivery = useReminderDeliverySettings();
   const [openSheet, setOpenSheet] = useState<SettingsSheet | null>(null);
 
   return (
@@ -123,6 +125,14 @@ export function SettingsV2Page({
             onClick={() => setOpenSheet("ai")}
           />
           <SettingsSummaryRow
+            title="Доставка напоминаний"
+            summary={reminderDeliverySummary(reminderDelivery)}
+            stateLabel={reminderDeliveryStateLabel(reminderDelivery)}
+            stateTone={reminderDelivery.inventory?.channelHealth.spoken[reminderDelivery.inventory.spokenEndpoint].status === "available" ? "neutral" : "unavailable"}
+            testId="settings-summary-reminder-delivery"
+            onClick={() => setOpenSheet("reminder-delivery")}
+          />
+          <SettingsSummaryRow
             title="Календари"
             summary={calendarSummary(calendarSources, calendarPreferences.loading, calendarPreferences.preferences)}
             stateLabel={calendarStateLabel(calendarPreferences.loading, calendarPreferences.preferences)}
@@ -182,6 +192,7 @@ export function SettingsV2Page({
           calendarSources={calendarSources}
           capabilities={capabilities}
           ai={ai}
+          reminderDelivery={reminderDelivery}
           onRefreshCalendarMetadata={onRefreshCalendarMetadata}
           onClose={() => setOpenSheet(null)}
         />
@@ -196,6 +207,7 @@ function SettingsSheet({
   calendarSources,
   capabilities,
   ai,
+  reminderDelivery,
   onRefreshCalendarMetadata,
   onClose
 }: {
@@ -204,6 +216,7 @@ function SettingsSheet({
   calendarSources: PlanningCalendarSource[];
   capabilities: CapabilitiesController;
   ai: AIProviderSettingsController;
+  reminderDelivery: ReminderDeliverySettingsController;
   onRefreshCalendarMetadata: () => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -218,6 +231,7 @@ function SettingsSheet({
   }
   if (kind === "capabilities") return <CapabilitySettingsSheet onClose={onClose} capabilities={capabilities} />;
   if (kind === "ai") return <AIProviderSettingsSheet onClose={onClose} controller={ai} />;
+  if (kind === "reminder-delivery") return <ReminderDeliverySettingsSheet onClose={onClose} controller={reminderDelivery} />;
   if (kind === "coffee") {
     return (
       <Sheet

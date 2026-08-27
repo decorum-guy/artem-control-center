@@ -259,6 +259,79 @@
   padding: 0;
 }
 
+.reminder-delivery-settings {
+  display: grid;
+  gap: 20px;
+}
+
+.reminder-delivery-settings__section {
+  display: grid;
+  gap: 10px;
+}
+
+.reminder-delivery-settings__section + .reminder-delivery-settings__section {
+  padding-top: 20px;
+  border-top: 1px solid var(--cc-divider);
+}
+
+.reminder-delivery-settings__heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.reminder-delivery-settings__heading h2 {
+  margin: 0;
+  color: var(--cc-text);
+  font-size: var(--cc-type-section-title-size);
+}
+
+.reminder-delivery-settings__heading span,
+.reminder-delivery-settings__actions small {
+  color: var(--cc-text-muted);
+  font-size: var(--cc-type-metadata-size);
+}
+
+.reminder-delivery-settings__options {
+  display: grid;
+  gap: 8px;
+}
+
+.reminder-delivery-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 12px;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-control);
+  background: var(--cc-surface-2);
+}
+
+.reminder-delivery-option input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--cc-accent);
+}
+
+.reminder-delivery-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.reminder-delivery-option small {
+  color: var(--cc-text-muted);
+  font-size: var(--cc-type-metadata-size);
+}
+
+.reminder-delivery-settings__actions {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
 .ai-provider-settings { display: grid; gap: 16px; }
 .ai-provider-settings__field { display: grid; gap: 6px; color: var(--cc-text-secondary); font-size: var(--cc-type-short-label-size); }
 .ai-provider-settings__field select,
