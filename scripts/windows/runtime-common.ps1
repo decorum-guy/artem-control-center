@@ -200,6 +200,40 @@ function Test-ArtemProductionDeploymentHealthy {
     }
 }
 
+function Assert-ArtemStagedProductionBuild {
+    param(
+        [Parameter(Mandatory)][string]$DashboardRoot,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedRevision
+    )
+    if (-not (Test-Path -LiteralPath (Join-Path $DashboardRoot "index.html"))) {
+        throw "Target production build has no dashboard index"
+    }
+    Assert-ArtemProductionBuildIdentity -DashboardRoot $DashboardRoot -ExpectedRevision $ExpectedRevision | Out-Null
+}
+
+function Promote-ArtemProductionBuild {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string]$StagedDashboard
+    )
+    if (-not (Test-Path -LiteralPath (Join-Path $StagedDashboard "index.html"))) {
+        throw "Cannot promote a missing staged production dashboard"
+    }
+
+    # Keep the last known-good generated artifact outside the checkout until
+    # served-artifact verification has completed. This is a narrow generated
+    # directory, never the repository root or a user-owned runtime directory.
+    if (Test-Path -LiteralPath $Paths.DashboardDist) {
+        if (Test-Path -LiteralPath $Paths.RollbackDashboard) {
+            Remove-Item -LiteralPath $Paths.DashboardDist -Recurse -Force
+        }
+        else {
+            Move-Item -LiteralPath $Paths.DashboardDist -Destination $Paths.RollbackDashboard
+        }
+    }
+    Move-Item -LiteralPath $StagedDashboard -Destination $Paths.DashboardDist
+}
+
 function Assert-ArtemTargetUpdaterLogic {
     param(
         [Parameter(Mandatory)]$Paths,
