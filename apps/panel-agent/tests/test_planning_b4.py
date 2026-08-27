@@ -15,7 +15,7 @@ from panel_agent.planning_adapter import (
     PlanningClient,
     PlanningUpstreamError,
 )
-from panel_agent.planning_api import build_planning_router
+from panel_agent.planning_api import _mutation_error, build_planning_router
 from panel_agent.planning_fixtures import PlanningFixtureTransport, fixture_payload
 from panel_agent.settings import IntegrationSettings
 
@@ -369,6 +369,12 @@ def test_b4_reminder_patch_rejects_invalid_timezone_at_panel_boundary(tmp_path):
 
     response = asyncio.run(exercise())
     assert response.status_code == 422
+
+
+def test_b4_reminder_create_validation_error_maps_to_safe_422():
+    response = _mutation_error(PlanningUpstreamError("reminder_create_invalid"))
+    assert response.status_code == 422
+    assert response.detail == "planning_mutation_invalid"
 
 
 def test_b4_mutation_timeout_is_uncertain_and_never_success(tmp_path):

@@ -621,6 +621,38 @@ describe("fixed Planning read client", () => {
     expect((replay[1]?.headers as Record<string, string>)["Idempotency-Key"]).toBe("b4-create-replay-001");
   });
 
+  it("classifies explicit disabled details and reminder not-found separately from HTTP status", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "planning_reminder_mutations_disabled" }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "planning_reminder_not_found" }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "not actually disabled" }), { status: 404 }));
+    const request = {
+      action: "edit" as const,
+      idempotencyKey: "b4-error-classification",
+      reminderId: "00000000-0000-4000-8000-000000000001",
+      expectedVersion: 1,
+      body: { title: "Обновить" }
+    };
+
+    await expect(mutatePlanningReminder(request)).rejects.toMatchObject({ mutationCode: "disabled", status: 404 });
+    await expect(mutatePlanningReminder({ ...request, idempotencyKey: "b4-not-found" })).rejects.toMatchObject({ mutationCode: "not_found", status: 404 });
+    await expect(mutatePlanningReminder({ ...request, idempotencyKey: "b4-plain-404" })).rejects.toMatchObject({ mutationCode: "http", status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("preserves explicit task mutation disabled classification", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ detail: "planning_task_mutations_disabled" }),
+      { status: 404 }
+    ));
+    await expect(mutatePlanningTask({
+      action: "create",
+      idempotencyKey: "b4-task-disabled",
+      body: { title: "Задача", priority: "normal", due_date: null, due_time: null, timezone: null }
+    })).rejects.toMatchObject({ mutationCode: "disabled", status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a create uncertain when canonical idempotency replay remains in progress", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new Error("response lost"))

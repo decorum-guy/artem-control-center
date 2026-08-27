@@ -1401,7 +1401,7 @@ function reminderMutationAllowed(
 ): boolean {
   return planningRemindersRouteEnabled
     && planningReminderMutationsEnabled
-    && planning?.reminderMutationsEnabled !== false
+    && planning?.reminderMutationsEnabled === true
     && planning?.sourceStatus === "current"
     && Boolean(planning.capabilities[capability]);
 }
@@ -1701,13 +1701,20 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
     return Boolean(accessStatus.capabilities[planningReminderAccessCapabilities[action]]?.allowed);
   };
   const currentPlanning = planning?.sourceStatus === "current";
+  const reminderWriterGateMetadataUnavailable = currentPlanning
+    && planningReminderMutationsEnabled
+    && planning?.reminderMutationsEnabled === undefined;
   const reminderWriterGateDisabled = currentPlanning
-    && (!planningReminderMutationsEnabled || planning.reminderMutationsEnabled === false);
+    && (!planningReminderMutationsEnabled || planning?.reminderMutationsEnabled === false);
   const reminderAccessBlocked = currentPlanning
     && !reminderWriterGateDisabled
+    && !reminderWriterGateMetadataUnavailable
     && Boolean(accessStatus)
     && !(["create", "edit", "complete", "cancel"] as const).some(accessAllows);
-  const reminderAccessUnavailable = currentPlanning && !reminderWriterGateDisabled && !accessAvailable;
+  const reminderAccessUnavailable = currentPlanning
+    && !reminderWriterGateDisabled
+    && !reminderWriterGateMetadataUnavailable
+    && !accessAvailable;
   const canCreate = reminderMutationAllowed(planning, "create") && accessAllows("create");
   const canEdit = reminderMutationAllowed(planning, "edit")
     && accessAllows("edit")
@@ -1729,6 +1736,15 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         severity: "warning",
         title: "Изменения напоминаний отключены",
         detail: "Серверный gate записи напоминаний отключён. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (reminderWriterGateMetadataUnavailable) {
+      showNotice({
+        id: `planning.reminder.gate-unavailable.${action}`,
+        severity: "warning",
+        title: "Серверный gate не подтверждён",
+        detail: "Метаданные разрешения записи напоминаний недоступны. Запрос не отправлен."
       });
       return false;
     }
@@ -1807,15 +1823,29 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       const mutationError = error instanceof PlanningMutationError ? error : null;
       const conflict = mutationError?.mutationCode === "conflict";
       const disabled = mutationError?.mutationCode === "disabled";
+      const notFound = mutationError?.mutationCode === "not_found";
+      if (notFound) {
+        setSelectedReminder(null);
+        setMutationSheet(null);
+        setRetry((value) => value + 1);
+      }
       showNotice({
         id: `planning.reminder.uncertain.${target?.id ?? "create"}`,
-        severity: conflict || disabled ? "warning" : "error",
-        title: conflict ? "Напоминание изменилось" : disabled ? "Изменения напоминаний отключены" : "Результат не подтверждён",
+        severity: conflict || disabled || notFound ? "warning" : "error",
+        title: conflict
+          ? "Напоминание изменилось"
+          : disabled
+            ? "Изменения напоминаний отключены"
+            : notFound
+              ? "Напоминание больше не найдено"
+              : "Результат не подтверждён",
         detail: conflict
           ? "Запись уже изменилась. Сначала перечитайте её."
           : disabled
             ? "Серверный gate записи напоминаний отключён. Запрос не отправлен повторно."
-            : "Результат не подтверждён. Повторите чтение перед новой попыткой."
+            : notFound
+              ? "Актуальная запись не найдена. Обновите список."
+              : "Результат не подтверждён. Повторите чтение перед новой попыткой."
       });
     }
   }
@@ -1864,15 +1894,28 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       const mutationError = error instanceof PlanningMutationError ? error : null;
       const conflict = mutationError?.mutationCode === "conflict";
       const disabled = mutationError?.mutationCode === "disabled";
+      const notFound = mutationError?.mutationCode === "not_found";
+      if (notFound) {
+        setSelectedReminder(null);
+        setRetry((value) => value + 1);
+      }
       showNotice({
         id: `planning.reminder.action-uncertain.${reminderId}`,
-        severity: conflict || disabled ? "warning" : "error",
-        title: conflict ? "Напоминание изменилось" : disabled ? "Изменения напоминаний отключены" : "Результат не подтверждён",
+        severity: conflict || disabled || notFound ? "warning" : "error",
+        title: conflict
+          ? "Напоминание изменилось"
+          : disabled
+            ? "Изменения напоминаний отключены"
+            : notFound
+              ? "Напоминание больше не найдено"
+              : "Результат не подтверждён",
         detail: conflict
           ? "Запись уже изменилась. Сначала перечитайте её."
           : disabled
             ? "Серверный gate записи напоминаний отключён."
-            : "Успех не показан. Перечитайте запись перед повторной попыткой."
+            : notFound
+              ? "Актуальная запись не найдена. Обновите список."
+              : "Успех не показан. Перечитайте запись перед повторной попыткой."
       });
     } finally {
       lifecyclePendingRef.current = false;
@@ -1905,6 +1948,11 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
           {reminderWriterGateDisabled && (
             <span className="planning-route-note planning-route-note--warning" data-testid="planning-reminder-mutation-gate">
               Запись напоминаний отключена серверным gate. Доступ к профилю этого не меняет.
+            </span>
+          )}
+          {reminderWriterGateMetadataUnavailable && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-reminder-mutation-gate-unavailable">
+              Серверный gate записи напоминаний не подтверждён. Запись временно заблокирована.
             </span>
           )}
           {reminderAccessBlocked && (

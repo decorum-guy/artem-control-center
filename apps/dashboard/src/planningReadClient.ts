@@ -101,7 +101,7 @@ export class PlanningReadError extends Error {
 }
 
 export class PlanningMutationError<T = PlanningReminder | PlanningTask> extends PlanningReadError {
-  readonly mutationCode: "uncertain" | "conflict" | "disabled" | "http" | "network" | "contract";
+  readonly mutationCode: "uncertain" | "conflict" | "disabled" | "not_found" | "http" | "network" | "contract";
   readonly reconciledObject: T | null;
 
   constructor(
@@ -151,6 +151,17 @@ const providerFreshnessValues = new Set<PlanningProviderFreshnessStatus>([
   "error",
   "not_configured",
   "disabled"
+]);
+const disabledMutationDetails = new Set([
+  "planning_disabled",
+  "planning_reminder_mutations_disabled",
+  "planning_task_mutations_disabled",
+  "planning_calendar_mutations_disabled"
+]);
+const notFoundMutationDetails = new Set([
+  "planning_reminder_not_found",
+  "planning_task_not_found",
+  "planning_calendar_event_not_found"
 ]);
 
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
@@ -1050,7 +1061,8 @@ async function mutationResponseDetail(response: Response): Promise<string> {
 function mutationCodeForResponse(detail: string, status: number): PlanningMutationError["mutationCode"] {
   if (detail === "planning_mutation_uncertain") return "uncertain";
   if (status === 409 || detail === "planning_idempotency_conflict") return "conflict";
-  if (status === 404) return "disabled";
+  if (disabledMutationDetails.has(detail)) return "disabled";
+  if (notFoundMutationDetails.has(detail)) return "not_found";
   return "http";
 }
 
