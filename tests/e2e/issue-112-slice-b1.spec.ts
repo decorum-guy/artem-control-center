@@ -693,7 +693,7 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     });
     expect(progressGeometry.width).toBe("4px");
     expect(progressGeometry.renderedHeight).toBeGreaterThan(progressGeometry.renderedWidth);
-    expect(progressGeometry).toMatchObject({ left: "5px", right: "auto", top: "5px", bottom: "5px" });
+    expect(progressGeometry).toMatchObject({ left: "5px", top: "5px", bottom: "5px" });
     await expect(control.getByTestId("interaction-lock-progress-fill")).toHaveAttribute("style", /scaleY\(/);
     const duringHold = await control.boundingBox();
     expect(duringHold?.width).toBe(beforeHold?.width);

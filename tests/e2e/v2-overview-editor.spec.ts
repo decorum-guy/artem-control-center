@@ -406,7 +406,8 @@ async function readCoffeeTransform(page: Page) {
     const image = panel.querySelector<HTMLImageElement>(".coffee-asset__image")!;
     const asset = panel.querySelector<HTMLElement>(".coffee-asset")!;
     const imageRect = image.getBoundingClientRect();
-    const origin = getComputedStyle(visual).transformOrigin.split(" ").map(Number);
+    const transformOrigin = getComputedStyle(visual).transformOrigin;
+    const [originX, originY] = transformOrigin.split(" ").map((value) => Number.parseFloat(value));
     return {
       scale: panel.getAttribute("data-image-scale"),
       x: panel.getAttribute("data-image-x"),
@@ -415,9 +416,9 @@ async function readCoffeeTransform(page: Page) {
       imageCenter: { x: imageRect.left + imageRect.width / 2, y: imageRect.top + imageRect.height / 2 },
       visual: {
         transform: getComputedStyle(visual).transform,
-        transformOrigin: getComputedStyle(visual).transformOrigin,
-        originX: origin[0],
-        originY: origin[1],
+        transformOrigin,
+        originX,
+        originY,
         layoutWidth: visual.offsetWidth,
         layoutHeight: visual.offsetHeight
       },
