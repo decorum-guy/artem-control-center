@@ -167,7 +167,17 @@ def test_update_check_blocks_invalid_checkout_states(monkeypatch, tmp_path, kwar
 
 
 def test_same_sha_reports_latest_version(monkeypatch, tmp_path):
-    client, _ = make_client(monkeypatch, tmp_path, FakeGit(target=CURRENT))
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(target=CURRENT))
+    service.dashboard_dist.mkdir(parents=True, exist_ok=True)
+    service.dashboard_dist.joinpath("dashboard-build.json").write_text(
+        json.dumps({
+            "schemaVersion": "dashboard-build.v1",
+            "revision": CURRENT,
+            "profile": "accepted-v2",
+            "buildId": f"{CURRENT}:accepted-v2",
+        }),
+        encoding="utf-8",
+    )
     response = client.post(
         "/api/v1/system/update/check",
         headers={"x-panel-intent": "panel-update"},
@@ -175,6 +185,45 @@ def test_same_sha_reports_latest_version(monkeypatch, tmp_path):
     assert response.json()["status"] == "up_to_date"
     assert response.json()["updateAvailable"] is False
     assert response.json()["updateAllowed"] is False
+
+
+def test_same_sha_with_missing_or_stale_artifact_requires_repair(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(target=CURRENT))
+    checked = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    )
+    assert checked.status_code == 200
+    assert checked.json() == {
+        "schemaVersion": "panel-update.v1",
+        "currentHead": CURRENT,
+        "targetHead": CURRENT,
+        "updateAvailable": True,
+        "updateAllowed": True,
+        "status": "repair_required",
+        "reason": "production_artifact_mismatch",
+    }
+
+    applied = client.post(
+        "/api/v1/system/update/apply",
+        headers={"x-panel-intent": "panel-update"},
+        json={"expectedCurrentHead": CURRENT, "expectedTargetHead": CURRENT},
+    )
+    assert applied.status_code == 202
+    command = json.loads(service.command_path.read_text(encoding="utf-8"))
+    assert command["repair"] is True
+
+
+def test_same_sha_with_corrupt_artifact_marker_requires_repair_not_success(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(target=CURRENT))
+    service.dashboard_dist.mkdir(parents=True, exist_ok=True)
+    service.dashboard_dist.joinpath("dashboard-build.json").write_text("not-json", encoding="utf-8")
+    response = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    )
+    assert response.json()["status"] == "repair_required"
+    assert response.json()["updateAllowed"] is True
 
 
 def test_update_uses_dedicated_gate_not_kiosk_control_permission(monkeypatch, tmp_path):

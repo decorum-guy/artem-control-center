@@ -13,8 +13,10 @@ $connectivityTask = Get-ScheduledTask -TaskName $connectivityPaths.TaskName -Err
 $connectivityConfig = Get-ArtemConnectivityConfig -Paths $connectivityPaths
 $readyPayload = $null
 $snapshot = $null
+$runtimeProcess = Test-ArtemRuntimeProcess -Paths $paths
+$panelReady = Test-ArtemPanelReady -Paths $paths
 
-if (Test-ArtemPanelReady -Paths $paths) {
+if ($panelReady) {
     try {
         $readyPayload = Invoke-RestMethod -Uri $paths.ReadyUrl -Method Get -TimeoutSec 5
         $snapshot = Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/v1/snapshot" -Method Get -TimeoutSec 5
@@ -35,11 +37,16 @@ $ha = Get-ServiceSnapshot -ServiceId "home-assistant"
 $alice = Get-ServiceSnapshot -ServiceId "alice-tg-bot"
 $avalarMain = Get-ServiceSnapshot -ServiceId "avalar-site-main"
 $avalarStage = Get-ServiceSnapshot -ServiceId "avalar-site-stage"
+$kiosk = Get-ArtemKioskStatus -Paths $paths -RuntimeReady $panelReady
 
 $status = [ordered]@{
-    runtimeProcess = Test-ArtemRuntimeProcess -Paths $paths
-    panelReady = Test-ArtemPanelReady -Paths $paths
-    kioskOpen = Test-ArtemKioskRunning -Paths $paths
+    runtimeProcess = $runtimeProcess
+    panelReady = $panelReady
+    kioskOpen = $kiosk.Open
+    kioskStatus = $kiosk.Status
+    kioskProcessOwned = $kiosk.ProcessOwned
+    kioskPresenceRecent = $kiosk.PresenceRecent
+    kioskWatcherOwned = $kiosk.WatcherOwned
     manualStop = Test-Path -LiteralPath $paths.ManualStop
     scheduledTask = $null -ne $runtimeTask
     scheduledTaskState = if ($runtimeTask) { [string]$runtimeTask.State } else { $null }

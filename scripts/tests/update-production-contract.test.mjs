@@ -1,0 +1,52 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const root = resolve(import.meta.dirname, "../..");
+const updater = readFileSync(resolve(root, "scripts/windows/update-production.ps1"), "utf8");
+
+test("target-dependent update work is below the explicit target continuation", () => {
+  const continuation = updater.indexOf("if ($Continuation)");
+  const targetProof = updater.indexOf("Assert-ArtemTargetUpdaterLogic", continuation);
+  const build = updater.indexOf("Invoke-IsolatedValidation", targetProof);
+  const restart = updater.indexOf("Ensure-ArtemHealthyVisiblePanel", build);
+  assert.ok(continuation >= 0);
+  assert.ok(targetProof > continuation);
+  assert.ok(build > targetProof);
+  assert.ok(restart > build);
+  assert.match(updater, /-File\"?,\s*\$targetScriptArgument/);
+  assert.match(updater, /\"-Continuation\"/);
+});
+
+test("same-SHA updates require artifact and served-runtime proof", () => {
+  assert.match(updater, /\$currentHead\s+-eq\s+\$targetHead/);
+  assert.match(updater, /Test-ArtemProductionDeploymentHealthy/);
+  assert.match(updater, /Assert-ArtemStagedProductionBuild/);
+  assert.match(updater, /Assert-ArtemServedProductionBuildIdentity/);
+  assert.doesNotMatch(updater, /if \(\$currentHead\s+-eq\s+\$targetHead\)\s*\{[\s\S]{0,240}?return/);
+});
+
+test("interruption and failure paths retain bounded recovery state", () => {
+  for (const field of ["UpdateTransactionState", "previousHead", "targetHead", "requestId", "phase", "status = \"incomplete\""]) {
+    assert.match(updater, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(updater, /Write-ArtemUpdateTransaction[\s\S]*-Phase \"rollback\"/);
+  assert.match(updater, /RollbackDashboard/);
+  assert.match(updater, /rollback_restored/);
+  assert.match(updater, /rollback_failed/);
+});
+
+test("production failures cannot be accepted from a command exit code alone", () => {
+  const buildAssertion = updater.indexOf("Assert-ArtemStagedProductionBuild");
+  const promotion = updater.indexOf("Promote-ArtemProductionBuild");
+  assert.ok(buildAssertion >= 0 && promotion > buildAssertion);
+  assert.match(updater, /Assert-ArtemProductionBuildIdentity[\s\S]*Assert-ArtemServedProductionBuildIdentity/);
+});
+
+test("the updater keeps the protected process and repository boundaries", () => {
+  assert.doesNotMatch(updater, /git(?:\.exe)?\s+clean/);
+  assert.match(updater, /git\.exe[\s\S]*?merge[\s\S]*?--ff-only[\s\S]*?\$targetHead/);
+  assert.match(updater, /Stop-ArtemRuntime\s+-Paths\s+\$paths\s+-Manual\s+\$false/);
+  assert.doesNotMatch(updater, /CommandLine\s+-like\s+['\"]\*--kiosk/);
+});

@@ -8,6 +8,16 @@ const npmCli = process.env.npm_execpath;
 const command = npmCli ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm";
 const args = npmCli ? [npmCli, "run", "build"] : ["run", "build"];
 
+const revisionResult = spawnSync("git", ["rev-parse", "HEAD"], {
+  cwd: root,
+  encoding: "utf8",
+  windowsHide: true
+});
+const buildRevision = revisionResult.status === 0 ? revisionResult.stdout.trim().toLowerCase() : "";
+if (!/^[0-9a-f]{40}$/.test(buildRevision)) {
+  throw new Error("Unable to resolve the Git revision for the production build identity");
+}
+
 const overrides = loadProductionCapabilityOverrides(process.env);
 const capabilities = productionBuildCapabilities(overrides);
 const buildEnvironment = productionBuildEnvironment(process.env, overrides);
@@ -37,5 +47,11 @@ writeFileSync(resolve(outDir, "dashboard-capabilities.json"), `${JSON.stringify(
   baseline: capabilities.baseline,
   active: capabilities.active,
   flags: capabilities.flags
+}, null, 2)}\n`, "utf8");
+writeFileSync(resolve(outDir, "dashboard-build.json"), `${JSON.stringify({
+  schemaVersion: "dashboard-build.v1",
+  revision: buildRevision,
+  profile: productionBuildProfileName,
+  buildId: `${buildRevision}:${productionBuildProfileName}`
 }, null, 2)}\n`, "utf8");
 await import("./production-build-assert.mjs");

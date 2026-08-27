@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -6,6 +7,15 @@ const root = resolve(import.meta.dirname, "..");
 const dist = process.env.PANEL_PRODUCTION_BUILD_OUT_DIR
   ? resolve(process.env.PANEL_PRODUCTION_BUILD_OUT_DIR)
   : resolve(root, "apps", "dashboard", "dist");
+
+const revisionResult = spawnSync("git", ["rev-parse", "HEAD"], {
+  cwd: root,
+  encoding: "utf8",
+  windowsHide: true
+});
+assert.equal(revisionResult.status, 0, "Production build source revision could not be resolved");
+const sourceRevision = revisionResult.stdout.trim().toLowerCase();
+assert.match(sourceRevision, /^[0-9a-f]{40}$/, "Production build source revision is invalid");
 
 function javascriptFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -50,4 +60,9 @@ for (const [id, enabled] of Object.entries(capabilityManifest.active)) {
   assert.ok(variable, `Unexpected build capability ${id}`);
   assert.equal(process.env[variable], String(enabled), `Manifest differs from actual build environment for ${id}`);
 }
-console.log(`Accepted V2 production bundle asserted (${files.length} JavaScript asset(s)).`);
+const buildIdentity = JSON.parse(readFileSync(join(dist, "dashboard-build.json"), "utf8"));
+assert.equal(buildIdentity.schemaVersion, "dashboard-build.v1", "Production build identity is missing");
+assert.equal(buildIdentity.revision, sourceRevision, "Production build identity does not match checkout");
+assert.equal(buildIdentity.profile, "accepted-v2", "Production build identity has the wrong profile");
+assert.equal(buildIdentity.buildId, `${sourceRevision}:accepted-v2`, "Production build identity is malformed");
+console.log(`Accepted V2 production bundle asserted (${files.length} JavaScript asset(s), revision ${sourceRevision}).`);

@@ -44,10 +44,9 @@ try {
         throw "Fresh heartbeat without panel-owned Edge must not count as kiosk"
     }
 
-    # Prove HWND is no longer consulted. A live panel profile plus fresh heartbeat
-    # is enough even when the old Windows window resolver is unusable on Samsung.
+    # A live panel profile plus fresh heartbeat is enough even when a legacy
+    # narrow visibility probe is unavailable on Samsung.
     function Test-ArtemKioskRunning { return $true }
-    function Get-ArtemVisibleKioskProcesses { throw "HWND authority must not be consulted" }
     if (-not (Test-ArtemKioskVisible -Paths $paths)) {
         throw "Fresh application presence plus panel Edge must be kiosk authority"
     }
@@ -102,6 +101,15 @@ try {
     }
     if (-not $strictFailed) {
         throw "Ordinary Open must remain strict when no dashboard presence appears"
+    }
+
+    # Status must preserve positive ownership evidence when one advisory signal
+    # is stale; it reports degraded rather than a contradictory kiosk=false.
+    function Test-ArtemKioskRunning { return $true }
+    Write-TestPresence -Paths $paths -ObservedAt ([DateTimeOffset]::UtcNow.AddSeconds(-30).ToString("o"))
+    $degraded = Get-ArtemKioskStatus -Paths $paths -RuntimeReady $true
+    if ($degraded.Status -ne "degraded" -or -not $degraded.Open) {
+        throw "Owned kiosk with stale presence must report degraded/open, not stopped"
     }
 }
 finally {

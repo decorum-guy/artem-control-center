@@ -171,4 +171,12 @@ test("the package exposes the production build command and Windows workflow invo
     readFileSync(resolve(root, "scripts/windows/update-production.ps1"), "utf8"),
     /build:production/
   );
+  assert.match(
+    readFileSync(resolve(root, "scripts/build-production.mjs"), "utf8"),
+    /dashboard-build\.json/
+  );
+  assert.match(
+    readFileSync(resolve(root, "scripts/production-build-assert.mjs"), "utf8"),
+    /Production build identity does not match checkout/
+  );
 });

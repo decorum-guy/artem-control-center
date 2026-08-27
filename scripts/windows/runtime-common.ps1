@@ -20,6 +20,8 @@ function Get-ArtemRuntimePaths {
         EdgeProfile = Join-Path $runtimeRoot "edge-profile"
         LastKnownGood = Join-Path $runtimeRoot "last-known-good.txt"
         RollbackHead = Join-Path $runtimeRoot "rollback-head.txt"
+        RollbackDashboard = Join-Path $runtimeRoot "dashboard-rollback"
+        UpdateTransactionState = Join-Path $runtimeRoot "update-transaction.json"
         CapabilityApplyState = Join-Path $runtimeRoot "capability-apply-state.json"
         UpdateLock = Join-Path $runtimeRoot "update-lock.json"
         UpdateState = Join-Path $runtimeRoot "update-state.json"
@@ -29,10 +31,13 @@ function Get-ArtemRuntimePaths {
         KioskWatchScript = Join-Path $repoRoot "scripts\windows\watch-kiosk.ps1"
         StopScript = Join-Path $repoRoot "scripts\windows\stop-production.ps1"
         UpdateScript = Join-Path $repoRoot "scripts\windows\update-production.ps1"
+        DashboardDist = Join-Path $repoRoot "apps\dashboard\dist"
+        DashboardBuildMetadata = Join-Path $repoRoot "apps\dashboard\dist\dashboard-build.json"
         DashboardIndex = Join-Path $repoRoot "apps\dashboard\dist\index.html"
         Python = Join-Path $repoRoot ".venv\Scripts\python.exe"
         PanelUrl = "http://127.0.0.1:8787/overview"
         ReadyUrl = "http://127.0.0.1:8787/health/ready"
+        ProductionBuildUrl = "http://127.0.0.1:8787/api/v1/system/production-build"
     }
 }
 
@@ -87,6 +92,110 @@ function Test-ArtemPanelReady {
     }
     catch {
         return $false
+    }
+}
+
+function Get-ArtemProductionBuildIdentity {
+    param(
+        [Parameter(Mandatory)][string]$DashboardRoot
+    )
+    $marker = Join-Path $DashboardRoot "dashboard-build.json"
+    $payload = Get-ArtemJsonPayload -Path $marker
+    $keys = if ($null -ne $payload) { @($payload.PSObject.Properties.Name | Sort-Object) } else { @() }
+    if (
+        $null -eq $payload -or
+        $keys.Count -ne 4 -or
+        ($keys -join ",") -ne "buildId,profile,revision,schemaVersion" -or
+        $payload.schemaVersion -ne "dashboard-build.v1" -or
+        [string]$payload.revision -notmatch '^[0-9a-f]{40}$' -or
+        [string]$payload.profile -ne "accepted-v2" -or
+        [string]$payload.buildId -ne ("{0}:{1}" -f $payload.revision, $payload.profile)
+    ) {
+        return $null
+    }
+    return [pscustomobject]@{
+        SchemaVersion = [string]$payload.schemaVersion
+        Revision = [string]$payload.revision
+        Profile = [string]$payload.profile
+        BuildId = [string]$payload.buildId
+    }
+}
+
+function Assert-ArtemProductionBuildIdentity {
+    param(
+        [Parameter(Mandatory)][string]$DashboardRoot,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedRevision
+    )
+    $identity = Get-ArtemProductionBuildIdentity -DashboardRoot $DashboardRoot
+    if ($null -eq $identity -or $identity.Revision -ne $ExpectedRevision -or $identity.Profile -ne "accepted-v2") {
+        throw "Production dashboard artifact identity does not match the expected revision/profile"
+    }
+    return $identity
+}
+
+function Get-ArtemServedProductionBuildIdentity {
+    param([Parameter(Mandatory)]$Paths)
+    try {
+        $payload = Invoke-RestMethod -Uri $Paths.ProductionBuildUrl -Method Get -TimeoutSec 5
+        $keys = if ($null -ne $payload) { @($payload.PSObject.Properties.Name | Sort-Object) } else { @() }
+        if (
+            $null -eq $payload -or
+            $keys.Count -ne 4 -or
+            ($keys -join ",") -ne "buildId,profile,revision,schemaVersion" -or
+            [string]$payload.schemaVersion -ne "dashboard-build.v1" -or
+            [string]$payload.revision -notmatch '^[0-9a-f]{40}$' -or
+            [string]$payload.profile -ne "accepted-v2" -or
+            [string]$payload.buildId -ne ("{0}:{1}" -f $payload.revision, $payload.profile)
+        ) {
+            return $null
+        }
+        return [pscustomobject]@{
+            SchemaVersion = [string]$payload.schemaVersion
+            Revision = [string]$payload.revision
+            Profile = [string]$payload.profile
+            BuildId = [string]$payload.buildId
+        }
+    }
+    catch {
+        return $null
+    }
+}
+
+function Assert-ArtemServedProductionBuildIdentity {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedRevision
+    )
+    $identity = Get-ArtemServedProductionBuildIdentity -Paths $Paths
+    if ($null -eq $identity -or $identity.Revision -ne $ExpectedRevision -or $identity.Profile -ne "accepted-v2") {
+        throw "Served production dashboard artifact does not match the expected revision/profile"
+    }
+    return $identity
+}
+
+function Assert-ArtemTargetUpdaterLogic {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedTargetHead
+    )
+    Set-Location -LiteralPath $Paths.RepoRoot
+    $head = (& git.exe rev-parse HEAD).Trim().ToLowerInvariant()
+    if ($LASTEXITCODE -ne 0 -or $head -ne $ExpectedTargetHead.ToLowerInvariant()) {
+        throw "Target updater checkout is not at the expected revision"
+    }
+
+    # Compare the updater loaded by PowerShell with the exact target tree blob.
+    # The path is fixed by the repository contract; no caller-controlled script
+    # path, ref, branch, or shell command participates in this proof.
+    $targetBlob = (& git.exe rev-parse "${ExpectedTargetHead}:scripts/windows/update-production.ps1").Trim().ToLowerInvariant()
+    $workingBlob = (& git.exe hash-object --path=scripts/windows/update-production.ps1 $Paths.UpdateScript).Trim().ToLowerInvariant()
+    if (
+        $LASTEXITCODE -ne 0 -or
+        $targetBlob -notmatch '^[0-9a-f]{40}$' -or
+        $workingBlob -notmatch '^[0-9a-f]{40}$' -or
+        $targetBlob -ne $workingBlob
+    ) {
+        throw "Target updater logic does not match the expected target revision"
     }
 }
 
@@ -339,53 +448,9 @@ function Get-ArtemKioskProcesses {
     return @(Get-ArtemOwnedEdgeProcesses -Paths $Paths)
 }
 
-# Legacy diagnostic only. Real Samsung Edge kiosk windows report HWND 0 for every
-# msedge process, so application heartbeat below is the visibility authority.
-function Get-ArtemVisibleKioskProcesses {
-    param(
-        [Parameter(Mandatory)]$Paths,
-        [object[]]$Processes,
-        [scriptblock]$WindowHandleResolver
-    )
-
-    $owned = if ($PSBoundParameters.ContainsKey('Processes')) {
-        @(Get-ArtemKioskProcesses -Paths $Paths -Processes $Processes)
-    }
-    else {
-        @(Get-ArtemKioskProcesses -Paths $Paths)
-    }
-    if ($null -eq $WindowHandleResolver) {
-        $WindowHandleResolver = {
-            param($ProcessId)
-            (Get-Process -Id $ProcessId -ErrorAction Stop).MainWindowHandle
-        }
-    }
-
-    $visible = @()
-    foreach ($process in $owned) {
-        try {
-            $handle = & $WindowHandleResolver ([int]$process.ProcessId)
-            if ($null -eq $handle) { continue }
-            $handleValue = if ($handle -is [IntPtr]) { $handle.ToInt64() } else { [int64]$handle }
-            if ($handleValue -ne 0) {
-                $visible += $process
-            }
-        }
-        catch {
-            continue
-        }
-    }
-    return @($visible)
-}
-
 function Test-ArtemKioskRunning {
     param([Parameter(Mandatory)]$Paths)
     return (Get-ArtemKioskProcesses -Paths $Paths).Count -gt 0
-}
-
-function Test-ArtemKioskVisible {
-    param([Parameter(Mandatory)]$Paths)
-    return (Get-ArtemVisibleKioskProcesses -Paths $Paths).Count -gt 0
 }
 
 function Stop-ArtemKiosk {
@@ -418,6 +483,10 @@ function Stop-ArtemKiosk {
         foreach ($process in $ordered) {
             & $ProcessStopper ([int]$process.ProcessId)
         }
+        # The owner token is advisory status evidence. Remove it with the
+        # explicit cleanup so a stopped kiosk cannot look degraded merely
+        # because its last watcher claim remains on disk.
+        Remove-Item -LiteralPath (Join-Path $Paths.RuntimeRoot "kiosk-watcher-owner.json") -Force -ErrorAction SilentlyContinue
     }
     catch {
         Write-Warning "Unable to close the panel-owned Edge kiosk: $($_.Exception.Message)"
@@ -435,63 +504,6 @@ function Start-ArtemKioskWatcher {
             "-File", $Paths.KioskWatchScript
         ) `
         -WindowStyle Hidden | Out-Null
-}
-
-# Legacy fallback. kiosk-presence.ps1 is sourced at the end of this file and
-# replaces both visibility functions with application-heartbeat authority.
-function Ensure-ArtemKioskVisible {
-    param(
-        [Parameter(Mandatory)]$Paths,
-        [int]$TimeoutSeconds = 20
-    )
-
-    if (Test-ArtemKioskVisible -Paths $Paths) {
-        Start-ArtemKioskWatcher -Paths $Paths
-        return
-    }
-
-    if (Test-ArtemKioskRunning -Paths $Paths) {
-        $cleanupDeadline = (Get-Date).AddSeconds(5)
-        while ((Get-Date) -lt $cleanupDeadline -and (Test-ArtemKioskRunning -Paths $Paths)) {
-            Stop-ArtemKiosk -Paths $Paths
-            Start-Sleep -Milliseconds 200
-        }
-        if (Test-ArtemKioskRunning -Paths $Paths) {
-            throw "Panel Edge background processes did not close"
-        }
-    }
-
-    Remove-Item `
-        -LiteralPath (Join-Path $Paths.RuntimeRoot "kiosk-close-request.json") `
-        -Force `
-        -ErrorAction SilentlyContinue
-
-    $edge = Get-ArtemEdgeExecutable
-    $edgeArguments = @(
-        "--kiosk",
-        $Paths.PanelUrl,
-        "--edge-kiosk-type=fullscreen",
-        "--user-data-dir=$($Paths.EdgeProfile)",
-        "--no-first-run",
-        "--disable-session-crashed-bubble",
-        "--disable-features=msEdgeSidebarV2"
-    )
-    Start-Process `
-        -FilePath $edge `
-        -ArgumentList $edgeArguments `
-        -WindowStyle Maximized | Out-Null
-
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        if (Test-ArtemKioskVisible -Paths $Paths) {
-            Start-ArtemKioskWatcher -Paths $Paths
-            return
-        }
-        Start-Sleep -Milliseconds 250
-    }
-
-    Stop-ArtemKiosk -Paths $Paths
-    throw "Control Center kiosk window did not become visible"
 }
 
 function Write-ArtemRuntimeCommand {
@@ -567,7 +579,10 @@ function Assert-ArtemProductionPrerequisites {
         throw "Python environment is missing. Run npm run setup."
     }
     if (-not (Test-Path -LiteralPath $Paths.DashboardIndex)) {
-        throw "Dashboard build is missing. Run npm run build."
+        throw "Production dashboard build is missing. Run npm run build:production."
+    }
+    if ($null -eq (Get-ArtemProductionBuildIdentity -DashboardRoot $Paths.DashboardDist)) {
+        throw "Production dashboard build identity is missing or invalid. Run npm run build:production."
     }
     $null = Get-Command node.exe -ErrorAction Stop
 }
