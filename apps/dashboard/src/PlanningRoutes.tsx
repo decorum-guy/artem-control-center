@@ -87,6 +87,12 @@ import {
 } from "./eventMutationBody";
 import { calendarEventPreviewSaveState } from "./calendarEventPreviewPolicy";
 import { calendarDateFromSearch } from "./calendarNavigation";
+import {
+  reminderLocalDateTime,
+  reminderUtcFromLocal,
+  type ReminderMutationBody,
+  type ReminderMutationSheetMode
+} from "./reminderMutationBody";
 
 const tasksModule = planningModuleForRoute("/tasks")!;
 const calendarModule = planningModuleForRoute("/calendar")!;
@@ -1377,8 +1383,6 @@ function ReminderSegments({ view, onChange }: { view: "upcoming" | "overdue" | "
   );
 }
 
-type ReminderMutationSheetMode = "create" | "edit";
-
 const planningReminderAccessCapabilities = {
   create: "planning.reminders.create",
   edit: "planning.reminders.edit",
@@ -1397,6 +1401,7 @@ function reminderMutationAllowed(
 ): boolean {
   return planningRemindersRouteEnabled
     && planningReminderMutationsEnabled
+    && planning?.reminderMutationsEnabled === true
     && planning?.sourceStatus === "current"
     && Boolean(planning.capabilities[capability]);
 }
@@ -1410,14 +1415,20 @@ function ReminderMutationSheet({
   mode: ReminderMutationSheetMode;
   reminder: PlanningReminder | null;
   onClose: () => void;
-  onSubmit: (body: { title: string; due_at_utc: string; timezone: string }) => Promise<void>;
+  onSubmit: (body: ReminderMutationBody) => Promise<void>;
 }) {
-  const [text, setText] = useState("");
+  const initialLocalDateTime = reminder ? reminderLocalDateTime(reminder) : { date: "", time: "" };
+  const [text, setText] = useState(mode === "create" ? "" : reminder?.title ?? "");
+  const [notes, setNotes] = useState(reminder?.notes ?? "");
+  const [dueDate, setDueDate] = useState(mode === "create" ? "" : initialLocalDateTime.date);
+  const [dueTime, setDueTime] = useState(mode === "create" ? "" : initialLocalDateTime.time);
+  const [timezone, setTimezone] = useState(reminder?.timezone ?? DEFAULT_PLANNING_TIME_ZONE);
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewPlanningReminder>> | null>(null);
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (mode !== "create") return undefined;
     const trimmed = text.trim();
     if (!trimmed) {
       setPreview(null);
@@ -1441,30 +1452,42 @@ function ReminderMutationSheet({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [reminder?.timezone, text]);
+  }, [mode, reminder?.timezone, text]);
 
   const candidate = preview?.candidate;
   const fields = candidate?.fields ?? {};
-  const canSave = Boolean(
-    candidate?.domain === "reminder"
-    && candidate.operation === "create"
-    && preview?.confidence === "high"
-    && preview.ambiguities.length === 0
-    && !preview.requires_confirmation
-    && typeof fields.title === "string"
-    && typeof fields.due_at_utc === "string"
-    && typeof fields.timezone === "string"
-  );
+  const explicitDueAtUtc = mode === "create" ? null : reminderUtcFromLocal(dueDate, dueTime, timezone.trim());
+  const canSave = mode === "create"
+    ? Boolean(
+      candidate?.domain === "reminder"
+      && candidate.operation === "create"
+      && preview?.confidence === "high"
+      && preview.ambiguities.length === 0
+      && !preview.requires_confirmation
+      && typeof fields.title === "string"
+      && typeof fields.due_at_utc === "string"
+      && typeof fields.timezone === "string"
+    )
+    : Boolean(explicitDueAtUtc && timezone.trim() && (mode === "reschedule" || text.trim()));
 
   async function save(): Promise<void> {
     if (!canSave || saving) return;
     setSaving(true);
     try {
-      await onSubmit({
-        title: fields.title as string,
-        due_at_utc: fields.due_at_utc as string,
-        timezone: fields.timezone as string
-      });
+      if (mode === "create") {
+        await onSubmit({
+          title: fields.title as string,
+          notes: notes.trim() || null,
+          due_at_utc: fields.due_at_utc as string,
+          timezone: fields.timezone as string
+        });
+      } else {
+        await onSubmit({
+          ...(mode === "edit" ? { title: text.trim(), notes: notes.trim() || null } : {}),
+          due_at_utc: explicitDueAtUtc as string,
+          timezone: timezone.trim()
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -1472,24 +1495,39 @@ function ReminderMutationSheet({
 
   return (
     <PlanningSheet
-      title={mode === "create" ? "Новое напоминание" : "Изменить напоминание"}
-      eyebrow="Напоминание · проверка перед сохранением"
-      description="Введите напоминание. Неоднозначное время нужно уточнить."
+      title={mode === "create" ? "Новое напоминание" : mode === "reschedule" ? "Перенести напоминание" : "Изменить напоминание"}
+      eyebrow={mode === "create" ? "Напоминание · проверка перед сохранением" : "Напоминание · каноническая запись"}
+      description={mode === "create" ? "Введите напоминание. Неоднозначное время нужно уточнить." : "Поля заполнены по канонической записи. Проверьте дату и время перед сохранением."}
       onClose={onClose}
       testId="planning-reminder-mutation"
     >
       <div className="planning-mutation-form">
-        <label className="planning-mutation-form__label" htmlFor="planning-reminder-free-text">Фраза</label>
-        <textarea
-          id="planning-reminder-free-text"
-          className="planning-mutation-form__input"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Например: завтра в 16:00 напомни позвонить врачу"
-          rows={3}
-          autoFocus
-        />
-        {parsing && <p className="planning-mutation-form__status">Проверяем формулировку…</p>}
+        {mode !== "reschedule" && (
+          <>
+            <label className="planning-mutation-form__label" htmlFor="planning-reminder-free-text">Текст напоминания</label>
+            <textarea
+              id="planning-reminder-free-text"
+              className="planning-mutation-form__input"
+              aria-label="Фраза"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder={mode === "create" ? "Например: завтра в 16:00 напомни позвонить врачу" : "Что нужно сделать?"}
+              rows={3}
+              autoFocus
+            />
+            {parsing && <p className="planning-mutation-form__status">Проверяем формулировку…</p>}
+          </>
+        )}
+        {mode !== "create" && (
+          <div className="planning-mutation-form__grid">
+            <label className="planning-mutation-form__label" htmlFor="planning-reminder-due-date">Дата</label>
+            <input id="planning-reminder-due-date" className="planning-mutation-form__input" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+            <label className="planning-mutation-form__label" htmlFor="planning-reminder-due-time">Время</label>
+            <input id="planning-reminder-due-time" className="planning-mutation-form__input" type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
+            <label className="planning-mutation-form__label" htmlFor="planning-reminder-timezone">Часовой пояс</label>
+            <input id="planning-reminder-timezone" className="planning-mutation-form__input" value={timezone} onChange={(event) => setTimezone(event.target.value)} />
+          </div>
+        )}
         {preview && (
           <section className="planning-mutation-preview" data-testid="planning-reminder-preview" aria-live="polite">
             <p className="planning-mutation-preview__eyebrow">Человеческая расшифровка</p>
@@ -1509,8 +1547,27 @@ function ReminderMutationSheet({
             {preview.error_code && <p className="planning-mutation-form__error">Формулировка не подтверждена: {preview.error_code}.</p>}
           </section>
         )}
+        {mode !== "reschedule" && (
+          <>
+            <label className="planning-mutation-form__label" htmlFor="planning-reminder-notes">Детали (необязательно)</label>
+            <textarea
+              id="planning-reminder-notes"
+              className="planning-mutation-form__input"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Дополнительный контекст"
+              rows={2}
+            />
+          </>
+        )}
         <p className="planning-detail-note">
-          {mode === "edit" && reminder ? `Текущая запись: ${reminder.title}. Изменения появятся после сохранения.` : "Сохранить можно только однозначное напоминание."}
+          {mode === "create"
+            ? "Сохранить можно только однозначное напоминание."
+            : mode === "reschedule"
+              ? "Дата и время сохраняются в указанном часовом поясе."
+              : reminder
+                ? `Текущая запись: ${reminder.title}. Изменения появятся после сохранения.`
+                : "Изменения появятся после сохранения."}
         </p>
       </div>
       <div className="planning-sheet-actions">
@@ -1531,6 +1588,7 @@ function ReminderDetailSheet({
   canCancel,
   lifecyclePending,
   onEdit,
+  onReschedule,
   onComplete,
   onCancel
 }: {
@@ -1541,6 +1599,7 @@ function ReminderDetailSheet({
   canCancel: boolean;
   lifecyclePending: boolean;
   onEdit: () => void;
+  onReschedule: () => void;
   onComplete: () => void;
   onCancel: () => void;
 }) {
@@ -1549,6 +1608,7 @@ function ReminderDetailSheet({
     <PlanningSheet title={reminder.title} eyebrow="Напоминание" onClose={onClose} testId="planning-reminder-detail">
       <dl className="planning-detail-list">
         <ReadOnlyField label="Срок" value={formatReminderExactDue(reminder)} />
+        {reminder.notes && <ReadOnlyField label="Детали" value={reminder.notes} />}
         <ReadOnlyField label="Жизненный цикл" value={lifecycleLabels[reminder.status]} />
         <ReadOnlyField label="Доставка" value={deliveryLabels[reminder.deliveryState]} />
         <ReadOnlyField label="Часовой пояс" value={reminder.timezone} />
@@ -1557,11 +1617,12 @@ function ReminderDetailSheet({
       {active && (canEdit || canComplete || canCancel) && (
         <div className="planning-sheet-actions planning-sheet-actions--stacked">
           {canEdit && <button type="button" className="planning-secondary-button" onClick={onEdit}>Изменить</button>}
+          {canEdit && <button type="button" className="planning-secondary-button" onClick={onReschedule}>Перенести</button>}
           {canComplete && <button type="button" className="planning-primary-button" disabled={lifecyclePending} onClick={onComplete}>Завершить явно</button>}
           {canCancel && <button type="button" className="planning-secondary-button" disabled={lifecyclePending} onClick={onCancel}>Отменить явно</button>}
         </div>
       )}
-      <p className="planning-detail-note">Доставлено не означает завершено. Напоминание остаётся активным до явного завершения или отмены.</p>
+      <p className="planning-detail-note">{active ? "Доставлено не означает завершено. Напоминание остаётся активным до явного завершения или отмены." : "Это терминальное состояние. Новая доставка не запускается автоматически."}</p>
     </PlanningSheet>
   );
 }
@@ -1599,7 +1660,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   const [now, setNow] = useState(() => new Date());
   const [retry, setRetry] = useState(0);
   const { showNotice } = useNoticeCenter();
-  const { status: accessStatus, ensureCapability } = useAccess();
+  const { status: accessStatus, available: accessAvailable, ensureCapability } = useAccess();
   const { guardMutation } = useInteractionLock();
   const { confirmAction } = useActionConfirmation();
   const lifecyclePendingRef = useRef(false);
@@ -1636,9 +1697,24 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       ? deliveryAttentionRank(left.deliveryState) - deliveryAttentionRank(right.deliveryState) || left.dueAtUtc.localeCompare(right.dueAtUtc) || left.id.localeCompare(right.id)
       : left.dueAtUtc.localeCompare(right.dueAtUtc) || left.id.localeCompare(right.id)) ?? [];
   const accessAllows = (action: keyof typeof planningReminderAccessCapabilities): boolean => {
-    if (!accessStatus) return true;
+    if (!accessStatus) return false;
     return Boolean(accessStatus.capabilities[planningReminderAccessCapabilities[action]]?.allowed);
   };
+  const currentPlanning = planning?.sourceStatus === "current";
+  const reminderWriterGateMetadataUnavailable = currentPlanning
+    && planningReminderMutationsEnabled
+    && planning?.reminderMutationsEnabled === undefined;
+  const reminderWriterGateDisabled = currentPlanning
+    && (!planningReminderMutationsEnabled || planning?.reminderMutationsEnabled === false);
+  const reminderAccessBlocked = currentPlanning
+    && !reminderWriterGateDisabled
+    && !reminderWriterGateMetadataUnavailable
+    && Boolean(accessStatus)
+    && !(["create", "edit", "complete", "cancel"] as const).some(accessAllows);
+  const reminderAccessUnavailable = currentPlanning
+    && !reminderWriterGateDisabled
+    && !reminderWriterGateMetadataUnavailable
+    && !accessAvailable;
   const canCreate = reminderMutationAllowed(planning, "create") && accessAllows("create");
   const canEdit = reminderMutationAllowed(planning, "edit")
     && accessAllows("edit")
@@ -1654,6 +1730,33 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
     action: keyof typeof planningReminderAccessCapabilities,
     title: string
   ): Promise<boolean> {
+    if (reminderWriterGateDisabled) {
+      showNotice({
+        id: `planning.reminder.gate.${action}`,
+        severity: "warning",
+        title: "Изменения напоминаний отключены",
+        detail: "Серверный gate записи напоминаний отключён. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (reminderWriterGateMetadataUnavailable) {
+      showNotice({
+        id: `planning.reminder.gate-unavailable.${action}`,
+        severity: "warning",
+        title: "Серверный gate не подтверждён",
+        detail: "Метаданные разрешения записи напоминаний недоступны. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (!accessAvailable && !accessStatus) {
+      showNotice({
+        id: `planning.reminder.access.unavailable.${action}`,
+        severity: "warning",
+        title: "Проверка доступа недоступна",
+        detail: "Профиль доступа не подтверждён. Запрос не отправлен."
+      });
+      return false;
+    }
     const capability = planningReminderAccessCapabilities[action];
     if (accessStatus && !accessStatus.capabilities[capability]) {
       showNotice({
@@ -1676,10 +1779,11 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
     return allowed;
   }
 
-  async function submitMutation(body: { title: string; due_at_utc: string; timezone: string }): Promise<void> {
+  async function submitMutation(body: ReminderMutationBody): Promise<void> {
     if (!guardMutation()) return;
+    if (!mutationSheet) return;
     const action = mutationSheet === "create" ? "create" : "edit";
-    const target = mutationSheet === "edit" ? selectedReminder : null;
+    const target = mutationSheet === "create" ? null : selectedReminder;
     if (!await ensurePlanningCapability(action, action === "create" ? "Создать напоминание" : "Изменить напоминание")) return;
     if (!guardMutation()) return;
     try {
@@ -1696,7 +1800,11 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       showNotice({
         id: `planning.reminder.${action}.${result.object.id}`,
         severity: "success",
-        title: action === "create" ? "Напоминание создано" : "Напоминание изменено",
+        title: action === "create"
+          ? "Напоминание создано"
+          : mutationSheet === "reschedule"
+            ? "Напоминание перенесено"
+            : "Напоминание изменено",
         detail: "Изменения сохранены."
       });
     } catch (error) {
@@ -1712,13 +1820,32 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         });
         return;
       }
+      const mutationError = error instanceof PlanningMutationError ? error : null;
+      const conflict = mutationError?.mutationCode === "conflict";
+      const disabled = mutationError?.mutationCode === "disabled";
+      const notFound = mutationError?.mutationCode === "not_found";
+      if (notFound) {
+        setSelectedReminder(null);
+        setMutationSheet(null);
+        setRetry((value) => value + 1);
+      }
       showNotice({
         id: `planning.reminder.uncertain.${target?.id ?? "create"}`,
-        severity: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "warning" : "error",
-        title: error instanceof PlanningMutationError && error.mutationCode === "conflict" ? "Напоминание изменилось" : "Результат не подтверждён",
-        detail: error instanceof PlanningMutationError && error.mutationCode === "conflict"
+        severity: conflict || disabled || notFound ? "warning" : "error",
+        title: conflict
+          ? "Напоминание изменилось"
+          : disabled
+            ? "Изменения напоминаний отключены"
+            : notFound
+              ? "Напоминание больше не найдено"
+              : "Результат не подтверждён",
+        detail: conflict
           ? "Запись уже изменилась. Сначала перечитайте её."
-          : "Результат не подтверждён. Повторите чтение перед новой попыткой."
+          : disabled
+            ? "Серверный gate записи напоминаний отключён. Запрос не отправлен повторно."
+            : notFound
+              ? "Актуальная запись не найдена. Обновите список."
+              : "Результат не подтверждён. Повторите чтение перед новой попыткой."
       });
     }
   }
@@ -1764,11 +1891,31 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         });
         return;
       }
+      const mutationError = error instanceof PlanningMutationError ? error : null;
+      const conflict = mutationError?.mutationCode === "conflict";
+      const disabled = mutationError?.mutationCode === "disabled";
+      const notFound = mutationError?.mutationCode === "not_found";
+      if (notFound) {
+        setSelectedReminder(null);
+        setRetry((value) => value + 1);
+      }
       showNotice({
         id: `planning.reminder.action-uncertain.${reminderId}`,
-        severity: "error",
-        title: "Результат не подтверждён",
-        detail: "Успех не показан. Перечитайте запись перед повторной попыткой."
+        severity: conflict || disabled || notFound ? "warning" : "error",
+        title: conflict
+          ? "Напоминание изменилось"
+          : disabled
+            ? "Изменения напоминаний отключены"
+            : notFound
+              ? "Напоминание больше не найдено"
+              : "Результат не подтверждён",
+        detail: conflict
+          ? "Запись уже изменилась. Сначала перечитайте её."
+          : disabled
+            ? "Серверный gate записи напоминаний отключён."
+            : notFound
+              ? "Актуальная запись не найдена. Обновите список."
+              : "Успех не показан. Перечитайте запись перед повторной попыткой."
       });
     } finally {
       lifecyclePendingRef.current = false;
@@ -1798,6 +1945,26 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
         <>
           <ReminderSegments view={view} onChange={setView} />
           <span className="planning-route-note">Доставка и завершение разделены</span>
+          {reminderWriterGateDisabled && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-reminder-mutation-gate">
+              Запись напоминаний отключена серверным gate. Доступ к профилю этого не меняет.
+            </span>
+          )}
+          {reminderWriterGateMetadataUnavailable && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-reminder-mutation-gate-unavailable">
+              Серверный gate записи напоминаний не подтверждён. Запись временно заблокирована.
+            </span>
+          )}
+          {reminderAccessBlocked && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-reminder-access-blocked">
+              Текущий профиль не разрешает изменять напоминания. Запрос не отправляется.
+            </span>
+          )}
+          {reminderAccessUnavailable && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-reminder-access-unavailable">
+              Проверка профиля доступа недоступна. Запись напоминаний временно заблокирована.
+            </span>
+          )}
         </>
       )}
       futureAction={canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать напоминание</button> : undefined}
@@ -1822,12 +1989,14 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
           canCancel={canCancel}
           lifecyclePending={lifecyclePending}
           onEdit={() => setMutationSheet("edit")}
+          onReschedule={() => setMutationSheet("reschedule")}
           onComplete={() => void runAction("complete")}
           onCancel={() => void runAction("cancel")}
         />
       )}
       {mutationSheet && (
         <ReminderMutationSheet
+          key={`${mutationSheet}:${selectedReminder?.id ?? "new"}`}
           mode={mutationSheet}
           reminder={selectedReminder}
           onClose={() => setMutationSheet(null)}

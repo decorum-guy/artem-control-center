@@ -29,13 +29,13 @@ const planningAccessIds = [
   "planning.reminders.cancel"
 ] as const;
 
-async function installAccessFixture(page: Page, profile: "read_only" | "standard") {
+async function installAccessFixture(page: Page, profile: "read_only" | "standard" | "full") {
   await page.route("**/api/v1/access", async (route) => {
     if (route.request().method() !== "GET" || new URL(route.request().url()).pathname !== "/api/v1/access") {
       await route.fallback();
       return;
     }
-    const allowed = profile === "standard";
+    const allowed = profile !== "read_only";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -46,6 +46,10 @@ async function installAccessFixture(page: Page, profile: "read_only" | "standard
         effectiveProfile: profile,
         temporaryFull: false,
         temporaryFullExpiresAt: null,
+        confirmationPolicy: {
+          actionConfirmationRequired: profile !== "full",
+          mode: profile === "full" ? "manual_persistent_full" : "profile_default"
+        },
         pinConfigured: true,
         lockoutUntil: null,
         capabilities: Object.fromEntries(planningAccessIds.map((capability) => [capability, {
@@ -153,17 +157,53 @@ test.describe("B4 Phase 1 reminder mutations", () => {
 
   test("keeps all mutation controls absent when the writer gate is off", async ({ page }, testInfo) => {
     test.skip(reminderMutationsEnabled, "This assertion covers the default-off writer build");
-    await installAccessFixture(page, "read_only");
+    await installAccessFixture(page, "full");
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/reminders") && request.method() !== "GET") mutations.push(request.method());
+    });
     await page.goto("/reminders?theme=day");
     await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
     await page.getByTestId("planning-reminder-route-row").first().click();
     await expect(page.getByTestId("planning-reminder-detail")).toBeVisible();
+    await expect(page.getByTestId("planning-reminder-mutation-gate")).toBeVisible();
+    await expect(page.getByTestId("planning-reminder-access-blocked")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Изменить" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Завершить явно" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Отменить явно" })).toHaveCount(0);
+    expect(mutations).toEqual([]);
     const directory = artifactDirectory(testInfo);
     await mkdir(directory, { recursive: true });
     await page.screenshot({ path: path.join(directory, "writer-gate-off.png"), animations: "disabled" });
+  });
+
+  test("fails closed when the server writer gate metadata is missing", async ({ page }) => {
+    test.skip(!reminderMutationsEnabled, "This assertion covers missing metadata in an enabled writer build");
+    await installAccessFixture(page, "full");
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/reminders") && request.method() !== "GET") mutations.push(request.method());
+    });
+    await page.route("**/api/v1/snapshot**", async (route) => {
+      const response = await route.fetch();
+      const payload = await response.json() as Record<string, unknown>;
+      const planning = payload.planning;
+      if (planning && typeof planning === "object" && !Array.isArray(planning)) {
+        delete (planning as Record<string, unknown>).reminderMutationsEnabled;
+      }
+      await route.fulfill({ response, body: JSON.stringify(payload) });
+    });
+    await page.goto("/reminders?theme=day");
+    await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
+    await page.getByTestId("planning-reminder-route-row").first().click();
+    await expect(page.getByTestId("planning-reminder-detail")).toBeVisible();
+    await expect(page.getByTestId("planning-reminder-mutation-gate-unavailable")).toBeVisible();
+    await expect(page.getByTestId("planning-reminder-mutation-gate")).toHaveCount(0);
+    await expect(page.getByTestId("planning-reminder-access-blocked")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Изменить" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Завершить явно" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Отменить явно" })).toHaveCount(0);
+    expect(mutations).toEqual([]);
   });
 
   test("shows ambiguity before save and replaces local state with canonical create response", async ({ page }, testInfo) => {
@@ -190,6 +230,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await expect(page.getByTestId("global-notice-stack")).toContainText("Напоминание создано");
     await expect(page.getByTestId("planning-reminder-detail")).toContainText("Позвонить врачу");
     await expect(page.getByRole("button", { name: "Изменить" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Перенести" })).toBeVisible();
     await page.getByRole("button", { name: "Изменить" }).click();
     await page.getByLabel("Фраза").fill("завтра в 16:00 напомни позвонить врачу ещё раз");
     await page.getByRole("button", { name: "Сохранить" }).click();
@@ -211,6 +252,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await expect(page.getByRole("button", { name: "Изменить" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Завершить явно" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Отменить явно" })).toHaveCount(0);
+    await expect(page.getByTestId("planning-reminder-access-blocked")).toBeVisible();
     expect(mutations).toEqual([]);
     const directory = artifactDirectory(testInfo);
     await mkdir(directory, { recursive: true });
@@ -241,7 +283,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     const confirmation = page.getByTestId("action-confirmation");
     await expect(confirmation).toBeVisible();
     await expect(confirmation).toContainText("Доставлено");
-    await expect(confirmation).toContainText("Завершено");
+    await expect(confirmation).toContainText("завершит");
     await mkdir(artifactDirectory(testInfo), { recursive: true });
     await page.screenshot({ path: path.join(artifactDirectory(testInfo), "b4-complete-confirmation.png"), animations: "disabled" });
     await confirmation.getByRole("button", { name: "Отмена" }).click();
@@ -268,7 +310,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await page.getByTestId("planning-reminder-route-row").first().click();
     await page.getByRole("button", { name: "Отменить явно" }).click();
     const confirmation = page.getByTestId("action-confirmation");
-    await expect(confirmation).toContainText("Отменено");
+    await expect(confirmation).toContainText("отменит");
     await confirmation.getByRole("button", { name: "Отмена" }).click();
     expect(mutations).toEqual([]);
     await page.getByRole("button", { name: "Отменить явно" }).click();
@@ -276,6 +318,24 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await expect.poll(() => mutations.length).toBe(1);
     await expect(page.getByTestId("global-notice-stack")).toContainText("Напоминание отменено");
     await expect(page.getByTestId("planning-reminder-detail")).toContainText("Отменено");
+  });
+
+  test("manual persistent Full Access waives the extra confirmation modal", async ({ page }) => {
+    test.skip(!reminderMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "full");
+    await installMutationFixtures(page);
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/reminders/") && request.method() === "POST") mutations.push(request.method());
+    });
+    await page.goto("/reminders?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByRole("button", { name: "Пропущено" }).click();
+    await page.getByTestId("planning-reminder-route-row").first().click();
+    await page.getByRole("button", { name: "Завершить явно" }).click();
+    await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
+    await expect.poll(() => mutations.length).toBe(1);
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Напоминание завершено");
   });
 
   test("reconciles create after response loss with the same idempotency key", async ({ page }, testInfo) => {
@@ -300,5 +360,38 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     const directory = artifactDirectory(testInfo);
     await mkdir(directory, { recursive: true });
     await page.screenshot({ path: path.join(directory, "b4-create-reconciled.png"), animations: "disabled" });
+  });
+
+  test("renders reminder not-found truthfully without retrying the mutation", async ({ page }) => {
+    test.skip(!reminderMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page);
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/reminders/") && request.method() !== "GET") mutations.push(request.method());
+    });
+    await page.route("**/api/v1/planning/reminders/**", async (route) => {
+      if (route.request().method() !== "PATCH") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "planning_reminder_not_found" })
+      });
+    });
+    await page.goto("/reminders?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-reminder-route-row").first().click();
+    await page.getByRole("button", { name: "Изменить" }).click();
+    const sheet = page.getByTestId("planning-reminder-mutation");
+    await sheet.getByLabel("Фраза").fill("Напоминание, которого больше нет");
+    await sheet.getByRole("button", { name: "Сохранить" }).click();
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Напоминание больше не найдено");
+    await expect(page.getByTestId("global-notice-stack")).not.toContainText("Изменения напоминаний отключены");
+    await expect(page.getByTestId("planning-reminder-detail")).toHaveCount(0);
+    await expect(page.getByTestId("planning-reminder-mutation")).toHaveCount(0);
+    expect(mutations).toEqual(["PATCH"]);
   });
 });

@@ -56,6 +56,7 @@ from .planning import (
     status_projection,
     timestamp_datetime,
     validate_date,
+    validate_timezone,
     validate_uuid4,
     validate_utc_timestamp,
 )
@@ -354,6 +355,7 @@ class PlanningClient:
             "due_at_utc": due_at_utc,
             "timezone": timezone,
         }
+        _validate_reminder_create_body(body)
         payload = await self._mutation_json(
             "create_reminder",
             idempotency_key=idempotency_key,
@@ -710,6 +712,25 @@ def _validate_expected_version(value: int) -> None:
         raise PlanningUpstreamError("expected_version_invalid")
 
 
+def _validate_reminder_create_body(body: Mapping[str, Any]) -> None:
+    allowed = {"title", "notes", "due_at_utc", "timezone"}
+    if set(body) != allowed:
+        raise PlanningUpstreamError("reminder_create_invalid")
+    if (
+        not isinstance(body["title"], str)
+        or not body["title"].strip()
+        or len(body["title"]) > 500
+    ):
+        raise PlanningUpstreamError("reminder_create_invalid")
+    if body["notes"] is not None and (not isinstance(body["notes"], str) or len(body["notes"]) > 4000):
+        raise PlanningUpstreamError("reminder_create_invalid")
+    try:
+        validate_utc_timestamp(body["due_at_utc"], "planning.reminder.due_at_utc")
+        validate_timezone(body["timezone"], "planning.reminder.timezone")
+    except ValueError as exc:
+        raise PlanningUpstreamError("reminder_create_invalid") from exc
+
+
 def _validate_reminder_patch_body(body: Mapping[str, Any]) -> None:
     allowed = {"title", "notes", "due_at_utc", "timezone"}
     if not body or set(body) - allowed:
@@ -726,6 +747,10 @@ def _validate_reminder_patch_body(body: Mapping[str, Any]) -> None:
     if "timezone" in body:
         if not isinstance(body["timezone"], str) or not body["timezone"] or len(body["timezone"]) > 64:
             raise PlanningUpstreamError("reminder_patch_invalid")
+        try:
+            validate_timezone(body["timezone"], "planning.reminder.timezone")
+        except ValueError as exc:
+            raise PlanningUpstreamError("reminder_patch_invalid") from exc
 
 
 def _validate_task_create_body(body: Mapping[str, Any]) -> None:
@@ -1125,6 +1150,7 @@ class PlanningAdapter:
         updates: dict[str, Any] = {
             "generatedAt": self._now_text(),
             "sourceStatus": self._status_source_status(current=self._domains_current),
+            "reminderMutationsEnabled": self.reminder_mutations_enabled,
             "capabilities": PlanningCapabilities(**self._effective_capabilities()),
         }
         if status.sources is not None:
@@ -1962,6 +1988,7 @@ class PlanningAdapter:
                 source=item.source,
                 sourceLabel=source_label(item.source),
                 title=item.title,
+                notes=item.notes,
                 dueAtUtc=item.due_at_utc,
                 timezone=item.timezone,
                 status=item.status,
@@ -2148,6 +2175,7 @@ class PlanningAdapter:
             schemaVersion="planning.panel.v1",
             generatedAt=generated_at,
             sourceStatus=source_status,
+            reminderMutationsEnabled=self.reminder_mutations_enabled,
             lastSyncedAt=last_synced_at,
             staleAfter=stale_after,
             reminders=mapped["reminders"],

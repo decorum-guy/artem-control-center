@@ -15,7 +15,7 @@ from panel_agent.planning_adapter import (
     PlanningClient,
     PlanningUpstreamError,
 )
-from panel_agent.planning_api import build_planning_router
+from panel_agent.planning_api import _mutation_error, build_planning_router
 from panel_agent.planning_fixtures import PlanningFixtureTransport, fixture_payload
 from panel_agent.settings import IntegrationSettings
 
@@ -162,6 +162,38 @@ def test_b4_feature_gate_keeps_all_mutations_false_by_default(tmp_path):
     }
 
 
+def test_b4_reminder_boundary_rejects_unknown_fields_without_forwarding(tmp_path):
+    transport = B4FixtureTransport()
+    adapter = PlanningAdapter(
+        _settings(tmp_path, mutations=True),
+        transport=transport,
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+
+    async def exercise():
+        await adapter.start()
+        app = FastAPI()
+        app.include_router(build_planning_router(adapter))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://panel.test") as client:
+            response = await client.post(
+                "/api/v1/planning/reminders",
+                headers={"Idempotency-Key": "b4-unknown-field"},
+                json={
+                    "title": "Synthetic reminder",
+                    "notes": None,
+                    "due_at_utc": "2026-08-13T12:00:00Z",
+                    "timezone": "Europe/Moscow",
+                    "provider": "arbitrary-provider",
+                },
+            )
+        await adapter.close()
+        return response
+
+    response = asyncio.run(exercise())
+    assert response.status_code == 422
+    assert not [request for request in transport.requests if request.method != "GET"]
+
+
 def test_b4_reminder_mutations_use_canonical_capabilities_and_readback(tmp_path):
     transport = B4FixtureTransport()
     adapter = PlanningAdapter(
@@ -174,6 +206,7 @@ def test_b4_reminder_mutations_use_canonical_capabilities_and_readback(tmp_path)
         await adapter.start()
         assert adapter.projection is not None
         assert adapter.projection.capabilities.create is True
+        assert adapter.projection.reminderMutationsEnabled is True
         app = FastAPI()
         app.include_router(build_planning_router(adapter))
         headers = {"Idempotency-Key": "b4-create-001"}
@@ -212,6 +245,88 @@ def test_b4_reminder_mutations_use_canonical_capabilities_and_readback(tmp_path)
     assert mutation_requests[1].headers["idempotency-key"] == "b4-complete-001"
 
 
+@pytest.mark.parametrize(
+    ("scenario", "operation", "expected_status"),
+    [
+        ("reminder-create-success", "create", "pending"),
+        ("reminder-edit-success", "edit", "pending"),
+        ("reminder-reschedule-success", "edit", "pending"),
+        ("reminder-complete-success", "complete", "completed"),
+        ("reminder-cancel-success", "cancel", "cancelled"),
+    ],
+)
+def test_b4_fixture_reminder_mutations_return_canonical_objects(scenario, operation, expected_status):
+    transport = PlanningFixtureTransport(scenario)
+    client = PlanningClient(
+        base_url="http://fixture.test",
+        internal_secret="synthetic-internal-secret",
+        panel_secret="synthetic-panel-agent-secret",
+        transport=transport,
+    )
+
+    async def exercise():
+        if operation == "create":
+            result = await client.create_reminder(
+                idempotency_key=f"fixture-{scenario}",
+                title="Fixture reminder",
+                notes="Fixture details",
+                due_at_utc="2026-08-13T12:00:00Z",
+                timezone="Europe/Moscow",
+            )
+        elif operation == "edit":
+            result = await client.edit_reminder(
+                reminder_id="00000000-0000-4000-8000-000000000001",
+                expected_version=1,
+                idempotency_key=f"fixture-{scenario}",
+                body={"title": "Edited fixture reminder", "due_at_utc": "2026-08-13T12:00:00Z", "timezone": "Europe/Moscow"},
+            )
+        elif operation == "complete":
+            result = await client.complete_reminder(
+                reminder_id="00000000-0000-4000-8000-000000000001",
+                expected_version=1,
+                idempotency_key=f"fixture-{scenario}",
+            )
+        else:
+            result = await client.cancel_reminder(
+                reminder_id="00000000-0000-4000-8000-000000000001",
+                expected_version=1,
+                idempotency_key=f"fixture-{scenario}",
+            )
+        await client.close()
+        return result
+
+    result = asyncio.run(exercise())
+    assert result.object.status == expected_status
+    assert result.object.version == 2
+    assert all("/internal/planning/v1/reminders" in path for path in transport.calls)
+
+
+def test_b4_fixture_reminder_failure_scenarios_are_explicit_and_non_successful():
+    async def exercise(scenario):
+        client = PlanningClient(
+            base_url="http://fixture.test",
+            internal_secret="synthetic-internal-secret",
+            panel_secret="synthetic-panel-agent-secret",
+            transport=PlanningFixtureTransport(scenario),
+        )
+        with pytest.raises(PlanningUpstreamError) as error:
+            await client.complete_reminder(
+                reminder_id="00000000-0000-4000-8000-000000000001",
+                expected_version=1,
+                idempotency_key=f"fixture-{scenario}",
+            )
+        await client.close()
+        return error.value
+
+    conflict = asyncio.run(exercise("reminder-conflict"))
+    uncertain = asyncio.run(exercise("reminder-uncertain"))
+    unavailable = asyncio.run(exercise("reminder-unavailable"))
+    assert conflict.category == "version_conflict"
+    assert uncertain.category == "mutation_uncertain"
+    assert uncertain.uncertain is True
+    assert unavailable.category == "mutation_uncertain"
+
+
 def test_b4_parse_preview_is_a_fixed_non_mutating_relay(tmp_path):
     adapter = PlanningAdapter(
         _settings(tmp_path, mutations=False),
@@ -231,6 +346,35 @@ def test_b4_parse_preview_is_a_fixed_non_mutating_relay(tmp_path):
     assert preview.candidate is not None
     assert preview.candidate["domain"] == "reminder"
     assert preview.requires_confirmation is False
+
+
+def test_b4_reminder_patch_rejects_invalid_timezone_at_panel_boundary(tmp_path):
+    adapter = PlanningAdapter(
+        _settings(tmp_path, mutations=True),
+        transport=B4FixtureTransport(),
+    )
+
+    async def exercise():
+        await adapter.start()
+        app = FastAPI()
+        app.include_router(build_planning_router(adapter))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://panel.test") as client:
+            response = await client.patch(
+                "/api/v1/planning/reminders/00000000-0000-4000-8000-000000000001",
+                headers={"Idempotency-Key": "b4-invalid-timezone", "If-Match": "1"},
+                json={"timezone": "Not/AZone"},
+            )
+        await adapter.close()
+        return response
+
+    response = asyncio.run(exercise())
+    assert response.status_code == 422
+
+
+def test_b4_reminder_create_validation_error_maps_to_safe_422():
+    response = _mutation_error(PlanningUpstreamError("reminder_create_invalid"))
+    assert response.status_code == 422
+    assert response.detail == "planning_mutation_invalid"
 
 
 def test_b4_mutation_timeout_is_uncertain_and_never_success(tmp_path):

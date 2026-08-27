@@ -37,12 +37,15 @@ browser secret. The Panel Agent authenticates the fixed upstream transport.
 Both gates must permit a writer before any control is rendered:
 
 1. `VITE_PLANNING_REMINDER_MUTATIONS_ENABLED=true`;
-2. the current canonical Planning status advertises the specific reminder
+2. the server/deployment reminder writer gate is enabled; it is exposed to the
+   browser as `planning.reminderMutationsEnabled`;
+3. the current canonical Planning status advertises the specific reminder
    capability (`create`, `update`, `complete`, or `cancel`).
 
 The feature gate is false by default. Stale, degraded, or unavailable
-canonical status suppresses controls. Delete, voice, and provider-sync remain
-false.
+canonical status suppresses controls. Delete/archive, voice, and provider-sync
+remain false. Cancellation is the canonical logical tombstone; there is no
+physical reminder-delete route.
 
 Every mutation carries an idempotency key. Edit and lifecycle actions carry
 both `If-Match` and the expected object version. The Panel Agent enforces
@@ -59,13 +62,21 @@ Delivery remains independent from lifecycle. In particular,
 `status=due` with `delivery_state=delivered` remains active until the user
 explicitly completes or cancels it.
 
-## Parsing before save
+## Save surfaces
 
-Create and edit use the existing Sheet, NoticeCenter, and OSK-compatible
-surface. Free text is sent to the canonical parser preview and rendered as a
-human restatement with visible ambiguities and proposals. Save stays disabled
-until the preview is a high-confidence, unambiguous reminder proposal. Vague
-time expressions such as `вечером` are not silently interpreted.
+Create uses the existing Sheet, NoticeCenter, and OSK-compatible surface. Free
+text is sent to the canonical parser preview and rendered as a human
+restatement with visible ambiguities and proposals. Save stays disabled until
+the preview is a high-confidence, unambiguous reminder proposal. Vague time
+expressions such as `вечером` are not silently interpreted.
 
-Tasks, calendar mutations, iCloud/CalDAV, TickTick, snooze presets, and #82
-Full Access changes are outside this phase.
+Edit is initialized from the canonical reminder object and supports text,
+details, and explicit date/time/timezone fields. `Перенести` uses the same
+versioned edit route but presents only the scheduling fields. Explicit local
+wall-clock values are converted to UTC only when the timezone resolves to one
+unambiguous instant.
+
+Tasks, calendar mutations, iCloud/CalDAV, TickTick, and snooze presets are
+outside this phase. Manually selected persistent Full Access follows #82:
+allowed reminder actions do not open a second confirmation modal; Interaction
+Lock remains an independent mutation guard.

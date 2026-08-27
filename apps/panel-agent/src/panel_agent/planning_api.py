@@ -790,6 +790,7 @@ def _mutation_error(error: PlanningUpstreamError, *, domain: Literal["reminder",
         return HTTPException(status_code=404, detail=f"planning_{domain}_not_found")
     if error.category in {
         "validation_error",
+        "reminder_create_invalid",
         "reminder_patch_invalid",
         "task_create_invalid",
         "task_patch_invalid",

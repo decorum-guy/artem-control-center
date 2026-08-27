@@ -101,7 +101,7 @@ export class PlanningReadError extends Error {
 }
 
 export class PlanningMutationError<T = PlanningReminder | PlanningTask> extends PlanningReadError {
-  readonly mutationCode: "uncertain" | "conflict" | "disabled" | "http" | "network" | "contract";
+  readonly mutationCode: "uncertain" | "conflict" | "disabled" | "not_found" | "http" | "network" | "contract";
   readonly reconciledObject: T | null;
 
   constructor(
@@ -151,6 +151,17 @@ const providerFreshnessValues = new Set<PlanningProviderFreshnessStatus>([
   "error",
   "not_configured",
   "disabled"
+]);
+const disabledMutationDetails = new Set([
+  "planning_disabled",
+  "planning_reminder_mutations_disabled",
+  "planning_task_mutations_disabled",
+  "planning_calendar_mutations_disabled"
+]);
+const notFoundMutationDetails = new Set([
+  "planning_reminder_not_found",
+  "planning_task_not_found",
+  "planning_calendar_event_not_found"
 ]);
 
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
@@ -360,12 +371,14 @@ function nullableUuid(value: unknown, label: string): string | null {
 
 function parseReminder(value: unknown): PlanningReminder {
   const item = record(value, "planning.reminder");
+  const expectedKeys = ["id", "version", "source", "sourceLabel", "title", "dueAtUtc", "timezone", "status", "deliveryState", "createdAt", "updatedAt"];
+  if (Object.prototype.hasOwnProperty.call(item, "notes")) expectedKeys.push("notes");
   exactKeys(
     item,
-    ["id", "version", "source", "sourceLabel", "title", "dueAtUtc", "timezone", "status", "deliveryState", "createdAt", "updatedAt"],
+    expectedKeys,
     "planning.reminder"
   );
-  return {
+  const parsed: PlanningReminder = {
     id: uuidValue(item.id, "planning.reminder.id"),
     version: integerValue(item.version, "planning.reminder.version", 1, Number.MAX_SAFE_INTEGER),
     source: enumValue(item.source, sourceValues, "planning.reminder.source"),
@@ -378,6 +391,10 @@ function parseReminder(value: unknown): PlanningReminder {
     createdAt: timestampValue(item.createdAt, "planning.reminder.createdAt"),
     updatedAt: timestampValue(item.updatedAt, "planning.reminder.updatedAt")
   };
+  if (Object.prototype.hasOwnProperty.call(item, "notes")) {
+    parsed.notes = item.notes === null ? null : stringValue(item.notes, "planning.reminder.notes", 0, 4000);
+  }
+  return parsed;
 }
 
 function parseTask(value: unknown): PlanningTask {
@@ -999,6 +1016,7 @@ function reconciliationMatches(request: PlanningReminderMutationRequest, object:
   if (request.action !== "edit") return false;
   if (object.version <= (request.expectedVersion ?? 0)) return false;
   return (request.body.title === undefined || request.body.title === object.title)
+    && (request.body.notes === undefined || request.body.notes === object.notes)
     && (request.body.due_at_utc === undefined || request.body.due_at_utc === object.dueAtUtc)
     && (request.body.timezone === undefined || request.body.timezone === object.timezone);
 }
@@ -1043,7 +1061,8 @@ async function mutationResponseDetail(response: Response): Promise<string> {
 function mutationCodeForResponse(detail: string, status: number): PlanningMutationError["mutationCode"] {
   if (detail === "planning_mutation_uncertain") return "uncertain";
   if (status === 409 || detail === "planning_idempotency_conflict") return "conflict";
-  if (status === 404) return "disabled";
+  if (disabledMutationDetails.has(detail)) return "disabled";
+  if (notFoundMutationDetails.has(detail)) return "not_found";
   return "http";
 }
 
