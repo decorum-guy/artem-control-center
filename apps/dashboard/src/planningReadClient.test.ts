@@ -307,6 +307,7 @@ describe("fixed Planning read client", () => {
         source: "panel-agent",
         sourceLabel: "Panel Agent",
         title: "Обновлённое напоминание",
+        notes: "Проверить документы",
         dueAtUtc: "2026-08-13T12:00:00Z",
         timezone: "Europe/Moscow",
         status: "due",
@@ -320,6 +321,7 @@ describe("fixed Planning read client", () => {
     });
     expect(object.object.status).toBe("due");
     expect(object.object.deliveryState).toBe("delivered");
+    expect(object.object.notes).toBe("Проверить документы");
     const preview = planningReadParsers.parseParsePreview({
       schemaVersion: "planning.v1",
       kind: "parse_preview",
@@ -346,6 +348,7 @@ describe("fixed Planning read client", () => {
         source: "panel-agent",
         sourceLabel: "Panel Agent",
         title: "Обновлённое напоминание",
+        notes: "Новый контекст",
         dueAtUtc: "2026-08-13T12:00:00Z",
         timezone: "Europe/Moscow",
         status: "due",
@@ -362,7 +365,7 @@ describe("fixed Planning read client", () => {
       idempotencyKey: "b4-edit-001",
       reminderId: "00000000-0000-4000-8000-000000000001",
       expectedVersion: 1,
-      body: { title: "Обновлённое напоминание", due_at_utc: "2026-08-13T12:00:00Z", timezone: "Europe/Moscow" },
+      body: { title: "Обновлённое напоминание", notes: "Новый контекст", due_at_utc: "2026-08-13T12:00:00Z", timezone: "Europe/Moscow" },
       timeoutMs: 1000
     });
     expect(result.object.title).toBe("Обновлённое напоминание");
@@ -370,6 +373,7 @@ describe("fixed Planning read client", () => {
     expect(String(input)).toBe("/api/v1/planning/reminders/00000000-0000-4000-8000-000000000001");
     expect(init).toMatchObject({ method: "PATCH" });
     expect(init?.headers).toMatchObject({ "Idempotency-Key": "b4-edit-001", "If-Match": "1" });
+    expect(init?.body).toBe(JSON.stringify({ title: "Обновлённое напоминание", notes: "Новый контекст", due_at_utc: "2026-08-13T12:00:00Z", timezone: "Europe/Moscow" }));
   });
 
   it("uses fixed task create/edit routes and preserves date-only versus timed fields", async () => {

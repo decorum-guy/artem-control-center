@@ -360,12 +360,14 @@ function nullableUuid(value: unknown, label: string): string | null {
 
 function parseReminder(value: unknown): PlanningReminder {
   const item = record(value, "planning.reminder");
+  const expectedKeys = ["id", "version", "source", "sourceLabel", "title", "dueAtUtc", "timezone", "status", "deliveryState", "createdAt", "updatedAt"];
+  if (Object.prototype.hasOwnProperty.call(item, "notes")) expectedKeys.push("notes");
   exactKeys(
     item,
-    ["id", "version", "source", "sourceLabel", "title", "dueAtUtc", "timezone", "status", "deliveryState", "createdAt", "updatedAt"],
+    expectedKeys,
     "planning.reminder"
   );
-  return {
+  const parsed: PlanningReminder = {
     id: uuidValue(item.id, "planning.reminder.id"),
     version: integerValue(item.version, "planning.reminder.version", 1, Number.MAX_SAFE_INTEGER),
     source: enumValue(item.source, sourceValues, "planning.reminder.source"),
@@ -378,6 +380,10 @@ function parseReminder(value: unknown): PlanningReminder {
     createdAt: timestampValue(item.createdAt, "planning.reminder.createdAt"),
     updatedAt: timestampValue(item.updatedAt, "planning.reminder.updatedAt")
   };
+  if (Object.prototype.hasOwnProperty.call(item, "notes")) {
+    parsed.notes = item.notes === null ? null : stringValue(item.notes, "planning.reminder.notes", 0, 4000);
+  }
+  return parsed;
 }
 
 function parseTask(value: unknown): PlanningTask {
@@ -999,6 +1005,7 @@ function reconciliationMatches(request: PlanningReminderMutationRequest, object:
   if (request.action !== "edit") return false;
   if (object.version <= (request.expectedVersion ?? 0)) return false;
   return (request.body.title === undefined || request.body.title === object.title)
+    && (request.body.notes === undefined || request.body.notes === object.notes)
     && (request.body.due_at_utc === undefined || request.body.due_at_utc === object.dueAtUtc)
     && (request.body.timezone === undefined || request.body.timezone === object.timezone);
 }

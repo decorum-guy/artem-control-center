@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -11,6 +12,7 @@ import httpx
 
 FIXTURE_TIMESTAMP = "2026-08-12T09:00:00Z"
 FIXTURE_STALE_AFTER = "2026-08-12T09:05:00Z"
+_FIXTURE_UUID4 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE)
 
 
 def fixture_reference_datetime() -> datetime:
@@ -54,6 +56,19 @@ PLANNING_FIXTURE_SCENARIOS = frozenset(
         "b3-composed-route-pagination",
         "b3-long-russian",
         "b3-overlap",
+        "reminder-gate-off",
+        "reminder-open-due",
+        "reminder-delivered-open",
+        "reminder-completed",
+        "reminder-cancelled",
+        "reminder-create-success",
+        "reminder-edit-success",
+        "reminder-reschedule-success",
+        "reminder-complete-success",
+        "reminder-cancel-success",
+        "reminder-conflict",
+        "reminder-uncertain",
+        "reminder-unavailable",
     }
 )
 _IDS = {
@@ -70,6 +85,7 @@ _IDS = {
     "project": "00000000-0000-4000-8000-000000000006",
     "timed_event": "00000000-0000-4000-8000-000000000007",
     "all_day_event": "00000000-0000-4000-8000-000000000008",
+    "mutation_created": "00000000-0000-4000-8000-000000000099",
 }
 
 
@@ -111,6 +127,20 @@ class PlanningFixtureTransport(httpx.AsyncBaseTransport):
                 },
                 request=request,
             )
+        if request.method in {"POST", "PATCH"} and _is_reminder_mutation_path(request.url.path):
+            if (
+                not request.headers.get("x-internal-secret")
+                or request.headers.get("x-planning-audience") != "panel-agent"
+                or not request.headers.get("x-planning-secret")
+            ):
+                return httpx.Response(401, request=request)
+            if self.scenario in {"timeout", "reminder-uncertain"}:
+                raise httpx.ReadTimeout("fixture mutation timeout", request=request)
+            if self.scenario in {"offline", "reminder-unavailable"}:
+                raise httpx.ConnectError("fixture mutation unavailable", request=request)
+            if self.scenario == "reminder-conflict":
+                return httpx.Response(409, json={"error": {"code": "version_conflict"}}, request=request)
+            return _reminder_mutation_response(request)
         if request.method != "GET":
             return httpx.Response(405, request=request)
         if (
@@ -121,7 +151,7 @@ class PlanningFixtureTransport(httpx.AsyncBaseTransport):
             return httpx.Response(401, request=request)
         if self.scenario == "timeout":
             raise httpx.ReadTimeout("fixture timeout", request=request)
-        if self.scenario == "offline":
+        if self.scenario in {"offline", "reminder-unavailable"}:
             raise httpx.ConnectError("fixture offline", request=request)
         if self.scenario == "malformed":
             return httpx.Response(200, content=b"{not-json", request=request)
@@ -216,6 +246,14 @@ def _reminder_items(scenario: str) -> list[dict[str, Any]]:
         return _b3_budget_reminder_items()
     if scenario == "b3-composed-route-pagination":
         return _b3_composed_paged_reminder_items()
+    if scenario == "reminder-open-due":
+        return [_due_normal_reminder()]
+    if scenario == "reminder-delivered-open":
+        return [_delivered_reminder()]
+    if scenario == "reminder-completed":
+        return [_completed_reminder("completed_future", "2026-08-12T11:00:00Z")]
+    if scenario == "reminder-cancelled":
+        return [_cancelled_reminder()]
     if scenario == "overview-delivery-failure":
         return [_reminder(), _failure_reminder()]
     if scenario == "overview-delivered-open":
@@ -235,6 +273,66 @@ def _reminder_items(scenario: str) -> list[dict[str, Any]]:
         _completed_reminder("completed_past", "2026-08-11T08:00:00Z"),
         _cancelled_reminder(),
     ]
+
+
+def _is_reminder_mutation_path(path: str) -> bool:
+    prefix = "/internal/planning/v1/reminders"
+    if path == prefix:
+        return True
+    parts = path.removeprefix(prefix).split("/")
+    if len(parts) == 2 and parts[0] == "" and _FIXTURE_UUID4.fullmatch(parts[1]):
+        return True
+    return len(parts) == 3 and parts[0] == "" and _FIXTURE_UUID4.fullmatch(parts[1]) and parts[2] in {"complete", "cancel"}
+
+
+def _reminder_mutation_response(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+    item = _reminder()
+    if path == "/internal/planning/v1/reminders":
+        try:
+            body = json.loads(request.content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return httpx.Response(422, json={"error": {"code": "validation_error"}}, request=request)
+        item.update({
+            key: body[key]
+            for key in ("title", "notes", "due_at_utc", "timezone")
+            if key in body
+        })
+        item["id"] = _IDS["mutation_created"]
+    elif path.endswith("/complete"):
+        item["status"] = "completed"
+        item["completed_at"] = FIXTURE_TIMESTAMP
+    elif path.endswith("/cancel"):
+        item["status"] = "cancelled"
+        item["cancelled_at"] = FIXTURE_TIMESTAMP
+        item["deleted_at"] = FIXTURE_TIMESTAMP
+    else:
+        try:
+            body = json.loads(request.content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return httpx.Response(422, json={"error": {"code": "validation_error"}}, request=request)
+        item["id"] = path.rsplit("/", 1)[-1]
+        item.update({
+            key: body[key]
+            for key in ("title", "notes", "due_at_utc", "timezone")
+            if key in body
+        })
+    item["version"] = 2
+    return httpx.Response(
+        200,
+        content=json.dumps({
+            "schemaVersion": "planning.v1",
+            "kind": "object",
+            "domain": "reminder",
+            "object": item,
+            "sourceStatus": "current",
+            "lastSyncedAt": FIXTURE_TIMESTAMP,
+            "staleAfter": FIXTURE_STALE_AFTER,
+            "correlation_id": "00000000-0000-4000-8000-000000000099",
+        }, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+        headers={"content-type": "application/json"},
+        request=request,
+    )
 
 
 def _filter_reminders(

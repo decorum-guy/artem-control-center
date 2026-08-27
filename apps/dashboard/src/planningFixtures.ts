@@ -137,6 +137,7 @@ function planning(overrides: Partial<PlanningSnapshot> = {}): PlanningSnapshot {
     schemaVersion: "planning.panel.v1",
     generatedAt: FIXTURE_NOW,
     sourceStatus: "current",
+    reminderMutationsEnabled: false,
     lastSyncedAt: FIXTURE_SYNCED_AT,
     staleAfter: "2026-08-12T12:05:00Z",
     reminders: {

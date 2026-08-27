@@ -624,6 +624,7 @@ class ReminderProjection(StrictPlanningModel):
     source: PlanningSource
     sourceLabel: StrictStr = Field(min_length=1, max_length=64)
     title: StrictStr = Field(min_length=1, max_length=500)
+    notes: StrictStr | None = Field(default=None, max_length=4000)
     dueAtUtc: StrictStr
     timezone: StrictStr = Field(min_length=1, max_length=64)
     status: ReminderStatus
@@ -887,6 +888,7 @@ class PlanningProjection(StrictPlanningModel):
     schemaVersion: Literal["planning.panel.v1"]
     generatedAt: StrictStr
     sourceStatus: PlanningSourceStatus
+    reminderMutationsEnabled: StrictBool = False
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     reminders: PlanningReminderLists
@@ -902,6 +904,7 @@ class PlanningStatusProjection(StrictPlanningModel):
     schemaVersion: Literal["planning.panel.v1"]
     generatedAt: StrictStr
     sourceStatus: PlanningSourceStatus
+    reminderMutationsEnabled: StrictBool = False
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     capabilities: PlanningCapabilities
@@ -1023,6 +1026,7 @@ def empty_planning_projection(
         schemaVersion=PLANNING_PANEL_SCHEMA,
         generatedAt=generated_at,
         sourceStatus=source_status,
+        reminderMutationsEnabled=False,
         lastSyncedAt=last_synced_at,
         staleAfter=stale_after,
         reminders=PlanningReminderLists(upcoming=[], overdue=[], deliveryFailures=[]),
@@ -1050,6 +1054,7 @@ def status_projection(projection: PlanningProjection) -> PlanningStatusProjectio
         schemaVersion=projection.schemaVersion,
         generatedAt=projection.generatedAt,
         sourceStatus=projection.sourceStatus,
+        reminderMutationsEnabled=projection.reminderMutationsEnabled,
         lastSyncedAt=projection.lastSyncedAt,
         staleAfter=projection.staleAfter,
         capabilities=projection.capabilities,

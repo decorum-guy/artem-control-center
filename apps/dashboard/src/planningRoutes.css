@@ -329,6 +329,9 @@
 .planning-sheet-actions--stacked { display: grid; }
 .planning-sheet-actions > button { flex: 1 1 160px; }
 .planning-mutation-form { display: grid; gap: 9px; }
+.planning-mutation-form__grid { display: grid; gap: 9px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.planning-mutation-form__grid .planning-mutation-form__label { grid-column: span 2; }
+.planning-mutation-form__grid .planning-mutation-form__input { min-width: 0; }
 .planning-mutation-form__label { color: var(--text-secondary); font-size: 12px; font-weight: 760; }
 .planning-mutation-form__input {
   width: 100%;
@@ -346,6 +349,7 @@
 .planning-mutation-form__status,
 .planning-mutation-form__error { margin: 0; color: var(--text-muted); font-size: 12px; }
 .planning-mutation-form__error { color: var(--danger); }
+.planning-route-note--warning { color: var(--danger); }
 .planning-mutation-preview {
   display: grid;
   gap: 7px;

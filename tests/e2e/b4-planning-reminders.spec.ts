@@ -29,13 +29,13 @@ const planningAccessIds = [
   "planning.reminders.cancel"
 ] as const;
 
-async function installAccessFixture(page: Page, profile: "read_only" | "standard") {
+async function installAccessFixture(page: Page, profile: "read_only" | "standard" | "full") {
   await page.route("**/api/v1/access", async (route) => {
     if (route.request().method() !== "GET" || new URL(route.request().url()).pathname !== "/api/v1/access") {
       await route.fallback();
       return;
     }
-    const allowed = profile === "standard";
+    const allowed = profile !== "read_only";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -46,6 +46,10 @@ async function installAccessFixture(page: Page, profile: "read_only" | "standard
         effectiveProfile: profile,
         temporaryFull: false,
         temporaryFullExpiresAt: null,
+        confirmationPolicy: {
+          actionConfirmationRequired: profile !== "full",
+          mode: profile === "full" ? "manual_persistent_full" : "profile_default"
+        },
         pinConfigured: true,
         lockoutUntil: null,
         capabilities: Object.fromEntries(planningAccessIds.map((capability) => [capability, {
@@ -158,6 +162,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
     await page.getByTestId("planning-reminder-route-row").first().click();
     await expect(page.getByTestId("planning-reminder-detail")).toBeVisible();
+    await expect(page.getByTestId("planning-reminder-mutation-gate")).toBeVisible();
     await expect(page.getByRole("button", { name: "Изменить" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Завершить явно" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Отменить явно" })).toHaveCount(0);
@@ -190,6 +195,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await expect(page.getByTestId("global-notice-stack")).toContainText("Напоминание создано");
     await expect(page.getByTestId("planning-reminder-detail")).toContainText("Позвонить врачу");
     await expect(page.getByRole("button", { name: "Изменить" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Перенести" })).toBeVisible();
     await page.getByRole("button", { name: "Изменить" }).click();
     await page.getByLabel("Фраза").fill("завтра в 16:00 напомни позвонить врачу ещё раз");
     await page.getByRole("button", { name: "Сохранить" }).click();
@@ -211,6 +217,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await expect(page.getByRole("button", { name: "Изменить" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Завершить явно" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Отменить явно" })).toHaveCount(0);
+    await expect(page.getByTestId("planning-reminder-access-blocked")).toBeVisible();
     expect(mutations).toEqual([]);
     const directory = artifactDirectory(testInfo);
     await mkdir(directory, { recursive: true });
@@ -241,7 +248,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     const confirmation = page.getByTestId("action-confirmation");
     await expect(confirmation).toBeVisible();
     await expect(confirmation).toContainText("Доставлено");
-    await expect(confirmation).toContainText("Завершено");
+    await expect(confirmation).toContainText("завершит");
     await mkdir(artifactDirectory(testInfo), { recursive: true });
     await page.screenshot({ path: path.join(artifactDirectory(testInfo), "b4-complete-confirmation.png"), animations: "disabled" });
     await confirmation.getByRole("button", { name: "Отмена" }).click();
@@ -268,7 +275,7 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await page.getByTestId("planning-reminder-route-row").first().click();
     await page.getByRole("button", { name: "Отменить явно" }).click();
     const confirmation = page.getByTestId("action-confirmation");
-    await expect(confirmation).toContainText("Отменено");
+    await expect(confirmation).toContainText("отменит");
     await confirmation.getByRole("button", { name: "Отмена" }).click();
     expect(mutations).toEqual([]);
     await page.getByRole("button", { name: "Отменить явно" }).click();
@@ -276,6 +283,24 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     await expect.poll(() => mutations.length).toBe(1);
     await expect(page.getByTestId("global-notice-stack")).toContainText("Напоминание отменено");
     await expect(page.getByTestId("planning-reminder-detail")).toContainText("Отменено");
+  });
+
+  test("manual persistent Full Access waives the extra confirmation modal", async ({ page }) => {
+    test.skip(!reminderMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "full");
+    await installMutationFixtures(page);
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/reminders/") && request.method() === "POST") mutations.push(request.method());
+    });
+    await page.goto("/reminders?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByRole("button", { name: "Пропущено" }).click();
+    await page.getByTestId("planning-reminder-route-row").first().click();
+    await page.getByRole("button", { name: "Завершить явно" }).click();
+    await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
+    await expect.poll(() => mutations.length).toBe(1);
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Напоминание завершено");
   });
 
   test("reconciles create after response loss with the same idempotency key", async ({ page }, testInfo) => {

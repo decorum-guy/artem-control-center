@@ -374,6 +374,8 @@ export interface PlanningReminder {
   source: PlanningSource;
   sourceLabel: string;
   title: string;
+  /** Optional canonical reminder details; omitted by older read projections. */
+  notes?: string | null;
   dueAtUtc: string;
   timezone: string;
   status: PlanningReminderStatus;
@@ -517,6 +519,8 @@ export interface PlanningSnapshot {
   schemaVersion: "planning.panel.v1";
   generatedAt: string;
   sourceStatus: PlanningSourceStatus;
+  /** Server/deployment writer gate, distinct from profile permissions. */
+  reminderMutationsEnabled?: boolean;
   lastSyncedAt: string | null;
   staleAfter: string | null;
   reminders: {
