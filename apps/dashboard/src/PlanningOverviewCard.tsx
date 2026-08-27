@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { PlanningCalendarSourceCalendar, PlanningProviderFreshnessStatus, PlanningSnapshot } from "@artem/contracts";
 import type { ShellNavigationTarget } from "./Shell";
 import { Sheet } from "./Sheet";
@@ -14,6 +14,8 @@ import {
   planningOverviewSummary
 } from "./planningOverview";
 import { planningRemindersRouteEnabled } from "./planningRouteConfig";
+import { calendarEventColor } from "./planningRouteLogic";
+import { useCalendarDisplayPreferences } from "./CalendarDisplayPreferences";
 
 type PlanningNavigationTarget = Extract<ShellNavigationTarget, "/calendar" | "/tasks" | "/reminders"> | CalendarNavigationTarget;
 
@@ -40,7 +42,9 @@ function PlanningRow({
   onClick,
   ariaLabel,
   empty = false,
-  className = ""
+  className = "",
+  indicatorColor,
+  indicatorTestId
 }: {
   testId: string;
   label: string;
@@ -52,7 +56,18 @@ function PlanningRow({
   ariaLabel?: string;
   empty?: boolean;
   className?: string;
+  indicatorColor?: string;
+  indicatorTestId?: string;
 }) {
+  const indicator = indicatorColor ? (
+    <span
+      className="planning-row__source-marker"
+      data-testid={indicatorTestId}
+      data-color={indicatorColor}
+      style={{ backgroundColor: indicatorColor } as CSSProperties}
+      aria-hidden="true"
+    />
+  ) : null;
   const content = (
     <>
       <div className="planning-row__copy">
@@ -79,6 +94,7 @@ function PlanningRow({
         aria-label={ariaLabel}
         onClick={onClick}
       >
+        {indicator}
         {content}
       </button>
     );
@@ -86,6 +102,7 @@ function PlanningRow({
 
   return (
     <div className={`planning-row ${className}`.trim()} data-testid={testId}>
+      {indicator}
       {content}
     </div>
   );
@@ -239,6 +256,7 @@ export function PlanningOverviewCard({
   onNavigate: (target: PlanningNavigationTarget) => void;
   density?: "comfortable" | "compact";
 }) {
+  const { preferences: calendarDisplayPreferences } = useCalendarDisplayPreferences();
   const initialHealth = planningHealthPresentation(planning);
   const now = usePlanningPresentationNow(initialHealth.state);
   const summary = planningOverviewSummary(planning, now);
@@ -268,6 +286,9 @@ export function PlanningOverviewCard({
   const taskTitle = overdueTask?.title ?? unavailableRowTitle(health, "Нет просроченных задач");
   const eventTitle = event?.title ?? unavailableRowTitle(health, "Событий нет");
   const eventDate = event ? formatCalendarEventDate(event) : null;
+  const eventColor = event
+    ? calendarEventColor(event, planning.providerStatuses, calendarDisplayPreferences?.overrides ?? [])
+    : undefined;
   const taskMeta = overdueTask
     ? formatTaskDueLabel(overdueTask)
     : health.state === "current" || health.state === "degraded"
@@ -316,6 +337,8 @@ export function PlanningOverviewCard({
         <PlanningRow
           testId="planning-event-row"
           className={!currentData ? "planning-row--not-current" : ""}
+          indicatorColor={eventColor}
+          indicatorTestId="planning-overview-calendar-marker"
           label="Календарь"
           title={eventTitle}
           meta={event ? formatCalendarEventTime(event) : undefined}

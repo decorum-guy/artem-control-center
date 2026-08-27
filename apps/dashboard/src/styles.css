@@ -747,6 +747,7 @@ p { color: var(--text-secondary); }
   min-height: 0;
 }
 .planning-row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -767,6 +768,15 @@ p { color: var(--text-secondary); }
 }
 .planning-row--interactive:hover { background: var(--surface-hover); }
 .planning-row--not-current { background: color-mix(in srgb, var(--surface-secondary) 58%, transparent); }
+.planning-row__source-marker {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  pointer-events: none;
+}
 .planning-row__copy { display: grid; min-width: 0; gap: 3px; }
 .planning-row__label {
   overflow: hidden;
