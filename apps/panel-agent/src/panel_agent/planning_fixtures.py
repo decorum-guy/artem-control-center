@@ -84,6 +84,33 @@ class PlanningFixtureTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request.url.path)
+        if request.method == "POST" and request.url.path == "/internal/planning/v1/calendar-sources/refresh":
+            if (
+                not request.headers.get("x-internal-secret")
+                or request.headers.get("x-planning-audience") != "panel-agent"
+                or not request.headers.get("x-planning-secret")
+            ):
+                return httpx.Response(401, request=request)
+            if self.scenario == "timeout":
+                raise httpx.ReadTimeout("fixture timeout", request=request)
+            if self.scenario == "offline":
+                raise httpx.ConnectError("fixture offline", request=request)
+            return httpx.Response(
+                200,
+                json={
+                    "schemaVersion": "planning.calendar-sources.refresh.v1",
+                    "kind": "calendar_sources_refresh",
+                    "result": "success",
+                    "status": "current",
+                    "observedAt": FIXTURE_TIMESTAMP,
+                    "lastSuccessfulSyncAt": FIXTURE_TIMESTAMP,
+                    "calendarsSeen": 0,
+                    "eventsSeen": 0,
+                    "errorCode": None,
+                    "correlation_id": "00000000-0000-4000-8000-000000000097",
+                },
+                request=request,
+            )
         if request.method != "GET":
             return httpx.Response(405, request=request)
         if (

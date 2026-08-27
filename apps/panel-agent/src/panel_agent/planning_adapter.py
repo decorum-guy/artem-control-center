@@ -25,6 +25,7 @@ from .planning import (
     PlanningCalendarIdentity,
     PlanningCalendarSource,
     PlanningCalendarSourceCalendar,
+    PlanningCalendarSourcesRefresh,
     PlanningConflict,
     PlanningEventObjectEnvelope,
     PlanningCapabilities,
@@ -71,6 +72,7 @@ PLANNING_ROUTES: Mapping[str, str] = {
     "events": "/internal/planning/v1/events",
     "projects": "/internal/planning/v1/projects",
     "status": "/internal/planning/v1/status",
+    "calendar_sources_refresh": "/internal/planning/v1/calendar-sources/refresh",
 }
 PLANNING_MUTATION_ROUTES: Mapping[str, str] = {
     "create_reminder": "/internal/planning/v1/reminders",
@@ -299,6 +301,15 @@ class PlanningClient:
     async def status(self) -> StatusEnvelope:
         payload = await self._get_json("status", {})
         return _validate_envelope(StatusEnvelope, payload)
+
+    async def refresh_calendar_sources(self) -> PlanningCalendarSourcesRefresh:
+        payload = await self._request_json(
+            "POST",
+            PLANNING_ROUTES["calendar_sources_refresh"],
+            json_body={},
+            expected_status={200},
+        )
+        return _validate_envelope(PlanningCalendarSourcesRefresh, payload)
 
     async def parse_preview(
         self,
@@ -949,6 +960,7 @@ class PlanningAdapter:
         self._cache_loaded = False
         self._upstream_connected = False
         self._failure_count = 0
+        self._calendar_source_refresh_task: asyncio.Task[PlanningCalendarSourcesRefresh] | None = None
 
         if not self._enabled:
             self._client = None
@@ -1106,24 +1118,52 @@ class PlanningAdapter:
         self._last_status = status
         self._last_status_at = self._clock()
         self._status_refresh_requested = False
-        if self._projection is not None:
-            source_status = self._status_source_status(
-                current=self._domains_current
+        current = self._projection or empty_planning_projection(
+            generated_at=self._now_text(),
+            source_status=self._status_source_status(current=self._domains_current),
+        )
+        updates: dict[str, Any] = {
+            "generatedAt": self._now_text(),
+            "sourceStatus": self._status_source_status(current=self._domains_current),
+            "capabilities": PlanningCapabilities(**self._effective_capabilities()),
+        }
+        if status.sources is not None:
+            updates["providerStatuses"] = self._project_sources(status.sources)
+        await self._set_projection(
+            current.model_copy(
+                update=updates,
+                deep=True,
             )
-            updates: dict[str, Any] = {
-                "generatedAt": self._now_text(),
-                "sourceStatus": source_status,
-                "capabilities": PlanningCapabilities(**self._effective_capabilities()),
-            }
-            if status.sources is not None:
-                updates["providerStatuses"] = self._project_sources(status.sources)
-            await self._set_projection(
-                self._projection.model_copy(
-                    update=updates,
-                    deep=True,
-                )
-            )
+        )
         return True
+
+    async def refresh_calendar_sources(self) -> PlanningCalendarSourcesRefresh:
+        """Refresh provider discovery, then reload only canonical source metadata."""
+
+        if self._calendar_source_refresh_task is not None and not self._calendar_source_refresh_task.done():
+            return await self._calendar_source_refresh_task
+        task = asyncio.create_task(
+            self._refresh_calendar_sources_once(),
+            name="panel-planning-calendar-source-refresh",
+        )
+        self._calendar_source_refresh_task = task
+        try:
+            return await task
+        finally:
+            if self._calendar_source_refresh_task is task:
+                self._calendar_source_refresh_task = None
+
+    async def _refresh_calendar_sources_once(self) -> PlanningCalendarSourcesRefresh:
+        try:
+            result = await self._live_client().refresh_calendar_sources()
+        except (PlanningReadUnavailable, PlanningUpstreamError):
+            try:
+                await self.refresh_status(force=True)
+            except PlanningUpstreamError:
+                pass
+            raise
+        await self.refresh_status(force=True)
+        return result
 
     async def refresh_domains(self) -> bool:
         if not self._enabled or self._client is None:

@@ -268,6 +268,9 @@
 .ai-provider-settings__actions button { min-height: 48px; }
 
 .settings-calendar-settings { display: grid; gap: 10px; }
+.settings-calendar-source-refresh { display: grid; gap: 4px; min-height: 76px; }
+.settings-calendar-source-refresh__button { min-height: 48px; }
+.settings-calendar-source-refresh__hint { margin: 0; color: var(--cc-text-muted); font-size: var(--cc-type-short-label-size); line-height: var(--cc-type-short-label-line); }
 .settings-calendar-row { min-width: 0; overflow: hidden; border: 1px solid var(--cc-divider); border-radius: var(--cc-radius-control); background: var(--cc-surface-1); }
 .settings-calendar-row__main { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; width: 100%; min-height: 70px; gap: 12px; padding: 10px 12px; border: 0; border-radius: 0; color: var(--cc-text); background: transparent; text-align: left; }
 .settings-calendar-row__main:hover { background: var(--cc-hover); }

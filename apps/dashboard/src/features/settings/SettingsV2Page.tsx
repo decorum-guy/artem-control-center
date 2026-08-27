@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { PlanningCalendarSource } from "@artem/contracts";
 import type { AccessStatus } from "../../accessApi";
 import {
@@ -16,6 +16,7 @@ import { Sheet } from "../../Sheet";
 import { useInteractionLock } from "../../InteractionLock";
 import { useCalendarDisplayPreferences } from "../../CalendarDisplayPreferences";
 import { calendarDisplayPalette, calendarDisplayOverrideColor, calendarSourceDisplayColor, normalizedCalendarColor } from "../../calendarDisplayColors";
+import { refreshPlanningCalendarSources } from "../../planningReadClient";
 import { RouteHeader } from "../../ShellPrimitives";
 import { SettingsSummaryColumn, SettingsSummaryRow } from "./SettingsSummaryRow";
 import { CapabilitySettingsSheet, capabilityStateLabel, capabilitySummary, useCapabilities, type CapabilitiesController } from "./CapabilitySettings";
@@ -44,13 +45,15 @@ export function SettingsV2Page({
   motion,
   calendarSources,
   onThemeChange,
-  onMotionChange
+  onMotionChange,
+  onRefreshCalendarMetadata
 }: {
   theme: Theme;
   motion: MotionMode;
   calendarSources: PlanningCalendarSource[];
   onThemeChange: (theme: Theme) => void;
   onMotionChange: (motion: MotionMode) => void;
+  onRefreshCalendarMetadata: () => Promise<boolean>;
 }) {
   const coffee = useCoffeeSettings();
   const { status: accessStatus, available: accessAvailable } = useAccess();
@@ -179,6 +182,7 @@ export function SettingsV2Page({
           calendarSources={calendarSources}
           capabilities={capabilities}
           ai={ai}
+          onRefreshCalendarMetadata={onRefreshCalendarMetadata}
           onClose={() => setOpenSheet(null)}
         />
       )}
@@ -192,6 +196,7 @@ function SettingsSheet({
   calendarSources,
   capabilities,
   ai,
+  onRefreshCalendarMetadata,
   onClose
 }: {
   kind: SettingsSheet;
@@ -199,9 +204,18 @@ function SettingsSheet({
   calendarSources: PlanningCalendarSource[];
   capabilities: CapabilitiesController;
   ai: AIProviderSettingsController;
+  onRefreshCalendarMetadata: () => Promise<boolean>;
   onClose: () => void;
 }) {
-  if (kind === "calendars") return <CalendarSettingsSheet sources={calendarSources} onClose={onClose} />;
+  if (kind === "calendars") {
+    return (
+      <CalendarSettingsSheet
+        sources={calendarSources}
+        onRefreshCalendarMetadata={onRefreshCalendarMetadata}
+        onClose={onClose}
+      />
+    );
+  }
   if (kind === "capabilities") return <CapabilitySettingsSheet onClose={onClose} capabilities={capabilities} />;
   if (kind === "ai") return <AIProviderSettingsSheet onClose={onClose} controller={ai} />;
   if (kind === "coffee") {
@@ -269,12 +283,24 @@ function SettingsSheet({
   );
 }
 
-function CalendarSettingsSheet({ sources, onClose }: { sources: PlanningCalendarSource[]; onClose: () => void }) {
+function CalendarSettingsSheet({
+  sources,
+  onRefreshCalendarMetadata,
+  onClose
+}: {
+  sources: PlanningCalendarSource[];
+  onRefreshCalendarMetadata: () => Promise<boolean>;
+  onClose: () => void;
+}) {
   const { preferences, loading, save } = useCalendarDisplayPreferences();
   const { guardMutation } = useInteractionLock();
+  const { ensureCapability } = useAccess();
   const [editing, setEditing] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sourceRefreshPending, setSourceRefreshPending] = useState(false);
+  const [sourceRefreshNotice, setSourceRefreshNotice] = useState<string | null>(null);
+  const sourceRefreshPendingRef = useRef(false);
   const calendars = sources.flatMap((source) => source.calendars.map((calendar) => ({ source, calendar })));
 
   async function setColor(source: PlanningCalendarSource, calendar: PlanningCalendarSource["calendars"][number], color: string | null) {
@@ -299,9 +325,55 @@ function CalendarSettingsSheet({ sources, onClose }: { sources: PlanningCalendar
     }
   }
 
+  async function refreshCalendarSources() {
+    if (sourceRefreshPendingRef.current) return;
+    sourceRefreshPendingRef.current = true;
+    setSourceRefreshPending(true);
+    setSourceRefreshNotice("Обновляем список календарей…");
+    try {
+      if (!(await ensureCapability("planning.calendar_sources.refresh", "Обновить список календарей"))) {
+        setSourceRefreshNotice("Обновление списка календарей доступно владельцу панели.");
+        return;
+      }
+      const result = await refreshPlanningCalendarSources(undefined, 15_000);
+      const metadataReloaded = await onRefreshCalendarMetadata();
+      if (result.result === "success" && metadataReloaded) {
+        setSourceRefreshNotice("Список календарей обновлён.");
+      } else if (result.result === "failure") {
+        setSourceRefreshNotice(calendarSourceRefreshFailureMessage(result.errorCode));
+      } else {
+        setSourceRefreshNotice("Источник обновлён, но список календарей не удалось перезагрузить.");
+      }
+    } catch {
+      try {
+        await onRefreshCalendarMetadata();
+      } catch {
+        // The primary refresh failure is already represented below.
+      }
+      setSourceRefreshNotice("Не удалось обновить список календарей. Показаны последние подтверждённые данные.");
+    } finally {
+      sourceRefreshPendingRef.current = false;
+      setSourceRefreshPending(false);
+    }
+  }
+
   return (
     <Sheet testId="settings-calendars-sheet" eyebrow="Расписание" title="Календари" description="Цвета действуют только внутри Control Center и не меняют источник." onClose={onClose}>
       <div className="settings-v2-sheet-content settings-calendar-settings" data-testid="settings-calendar-list">
+        <div className="settings-calendar-source-refresh">
+          <button
+            type="button"
+            className="planning-primary-button settings-calendar-source-refresh__button"
+            data-testid="settings-calendar-refresh"
+            disabled={sourceRefreshPending}
+            aria-busy={sourceRefreshPending}
+            onClick={() => void refreshCalendarSources()}
+          >
+            {sourceRefreshPending ? "Обновляем…" : "Обновить список календарей"}
+          </button>
+          <p className="settings-calendar-source-refresh__hint">Проверяет доступные календари и их цвета у источника.</p>
+        </div>
+        {sourceRefreshNotice && <p className="settings-notice" role="status" aria-live="polite">{sourceRefreshNotice}</p>}
         {loading && <p className="settings-notice" role="status">Проверяем сохранённые цвета…</p>}
         {!loading && !preferences && <p className="settings-notice" role="status">Настройки цветов временно недоступны. В календаре используются цвета источника.</p>}
         {preferences && !preferences.available && <p className="settings-notice" role="status">Сохранённые настройки цветов временно недоступны. В календаре используются цвета источника.</p>}
@@ -336,6 +408,19 @@ function CalendarSettingsSheet({ sources, onClose }: { sources: PlanningCalendar
       </div>
     </Sheet>
   );
+}
+
+function calendarSourceRefreshFailureMessage(errorCode: string | null): string {
+  if (errorCode === "provider_authentication_failed") {
+    return "Источник календарей отклонил доступ. Показаны последние подтверждённые данные.";
+  }
+  if (errorCode === "provider_timeout") {
+    return "Источник календарей не ответил вовремя. Показаны последние подтверждённые данные.";
+  }
+  if (errorCode === "provider_payload_invalid" || errorCode === "provider_xml_invalid") {
+    return "Источник календарей вернул некорректные данные. Показаны последние подтверждённые данные.";
+  }
+  return "Не удалось обновить список календарей. Показаны последние подтверждённые данные.";
 }
 
 function calendarSummary(sources: PlanningCalendarSource[], loading: boolean, preferences: ReturnType<typeof useCalendarDisplayPreferences>["preferences"]): string {

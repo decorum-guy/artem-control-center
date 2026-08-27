@@ -219,7 +219,10 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
     )
     assert delivered.status == "due"
     assert delivered.deliveryState == "delivered"
-    assert {path for _, path, _, _ in transport.requests} == set(PLANNING_ROUTES.values()) - {PLANNING_ROUTES["parse"]}
+    assert {path for _, path, _, _ in transport.requests} == set(PLANNING_ROUTES.values()) - {
+        PLANNING_ROUTES["parse"],
+        PLANNING_ROUTES["calendar_sources_refresh"],
+    }
     assert all(method == "GET" for method, _, _, _ in transport.requests)
     assert all(
         headers == {
@@ -327,7 +330,9 @@ def test_wrong_domain_and_duplicate_json_are_rejected(tmp_path):
 def test_fixture_content_is_inert_text_and_client_has_no_proxy_surface(tmp_path):
     assert not hasattr(PlanningClient, "proxy")
     assert not hasattr(PlanningClient, "request")
-    assert set(PLANNING_ROUTES) == {"reminders", "parse", "tasks", "events", "projects", "status"}
+    assert set(PLANNING_ROUTES) == {
+        "reminders", "parse", "tasks", "events", "projects", "status", "calendar_sources_refresh"
+    }
     assert "/alice/interpret" not in PLANNING_ROUTES.values()
     projection = empty_planning_projection(
         generated_at="2026-08-12T09:00:00Z",

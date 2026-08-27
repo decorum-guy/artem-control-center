@@ -146,6 +146,11 @@ def test_capability_settings_are_a_fixed_full_access_mutation():
     assert capability_for_request("POST", "/api/v1/system/runtime/apply-capabilities") == "settings.capabilities.manage"
 
 
+def test_calendar_source_refresh_is_a_standard_owner_action():
+    assert CAPABILITIES["planning.calendar_sources.refresh"] == "standard"
+    assert capability_for_request("POST", "/api/v1/planning/calendar-sources/refresh") == "planning.calendar_sources.refresh"
+
+
 def test_planning_route_matching_is_fixed_and_unknown_actions_are_unregistered():
     reminder_id = "not-a-uuid-but-one-path-segment"
     assert capability_for_request("POST", "/api/v1/planning/reminders") == "planning.reminders.create"

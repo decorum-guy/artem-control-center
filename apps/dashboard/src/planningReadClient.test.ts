@@ -7,6 +7,7 @@ import {
   PlanningReadError,
   planningReadParsers,
   previewPlanningReminder,
+  refreshPlanningCalendarSources,
   readPlanningEvents,
   readPlanningEventsForRange,
   readPlanningTaskById,
@@ -816,5 +817,47 @@ describe("fixed Planning read client", () => {
     });
     await expect(readPlanningTasks("today", null, 20, 0, controller.signal)).rejects.toMatchObject({ code: "aborted" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the fixed source-discovery action and accepts only its bounded result", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      schemaVersion: "planning.calendar-sources.refresh.v1",
+      kind: "calendar_sources_refresh",
+      result: "success",
+      status: "current",
+      observedAt: "2026-08-27T09:00:00Z",
+      lastSuccessfulSyncAt: "2026-08-27T09:00:00Z",
+      calendarsSeen: 2,
+      eventsSeen: 12,
+      errorCode: null,
+      correlation_id: "00000000-0000-4000-8000-000000000097"
+    }), { status: 200 }));
+
+    await expect(refreshPlanningCalendarSources()).resolves.toMatchObject({
+      result: "success",
+      status: "current",
+      calendarsSeen: 2
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/planning/calendar-sources/refresh",
+      expect.objectContaining({ method: "POST", body: "{}", cache: "no-store" })
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).not.toBe("GET");
+
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      schemaVersion: "planning.calendar-sources.refresh.v1",
+      kind: "calendar_sources_refresh",
+      result: "success",
+      status: "current",
+      observedAt: "2026-08-27T09:00:00Z",
+      lastSuccessfulSyncAt: "2026-08-27T09:00:00Z",
+      lastSuccessfulSyncAtExtra: "private",
+      calendarsSeen: 0,
+      eventsSeen: 0,
+      errorCode: null,
+      correlation_id: "00000000-0000-4000-8000-000000000097"
+    }), { status: 200 }));
+    await expect(refreshPlanningCalendarSources()).rejects.toMatchObject({ code: "contract" });
   });
 });
