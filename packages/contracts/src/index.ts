@@ -521,6 +521,8 @@ export interface PlanningSnapshot {
   sourceStatus: PlanningSourceStatus;
   /** Server/deployment writer gate, distinct from profile permissions. */
   reminderMutationsEnabled?: boolean;
+  /** Server/deployment task writer gate, distinct from profile permissions. */
+  taskMutationsEnabled?: boolean;
   lastSyncedAt: string | null;
   staleAfter: string | null;
   reminders: {
@@ -532,6 +534,8 @@ export interface PlanningSnapshot {
     today: PlanningTask[];
     overdue: PlanningTask[];
     upcoming: PlanningTask[];
+    /** Present in current projections; omitted only by older cached snapshots. */
+    undated?: PlanningTask[];
     projects: PlanningProject[];
   };
   calendar: {

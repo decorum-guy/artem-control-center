@@ -334,6 +334,8 @@ jobs:
         env:
           B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
           VITE_PLANNING_TASK_MUTATIONS_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
           B4_TASK_ARTIFACT_DIR: artifacts/b4-task-mutations-review
         run: npm run test:e2e -- tests/e2e/b4-planning-tasks.spec.ts --grep-invert "writer gate is off"
 

@@ -459,7 +459,7 @@ def build_planning_router(
         _no_store(response)
         query = _query(request, allowed={"view", "projectId", "limit", "offset"})
         view = query.get("view")
-        if view not in {"today", "overdue", "upcoming"}:
+        if view not in {"today", "overdue", "upcoming", "undated"}:
             raise HTTPException(status_code=422, detail="planning_view_required")
         project_id = query.get("projectId")
         if project_id is not None:

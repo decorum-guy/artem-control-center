@@ -110,6 +110,10 @@ describe("B3 route semantics", () => {
     expect(label).not.toContain("Europe/");
   });
 
+  it("renders a fully undated task truthfully", () => {
+    expect(formatTaskDueForRoute({ ...baseTask, dueDate: null, dueTime: null, timezone: null })).toBe("Без срока");
+  });
+
   it("keeps selected-day filtering date-only safe and includes cross-midnight timed overlap", () => {
     const allDay = baseEvent({
       id: "00000000-0000-4000-8000-000000000210",

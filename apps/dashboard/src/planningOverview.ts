@@ -315,6 +315,7 @@ function hasPlanningItems(snapshot: PlanningSnapshot): boolean {
       snapshot.tasks.today.length ||
       snapshot.tasks.overdue.length ||
       snapshot.tasks.upcoming.length ||
+      (snapshot.tasks.undated?.length ?? 0) ||
       snapshot.tasks.projects.length ||
       snapshot.calendar.today.length ||
       snapshot.calendar.upcoming.length ||

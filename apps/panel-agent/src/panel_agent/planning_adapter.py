@@ -248,12 +248,12 @@ class PlanningClient:
     async def tasks(
         self,
         *,
-        view: Literal["today", "overdue", "upcoming"],
+        view: Literal["today", "overdue", "upcoming", "undated"],
         project_id: str | None = None,
         limit: int = PLANNING_PAGE_LIMIT,
         offset: int = 0,
     ) -> TaskListEnvelope:
-        if view not in {"today", "overdue", "upcoming"}:
+        if view not in {"today", "overdue", "upcoming", "undated"}:
             raise PlanningUpstreamError("query_view_out_of_range")
         if project_id is not None:
             validate_uuid4(project_id, "planning.project_id")
@@ -1151,6 +1151,7 @@ class PlanningAdapter:
             "generatedAt": self._now_text(),
             "sourceStatus": self._status_source_status(current=self._domains_current),
             "reminderMutationsEnabled": self.reminder_mutations_enabled,
+            "taskMutationsEnabled": self.task_mutations_enabled,
             "capabilities": PlanningCapabilities(**self._effective_capabilities()),
         }
         if status.sources is not None:
@@ -1241,6 +1242,7 @@ class PlanningAdapter:
                 self._client.tasks(view="today", limit=PLANNING_PAGE_LIMIT, offset=0),
                 self._client.tasks(view="overdue", limit=PLANNING_PAGE_LIMIT, offset=0),
                 self._client.tasks(view="upcoming", limit=PLANNING_PAGE_LIMIT, offset=0),
+                self._client.tasks(view="undated", limit=PLANNING_PAGE_LIMIT, offset=0),
                 self._client.events(
                     from_utc=windows["today_from"],
                     to_utc=windows["today_to"],
@@ -1738,7 +1740,7 @@ class PlanningAdapter:
     async def read_tasks(
         self,
         *,
-        view: Literal["today", "overdue", "upcoming"],
+        view: Literal["today", "overdue", "upcoming", "undated"],
         project_id: str | None,
         limit: int,
         offset: int,
@@ -1956,9 +1958,10 @@ class PlanningAdapter:
         task_today = self._map_tasks(results[task_index], previous.tasks.today)
         task_overdue = self._map_tasks(results[task_index + 1], previous.tasks.overdue)
         task_upcoming = self._map_tasks(results[task_index + 2], previous.tasks.upcoming)
-        event_today = self._map_events(results[task_index + 3], previous.calendar.today, upstream_sources)
-        event_upcoming = self._map_events(results[task_index + 4], previous.calendar.upcoming, upstream_sources)
-        projects = self._map_projects(results[task_index + 5], previous.tasks.projects)
+        task_undated = self._map_tasks(results[task_index + 3], previous.tasks.undated)
+        event_today = self._map_events(results[task_index + 4], previous.calendar.today, upstream_sources)
+        event_upcoming = self._map_events(results[task_index + 5], previous.calendar.upcoming, upstream_sources)
+        projects = self._map_projects(results[task_index + 6], previous.tasks.projects)
         events = [*event_today, *event_upcoming]
         return {
             "reminders": {
@@ -1970,6 +1973,7 @@ class PlanningAdapter:
                 "today": _bounded_unique(task_today),
                 "overdue": _bounded_unique(task_overdue),
                 "upcoming": _bounded_unique(task_upcoming),
+                "undated": _bounded_unique(task_undated),
                 "projects": _bounded_unique(projects),
             },
             "calendar": {
@@ -2176,6 +2180,7 @@ class PlanningAdapter:
             generatedAt=generated_at,
             sourceStatus=source_status,
             reminderMutationsEnabled=self.reminder_mutations_enabled,
+            taskMutationsEnabled=self.task_mutations_enabled,
             lastSyncedAt=last_synced_at,
             staleAfter=stale_after,
             reminders=mapped["reminders"],

@@ -26,6 +26,8 @@ describe("Planning snapshot contract", () => {
       }
     });
     expect(emptyPlanningFixture.reminders.upcoming).toHaveLength(0);
+    expect(emptyPlanningFixture.taskMutationsEnabled).toBe(false);
+    expect(emptyPlanningFixture.tasks.undated).toHaveLength(0);
     expect(emptyPlanningFixture.tasks.projects).toHaveLength(0);
     expect(emptyPlanningFixture.calendar.conflicts).toHaveLength(0);
   });

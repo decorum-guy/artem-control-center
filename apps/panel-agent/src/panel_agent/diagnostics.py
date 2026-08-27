@@ -496,6 +496,7 @@ class DiagnosticsCollector:
                 len(planning.tasks.today)
                 + len(planning.tasks.overdue)
                 + len(planning.tasks.upcoming)
+                + len(planning.tasks.undated)
             ),
             calendarCount=len(_unique_events(snapshot)),
             cacheUsed=planning.sourceStatus in {"stale", "offline"},

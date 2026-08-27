@@ -5,6 +5,7 @@ import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 
 const tasksRouteEnabled = process.env.B3_PLANNING_TASKS_ROUTE_ENABLED === "true";
 const taskMutationsEnabled = process.env.VITE_PLANNING_TASK_MUTATIONS_ENABLED === "true";
+const interactionLockEnabled = process.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true";
 const artifactDirectory = (testInfo: { outputPath: (name: string) => string }) =>
   process.env.B4_TASK_ARTIFACT_DIR ?? testInfo.outputPath("b4-task-mutations");
 
@@ -37,13 +38,13 @@ const planningAccessIds = [
   "planning.tasks.archive"
 ] as const;
 
-async function installAccessFixture(page: Page, profile: "read_only" | "standard") {
+async function installAccessFixture(page: Page, profile: "read_only" | "standard" | "full") {
   await page.route("**/api/v1/access", async (route) => {
     if (route.request().method() !== "GET" || new URL(route.request().url()).pathname !== "/api/v1/access") {
       await route.fallback();
       return;
     }
-    const allowed = profile === "standard";
+    const allowed = profile !== "read_only";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -54,6 +55,10 @@ async function installAccessFixture(page: Page, profile: "read_only" | "standard
         effectiveProfile: profile,
         temporaryFull: false,
         temporaryFullExpiresAt: null,
+        confirmationPolicy: {
+          actionConfirmationRequired: profile !== "full",
+          mode: profile === "full" ? "manual_persistent_full" : "profile_default"
+        },
         pinConfigured: true,
         lockoutUntil: null,
         capabilities: Object.fromEntries(planningAccessIds.map((capability) => [capability, {
@@ -65,6 +70,18 @@ async function installAccessFixture(page: Page, profile: "read_only" | "standard
         }]))
       })
     });
+  });
+}
+
+async function overrideTaskWriterMetadata(page: Page, value: boolean | undefined): Promise<void> {
+  await page.route("**/api/v1/snapshot**", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json() as { planning?: Record<string, unknown> };
+    if (payload.planning) {
+      if (value === undefined) delete payload.planning.taskMutationsEnabled;
+      else payload.planning.taskMutationsEnabled = value;
+    }
+    await route.fulfill({ response, body: JSON.stringify(payload) });
   });
 }
 
@@ -80,11 +97,18 @@ function objectEnvelope(object: Record<string, unknown>) {
   };
 }
 
-async function installMutationFixtures(page: Page, options: { createResponseLost?: boolean } = {}) {
+async function installMutationFixtures(page: Page, options: {
+  createResponseLost?: boolean;
+  createResponseAlwaysLost?: boolean;
+  taskMutationError?: { method: "PATCH" | "POST" | "DELETE"; pathSuffix?: string; status: number; detail: string };
+} = {}) {
   let canonical = { ...canonicalBase };
+  let undatedCreated = false;
   let createAttempts = 0;
 
-  const listEnvelope = () => ({
+  const listEnvelope = (view: string | null) => {
+    const items = undatedCreated && view !== "undated" ? [] : [canonical];
+    return {
     schemaVersion: "planning.panel.v1",
     kind: "list",
     domain: "task",
@@ -92,18 +116,23 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
     sourceStatus: "current",
     lastSyncedAt: "2026-08-12T09:00:00Z",
     staleAfter: "2026-08-12T09:05:00Z",
-    items: [canonical],
+    items,
     limit: 20,
     offset: 0,
-    count: 1,
+    count: items.length,
     hasMore: false
-  });
+    };
+  };
 
   await page.route("**/api/v1/planning/parse", async (route) => {
     const body = route.request().postDataJSON() as { text?: string };
     const text = typeof body.text === "string" ? body.text : "";
-    const ambiguous = text.includes("вечером");
+    const hasDate = /(?:сегодня|завтра|послезавтра)/i.test(text);
+    const ambiguous = text.includes("вечером") || !hasDate;
     const timed = text.includes("18:30");
+    const ambiguity = text.includes("вечером")
+      ? { field: "time", candidates: ["18:00", "20:00"], reason: "«Вечером» не задаёт точное время." }
+      : { field: "date", candidates: ["сегодня", "завтра", "конкретная дата"], reason: "У задачи должна быть дата." };
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -125,7 +154,7 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
             : "Задача «Купить продукты» на 14 августа без времени."
         },
         confidence: ambiguous ? "medium" : "high",
-        ambiguities: ambiguous ? [{ field: "time", candidates: ["18:00", "20:00"], reason: "«Вечером» не задаёт точное время." }] : [],
+        ambiguities: ambiguous ? [ambiguity] : [],
         requires_confirmation: ambiguous,
         normalized_text: text,
         error_code: null,
@@ -134,12 +163,21 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
     });
   });
 
-  await page.route("**/api/v1/planning/tasks", async (route) => {
+  await page.route(/\/api\/v1\/planning\/tasks(?:\?.*)?$/, async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(listEnvelope()) });
+      const view = new URL(route.request().url()).searchParams.get("view");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(listEnvelope(view)) });
       return;
     }
     if (route.request().method() !== "POST") return route.fallback();
+    if (options.taskMutationError?.method === "POST" && !options.taskMutationError.pathSuffix) {
+      await route.fulfill({
+        status: options.taskMutationError.status,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: options.taskMutationError.detail })
+      });
+      return;
+    }
     createAttempts += 1;
     const body = route.request().postDataJSON() as Record<string, unknown>;
     canonical = {
@@ -153,7 +191,8 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
       version: 1,
       updatedAt: "2026-08-12T09:01:00Z"
     };
-    if (options.createResponseLost && createAttempts === 1) {
+    undatedCreated = body.due_date === null;
+    if (options.createResponseAlwaysLost || (options.createResponseLost && createAttempts === 1)) {
       await route.abort("timedout");
       return;
     }
@@ -167,6 +206,15 @@ async function installMutationFixtures(page: Page, options: { createResponseLost
       return;
     }
     if (method !== "PATCH" && method !== "POST" && method !== "DELETE") return route.fallback();
+    const taskMutationError = options.taskMutationError;
+    if (taskMutationError?.method === method && (!taskMutationError.pathSuffix || route.request().url().endsWith(taskMutationError.pathSuffix))) {
+      await route.fulfill({
+        status: taskMutationError.status,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: taskMutationError.detail })
+      });
+      return;
+    }
     const body = method === "PATCH" ? route.request().postDataJSON() as Record<string, unknown> : {};
     canonical = {
       ...canonical,
@@ -206,6 +254,251 @@ test.describe("B4.2 task mutations", () => {
   test.beforeEach(async ({ page }) => {
     test.skip(!tasksRouteEnabled, "B3 tasks route is not enabled for this browser run");
     await page.clock.install({ time: "2026-08-12T09:00:00Z" });
+  });
+
+  test("shows the canonical undated task view and keeps project filtering upstream", async ({ page }) => {
+    await page.goto("/tasks?theme=day");
+    await expect(page.getByRole("button", { name: "Без срока" })).toBeVisible();
+    await page.getByRole("button", { name: "Без срока" }).click();
+    const list = page.getByTestId("planning-task-list");
+    await expect(list).toContainText("Synthetic undated no project");
+    await expect(list).toContainText("Synthetic undated project");
+    await expect(list).not.toContainText("Synthetic today task");
+    await expect(list).not.toContainText("Synthetic upcoming task");
+    await page.getByRole("button", { name: "Проект", exact: true }).click();
+    await page.getByRole("option", { name: "Домашние дела", exact: true }).click();
+    await expect(list).not.toContainText("Synthetic undated no project");
+    await expect(list).toContainText("Synthetic undated project");
+    const dimensions = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth
+    }));
+    expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+    await expect(page.locator(".planning-segmented button").filter({ hasText: "Без срока" })).toHaveCSS("min-height", "48px");
+    expect(page.url()).toContain("/tasks");
+  });
+
+  test("creates an explicitly undated task without parsing and keeps it discoverable", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page);
+    const requests: Array<Record<string, unknown>> = [];
+    const parseRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/v1/planning/tasks") && request.method() === "POST") requests.push(request.postDataJSON() as Record<string, unknown>);
+      if (new URL(request.url()).pathname === "/api/v1/planning/parse") parseRequests.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByRole("button", { name: "Без срока" }).click();
+    await page.getByRole("button", { name: "Создать задачу" }).click();
+    const sheet = page.getByTestId("planning-task-mutation");
+    await sheet.getByTestId("planning-task-due-mode").getByRole("button", { name: "Без срока" }).click();
+    expect(parseRequests).toEqual([]);
+    await sheet.getByLabel("Фраза").fill("Разобрать входящие");
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeEnabled();
+    await sheet.getByRole("button", { name: "Сохранить" }).click();
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Задача создана");
+    expect(parseRequests).toEqual([]);
+    expect(requests).toEqual([{
+      title: "Разобрать входящие",
+      due_date: null,
+      due_time: null,
+      timezone: null,
+      priority: "none"
+    }]);
+    await expect(page.getByTestId("planning-task-detail")).toContainText("Без срока");
+    await expect(page.getByTestId("planning-task-detail")).not.toContainText("00:00");
+    await expect(page.getByTestId("planning-task-detail")).not.toContainText("Europe/Moscow");
+    await page.getByTestId("planning-task-detail").getByRole("button", { name: "Закрыть" }).click();
+    await expect(page).toHaveURL(/\/tasks(?:\?|$)/);
+    await expect(page.getByTestId("planning-task-list")).toContainText("Разобрать входящие");
+    await expect(page.getByTestId("planning-task-list")).not.toContainText("00:00");
+    await expect(page.locator(".planning-route-controls").getByRole("button", { name: "Без срока", exact: true })).toHaveAttribute("aria-pressed", "true");
+    const dimensions = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth
+    }));
+    expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+  });
+
+  test("dated mode preserves Alice no-date ambiguity until owner selects undated", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page);
+    const parseRequests: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/v1/planning/parse") parseRequests.push(request.method());
+    });
+    await openTaskCreator(page);
+    const sheet = page.getByTestId("planning-task-mutation");
+    await sheet.getByLabel("Фраза").fill("Разобрать входящие");
+    await expect(page.getByTestId("planning-task-ambiguities")).toContainText("У задачи должна быть дата");
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    expect(parseRequests).toEqual(["POST"]);
+    await sheet.getByTestId("planning-task-due-mode").getByRole("button", { name: "Без срока" }).click();
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeEnabled();
+    expect(parseRequests).toEqual(["POST"]);
+    await sheet.getByTestId("planning-task-due-mode").getByRole("button", { name: "Со сроком" }).click();
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    await expect(page.getByTestId("planning-task-ambiguities")).toContainText("У задачи должна быть дата");
+    expect(parseRequests).toEqual(["POST", "POST"]);
+  });
+
+  test("keeps the literal undated mode from stripping an entered phrase", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page);
+    const requests: Array<Record<string, unknown>> = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/v1/planning/tasks") && request.method() === "POST") requests.push(request.postDataJSON() as Record<string, unknown>);
+    });
+    await openTaskCreator(page);
+    const sheet = page.getByTestId("planning-task-mutation");
+    await sheet.getByTestId("planning-task-due-mode").getByRole("button", { name: "Без срока" }).click();
+    await saveTask(page, "разобрать входящие без срока");
+    expect(requests[0]).toEqual({
+      title: "разобрать входящие без срока",
+      due_date: null,
+      due_time: null,
+      timezone: null,
+      priority: "none"
+    });
+    expect(requests).toHaveLength(1);
+  });
+
+  test("persistent Full Access follows the shared confirmation-free policy", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "full");
+    await installMutationFixtures(page);
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/tasks/") && request.method() === "POST") mutations.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-task-route-row").first().click();
+    await page.getByRole("button", { name: "Завершить" }).click();
+    await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
+    await expect.poll(() => mutations.length).toBe(1);
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Задача завершена");
+  });
+
+  test("renders task disabled without retrying or mislabeling it as access denial", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "full");
+    await installMutationFixtures(page, {
+      taskMutationError: { method: "POST", pathSuffix: "/complete", status: 404, detail: "planning_task_mutations_disabled" }
+    });
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/tasks/") && request.method() === "POST") mutations.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-task-route-row").first().click();
+    await page.getByRole("button", { name: "Завершить" }).click();
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Изменения задач отключены");
+    await expect(page.getByTestId("global-notice-stack")).not.toContainText("Результат не подтверждён");
+    await expect(page.getByTestId("global-notice-stack")).not.toContainText("недостаточно прав");
+    expect(mutations).toEqual(["POST"]);
+  });
+
+  test("renders task not-found truthfully and does not resend the edit", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page, {
+      taskMutationError: { method: "PATCH", status: 404, detail: "planning_task_not_found" }
+    });
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/tasks/") && request.method() === "PATCH") mutations.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-task-route-row").first().click();
+    await page.getByRole("button", { name: "Изменить" }).click();
+    await saveTask(page, "завтра купить продукты");
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Задача больше не найдена");
+    await expect(page.getByTestId("global-notice-stack")).not.toContainText("Изменения задач отключены");
+    await expect(page.getByTestId("planning-task-detail")).toHaveCount(0);
+    await expect(page.getByTestId("planning-task-mutation")).toHaveCount(0);
+    expect(mutations).toEqual(["PATCH"]);
+  });
+
+  test("renders task conflicts as stale state without false success", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page, {
+      taskMutationError: { method: "POST", pathSuffix: "/complete", status: 409, detail: "planning_version_conflict" }
+    });
+    await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-task-route-row").first().click();
+    await page.getByRole("button", { name: "Завершить" }).click();
+    await page.getByTestId("action-confirmation").getByRole("button", { name: "Завершить задачу" }).click();
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Задача изменилась");
+    await expect(page.getByTestId("global-notice-stack")).not.toContainText("Задача завершена");
+  });
+
+  test("keeps unresolved task create transport uncertainty non-successful", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page, { createResponseAlwaysLost: true });
+    await openTaskCreator(page);
+    await saveTask(page, "завтра купить продукты");
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Результат не подтверждён");
+    await expect(page.getByTestId("global-notice-stack")).not.toContainText("Задача создана");
+    await expect(page.getByTestId("planning-task-detail")).toHaveCount(0);
+  });
+
+  test("fails closed when the server task gate is explicitly false", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "full");
+    await overrideTaskWriterMetadata(page, false);
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/tasks") && request.method() !== "GET") mutations.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    await expect(page.getByTestId("planning-task-mutation-gate")).toContainText("отключена серверным gate");
+    await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
+    await page.getByTestId("planning-task-route-row").first().click();
+    await expect(page.getByRole("button", { name: "Завершить" })).toHaveCount(0);
+    expect(mutations).toEqual([]);
+  });
+
+  test("fails closed when server task gate metadata is absent", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "full");
+    await overrideTaskWriterMetadata(page, undefined);
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/tasks") && request.method() !== "GET") mutations.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    await expect(page.getByTestId("planning-task-mutation-gate-unavailable")).toContainText("не подтверждён");
+    await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
+    expect(mutations).toEqual([]);
+  });
+
+  test("fails closed when access verification is unavailable", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await page.route("**/api/v1/access", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "access_unavailable" }) });
+        return;
+      }
+      await route.fallback();
+    });
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/tasks") && request.method() !== "GET") mutations.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    await expect(page.getByTestId("planning-task-access-unavailable")).toContainText("Проверка профиля доступа недоступна");
+    await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
+    expect(mutations).toEqual([]);
   });
 
   test("keeps task mutation controls absent when the writer gate is off", async ({ page }, testInfo) => {
@@ -401,5 +694,31 @@ test.describe("B4.2 task mutations", () => {
     expect(Math.min(...targetHeights)).toBeGreaterThanOrEqual(48);
     await mkdir(artifactDirectory(testInfo), { recursive: true });
     await page.screenshot({ path: path.join(artifactDirectory(testInfo), "b4-tasks-200-percent.png"), animations: "disabled" });
+  });
+});
+
+test.describe("B4.2 task Interaction Lock", () => {
+  test.beforeEach(() => {
+    test.skip(!tasksRouteEnabled, "B3 tasks route is not enabled for this browser run");
+  });
+
+  test("Interaction Lock blocks a Full Access task mutation", async ({ page }) => {
+    test.skip(!taskMutationsEnabled || !interactionLockEnabled, "Run with task writer and Interaction Lock enabled");
+    await installAccessFixture(page, "full");
+    await installMutationFixtures(page);
+    const mutations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/planning/tasks/") && request.method() === "POST") mutations.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    const lock = page.getByTestId("interaction-lock-control");
+    await lock.hover();
+    await page.mouse.down();
+    await page.waitForTimeout(1_100);
+    await page.mouse.up();
+    await expect(lock).toHaveAttribute("aria-pressed", "true");
+    await page.getByTestId("planning-task-route-row").first().evaluate((button) => (button as HTMLButtonElement).click());
+    await page.getByRole("button", { name: "Завершить" }).evaluate((button) => (button as HTMLButtonElement).click());
+    expect(mutations).toEqual([]);
   });
 });

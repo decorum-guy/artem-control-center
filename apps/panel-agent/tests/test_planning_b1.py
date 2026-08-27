@@ -167,6 +167,7 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
     assert projection.sourceStatus == "current"
     assert projection.reminders.upcoming
     assert projection.tasks.today and projection.tasks.overdue and projection.tasks.upcoming
+    assert projection.tasks.undated
     assert projection.tasks.projects
     assert projection.calendar.today
     assert projection.calendar.conflicts
@@ -202,7 +203,7 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
         "calendars": [],
     }
     assert all(len(getattr(projection.reminders, field)) <= 20 for field in ("upcoming", "overdue", "deliveryFailures"))
-    assert all(len(getattr(projection.tasks, field)) <= 20 for field in ("today", "overdue", "upcoming", "projects"))
+    assert all(len(getattr(projection.tasks, field)) <= 20 for field in ("today", "overdue", "upcoming", "undated", "projects"))
     assert all(len(getattr(projection.calendar, field)) <= 20 for field in ("today", "upcoming", "conflicts"))
     overdue_titles = {item.title for item in projection.reminders.overdue}
     upcoming_titles = {item.title for item in projection.reminders.upcoming}
@@ -729,6 +730,51 @@ def test_online_route_reads_bypass_global_summary_and_preserve_a4_pagination(tmp
     assert len(completed.items) == 2
     assert {item.status for item in cancelled.items} == {"cancelled"}
     assert len(cancelled.items) == 1
+
+
+def test_undated_task_read_is_fixed_canonical_view_with_safe_project_filter(tmp_path):
+    transport = RecordingFixtureTransport("healthy")
+    adapter = PlanningAdapter(
+        settings(tmp_path),
+        transport=transport,
+        wall_clock=lambda: datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc),
+    )
+
+    async def exercise():
+        await adapter.start()
+        all_items = await adapter.read_tasks(view="undated", project_id=None, limit=20, offset=0)
+        project_items = await adapter.read_tasks(
+            view="undated",
+            project_id="00000000-0000-4000-8000-000000000006",
+            limit=20,
+            offset=0,
+        )
+        app = FastAPI()
+        app.include_router(build_planning_router(adapter))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://panel.test") as client:
+            route_response = await client.get("/api/v1/planning/tasks?view=undated&limit=20&offset=0")
+            filtered_response = await client.get(
+                "/api/v1/planning/tasks?view=undated&projectId=00000000-0000-4000-8000-000000000006"
+            )
+            unknown_response = await client.get("/api/v1/planning/tasks?view=inbox")
+        await adapter.close()
+        return all_items, project_items, route_response, filtered_response, unknown_response
+
+    all_items, project_items, route_response, filtered_response, unknown_response = asyncio.run(exercise())
+    assert all(item.dueDate is None for item in all_items.items)
+    assert len(all_items.items) == 2
+    assert len(project_items.items) == 1
+    assert project_items.items[0].projectId == "00000000-0000-4000-8000-000000000006"
+    assert route_response.status_code == 200
+    assert route_response.json()["domain"] == "task"
+    assert route_response.json()["items"]
+    assert all(item["dueDate"] is None for item in route_response.json()["items"])
+    assert filtered_response.status_code == 200
+    assert len(filtered_response.json()["items"]) == 1
+    assert unknown_response.status_code == 422
+    task_queries = [query for _, path, _, query in transport.requests if path.endswith("/tasks")]
+    assert any("view=undated" in query for query in task_queries)
+    assert any("view=undated" in query and "project_id=00000000-0000-4000-8000-000000000006" in query for query in task_queries)
 
 
 def test_offline_route_read_fails_closed_instead_of_slicing_bounded_cache(tmp_path):
