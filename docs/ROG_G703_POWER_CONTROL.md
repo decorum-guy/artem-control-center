@@ -1,8 +1,9 @@
 # ASUS ROG G703GI power control
 
-This feature adds two fixed controls for the ASUS ROG G703GI Windows laptop:
+This feature adds three fixed controls for the ASUS ROG G703GI Windows laptop:
 
 - **Включить** — sends a Wake-on-LAN magic packet and waits for the ASUS companion to become reachable.
+- **Сон** — asks the companion to enter Windows Sleep/suspend, then waits for the ASUS companion to become unreachable.
 - **Гибернация** — asks the companion to enter Windows S4 hibernation, then waits for the companion to become unreachable.
 
 The integration is disabled by default. It is deliberately a fixed device integration: the browser can select only the registered target and action IDs. It cannot provide a MAC address, host, URL, command, PowerShell text, or credentials.
@@ -25,10 +26,11 @@ The companion exposes only these routes:
 | --- | --- | --- |
 | \`GET\` | \`/health\` | Authenticated liveness check |
 | \`POST\` | \`/hibernate\` | Authenticated fixed Windows S4 operation |
+| \`POST\` | \`/sleep\` | Authenticated fixed Windows Sleep/suspend operation |
 
-\`POST /hibernate\` accepts no request body. It returns an accepted response, flushes it, and then invokes the fixed equivalent of \`shutdown.exe /h\`. It does not provide shutdown, restart, logoff, shell, command, URL, proxy, or arbitrary process operations.
+Both power endpoints accept no request body. Each returns an accepted response, flushes it, and then schedules its own fixed executor. \`/hibernate\` invokes the fixed equivalent of \`shutdown.exe /h\`; \`/sleep\` invokes \`SetSuspendState(FALSE, TRUE, FALSE)\`, which requests Windows Sleep/suspend rather than hibernation. Neither operation provides shutdown, restart, logoff, shell, command, URL, proxy, or arbitrary process operations.
 
-The UI reports only \`Online\`, \`Offline\`, \`Waking\`, \`Hibernating\`, or \`Unavailable\`. Offline does not distinguish Sleep from Hibernate. The intended effective off state for this laptop is Hibernate/S4; normal Shutdown/S5 is not presented by this integration.
+The UI reports only \`Online\`, \`Offline\`, \`Waking\`, \`Sleeping\`, \`Hibernating\`, or \`Unavailable\`. Offline does not distinguish Sleep from Hibernate. Normal Shutdown/S5 is not presented by this integration.
 
 ## Configuration
 
@@ -44,14 +46,16 @@ PANEL_ROG_G703_COMPANION_BASE_URL=http://192.168.1.25:8769
 PANEL_ROG_G703_COMPANION_SECRET=<value-read-from-the-ASUS-secret-file>
 PANEL_ROG_G703_WOL_REPEATS=3
 PANEL_ROG_G703_WOL_COOLDOWN_SECONDS=5
+PANEL_ROG_G703_SLEEP_COOLDOWN_SECONDS=10
 PANEL_ROG_G703_HIBERNATE_COOLDOWN_SECONDS=10
 PANEL_ROG_G703_HEALTH_TIMEOUT_SECONDS=60
+PANEL_ROG_G703_SLEEP_TIMEOUT_SECONDS=45
 PANEL_ROG_G703_HIBERNATE_TIMEOUT_SECONDS=45
 \`\`\`
 
 The MAC, companion address, and secret above are placeholders only. Do not commit real values. Startup validation rejects an invalid MAC, non-fixed target ID, unsafe broadcast/interface values, an origin containing credentials/query/fragment, or a secret shorter than 32 characters.
 
-The existing global `PANEL_WRITES_ENABLED` gate and Panel Agent access profile still apply. Keep that gate off during setup and enable it only when the broader write policy is intentionally enabled; the ROG feature does not bypass it.
+The existing global `PANEL_WRITES_ENABLED` gate and Panel Agent access profile still apply. Sleep and Hibernate use the same `standard` risk/access class. Keep that gate off during setup and enable it only when the broader write policy is intentionally enabled; the ROG feature does not bypass it.
 
 The Panel Agent sends one fixed \`Authorization: Bearer ...\` header to the fixed origin and fixed routes. It does not follow redirects, accepts only bounded responses, and never logs the secret. The default transport is HTTP on the trusted home LAN; HTTP is not encrypted and must not be exposed to the public internet. The bootstrap firewall rule is LAN-scoped and can be narrowed to an explicit IPv4/CIDR.
 
@@ -106,11 +110,13 @@ Uninstall does not remove unrelated project data or other Windows services. It r
 
 ## Notices and confirmation
 
-Wake uses the existing action/access model without a destructive confirmation. Hibernate reuses the existing \`ActionConfirmationProvider\` with the target-specific text:
+Wake uses the existing action/access model without a destructive confirmation. Sleep and Hibernate reuse the existing \`ActionConfirmationProvider\` with target-specific text:
 
 > Перевести ASUS ROG G703GI в гибернацию?
 
-The existing global NoticeCenter reports the bounded transition, for example \`Пакет пробуждения отправлен\`, \`ASUS появился в сети\`, \`ASUS переходит в гибернацию\`, \`ASUS больше не отвечает — гибернация подтверждена\`, or a failure/timeout. There is no second toast system and no native \`window.confirm\` prompt.
+> Перевести ASUS ROG G703GI в сон?
+
+The existing global NoticeCenter reports the bounded transition, for example \`Пакет пробуждения отправлен\`, \`ASUS появился в сети\`, \`ASUS переходит в сон\`, \`ASUS переходит в гибернацию\`, \`ASUS больше не отвечает — переход подтверждён\`, or a failure/timeout. There is no second toast system and no native \`window.confirm\` prompt.
 
 ## Physical ASUS acceptance checklist
 

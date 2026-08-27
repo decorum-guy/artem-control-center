@@ -191,14 +191,17 @@ if ($restartBlock -notlike "*Start-Sleep -Milliseconds 250*") {
 }
 
 foreach ($required in @(
-    'parsed.path != "/health"',
-    'parsed.path != "/hibernate"',
+    '"/health"',
+    '"/hibernate"',
+    '"/sleep"',
     "Authorization",
     "compare_digest",
     "shutdown.exe",
     '"/h"',
+    "SetSuspendState",
     "MAX_REQUEST_BODY_BYTES",
     "schedule_hibernate",
+    "schedule_sleep",
     "serve_forever"
 )) {
     if ($companion -notlike "*$required*") {
@@ -224,4 +227,4 @@ foreach ($forbidden in @(
     }
 }
 
-Write-Host "Validated fixed ROG G703 companion routes, protected bootstrap, LAN firewall scope and S4-only executor contract."
+Write-Host "Validated fixed ROG G703 companion routes, protected bootstrap, LAN firewall scope and distinct Sleep/S4 executor contracts."

@@ -50,8 +50,10 @@ class IntegrationSettings:
     rog_g703_companion_secret: str = ""
     rog_g703_wol_repeats: int = 3
     rog_g703_wol_cooldown_seconds: int = 5
+    rog_g703_sleep_cooldown_seconds: int = 10
     rog_g703_hibernate_cooldown_seconds: int = 10
     rog_g703_health_timeout_seconds: int = 60
+    rog_g703_sleep_timeout_seconds: int = 45
     rog_g703_hibernate_timeout_seconds: int = 45
     rog_g703_http_timeout_seconds: float = 3.0
     rog_g703_health_poll_seconds: float = 15.0
@@ -213,6 +215,10 @@ class IntegrationSettings:
                 60,
                 max(3, int(os.getenv("PANEL_ROG_G703_WOL_COOLDOWN_SECONDS", "5"))),
             ),
+            rog_g703_sleep_cooldown_seconds=min(
+                120,
+                max(5, int(os.getenv("PANEL_ROG_G703_SLEEP_COOLDOWN_SECONDS", "10"))),
+            ),
             rog_g703_hibernate_cooldown_seconds=min(
                 120,
                 max(5, int(os.getenv("PANEL_ROG_G703_HIBERNATE_COOLDOWN_SECONDS", "10"))),
@@ -220,6 +226,10 @@ class IntegrationSettings:
             rog_g703_health_timeout_seconds=min(
                 180,
                 max(5, int(os.getenv("PANEL_ROG_G703_HEALTH_TIMEOUT_SECONDS", "60"))),
+            ),
+            rog_g703_sleep_timeout_seconds=min(
+                120,
+                max(5, int(os.getenv("PANEL_ROG_G703_SLEEP_TIMEOUT_SECONDS", "45"))),
             ),
             rog_g703_hibernate_timeout_seconds=min(
                 120,

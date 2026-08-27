@@ -6,6 +6,7 @@ export type ActionConfirmationId =
   | "home.coffee.turn_on"
   | "home.kettle.boil"
   | "system.runtime.shutdown"
+  | "system.rog_g703.sleep"
   | "system.rog_g703.hibernate"
   | "planning.reminders.complete"
   | "planning.reminders.cancel"
@@ -112,6 +113,16 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "Windows",
     description: "Переведём ASUS в гибернацию и дождёмся завершения перехода.",
     confirmLabel: "Гибернация"
+  },
+  "system.rog_g703.sleep": {
+    id: "system.rog_g703.sleep",
+    level: "simple",
+    tone: "standard",
+    title: "Перевести ASUS ROG G703GI в сон?",
+    target: "ASUS ROG G703GI",
+    environment: "Windows",
+    description: "Переведём ASUS в сон и дождёмся завершения перехода.",
+    confirmLabel: "Сон"
   },
   "planning.reminders.complete": {
     id: "planning.reminders.complete",

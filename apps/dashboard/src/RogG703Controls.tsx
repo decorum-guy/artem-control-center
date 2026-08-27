@@ -8,9 +8,62 @@ import {
 } from "./RogG703Controller";
 import {
   ROG_G703_HIBERNATE_ACTION,
+  ROG_G703_SLEEP_ACTION,
   ROG_G703_WAKE_ACTION
 } from "./rogG703Api";
 import "./RogG703Controls.css";
+
+type RogG703Controller = ReturnType<typeof useRogG703Controller>;
+
+function RogG703PowerActionGroup({
+  controller,
+  testIdPrefix,
+  className,
+  interactive = true
+}: {
+  controller: RogG703Controller;
+  testIdPrefix: "rog-g703" | "system-rog" | "overview-rog-g703";
+  className: string;
+  interactive?: boolean;
+}) {
+  const status = controller.displayStatus;
+  const actionIds = status === "online" || status === "sleeping" || status === "hibernating"
+    ? [ROG_G703_SLEEP_ACTION, ROG_G703_HIBERNATE_ACTION]
+    : status === "offline" || status === "waking"
+      ? [ROG_G703_WAKE_ACTION]
+      : [];
+
+  if (!actionIds.length) return null;
+
+  return (
+    <div className={className} aria-label="Управление ASUS ROG G703GI">
+      {actionIds.map((actionId) => {
+        const pending = controller.pendingAction === actionId;
+        const label = pending
+          ? actionId === ROG_G703_WAKE_ACTION
+            ? "Пробуждаем…"
+            : actionId === ROG_G703_SLEEP_ACTION
+              ? "Сон…"
+              : "Гибернация…"
+          : controller.actionTitles[actionId];
+        return (
+          <button
+            key={actionId}
+            className={`rog-g703-action rog-g703-action--${actionId === ROG_G703_WAKE_ACTION ? "wake" : actionId === ROG_G703_SLEEP_ACTION ? "sleep" : "hibernate"}`}
+            type="button"
+            data-testid={`${testIdPrefix}-${actionId === ROG_G703_WAKE_ACTION ? "wake" : actionId === ROG_G703_SLEEP_ACTION ? "sleep" : "hibernate"}`}
+            disabled={!interactive || !controller.canUse(actionId)}
+            aria-busy={pending}
+            title={controller.availabilityReason(actionId)}
+            onClick={() => void controller.run(actionId)}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
   const controller = useRogG703Controller(service);
@@ -34,33 +87,14 @@ export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
         </div>
       </div>
 
-      <div className="rog-g703-actions" aria-label="Управление ASUS ROG G703GI">
-        <button
-          className="rog-g703-action rog-g703-action--wake"
-          type="button"
-          data-testid="rog-g703-wake"
-          disabled={!controller.canUse(ROG_G703_WAKE_ACTION)}
-          aria-busy={controller.pendingAction === ROG_G703_WAKE_ACTION}
-          title={controller.availabilityReason(ROG_G703_WAKE_ACTION)}
-          onClick={() => void controller.run(ROG_G703_WAKE_ACTION)}
-        >
-          {controller.pendingAction === ROG_G703_WAKE_ACTION ? "Пробуждаем…" : "Включить"}
-        </button>
-        <button
-          className="rog-g703-action rog-g703-action--hibernate"
-          type="button"
-          data-testid="rog-g703-hibernate"
-          disabled={!controller.canUse(ROG_G703_HIBERNATE_ACTION)}
-          aria-busy={controller.pendingAction === ROG_G703_HIBERNATE_ACTION}
-          title={controller.availabilityReason(ROG_G703_HIBERNATE_ACTION)}
-          onClick={() => void controller.run(ROG_G703_HIBERNATE_ACTION)}
-        >
-          {controller.pendingAction === ROG_G703_HIBERNATE_ACTION ? "Гибернация…" : "Гибернация"}
-        </button>
-      </div>
+      <RogG703PowerActionGroup
+        controller={controller}
+        testIdPrefix="rog-g703"
+        className="rog-g703-actions"
+      />
 
       <p className="rog-g703-controls__note">
-        Кнопка переводит Windows в гибернацию. Полное выключение здесь недоступно.
+        Сон и гибернация — отдельные операции Windows. Полное выключение здесь недоступно.
       </p>
       {!controller.apiAvailable && (
         <p className="rog-g703-controls__unavailable">Управление ASUS ROG сейчас недоступно.</p>
@@ -71,7 +105,7 @@ export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
 
 function rogG703Tone(status: ReturnType<typeof useRogG703Controller>["displayStatus"]): "success" | "warning" | "offline" | "unavailable" {
   if (status === "online") return "success";
-  if (status === "waking" || status === "hibernating") return "warning";
+  if (status === "waking" || status === "sleeping" || status === "hibernating") return "warning";
   if (status === "unavailable") return "unavailable";
   return "offline";
 }
@@ -80,12 +114,6 @@ function rogG703Tone(status: ReturnType<typeof useRogG703Controller>["displaySta
 export function RogG703CompactControl({ service, interactive = true }: { service: ServiceSnapshot; interactive?: boolean }) {
   const controller = useRogG703Controller(service);
   const status = controller.displayStatus;
-  const actionId = status === "online"
-    ? ROG_G703_HIBERNATE_ACTION
-    : status === "offline"
-      ? ROG_G703_WAKE_ACTION
-      : null;
-  const transition = status === "waking" || status === "hibernating";
 
   return (
     <WorkZone className="overview-v2-real-widget overview-rog-widget" data-testid="overview-rog-g703">
@@ -103,25 +131,17 @@ export function RogG703CompactControl({ service, interactive = true }: { service
         {service.presentation?.freshnessLabel ?? "свежесть не указана"}
       </span>
       <div className="overview-rog-widget__action">
-        {transition ? (
-          <button type="button" data-testid="overview-rog-g703-action" disabled aria-busy="true">
-            {controller.display.label}
-          </button>
-        ) : actionId ? (
-          <button
-            type="button"
-            data-testid="overview-rog-g703-action"
-            disabled={!interactive || !controller.canUse(actionId)}
-            title={controller.availabilityReason(actionId)}
-            aria-busy={controller.pendingAction === actionId}
-            onClick={() => { if (interactive) void controller.run(actionId); }}
-          >
-            {controller.pendingAction === actionId ? "Проверяем…" : controller.actionTitles[actionId]}
-          </button>
-        ) : (
+        {status === "unavailable" ? (
           <span className="overview-rog-widget__unavailable" data-testid="overview-rog-g703-unavailable">
             Недоступен
           </span>
+        ) : (
+          <RogG703PowerActionGroup
+            controller={controller}
+            testIdPrefix="overview-rog-g703"
+            className="overview-rog-widget__actions"
+            interactive={interactive}
+          />
         )}
       </div>
     </WorkZone>
@@ -132,48 +152,32 @@ export function RogG703CompactControl({ service, interactive = true }: { service
 export function RogG703DetailControl({ service }: { service: ServiceSnapshot }) {
   const controller = useRogG703Controller(service);
   const status = controller.displayStatus;
-  const transition = status === "waking" || status === "hibernating";
-  const actionId = status === "online"
-    ? ROG_G703_HIBERNATE_ACTION
-    : status === "offline"
-      ? ROG_G703_WAKE_ACTION
-      : null;
 
   return (
     <section className="system-rog-detail" data-testid="system-rog-g703" aria-labelledby="system-rog-g703-title">
       <header className="system-rog-detail__header">
         <div className="system-rog-detail__identity">
           <span className="system-rog-detail__icon" aria-hidden="true"><Icon name="system" /></span>
-          <p className="section-kicker">Хост · ASUS</p>
+          <h2 id="system-rog-g703-title">{service.title}</h2>
         </div>
         <StatusText label={controller.display.label} tone={rogG703Tone(status)} />
       </header>
 
       <div className="system-rog-detail__state" role="status" aria-live="polite">
-        <h2 id="system-rog-g703-title">{service.title}</h2>
         <strong>{controller.display.label}</strong>
         <span>{controller.display.detail}</span>
       </div>
 
       <div className="system-rog-detail__footer">
         <span>{service.presentation?.freshnessLabel ?? "Свежесть не указана"}</span>
-        {transition ? (
-          <button type="button" disabled aria-busy="true" data-testid="system-rog-action">
-            {controller.display.label}
-          </button>
-        ) : actionId ? (
-          <button
-            type="button"
-            data-testid="system-rog-action"
-            disabled={!controller.canUse(actionId)}
-            aria-busy={controller.pendingAction === actionId}
-            title={controller.availabilityReason(actionId)}
-            onClick={() => void controller.run(actionId)}
-          >
-            {controller.pendingAction === actionId ? "Проверяем…" : controller.actionTitles[actionId]}
-          </button>
-        ) : (
+        {status === "unavailable" ? (
           <span className="system-rog-detail__unavailable" data-testid="system-rog-action-unavailable">Недоступен</span>
+        ) : (
+          <RogG703PowerActionGroup
+            controller={controller}
+            testIdPrefix="system-rog"
+            className="system-rog-detail__actions"
+          />
         )}
       </div>
     </section>

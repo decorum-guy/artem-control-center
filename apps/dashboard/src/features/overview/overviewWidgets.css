@@ -186,6 +186,12 @@
   min-width: 144px;
 }
 
+.overview-rog-widget__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(132px, 1fr));
+  gap: 8px;
+}
+
 .overview-rog-widget__action button {
   width: 156px;
   min-height: 48px;
@@ -630,9 +636,23 @@
   min-width: 0;
 }
 
+.overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-rog-widget__actions {
+  width: 100%;
+}
+
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-rog-widget__action button,
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-rog-widget__unavailable {
   width: 100%;
+}
+
+@media (max-width: 760px) {
+  .overview-rog-widget__actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-rog-widget__action button {
+    width: auto;
+  }
 }
 
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .coffee-panel--overview {

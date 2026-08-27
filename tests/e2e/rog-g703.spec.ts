@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-type RogStatus = "offline" | "online" | "waking" | "hibernating";
-type RogAction = "system.rog_g703.wake" | "system.rog_g703.hibernate";
+type RogStatus = "offline" | "online" | "waking" | "sleeping" | "hibernating";
+type RogAction = "system.rog_g703.wake" | "system.rog_g703.sleep" | "system.rog_g703.hibernate";
 
 function actionAvailability(actionId: RogAction, status: RogStatus) {
   const online = status === "online";
@@ -40,6 +40,7 @@ function accessStatus(elevated: boolean) {
     lockoutUntil: null,
     capabilities: {
       "system.rog_g703.wake": decision("system.rog_g703.wake"),
+      "system.rog_g703.sleep": decision("system.rog_g703.sleep"),
       "system.rog_g703.hibernate": decision("system.rog_g703.hibernate")
     }
   };
@@ -60,9 +61,12 @@ function rogService(status: RogStatus) {
         ? "Не отвечает · сон или гибернация"
         : status === "waking"
           ? "Проверяем появление ASUS в сети"
-          : "Переходит в гибернацию Windows S4",
+          : status === "sleeping"
+            ? "Переходит в сон Windows"
+            : "Переходит в гибернацию Windows S4",
     actions: [
       { id: "system.rog_g703.wake", title: "Включить", enabled: status === "offline", risk: "low" },
+      { id: "system.rog_g703.sleep", title: "Сон", enabled: status === "online", risk: "medium" },
       { id: "system.rog_g703.hibernate", title: "Гибернация", enabled: status === "online", risk: "medium" }
     ],
     data: {
@@ -168,6 +172,7 @@ async function mockRogG703(page: Page, options: { requireElevation?: boolean } =
           },
           actions: {
             "system.rog_g703.wake": availabilityFor("system.rog_g703.wake"),
+            "system.rog_g703.sleep": availabilityFor("system.rog_g703.sleep"),
             "system.rog_g703.hibernate": availabilityFor("system.rog_g703.hibernate")
           }
         })
@@ -180,7 +185,7 @@ async function mockRogG703(page: Page, options: { requireElevation?: boolean } =
       expect(Object.keys(body)).toEqual(["actionId"]);
       activeAction = body.actionId as RogAction;
       polls = 0;
-      status = activeAction.endsWith("wake") ? "waking" : "hibernating";
+      status = activeAction.endsWith("wake") ? "waking" : activeAction.endsWith("sleep") ? "sleeping" : "hibernating";
       await new Promise((resolve) => setTimeout(resolve, 120));
       await route.fulfill({
         status: 202,
@@ -202,7 +207,7 @@ async function mockRogG703(page: Page, options: { requireElevation?: boolean } =
     }
     if (url.pathname.endsWith(`/${executionId}`)) {
       polls += 1;
-      const transition = activeAction?.endsWith("wake") ? "waking" : "hibernating";
+      const transition = activeAction?.endsWith("wake") ? "waking" : activeAction?.endsWith("sleep") ? "sleeping" : "hibernating";
       const terminal = activeAction?.endsWith("wake") ? "online" : "offline";
       if (polls > 1) status = terminal;
       await route.fulfill({
@@ -238,10 +243,10 @@ test("feature-off System route is explicit and does not expose ASUS controls", a
   await expect(page.getByTestId("route-system")).toBeVisible();
   await expect(page.getByTestId("rog-g703-disabled")).toBeVisible();
   await expect(page.getByTestId("rog-g703-controls")).toHaveCount(0);
-  await expect(page.getByText("MAC-адрес", { exact: false })).toHaveCount(1);
+  await expect(page.getByTestId("rog-g703-disabled")).toContainText("Секретные данные не отображаются");
 });
 
-test("touch-first ROG flow verifies wake, S4 hibernate and safe action payloads", async ({ page }) => {
+test("touch-first ROG flow verifies wake, distinct Sleep/S4 hibernate and safe action payloads", async ({ page }) => {
   await page.addInitScript(() => {
     (window as typeof window & { __nativeConfirmationCalls?: number }).__nativeConfirmationCalls = 0;
     window.confirm = () => {
@@ -255,17 +260,37 @@ test("touch-first ROG flow verifies wake, S4 hibernate and safe action payloads"
   const controls = page.getByTestId("rog-g703-controls");
   await expect(controls).toBeVisible();
   const wake = page.getByTestId("rog-g703-wake");
+  const sleep = page.getByTestId("rog-g703-sleep");
   const hibernate = page.getByTestId("rog-g703-hibernate");
   await expect(wake).toBeEnabled();
-  await expect(hibernate).toBeDisabled();
+  await expect(sleep).toHaveCount(0);
+  await expect(hibernate).toHaveCount(0);
   expect((await wake.boundingBox())?.height).toBeGreaterThanOrEqual(48);
-  expect((await hibernate.boundingBox())?.height).toBeGreaterThanOrEqual(48);
 
   await wake.tap();
   await expect(controls).toContainText("Пробуждение");
   await expect(page.getByTestId("rog-g703-action-notice")).toContainText("Пакет пробуждения");
   await expect(controls).toContainText("В сети");
+  await expect(sleep).toBeEnabled();
   await expect(hibernate).toBeEnabled();
+  expect((await sleep.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+  expect((await hibernate.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+
+  await sleep.tap();
+  const sleepConfirmation = page.getByTestId("action-confirmation");
+  await expect(sleepConfirmation).toBeVisible();
+  await expect(sleepConfirmation).toContainText("Перевести ASUS ROG G703GI в сон?");
+  await sleepConfirmation.getByRole("button", { name: "Сон" }).click();
+  await expect(controls).toContainText("Сон");
+  await expect(sleep).toBeDisabled();
+  await expect(hibernate).toBeDisabled();
+  await expect(sleep).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("переходит в сон");
+  await expect(controls).toContainText("Не в сети");
+  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("переход подтверждён");
+
+  await wake.tap();
+  await expect(controls).toContainText("В сети");
 
   await hibernate.tap();
   const confirmation = page.getByTestId("action-confirmation");
@@ -275,9 +300,11 @@ test("touch-first ROG flow verifies wake, S4 hibernate and safe action payloads"
   await expect(controls).toContainText("Гибернация");
   await expect(page.getByTestId("rog-g703-action-notice")).toContainText("переходит в гибернацию");
   await expect(controls).toContainText("Не в сети");
-  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("гибернация подтверждена");
+  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("переход подтверждён");
 
   expect(api.getRequestBodies()).toEqual([
+    { actionId: "system.rog_g703.wake" },
+    { actionId: "system.rog_g703.sleep" },
     { actionId: "system.rog_g703.wake" },
     { actionId: "system.rog_g703.hibernate" }
   ]);
