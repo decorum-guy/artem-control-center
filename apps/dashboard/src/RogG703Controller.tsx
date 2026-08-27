@@ -7,6 +7,7 @@ import { useInteractionLock } from "./InteractionLock";
 import {
   fetchRogG703Availability,
   ROG_G703_HIBERNATE_ACTION,
+  ROG_G703_SLEEP_ACTION,
   ROG_G703_WAKE_ACTION,
   startRogG703Action,
   waitForRogG703Execution,
@@ -20,8 +21,9 @@ type AvailabilityMap = Record<RogG703ActionId, RogG703ActionAvailability>;
 
 export const rogG703StatusCopy: Record<RogG703DeviceStatus, { label: string; detail: string }> = {
   online: { label: "В сети", detail: "ASUS отвечает" },
-  offline: { label: "Не в сети", detail: "Устройство не отвечает" },
+  offline: { label: "Не в сети", detail: "Устройство не отвечает — сон или гибернация" },
   waking: { label: "Пробуждение", detail: "Ждём, когда ASUS появится в сети" },
+  sleeping: { label: "Сон", detail: "Ждём завершения перехода" },
   hibernating: { label: "Гибернация", detail: "Ждём завершения перехода" },
   unavailable: { label: "Недоступен", detail: "Проверка устройства сейчас недоступна" }
 };
@@ -31,8 +33,9 @@ const actionProgressCopy: Record<RogG703ActionExecution["status"], string> = {
   waking: "Пакет пробуждения отправлен",
   online: "ASUS появился в сети",
   wake_timeout: "Не удалось разбудить ASUS",
+  sleeping: "ASUS переходит в сон",
   hibernating: "ASUS переходит в гибернацию",
-  offline: "ASUS больше не отвечает — гибернация подтверждена",
+  offline: "ASUS больше не отвечает — переход подтверждён",
   failed: "Операция ASUS завершилась ошибкой"
 };
 
@@ -42,8 +45,11 @@ function actionErrorCopy(error: string | null): string {
       return "Не удалось разбудить ASUS в заданное время.";
     case "hibernate_timeout":
       return "ASUS остаётся доступен: переход в гибернацию не подтверждён.";
+    case "sleep_timeout":
+      return "ASUS остаётся доступен: переход в сон не подтверждён.";
     case "companion_health_failed":
     case "companion_hibernate_failed":
+    case "companion_sleep_failed":
       return "ASUS companion не подтвердил операцию.";
     default:
       return "Операция ASUS не выполнена. Проверьте состояние и повторите попытку.";
@@ -112,7 +118,8 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
 
   const actionTitles = useMemo<Record<RogG703ActionId, string>>(() => ({
     [ROG_G703_WAKE_ACTION]: "Включить",
-    [ROG_G703_HIBERNATE_ACTION]: "Гибернация"
+    [ROG_G703_HIBERNATE_ACTION]: "Гибернация",
+    [ROG_G703_SLEEP_ACTION]: "Сон"
   }), []);
 
   const showActionNotice = useCallback((
@@ -158,19 +165,27 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
       return;
     }
 
-    if (actionId === ROG_G703_HIBERNATE_ACTION) {
-      const confirmation = await confirmAction("system.rog_g703.hibernate");
+    if (actionId === ROG_G703_HIBERNATE_ACTION || actionId === ROG_G703_SLEEP_ACTION) {
+      const confirmation = await confirmAction(actionId);
       if (!confirmation.confirmed) return;
     }
 
     if (!guardMutation()) return;
     setPendingAction(actionId);
-    setTransitionStatus(actionId === ROG_G703_WAKE_ACTION ? "waking" : "hibernating");
+    setTransitionStatus(
+      actionId === ROG_G703_WAKE_ACTION
+        ? "waking"
+        : actionId === ROG_G703_SLEEP_ACTION
+          ? "sleeping"
+          : "hibernating"
+    );
     showActionNotice(
       "progress",
       actionId === ROG_G703_WAKE_ACTION
         ? "Отправляем пакет пробуждения…"
-        : "Отправляем команду гибернации…"
+        : actionId === ROG_G703_SLEEP_ACTION
+          ? "Отправляем команду сна…"
+          : "Отправляем команду гибернации…"
     );
 
     try {
@@ -180,6 +195,7 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
         (execution) => {
           const failed = execution.status === "failed" || execution.status === "wake_timeout";
           if (execution.status === "waking") setTransitionStatus("waking");
+          if (execution.status === "sleeping") setTransitionStatus("sleeping");
           if (execution.status === "hibernating") setTransitionStatus("hibernating");
           if (execution.status === "online") setTransitionStatus("online");
           if (execution.status === "offline" || execution.status === "wake_timeout") setTransitionStatus("offline");

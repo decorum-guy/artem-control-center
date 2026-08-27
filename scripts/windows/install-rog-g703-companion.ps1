@@ -152,7 +152,7 @@ function Configure-CompanionFirewall {
         -LocalAddress $localAddress `
         -RemoteAddress $FirewallRemoteAddress `
         -Profile $FirewallProfile `
-        -Description "LAN-only authenticated ROG G703 health and hibernate companion" |
+        -Description "LAN-only authenticated ROG G703 health and fixed power companion" |
         Out-Null
 }
 

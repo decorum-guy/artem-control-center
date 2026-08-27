@@ -298,3 +298,25 @@ actions:
     verify:
       type: fixed_companion_unreachable
       timeout_seconds: 45
+
+  - id: system.rog_g703.sleep
+    enabled: false
+    enablement: PANEL_ROG_G703_ENABLED_and_Panel_Agent_access_policy
+    title: Sleep ASUS ROG G703GI
+    target: rog_g703gi
+    risk: medium
+    confirmation: confirm
+    cooldown_seconds: 10
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+    executor:
+      type: fixed_companion_action
+      target_id: rog_g703gi
+      route: /sleep
+      operation: windows_sleep_suspend
+      allow_arbitrary_command: false
+    verify:
+      type: fixed_companion_unreachable
+      timeout_seconds: 45

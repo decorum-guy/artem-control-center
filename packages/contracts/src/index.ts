@@ -83,6 +83,7 @@ export type RogG703DeviceStatus =
   | "online"
   | "offline"
   | "waking"
+  | "sleeping"
   | "hibernating"
   | "unavailable";
 

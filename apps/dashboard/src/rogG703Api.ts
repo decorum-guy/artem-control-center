@@ -3,15 +3,18 @@ import type { CapabilityDecision } from "./accessApi";
 export const ROG_G703_TARGET_ID = "rog_g703gi" as const;
 export const ROG_G703_WAKE_ACTION = "system.rog_g703.wake" as const;
 export const ROG_G703_HIBERNATE_ACTION = "system.rog_g703.hibernate" as const;
+export const ROG_G703_SLEEP_ACTION = "system.rog_g703.sleep" as const;
 
 export type RogG703ActionId =
   | typeof ROG_G703_WAKE_ACTION
-  | typeof ROG_G703_HIBERNATE_ACTION;
+  | typeof ROG_G703_HIBERNATE_ACTION
+  | typeof ROG_G703_SLEEP_ACTION;
 
 export type RogG703DeviceStatus =
   | "online"
   | "offline"
   | "waking"
+  | "sleeping"
   | "hibernating"
   | "unavailable";
 
@@ -20,6 +23,7 @@ export type RogG703ActionStatus =
   | "waking"
   | "online"
   | "wake_timeout"
+  | "sleeping"
   | "hibernating"
   | "offline"
   | "failed";

@@ -6,8 +6,8 @@ const overviewV2Enabled = process.env.VITE_OVERVIEW_V2_ENABLED === "true";
 const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 const overviewLayoutWritesEnabled = process.env.PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED === "true";
 
-type RogStatus = "online" | "offline" | "waking" | "hibernating" | "unavailable";
-type RogAction = "system.rog_g703.wake" | "system.rog_g703.hibernate";
+type RogStatus = "online" | "offline" | "waking" | "sleeping" | "hibernating" | "unavailable";
+type RogAction = "system.rog_g703.wake" | "system.rog_g703.sleep" | "system.rog_g703.hibernate";
 type ConnectivityFixture = "available" | "pending" | "unavailable";
 type HomeFixture = "one" | "two";
 
@@ -27,6 +27,7 @@ function rogService(status: RogStatus) {
     summary: "ASUS companion state",
     actions: [
       { id: "system.rog_g703.wake", title: "Включить", enabled: status === "offline", risk: "low" },
+      { id: "system.rog_g703.sleep", title: "Сон", enabled: status === "online", risk: "medium" },
       { id: "system.rog_g703.hibernate", title: "Гибернация", enabled: status === "online", risk: "medium" }
     ],
     presentation: {
@@ -48,12 +49,12 @@ function rogService(status: RogStatus) {
 
 function decision(actionId: RogAction, status: RogStatus) {
   const allowed = (actionId.endsWith("wake") && status === "offline") ||
-    (actionId.endsWith("hibernate") && status === "online");
+    (!actionId.endsWith("wake") && status === "online");
   return {
     availability: allowed ? "allowed" : "not_allowed",
     allowed,
     reason: allowed ? null : "action_not_available_for_current_state",
-    requiresConfirmation: actionId.endsWith("hibernate"),
+    requiresConfirmation: !actionId.endsWith("wake"),
     capability: "system.rog_g703",
     cooldownUntil: null,
     targetId: "rog_g703gi",
@@ -186,6 +187,7 @@ async function installRogMocks(page: Page) {
         status: rogService(rogStatus).data,
         actions: {
           "system.rog_g703.wake": decision("system.rog_g703.wake", rogStatus),
+          "system.rog_g703.sleep": decision("system.rog_g703.sleep", rogStatus),
           "system.rog_g703.hibernate": decision("system.rog_g703.hibernate", rogStatus)
         }
       })
@@ -205,7 +207,7 @@ async function installRogMocks(page: Page) {
         correlationId: `curated-${postedActions.length}`,
         targetId: "rog_g703gi",
         actionId,
-        status: actionId.endsWith("wake") ? "waking" : "hibernating",
+        status: actionId.endsWith("wake") ? "waking" : actionId.endsWith("sleep") ? "sleeping" : "hibernating",
         requestedAt: "2026-08-14T12:00:00Z",
         updatedAt: "2026-08-14T12:00:00Z",
         finishedAt: null,
@@ -304,7 +306,8 @@ test.describe("PR4 curated Overview", () => {
     const rogIdentity = await rog.locator(".overview-rog-widget__identity h2").boundingBox();
     const rogStatus = await rog.locator(".overview-rog-widget__status").boundingBox();
     const rogFreshness = await rog.locator(".overview-rog-widget__freshness").boundingBox();
-    const rogAction = await rog.locator(".overview-rog-widget__action button").boundingBox();
+    const rogSleep = await rog.getByTestId("overview-rog-g703-sleep").boundingBox();
+    const rogHibernate = await rog.getByTestId("overview-rog-g703-hibernate").boundingBox();
     expect(rogBox).not.toBeNull();
     for (const child of [rogIdentity, rogStatus, rogFreshness]) {
       expect(child).not.toBeNull();
@@ -314,7 +317,8 @@ test.describe("PR4 curated Overview", () => {
     expect(rogIdentity?.height).toBeLessThanOrEqual(20);
     expect(rogStatus?.height).toBeLessThanOrEqual(20);
     expect(rogFreshness?.height).toBeLessThanOrEqual(18);
-    expect(rogAction?.height).toBeGreaterThanOrEqual(48);
+    expect(rogSleep?.height).toBeGreaterThanOrEqual(48);
+    expect(rogHibernate?.height).toBeGreaterThanOrEqual(48);
 
     if (overviewLayoutWritesEnabled) {
       await expect(page.getByTestId("overview-configure")).toBeEnabled();
@@ -323,7 +327,8 @@ test.describe("PR4 curated Overview", () => {
     }
     for (const control of [
       page.getByTestId("overview-configure"),
-      rog.locator(".overview-rog-widget__action button"),
+      rog.getByTestId("overview-rog-g703-sleep"),
+      rog.getByTestId("overview-rog-g703-hibernate"),
       page.getByTestId("widget-coffee-machine").getByRole("button"),
       page.getByTestId("overview-home-device-kettle"),
       page.getByTestId("planning-reminder-row"),
@@ -343,8 +348,8 @@ test.describe("PR4 curated Overview", () => {
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
     await expect(page.getByTestId("overview-rog-g703")).toContainText("Не в сети");
-    await expect(page.getByTestId("overview-rog-g703-action")).toHaveText("Включить");
-    await page.getByTestId("overview-rog-g703-action").click();
+    await expect(page.getByTestId("overview-rog-g703-wake")).toHaveText("Включить");
+    await page.getByTestId("overview-rog-g703-wake").click();
     await expect.poll(() => postedActions.length).toBe(1);
     expect(postedActions).toEqual([{ actionId: "system.rog_g703.wake" }]);
     await expect(page.getByTestId("overview-rog-g703")).toContainText("В сети");
@@ -353,9 +358,10 @@ test.describe("PR4 curated Overview", () => {
 
   test.describe("ROG state projection", () => {
     const states: Array<[RogStatus, string, string | null]> = [
-      ["online", "В сети", "Гибернация"],
+      ["online", "В сети", "Сон"],
       ["offline", "Не в сети", "Включить"],
-      ["waking", "Пробуждение", "Пробуждение"],
+      ["waking", "Пробуждение", null],
+      ["sleeping", "Сон", "Сон"],
       ["hibernating", "Гибернация", "Гибернация"],
       ["unavailable", "Недоступен", null]
     ];
@@ -368,13 +374,25 @@ test.describe("PR4 curated Overview", () => {
         await waitForOverview(page);
         await expect(page.getByTestId("overview-rog-g703")).toContainText(label);
         if (action) {
-          await expect(page.getByTestId("overview-rog-g703-action")).toContainText(action);
-          await expect(page.locator(".overview-rog-widget__action button")).toHaveCount(1);
-          if (state === "online") await expect(page.getByTestId("overview-rog-g703-action")).not.toContainText("Включить");
-          if (state === "offline") await expect(page.getByTestId("overview-rog-g703-action")).not.toContainText("Гибернация");
+          if (state === "online") {
+            await expect(page.getByTestId("overview-rog-g703-sleep")).toContainText("Сон");
+            await expect(page.getByTestId("overview-rog-g703-hibernate")).toContainText("Гибернация");
+          } else {
+            const actionButton = state === "offline"
+              ? page.getByTestId("overview-rog-g703-wake")
+              : page.getByTestId(state === "sleeping" ? "overview-rog-g703-sleep" : "overview-rog-g703-hibernate");
+            await expect(actionButton).toContainText(action);
+          }
+          await expect(page.locator(".overview-rog-widget__action button")).toHaveCount(state === "online" || state === "sleeping" || state === "hibernating" ? 2 : 1);
+          if (state === "online") await expect(page.getByTestId("overview-rog-g703-wake")).toHaveCount(0);
+          if (state === "offline") await expect(page.getByTestId("overview-rog-g703-hibernate")).toHaveCount(0);
         } else {
-          await expect(page.getByTestId("overview-rog-g703-unavailable")).toContainText("Недоступен");
-          await expect(page.getByTestId("overview-rog-g703-action")).toHaveCount(0);
+          if (state === "waking") {
+            await expect(page.getByTestId("overview-rog-g703-wake")).toBeDisabled();
+          } else {
+            await expect(page.getByTestId("overview-rog-g703-unavailable")).toContainText("Недоступен");
+            await expect(page.getByTestId("overview-rog-g703-wake")).toHaveCount(0);
+          }
         }
         await expectNoOverflow(page);
       });
@@ -386,17 +404,18 @@ test.describe("PR4 curated Overview", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    await expect(page.getByTestId("overview-rog-g703-action")).toHaveText("Включить");
+    await expect(page.getByTestId("overview-rog-g703-wake")).toHaveText("Включить");
     await page.goto("/system?theme=night");
     if (visualShellEnabled) {
       await expect(page.getByTestId("system-rog-g703")).toBeVisible();
       await expect(page.getByTestId("system-rog-g703")).toContainText("Не в сети");
-      await expect(page.getByTestId("system-rog-action")).toHaveText("Включить");
+      await expect(page.getByTestId("system-rog-wake")).toHaveText("Включить");
     } else {
       await expect(page.getByTestId("rog-g703-controls")).toBeVisible();
       await expect(page.getByTestId("rog-g703-controls")).toContainText("Не в сети");
       await expect(page.getByTestId("rog-g703-wake")).toBeEnabled();
-      await expect(page.getByTestId("rog-g703-hibernate")).toBeDisabled();
+      await expect(page.getByTestId("rog-g703-sleep")).toHaveCount(0);
+      await expect(page.getByTestId("rog-g703-hibernate")).toHaveCount(0);
     }
   });
 

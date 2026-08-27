@@ -29,7 +29,7 @@ function runtimeService(health = "healthy") {
   };
 }
 
-function rogService(status: "online" | "offline" | "waking" | "hibernating" | "unavailable") {
+function rogService(status: "online" | "offline" | "waking" | "sleeping" | "hibernating" | "unavailable") {
   return {
     id: "rog_g703gi",
     title: "ASUS ROG G703GI",
@@ -40,6 +40,7 @@ function rogService(status: "online" | "offline" | "waking" | "hibernating" | "u
     summary: status === "online" ? "В сети" : status === "offline" ? "Не в сети" : "Состояние перехода",
     actions: [
       { id: "system.rog_g703.wake", title: "Включить", enabled: status === "offline", risk: "low" },
+      { id: "system.rog_g703.sleep", title: "Сон", enabled: status === "online", risk: "medium" },
       { id: "system.rog_g703.hibernate", title: "Гибернация", enabled: status === "online", risk: "medium" }
     ],
     presentation: {
@@ -148,10 +149,10 @@ async function measureRogLayout(page: Page): Promise<RogLayout> {
       return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height };
     };
     const title = root.querySelector<HTMLElement>("#system-rog-g703-title");
-    const status = root.querySelector<HTMLElement>(".system-rog-detail__state strong");
+    const status = root.querySelector<HTMLElement>(".system-rog-detail__header .v2-status-text");
     const detail = root.querySelector<HTMLElement>(".system-rog-detail__state span");
-    const state = title?.closest(".system-rog-detail__state");
-    if (!title || !status || !detail || !state) throw new Error("ROG title/state geometry is incomplete");
+    const identity = title?.closest(".system-rog-detail__identity");
+    if (!title || !status || !detail || !identity) throw new Error("ROG title/state geometry is incomplete");
     return {
       card: rect(root),
       header: rect(root.querySelector(".system-rog-detail__header")),
@@ -159,7 +160,7 @@ async function measureRogLayout(page: Page): Promise<RogLayout> {
       status: rect(status),
       detail: rect(detail),
       footer: rect(root.querySelector(".system-rog-detail__footer")),
-      titleInPrimaryState: true,
+      titleInPrimaryState: Boolean(title.closest(".system-rog-detail__header")),
       noInternalOverflow: root.scrollHeight <= root.clientHeight && root.scrollWidth <= root.clientWidth
     };
   });
@@ -167,13 +168,13 @@ async function measureRogLayout(page: Page): Promise<RogLayout> {
 
 function assertRogLayout(layout: RogLayout): void {
   expect(layout.titleInPrimaryState).toBe(true);
-  expect(Math.abs(layout.title.left - layout.status.left)).toBeLessThanOrEqual(1);
-  expect(layout.title.top - layout.header.bottom).toBeGreaterThanOrEqual(8);
-  expect(layout.status.top - layout.title.bottom).toBeGreaterThanOrEqual(8);
+  expect(layout.title.left).toBeGreaterThan(layout.header.left);
+  expect(layout.title.top - layout.header.top).toBeGreaterThanOrEqual(0);
+  expect(layout.title.top - layout.header.top).toBeLessThanOrEqual(8);
   expect(layout.detail.top - layout.status.bottom).toBeGreaterThanOrEqual(0);
   expect(layout.footer.top - layout.detail.bottom).toBeGreaterThanOrEqual(8);
-  expect(layout.title.top).toBeGreaterThanOrEqual(layout.header.bottom);
-  expect(layout.status.top).toBeGreaterThanOrEqual(layout.title.bottom);
+  expect(layout.title.top).toBeGreaterThanOrEqual(layout.header.top);
+  expect(layout.status.top).toBeGreaterThanOrEqual(layout.header.top);
   expect(layout.detail.top).toBeGreaterThanOrEqual(layout.status.bottom);
   expect(layout.footer.top).toBeGreaterThanOrEqual(layout.detail.bottom);
   expect(layout.noInternalOverflow).toBe(true);
@@ -372,7 +373,8 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(page.getByTestId("system-diagnostic-fixture-multi-action")).toContainText("Требует внимания");
     await expect(page.getByTestId("system-rog-g703")).toContainText("В сети");
     await expect(page.getByTestId("system-rog-g703")).toContainText("ASUS отвечает");
-    await expect(page.getByTestId("system-rog-action")).toHaveText("Гибернация");
+    await expect(page.getByTestId("system-rog-sleep")).toHaveText("Сон");
+    await expect(page.getByTestId("system-rog-hibernate")).toHaveText("Гибернация");
     assertRogLayout(await measureRogLayout(page));
     await expect(page.getByTestId("system-runtime-zone")).toBeVisible();
     await expect(page.getByTestId("system-fact-update")).toContainText("Обновления");
@@ -384,7 +386,9 @@ test.describe("Control Center V2 PR7 route density", () => {
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Не в сети");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Устройство не отвечает");
-    await expect(page.getByTestId("system-rog-action")).toHaveText("Включить");
+    await expect(page.getByTestId("system-rog-wake")).toHaveText("Включить");
+    await expect(page.getByTestId("system-rog-sleep")).toHaveCount(0);
+    await expect(page.getByTestId("system-rog-hibernate")).toHaveCount(0);
     assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");
@@ -392,14 +396,23 @@ test.describe("Control Center V2 PR7 route density", () => {
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Пробуждение");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Ждём, когда ASUS появится в сети");
-    await expect(page.getByTestId("system-rog-action")).toBeDisabled();
+    await expect(page.getByTestId("system-rog-wake")).toBeDisabled();
     assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");
     await installSnapshotMock(page, (snapshot) => addRog(snapshot, "hibernating"));
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Гибернация");
-    await expect(page.getByTestId("system-rog-action")).toBeDisabled();
+    await expect(page.getByTestId("system-rog-sleep")).toBeDisabled();
+    await expect(page.getByTestId("system-rog-hibernate")).toBeDisabled();
+    assertRogLayout(await measureRogLayout(page));
+
+    await page.unroute("**/api/v1/snapshot**");
+    await installSnapshotMock(page, (snapshot) => addRog(snapshot, "sleeping"));
+    await page.goto("/system");
+    await expect(page.getByTestId("system-rog-g703")).toContainText("Сон");
+    await expect(page.getByTestId("system-rog-sleep")).toBeDisabled();
+    await expect(page.getByTestId("system-rog-hibernate")).toBeDisabled();
     assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");

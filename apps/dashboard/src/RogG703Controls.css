@@ -41,6 +41,7 @@
 
 .rog-g703-status--online .rog-g703-status__indicator { background: var(--success); }
 .rog-g703-status--waking .rog-g703-status__indicator,
+.rog-g703-status--sleeping .rog-g703-status__indicator,
 .rog-g703-status--hibernating .rog-g703-status__indicator { background: var(--warning); }
 .rog-g703-status--offline .rog-g703-status__indicator,
 .rog-g703-status--unavailable .rog-g703-status__indicator { background: var(--danger); }
@@ -79,6 +80,10 @@
 
 .rog-g703-action--hibernate {
   border-color: color-mix(in srgb, var(--warning) 58%, var(--border));
+}
+
+.rog-g703-action--sleep {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
 }
 
 .rog-g703-controls__note,

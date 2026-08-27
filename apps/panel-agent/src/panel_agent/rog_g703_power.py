@@ -22,14 +22,27 @@ from .settings import IntegrationSettings
 ROG_G703_TARGET_ID = "rog_g703gi"
 ROG_G703_WAKE_ACTION = "system.rog_g703.wake"
 ROG_G703_HIBERNATE_ACTION = "system.rog_g703.hibernate"
+ROG_G703_SLEEP_ACTION = "system.rog_g703.sleep"
 
-RogActionId = Literal[ROG_G703_WAKE_ACTION, ROG_G703_HIBERNATE_ACTION]
-RogDeviceStatus = Literal["online", "offline", "waking", "hibernating", "unavailable"]
+RogActionId = Literal[
+    ROG_G703_WAKE_ACTION,
+    ROG_G703_HIBERNATE_ACTION,
+    ROG_G703_SLEEP_ACTION,
+]
+RogDeviceStatus = Literal[
+    "online",
+    "offline",
+    "waking",
+    "sleeping",
+    "hibernating",
+    "unavailable",
+]
 RogActionStatus = Literal[
     "requested",
     "waking",
     "online",
     "wake_timeout",
+    "sleeping",
     "hibernating",
     "offline",
     "failed",
@@ -37,16 +50,19 @@ RogActionStatus = Literal[
 
 CAPABILITIES.setdefault(ROG_G703_WAKE_ACTION, "standard")
 CAPABILITIES.setdefault(ROG_G703_HIBERNATE_ACTION, "standard")
+CAPABILITIES.setdefault(ROG_G703_SLEEP_ACTION, "standard")
 
 _MAC_SEPARATOR_PATTERN = re.compile(r"[-:.]")
 _SAFE_ERROR_CODES = {
     "companion_health_failed",
     "companion_hibernate_failed",
+    "companion_sleep_failed",
     "companion_response_too_large",
     "hibernate_timeout",
     "health_unreachable",
     "invalid_companion_response",
     "rog_g703_not_configured",
+    "sleep_timeout",
     "wake_timeout",
     "wol_send_failed",
 }
@@ -106,6 +122,8 @@ class RogCompanion(Protocol):
 
     async def hibernate(self) -> None: ...
 
+    async def sleep(self) -> None: ...
+
 
 class CompanionRequestError(RuntimeError):
     def __init__(self, code: str, *, unreachable: bool = False) -> None:
@@ -145,16 +163,32 @@ class HttpRogCompanion:
         return True
 
     async def hibernate(self) -> None:
-        payload = await self._request("POST", "/hibernate", expected_status=202)
+        payload = await self._request(
+            "POST",
+            "/hibernate",
+            expected_status=202,
+            failure_code="companion_hibernate_failed",
+        )
         if payload.get("accepted") is not True or payload.get("operation") != "hibernate":
             raise CompanionRequestError("companion_hibernate_failed")
+
+    async def sleep(self) -> None:
+        payload = await self._request(
+            "POST",
+            "/sleep",
+            expected_status=202,
+            failure_code="companion_sleep_failed",
+        )
+        if payload.get("accepted") is not True or payload.get("operation") != "sleep":
+            raise CompanionRequestError("companion_sleep_failed")
 
     async def _request(
         self,
         method: Literal["GET", "POST"],
-        path: Literal["/health", "/hibernate"],
+        path: Literal["/health", "/hibernate", "/sleep"],
         *,
         expected_status: int,
+        failure_code: str | None = None,
     ) -> dict[str, Any]:
         # The origin and the two paths are constants. No browser input reaches
         # this client, and redirects are deliberately not followed.
@@ -170,9 +204,9 @@ class HttpRogCompanion:
                 async with client.stream(method, path, headers=headers) as response:
                     body = await _read_bounded_response(response, self.response_limit)
                     if response.status_code != expected_status:
-                        if method == "GET":
-                            raise CompanionRequestError("companion_health_failed")
-                        raise CompanionRequestError("companion_hibernate_failed")
+                        raise CompanionRequestError(
+                            "companion_health_failed" if method == "GET" else failure_code or "companion_request_failed"
+                        )
         except CompanionRequestError:
             raise
         except (httpx.TimeoutException, httpx.NetworkError, OSError, TimeoutError) as exc:
@@ -181,7 +215,7 @@ class HttpRogCompanion:
         except httpx.HTTPError as exc:
             del exc
             raise CompanionRequestError(
-                "companion_health_failed" if method == "GET" else "companion_hibernate_failed"
+                "companion_health_failed" if method == "GET" else failure_code or "companion_request_failed"
             ) from None
 
         try:
@@ -249,7 +283,7 @@ class RogG703Device:
                 pass
 
     async def refresh(self) -> bool:
-        if not self.enabled or self.status in {"waking", "hibernating"}:
+        if not self.enabled or self.status in {"waking", "sleeping", "hibernating"}:
             return self.status == "online"
         try:
             online = await self.companion.health()
@@ -324,6 +358,7 @@ class RogG703Device:
             "online": "healthy",
             "offline": "offline",
             "waking": "degraded",
+            "sleeping": "degraded",
             "hibernating": "degraded",
             "unavailable": "offline",
         }
@@ -331,6 +366,7 @@ class RogG703Device:
             "online": "В сети",
             "offline": "Не отвечает · сон или гибернация",
             "waking": "Проверяем появление ASUS в сети",
+            "sleeping": "Переходит в сон Windows",
             "hibernating": "Переходит в гибернацию Windows S4",
             "unavailable": "Исполнитель ASUS недоступен",
         }
@@ -345,6 +381,12 @@ class RogG703Device:
             ActionDescriptor(
                 id=ROG_G703_HIBERNATE_ACTION,
                 title="Гибернация",
+                enabled=write_enabled and self.status == "online",
+                risk="medium",
+            ),
+            ActionDescriptor(
+                id=ROG_G703_SLEEP_ACTION,
+                title="Сон",
                 enabled=write_enabled and self.status == "online",
                 risk="medium",
             ),
@@ -373,7 +415,7 @@ class RogG703Device:
     async def _poll_forever(self) -> None:
         while True:
             await asyncio.sleep(self.settings.rog_g703_health_poll_seconds)
-            if self.status not in {"waking", "hibernating"}:
+            if self.status not in {"waking", "sleeping", "hibernating"}:
                 await self.refresh()
 
 
@@ -434,10 +476,10 @@ class RogG703ActionExecutor:
             return False
         if action_id == ROG_G703_WAKE_ACTION:
             return self._wol_sender is not None
-        return True
+        return action_id in {ROG_G703_HIBERNATE_ACTION, ROG_G703_SLEEP_ACTION}
 
     def _precondition_ok(self, action_id: str) -> bool:
-        if action_id == ROG_G703_HIBERNATE_ACTION:
+        if action_id in {ROG_G703_HIBERNATE_ACTION, ROG_G703_SLEEP_ACTION}:
             return self.device.status == "online"
         return self.device.status in {"offline", "unavailable"}
 
@@ -528,8 +570,12 @@ class RogG703ActionExecutor:
             async with self._lock:
                 if action_id == ROG_G703_WAKE_ACTION:
                     await self._execute_wake(correlation_id)
-                else:
+                elif action_id == ROG_G703_HIBERNATE_ACTION:
                     await self._execute_hibernate(correlation_id)
+                elif action_id == ROG_G703_SLEEP_ACTION:
+                    await self._execute_sleep(correlation_id)
+                else:
+                    raise RuntimeError("rog_g703_action_failed")
         except Exception as exc:
             error = _sanitize_error(exc)
             self._update(correlation_id, "failed", error=error)
@@ -629,6 +675,46 @@ class RogG703ActionExecutor:
             correlation_id=correlation_id,
         )
 
+    async def _execute_sleep(self, correlation_id: str) -> None:
+        self._update(correlation_id, "sleeping")
+        await self.device.set_status("sleeping")
+        try:
+            await self.device.companion.sleep()
+        except Exception as exc:
+            raise RuntimeError("companion_sleep_failed") from exc
+
+        self.cooldowns[ROG_G703_SLEEP_ACTION] = _now() + timedelta(
+            seconds=self.settings.rog_g703_sleep_cooldown_seconds
+        )
+        offline = await self.device.wait_until_offline(
+            self.settings.rog_g703_sleep_timeout_seconds
+        )
+        if not offline:
+            self._update(
+                correlation_id,
+                "failed",
+                result={"offlineConfirmed": False},
+                error="sleep_timeout",
+            )
+            await self.device.set_status("online", error="sleep_timeout")
+            self.access.audit_capability(
+                ROG_G703_SLEEP_ACTION,
+                result="sleep_timeout",
+                correlation_id=correlation_id,
+            )
+            return
+
+        self._update(
+            correlation_id,
+            "offline",
+            result={"offlineConfirmed": True},
+        )
+        self.access.audit_capability(
+            ROG_G703_SLEEP_ACTION,
+            result="success",
+            correlation_id=correlation_id,
+        )
+
 
 def build_rog_g703_action_router(executor: RogG703ActionExecutor) -> APIRouter:
     router = APIRouter(
@@ -648,6 +734,7 @@ def build_rog_g703_action_router(executor: RogG703ActionExecutor) -> APIRouter:
                 ROG_G703_HIBERNATE_ACTION: executor.availability(
                     ROG_G703_HIBERNATE_ACTION
                 ),
+                ROG_G703_SLEEP_ACTION: executor.availability(ROG_G703_SLEEP_ACTION),
             },
         }
 
