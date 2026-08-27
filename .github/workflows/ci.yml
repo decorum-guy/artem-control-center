@@ -360,6 +360,8 @@ jobs:
         env:
           B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
           VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
           B4_CALENDAR_ARTIFACT_DIR: artifacts/b4-calendar-mutations-review
         run: npm run test:e2e -- tests/e2e/b4-planning-calendar.spec.ts --grep-invert "writer gate is off"
 

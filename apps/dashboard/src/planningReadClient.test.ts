@@ -812,6 +812,37 @@ describe("fixed Planning read client", () => {
     expect(fetchMock.mock.calls[0][1]?.signal).not.toBe(fetchMock.mock.calls[1][1]?.signal);
   });
 
+  it("classifies explicit Calendar disabled and not-found errors without retrying", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "planning_calendar_mutations_disabled" }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "planning_calendar_event_not_found" }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "planning_calendar_event_not_found" }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "unrelated_not_found" }), { status: 404 }));
+    const createRequest = {
+      action: "create" as const,
+      idempotencyKey: "calendar-disabled",
+      body: { title: "Событие" }
+    };
+    await expect(mutatePlanningEvent(createRequest)).rejects.toMatchObject({ mutationCode: "disabled", status: 404 });
+    const editRequest = {
+      action: "edit" as const,
+      idempotencyKey: "calendar-edit-not-found",
+      eventId: calendarEvent.id,
+      expectedVersion: 2,
+      body: { title: "Обновить" }
+    };
+    await expect(mutatePlanningEvent(editRequest)).rejects.toMatchObject({ mutationCode: "not_found", status: 404 });
+    await expect(mutatePlanningEvent({
+      action: "delete",
+      idempotencyKey: "calendar-delete-not-found",
+      eventId: calendarEvent.id,
+      expectedVersion: 2,
+      body: {}
+    })).rejects.toMatchObject({ mutationCode: "not_found", status: 404 });
+    await expect(mutatePlanningEvent({ ...editRequest, idempotencyKey: "calendar-unrelated-404" })).rejects.toMatchObject({ mutationCode: "http", status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("reconciles Calendar edit and delete timeouts through read-by-ID", async () => {
     const edited = { ...calendarEvent, title: "Moved outside range", version: 3, startAtUtc: "2026-08-20T10:00:00Z", endAtUtc: "2026-08-20T11:00:00Z" };
     const tombstoned = { ...edited, deletedAt: "2026-08-12T09:03:00Z", version: 4 };

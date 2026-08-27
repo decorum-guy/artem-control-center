@@ -5,6 +5,7 @@ import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 
 const calendarRouteEnabled = process.env.B3_PLANNING_CALENDAR_ROUTE_ENABLED === "true";
 const calendarMutationsEnabled = process.env.VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED === "true";
+const interactionLockEnabled = process.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true";
 const artifactDirectory = (testInfo: TestInfo) => process.env.B4_CALENDAR_ARTIFACT_DIR ?? testInfo.outputPath("b4-calendar-mutations");
 
 const localId = "00000000-0000-4000-8000-000000000701";
@@ -49,11 +50,11 @@ async function capture(page: Page, testInfo: TestInfo, name: string): Promise<vo
   await page.screenshot({ path: path.join(directory, name) });
 }
 
-async function installAccess(page: Page, profile: "read_only" | "standard"): Promise<void> {
+async function installAccess(page: Page, profile: "read_only" | "standard" | "full"): Promise<void> {
   const ids = ["planning.calendar.create", "planning.calendar.edit", "planning.calendar.delete"];
   await page.route("**/api/v1/access", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
-    const allowed = profile === "standard";
+    const allowed = profile !== "read_only";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -64,6 +65,10 @@ async function installAccess(page: Page, profile: "read_only" | "standard"): Pro
         effectiveProfile: profile,
         temporaryFull: false,
         temporaryFullExpiresAt: null,
+        confirmationPolicy: {
+          actionConfirmationRequired: profile !== "full",
+          mode: profile === "full" ? "manual_persistent_full" : "profile_default"
+        },
         pinConfigured: true,
         lockoutUntil: null,
         capabilities: Object.fromEntries(ids.map((capability) => [capability, {
@@ -74,6 +79,29 @@ async function installAccess(page: Page, profile: "read_only" | "standard"): Pro
           availability: allowed ? "allowed" : "profile_blocked"
         }]))
       })
+    });
+  });
+}
+
+async function overrideCalendarServerGate(page: Page, value: boolean | undefined): Promise<void> {
+  await page.route("**/api/v1/snapshot**", async (route) => {
+    const response = await route.fetch();
+    const snapshot = await response.json() as { planning?: Record<string, unknown> | null };
+    if (snapshot.planning) {
+      if (value === undefined) delete snapshot.planning.calendarMutationsEnabled;
+      else snapshot.planning.calendarMutationsEnabled = value;
+    }
+    await route.fulfill({ response, body: JSON.stringify(snapshot) });
+  });
+}
+
+async function installUnavailableAccess(page: Page): Promise<void> {
+  await page.route("**/api/v1/access", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "access_unavailable" })
     });
   });
 }
@@ -94,6 +122,7 @@ type EventFixtureOptions = {
   loseCreateResponse?: boolean;
   loseEditResponse?: boolean;
   loseDeleteResponse?: boolean;
+  mutationErrors?: Partial<Record<"POST" | "PATCH" | "DELETE", { status: number; detail: string }>>;
 };
 
 async function installEventFixtures(page: Page, options: EventFixtureOptions = {}): Promise<{ requests: Array<{ method: string; body: string; key: string }>; getCurrent: () => Record<string, unknown> }> {
@@ -185,6 +214,15 @@ async function installEventFixtures(page: Page, options: EventFixtureOptions = {
     }
     const body = request.postData() ?? "{}";
     requests.push({ method: request.method(), body, key: request.headers()["idempotency-key"] ?? "" });
+    const mutationError = options.mutationErrors?.[request.method() as "POST" | "PATCH" | "DELETE"];
+    if (mutationError) {
+      await route.fulfill({
+        status: mutationError.status,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: mutationError.detail })
+      });
+      return;
+    }
     const input = JSON.parse(body) as Record<string, unknown>;
     const fieldMap: Record<string, string> = {
       all_day: "allDay",
@@ -233,7 +271,142 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.goto("/calendar");
     await expect(page.getByTestId("route-calendar")).toBeVisible();
     await expect(page.getByRole("button", { name: "Создать событие" })).toHaveCount(0);
+    await expect(page.getByTestId("planning-calendar-mutation-frontend-gate")).toContainText("Запись календаря отключена в этой сборке.");
     await capture(page, testInfo, "b4-calendar-gate-off.png");
+  });
+
+  test("Full Access still requires the explicit server Calendar gate", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
+    await installAccess(page, "full");
+    await overrideCalendarServerGate(page, false);
+    const fixture = await installEventFixtures(page);
+    await page.goto("/calendar");
+    await unlockTouchLockIfNeeded(page);
+    await expect(page.getByTestId("planning-calendar-mutation-gate")).toContainText("Запись локального календаря отключена серверным gate.");
+    await expect(page.getByTestId("planning-calendar-mutation-frontend-gate")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Создать событие" })).toHaveCount(0);
+    await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).tap();
+    await expect(page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" })).toHaveCount(0);
+    await expect(page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Удалить" })).toHaveCount(0);
+    expect(fixture.requests).toHaveLength(0);
+    await expect(page.getByText("Недостаточно прав")).toHaveCount(0);
+  });
+
+  test("missing server Calendar gate metadata fails closed", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
+    await installAccess(page, "full");
+    await overrideCalendarServerGate(page, undefined);
+    const fixture = await installEventFixtures(page);
+    await page.goto("/calendar");
+    await expect(page.getByTestId("planning-calendar-mutation-gate-unavailable")).toContainText("Серверный gate записи календаря не подтверждён.");
+    await expect(page.getByRole("button", { name: "Создать событие" })).toHaveCount(0);
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  test("unavailable access verification fails closed", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
+    await installUnavailableAccess(page);
+    const fixture = await installEventFixtures(page);
+    await page.goto("/calendar");
+    await expect(page.getByTestId("planning-calendar-access-unavailable")).toContainText("Проверка профиля доступа недоступна.");
+    await expect(page.getByTestId("planning-calendar-mutation-gate")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Создать событие" })).toHaveCount(0);
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  test("explicit Calendar disabled error is truthful and never retried", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
+    await installAccess(page, "full");
+    const fixture = await installEventFixtures(page, {
+      mutationErrors: { POST: { status: 404, detail: "planning_calendar_mutations_disabled" } }
+    });
+    await page.goto("/calendar");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByRole("button", { name: "Создать событие" }).tap();
+    const sheet = page.getByTestId("planning-calendar-mutation");
+    await sheet.locator("textarea").fill("весь день отключённое событие");
+    await sheet.getByRole("button", { name: "Сохранить" }).tap();
+    await expect(page.getByTestId("global-notice-stack").getByText("Изменения календаря отключены").first()).toBeVisible();
+    await expect(page.getByTestId("global-notice-stack").getByText("Событие создано")).toHaveCount(0);
+    expect(fixture.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+  });
+
+  test("Calendar PATCH not_found clears stale detail and refreshes without retry", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
+    await installAccess(page, "full");
+    const fixture = await installEventFixtures(page, {
+      mutationErrors: { PATCH: { status: 404, detail: "planning_calendar_event_not_found" } }
+    });
+    await page.goto("/calendar");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).tap();
+    await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" }).tap();
+    const sheet = page.getByTestId("planning-calendar-mutation");
+    await sheet.locator("textarea").fill("весь день исчезнувшее событие");
+    await sheet.getByRole("button", { name: "Сохранить" }).tap();
+    await expect(page.getByTestId("global-notice-stack").getByText("Событие больше не найдено").first()).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-detail")).toHaveCount(0);
+    await expect(page.getByTestId("planning-calendar-mutation")).toHaveCount(0);
+    expect(fixture.requests.filter((request) => request.method === "PATCH")).toHaveLength(1);
+  });
+
+  test("Calendar DELETE not_found clears stale detail and does not retry", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
+    await installAccess(page, "full");
+    const fixture = await installEventFixtures(page, {
+      mutationErrors: { DELETE: { status: 404, detail: "planning_calendar_event_not_found" } }
+    });
+    await page.goto("/calendar");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).tap();
+    await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Удалить" }).tap();
+    await expect(page.getByTestId("global-notice-stack").getByText("Событие больше не найдено").first()).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-detail")).toHaveCount(0);
+    expect(fixture.requests.filter((request) => request.method === "DELETE")).toHaveLength(1);
+  });
+
+  test("Calendar version conflict is not presented as provider read-only or success", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
+    await installAccess(page, "full");
+    const fixture = await installEventFixtures(page, {
+      mutationErrors: { PATCH: { status: 409, detail: "planning_version_conflict" } }
+    });
+    await page.goto("/calendar");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).tap();
+    await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" }).tap();
+    const sheet = page.getByTestId("planning-calendar-mutation");
+    await sheet.locator("textarea").fill("весь день устаревшее изменение");
+    await sheet.getByRole("button", { name: "Сохранить" }).tap();
+    await expect(page.getByTestId("global-notice-stack").getByText("Событие изменилось").first()).toBeVisible();
+    await expect(page.getByTestId("global-notice-stack").getByText("Событие изменено")).toHaveCount(0);
+    expect(fixture.requests.filter((request) => request.method === "PATCH")).toHaveLength(1);
+  });
+
+  test("persistent Full Access follows shared confirmation policy for local Calendar", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled, "run in the writer CI invocation");
+    await installAccess(page, "full");
+    const fixture = await installEventFixtures(page);
+    await page.goto("/calendar");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Внешняя встреча" }).tap();
+    const externalDetail = page.getByTestId("planning-calendar-detail");
+    await expect(externalDetail).toContainText("Внешний календарь · только просмотр");
+    await expect(externalDetail.getByRole("button", { name: "Изменить" })).toHaveCount(0);
+    await expect(externalDetail.getByRole("button", { name: "Удалить" })).toHaveCount(0);
+    await externalDetail.getByRole("button", { name: "Закрыть" }).tap();
+    expect(fixture.requests).toHaveLength(0);
+    await page.getByRole("button", { name: "Создать событие" }).tap();
+    const sheet = page.getByTestId("planning-calendar-mutation");
+    await sheet.locator("textarea").fill("весь день новая встреча");
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeEnabled();
+    await sheet.getByRole("button", { name: "Сохранить" }).tap();
+    await expect.poll(() => fixture.requests.filter((request) => request.method === "POST").length).toBe(1);
+    const detail = page.getByTestId("planning-calendar-detail");
+    await expect(detail).toBeVisible();
+    await detail.getByRole("button", { name: "Удалить" }).tap();
+    await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
+    await expect.poll(() => fixture.requests.filter((request) => request.method === "DELETE").length).toBe(1);
   });
 
   test("read-only access suppresses Calendar mutations while preserving provider readback", async ({ page }, testInfo) => {
@@ -349,5 +522,24 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     const targetHeights = await page.locator("button, textarea, input").evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().height)).filter((height) => height > 0));
     expect(Math.min(...targetHeights)).toBeGreaterThanOrEqual(48);
     await capture(page, testInfo, "b4-calendar-200-percent.png");
+  });
+});
+
+test.describe("B4.3 Calendar Interaction Lock", () => {
+  test("Interaction Lock blocks a Full Access Calendar delete", async ({ page }) => {
+    test.skip(!calendarRouteEnabled || !calendarMutationsEnabled || !interactionLockEnabled, "Run with Calendar writer and Interaction Lock enabled");
+    await installAccess(page, "full");
+    const fixture = await installEventFixtures(page);
+    await page.goto("/calendar?date=2026-08-12");
+    const lock = page.getByTestId("interaction-lock-control");
+    await lock.focus();
+    await page.keyboard.down("Space");
+    await page.waitForTimeout(1_100);
+    await page.keyboard.up("Space");
+    await expect(lock).toHaveAttribute("aria-pressed", "true");
+    await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).evaluate((button) => (button as HTMLButtonElement).click());
+    await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Удалить" }).evaluate((button) => (button as HTMLButtonElement).click());
+    await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
+    expect(fixture.requests.filter((request) => request.method === "DELETE")).toHaveLength(0);
   });
 });

@@ -859,6 +859,7 @@ function calendarMutationAllowed(
 ): boolean {
   return planningCalendarRouteEnabled
     && planningCalendarMutationsEnabled
+    && planning?.calendarMutationsEnabled === true
     && planning?.sourceStatus === "current"
     && Boolean(planning?.capabilities.calendar[capability]);
 }
@@ -1209,7 +1210,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const [expandedDay, setExpandedDay] = useState(false);
   const [calendarRefreshPending, setCalendarRefreshPending] = useState(false);
   const [liveNow, setLiveNow] = useState(() => new Date());
-  const { status: accessStatus, ensureCapability } = useAccess();
+  const { status: accessStatus, available: accessAvailable, ensureCapability } = useAccess();
   const { guardMutation } = useInteractionLock();
   const { preferences: calendarDisplayPreferences } = useCalendarDisplayPreferences();
   const { confirmAction } = useActionConfirmation();
@@ -1245,9 +1246,27 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const sources = envelope?.sources ?? planning?.providerStatuses ?? [];
   const overlapIds = eventOverlapIds(selectedDayEvents);
   const accessAllows = (action: "create" | "edit" | "delete"): boolean => {
-    if (!accessStatus) return true;
+    if (!accessAvailable || !accessStatus) return false;
     return Boolean(accessStatus.capabilities[planningCalendarAccessCapabilities[action]]?.allowed);
   };
+  const currentPlanning = planning?.sourceStatus === "current";
+  const calendarFrontendWriterDisabled = !planningCalendarMutationsEnabled;
+  const calendarServerWriterDisabled = currentPlanning
+    && planningCalendarMutationsEnabled
+    && planning?.calendarMutationsEnabled === false;
+  const calendarWriterGateMetadataUnavailable = currentPlanning
+    && planningCalendarMutationsEnabled
+    && planning?.calendarMutationsEnabled === undefined;
+  const calendarAccessUnavailable = currentPlanning
+    && planningCalendarMutationsEnabled
+    && planning?.calendarMutationsEnabled === true
+    && (!accessAvailable || !accessStatus);
+  const calendarAccessBlocked = currentPlanning
+    && planningCalendarMutationsEnabled
+    && planning?.calendarMutationsEnabled === true
+    && accessAvailable
+    && Boolean(accessStatus)
+    && !(Object.keys(planningCalendarAccessCapabilities) as Array<keyof typeof planningCalendarAccessCapabilities>).some(accessAllows);
   const canCreate = calendarMutationAllowed(planning, "create") && accessAllows("create");
   const canEdit = Boolean(selectedEvent?.localOnlyMutable && calendarMutationAllowed(planning, "edit") && accessAllows("edit"));
   const canDelete = Boolean(selectedEvent?.localOnlyMutable && !selectedEvent?.deletedAt && calendarMutationAllowed(planning, "delete") && accessAllows("delete"));
@@ -1284,8 +1303,44 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   }
 
   async function ensureCalendarCapability(action: "create" | "edit" | "delete", title: string): Promise<boolean> {
+    if (calendarFrontendWriterDisabled) {
+      showNotice({
+        id: `planning.calendar.frontend-gate.${action}`,
+        severity: "warning",
+        title: "Изменения календаря отключены в этой сборке",
+        detail: "Запись календаря отключена в этой сборке. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (calendarServerWriterDisabled) {
+      showNotice({
+        id: `planning.calendar.server-gate.${action}`,
+        severity: "warning",
+        title: "Изменения календаря отключены сервером",
+        detail: "Запись локального календаря отключена серверным gate. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (calendarWriterGateMetadataUnavailable) {
+      showNotice({
+        id: `planning.calendar.gate-unavailable.${action}`,
+        severity: "warning",
+        title: "Серверный gate записи календаря не подтверждён",
+        detail: "Серверный gate записи календаря не подтверждён. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (!accessAvailable || !accessStatus) {
+      showNotice({
+        id: `planning.calendar.access.unavailable.${action}`,
+        severity: "warning",
+        title: "Проверка доступа недоступна",
+        detail: "Проверка профиля доступа недоступна. Запрос не отправлен."
+      });
+      return false;
+    }
     const capability = planningCalendarAccessCapabilities[action];
-    if (accessStatus && !accessStatus.capabilities[capability]) {
+    if (!accessStatus.capabilities[capability]) {
       showNotice({
         id: `planning.calendar.access.${action}`,
         severity: "warning",
@@ -1342,14 +1397,32 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           detail: "Результат сохранения проверен."
         });
       } else {
-        const conflict = error instanceof PlanningMutationError && error.mutationCode === "conflict";
+        const mutationError = error instanceof PlanningMutationError ? error : null;
+        const conflict = mutationError?.mutationCode === "conflict";
+        const disabled = mutationError?.mutationCode === "disabled";
+        const notFound = mutationError?.mutationCode === "not_found";
+        if (notFound) {
+          setSelectedEvent(null);
+          setMutationSheet(null);
+          setRetry((value) => value + 1);
+        }
         showNotice({
           id: `planning.calendar.uncertain.${target?.id ?? "create"}`,
-          severity: conflict ? "warning" : "error",
-          title: conflict ? "Событие изменилось или недоступно для записи" : "Результат не подтверждён",
+          severity: conflict || disabled || notFound ? "warning" : "error",
+          title: conflict
+            ? "Событие изменилось"
+            : disabled
+              ? "Изменения календаря отключены"
+              : notFound
+                ? "Событие больше не найдено"
+                : "Результат не подтверждён",
           detail: conflict
-            ? "Изменять и удалять можно только native local-only событие с актуальной версией."
-            : "Успех не показан. Перечитайте событие по ID перед новой попыткой."
+            ? "Запись уже изменилась. Сначала перечитайте её."
+            : disabled
+              ? "Серверный gate записи календаря отключён. Запрос не отправлен повторно."
+              : notFound
+                ? "Актуальная запись не найдена. Календарь обновлён."
+                : "Результат не подтверждён. Перечитайте событие перед новой попыткой."
         });
       }
     } finally {
@@ -1396,11 +1469,32 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           detail: "Удаление подтверждено."
         });
       } else {
+        const mutationError = error instanceof PlanningMutationError ? error : null;
+        const conflict = mutationError?.mutationCode === "conflict";
+        const disabled = mutationError?.mutationCode === "disabled";
+        const notFound = mutationError?.mutationCode === "not_found";
+        if (notFound) {
+          setSelectedEvent(null);
+          setMutationSheet(null);
+          setRetry((value) => value + 1);
+        }
         showNotice({
           id: `planning.calendar.delete.uncertain.${target.id}`,
-          severity: "error",
-          title: "Результат не подтверждён",
-          detail: "Успех не показан. Перечитайте событие по ID перед новой попыткой."
+          severity: conflict || disabled || notFound ? "warning" : "error",
+          title: conflict
+            ? "Событие изменилось"
+            : disabled
+              ? "Изменения календаря отключены"
+              : notFound
+                ? "Событие больше не найдено"
+                : "Результат не подтверждён",
+          detail: conflict
+            ? "Запись уже изменилась. Сначала перечитайте её."
+            : disabled
+              ? "Серверный gate записи календаря отключён. Запрос не отправлен повторно."
+              : notFound
+                ? "Актуальная запись не найдена. Календарь обновлён."
+                : "Результат не подтверждён. Перечитайте событие перед новой попыткой."
         });
       }
     } finally {
@@ -1438,16 +1532,43 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
       preview={preview}
       onRetry={() => setRetry((value) => value + 1)}
       controls={(
-        <CalendarMonthControls
-          month={visibleMonth}
-          onPrevious={() => navigateMonth(-1)}
-          onToday={selectToday}
-          onNext={() => navigateMonth(1)}
-          futureAction={createAction}
-          onRefresh={refreshCalendarData}
-          refreshDisabled={calendarRefreshPending || routeRead.refreshing}
-          refreshing={calendarRefreshPending || routeRead.refreshing}
-        />
+        <>
+          <CalendarMonthControls
+            month={visibleMonth}
+            onPrevious={() => navigateMonth(-1)}
+            onToday={selectToday}
+            onNext={() => navigateMonth(1)}
+            futureAction={createAction}
+            onRefresh={refreshCalendarData}
+            refreshDisabled={calendarRefreshPending || routeRead.refreshing}
+            refreshing={calendarRefreshPending || routeRead.refreshing}
+          />
+          {calendarFrontendWriterDisabled && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-calendar-mutation-frontend-gate">
+              Запись календаря отключена в этой сборке.
+            </span>
+          )}
+          {calendarServerWriterDisabled && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-calendar-mutation-gate">
+              Запись локального календаря отключена серверным gate.
+            </span>
+          )}
+          {calendarWriterGateMetadataUnavailable && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-calendar-mutation-gate-unavailable">
+              Серверный gate записи календаря не подтверждён.
+            </span>
+          )}
+          {calendarAccessBlocked && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-calendar-access-blocked">
+              Текущий профиль не разрешает изменять календарь.
+            </span>
+          )}
+          {calendarAccessUnavailable && (
+            <span className="planning-route-note planning-route-note--warning" data-testid="planning-calendar-access-unavailable">
+              Проверка профиля доступа недоступна.
+            </span>
+          )}
+        </>
       )}
       testId="route-calendar"
     >

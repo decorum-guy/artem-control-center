@@ -157,6 +157,7 @@ function planning(overrides: Partial<PlanningSnapshot> = {}): PlanningSnapshot {
     sourceStatus: "current",
     reminderMutationsEnabled: false,
     taskMutationsEnabled: false,
+    calendarMutationsEnabled: false,
     lastSyncedAt: FIXTURE_SYNCED_AT,
     staleAfter: "2026-08-12T12:05:00Z",
     reminders: {
@@ -232,6 +233,9 @@ export const emptyPlanningFixture: PlanningSnapshot = {
 
 export const planningFixtures = {
   healthy: planning(),
+  calendarWriterEnabled: planning({ calendarMutationsEnabled: true }),
+  calendarWriterDisabled: planning({ calendarMutationsEnabled: false }),
+  calendarWriterMetadataMissing: planning({ calendarMutationsEnabled: undefined }),
   empty: planning({
     reminders: { upcoming: [], overdue: [], deliveryFailures: [] },
     tasks: { today: [], overdue: [], upcoming: [], undated: [], projects: [] },

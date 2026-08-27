@@ -891,6 +891,7 @@ class PlanningProjection(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     reminderMutationsEnabled: StrictBool = False
     taskMutationsEnabled: StrictBool = False
+    calendarMutationsEnabled: StrictBool = False
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     reminders: PlanningReminderLists
@@ -908,6 +909,7 @@ class PlanningStatusProjection(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     reminderMutationsEnabled: StrictBool = False
     taskMutationsEnabled: StrictBool = False
+    calendarMutationsEnabled: StrictBool = False
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     capabilities: PlanningCapabilities
@@ -1031,6 +1033,7 @@ def empty_planning_projection(
         sourceStatus=source_status,
         reminderMutationsEnabled=False,
         taskMutationsEnabled=False,
+        calendarMutationsEnabled=False,
         lastSyncedAt=last_synced_at,
         staleAfter=stale_after,
         reminders=PlanningReminderLists(upcoming=[], overdue=[], deliveryFailures=[]),
@@ -1060,6 +1063,7 @@ def status_projection(projection: PlanningProjection) -> PlanningStatusProjectio
         sourceStatus=projection.sourceStatus,
         reminderMutationsEnabled=projection.reminderMutationsEnabled,
         taskMutationsEnabled=projection.taskMutationsEnabled,
+        calendarMutationsEnabled=projection.calendarMutationsEnabled and projection.sourceStatus == "current",
         lastSyncedAt=projection.lastSyncedAt,
         staleAfter=projection.staleAfter,
         capabilities=projection.capabilities,
