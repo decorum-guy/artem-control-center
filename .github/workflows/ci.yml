@@ -406,5 +406,8 @@ jobs:
           path: artifacts/v2-full-access-touch-lock-review
           if-no-files-found: error
 
+      - name: Build production profile for runtime smoke
+        run: npm run build:production
+
       - name: Smoke-test production runtime
         run: npm run test:production-smoke
