@@ -76,7 +76,10 @@ import { useCalendarDisplayPreferences } from "./CalendarDisplayPreferences";
 import { Icon } from "./icons";
 import type { ActionConfirmationId } from "./actionConfirmationCatalog";
 import {
+  TASK_TITLE_MAX_LENGTH,
+  taskMutationBodyFromUndatedTitle,
   taskMutationBodyFromPreview,
+  type TaskDueMode,
   type TaskMutationBody,
   type TaskMutationSheetMode
 } from "./taskMutationBody";
@@ -227,11 +230,24 @@ function TaskMutationSheet({
   onSubmit: (body: TaskMutationBody) => Promise<void>;
 }) {
   const [text, setText] = useState("");
+  const [dueMode, setDueMode] = useState<TaskDueMode>(() => (
+    mode === "edit"
+    && task?.dueDate === null
+    && task.dueTime === null
+    && task.timezone === null
+      ? "undated"
+      : "dated"
+  ));
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewPlanningTask>> | null>(null);
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (dueMode === "undated") {
+      setPreview(null);
+      setParsing(false);
+      return undefined;
+    }
     const trimmed = text.trim();
     if (!trimmed) {
       setPreview(null);
@@ -239,6 +255,7 @@ function TaskMutationSheet({
       return undefined;
     }
     const controller = new AbortController();
+    let active = true;
     const timer = window.setTimeout(() => {
       setParsing(true);
       void previewPlanningTask(
@@ -247,33 +264,57 @@ function TaskMutationSheet({
         DEFAULT_PLANNING_TIME_ZONE,
         controller.signal
       )
-        .then(setPreview)
-        .catch(() => setPreview(null))
-        .finally(() => setParsing(false));
+        .then((nextPreview) => {
+          if (active) setPreview(nextPreview);
+        })
+        .catch(() => {
+          if (active) setPreview(null);
+        })
+        .finally(() => {
+          if (active) setParsing(false);
+        });
     }, 220);
     return () => {
+      active = false;
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [text]);
+  }, [dueMode, text]);
 
-  const candidate = preview?.candidate;
+  const visiblePreview = dueMode === "dated" ? preview : null;
+  const candidate = visiblePreview?.candidate;
   const fields = candidate?.fields ?? {};
   const priority = fields.priority;
-  const canSave = Boolean(
+  const datedCanSave = Boolean(
     candidate?.domain === "task"
     && candidate.operation === "create"
-    && preview?.confidence === "high"
-    && preview.ambiguities.length === 0
-    && !preview.requires_confirmation
+    && visiblePreview?.confidence === "high"
+    && visiblePreview.ambiguities.length === 0
+    && !visiblePreview.requires_confirmation
     && typeof fields.title === "string"
     && (priority === "none" || priority === "low" || priority === "normal" || priority === "high")
   );
+  const undatedBody = dueMode === "undated" ? taskMutationBodyFromUndatedTitle(mode, text) : null;
+  const canSave = dueMode === "undated" ? Boolean(undatedBody) : datedCanSave;
+  const undatedTitle = text.trim();
+  const undatedTitleError = dueMode === "undated"
+    ? !undatedTitle
+      ? "Введите название задачи."
+      : [...undatedTitle].length > TASK_TITLE_MAX_LENGTH
+        ? `Название не должно превышать ${TASK_TITLE_MAX_LENGTH} символов.`
+        : null
+    : null;
 
   async function save(): Promise<void> {
     if (!canSave || saving) return;
     setSaving(true);
-    const body = taskMutationBodyFromPreview(mode, fields);
+    const body = dueMode === "undated"
+      ? undatedBody
+      : taskMutationBodyFromPreview(mode, fields);
+    if (!body) {
+      setSaving(false);
+      return;
+    }
     try {
       await onSubmit(body);
     } finally {
@@ -285,44 +326,67 @@ function TaskMutationSheet({
     <PlanningSheet
       title={mode === "create" ? "Новая задача" : "Изменить задачу"}
       eyebrow="Задача · проверка перед сохранением"
-      description="Введите задачу. Неоднозначная дата или время блокирует сохранение. Примеры: «завтра купить продукты» и «завтра в 18:30 отправить отчёт»."
+      description="Выберите режим срока. В режиме «Со сроком» текст проверяется Alice, а «Без срока» сохраняет введённый текст как название без разбора даты."
       onClose={onClose}
       testId="planning-task-mutation"
     >
       <div className="planning-mutation-form">
+        <div className="planning-segmented" role="group" aria-label="Срок задачи" data-testid="planning-task-due-mode">
+          <button
+            type="button"
+            className={dueMode === "dated" ? "is-active" : ""}
+            aria-pressed={dueMode === "dated"}
+            onClick={() => setDueMode("dated")}
+          >
+            Со сроком
+          </button>
+          <button
+            type="button"
+            className={dueMode === "undated" ? "is-active" : ""}
+            aria-pressed={dueMode === "undated"}
+            onClick={() => setDueMode("undated")}
+          >
+            Без срока
+          </button>
+        </div>
         <label className="planning-mutation-form__label" htmlFor="planning-task-free-text">Фраза</label>
         <textarea
           id="planning-task-free-text"
           className="planning-mutation-form__input"
           value={text}
           onChange={(event) => setText(event.target.value)}
-          placeholder="Например: завтра купить продукты или завтра в 18:30 отправить отчёт"
+          placeholder={dueMode === "undated" ? "Например: Разобрать входящие" : "Например: завтра купить продукты или завтра в 18:30 отправить отчёт"}
           rows={3}
           autoFocus
         />
-        {parsing && <p className="planning-mutation-form__status">Проверяем формулировку…</p>}
-        {preview && (
+        {dueMode === "dated" && parsing && <p className="planning-mutation-form__status">Проверяем формулировку…</p>}
+        {undatedTitleError && <p className="planning-mutation-form__error" data-testid="planning-task-undated-error">{undatedTitleError}</p>}
+        {visiblePreview && (
           <section className="planning-mutation-preview" data-testid="planning-task-preview" aria-live="polite">
             <p className="planning-mutation-preview__eyebrow">Человеческая расшифровка</p>
             <p className="planning-mutation-preview__restatement">{candidate?.normalized_paraphrase ?? "Предложение пока не сформировано."}</p>
-            {preview.ambiguities.length > 0 && (
+            {visiblePreview.ambiguities.length > 0 && (
               <div className="planning-mutation-preview__ambiguities" data-testid="planning-task-ambiguities">
                 <strong>Нужно уточнить</strong>
-                {preview.ambiguities.map((ambiguity) => (
+                {visiblePreview.ambiguities.map((ambiguity) => (
                   <p key={`${ambiguity.field}-${ambiguity.reason}`}>{ambiguity.reason}{ambiguity.candidates.length ? ` Варианты: ${ambiguity.candidates.join(", ")}.` : ""}</p>
                 ))}
               </div>
             )}
-            {preview.error_code && <p className="planning-mutation-form__error">Формулировка не подтверждена: {preview.error_code}.</p>}
+            {visiblePreview.error_code && <p className="planning-mutation-form__error">Формулировка не подтверждена: {visiblePreview.error_code}.</p>}
           </section>
         )}
         <p className="planning-detail-note">
-          {mode === "edit" && task ? `Текущая запись: ${task.title}. Изменения появятся после сохранения.` : "Сохранить можно только однозначную задачу."}
+          {dueMode === "undated"
+            ? "Текст сохранится буквально, без даты, времени, часового пояса и скрытого разбора других полей."
+            : mode === "edit" && task
+              ? `Текущая запись: ${task.title}. Изменения появятся после сохранения.`
+              : "Сохранить можно только однозначную задачу."}
         </p>
       </div>
       <div className="planning-sheet-actions">
         <button type="button" className="planning-secondary-button" onClick={onClose}>Отмена</button>
-        <button type="button" className="planning-primary-button" disabled={!canSave || parsing || saving} onClick={() => void save()}>
+        <button type="button" className="planning-primary-button" disabled={!canSave || (dueMode === "dated" && parsing) || saving} onClick={() => void save()}>
           {saving ? "Сохраняем…" : "Сохранить"}
         </button>
       </div>

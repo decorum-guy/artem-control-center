@@ -103,9 +103,12 @@ async function installMutationFixtures(page: Page, options: {
   taskMutationError?: { method: "PATCH" | "POST" | "DELETE"; pathSuffix?: string; status: number; detail: string };
 } = {}) {
   let canonical = { ...canonicalBase };
+  let undatedCreated = false;
   let createAttempts = 0;
 
-  const listEnvelope = () => ({
+  const listEnvelope = (view: string | null) => {
+    const items = undatedCreated && view !== "undated" ? [] : [canonical];
+    return {
     schemaVersion: "planning.panel.v1",
     kind: "list",
     domain: "task",
@@ -113,19 +116,23 @@ async function installMutationFixtures(page: Page, options: {
     sourceStatus: "current",
     lastSyncedAt: "2026-08-12T09:00:00Z",
     staleAfter: "2026-08-12T09:05:00Z",
-    items: [canonical],
+    items,
     limit: 20,
     offset: 0,
-    count: 1,
+    count: items.length,
     hasMore: false
-  });
+    };
+  };
 
   await page.route("**/api/v1/planning/parse", async (route) => {
     const body = route.request().postDataJSON() as { text?: string };
     const text = typeof body.text === "string" ? body.text : "";
-    const ambiguous = text.includes("вечером");
+    const hasDate = /(?:сегодня|завтра|послезавтра)/i.test(text);
+    const ambiguous = text.includes("вечером") || !hasDate;
     const timed = text.includes("18:30");
-    const undated = text.includes("без срока");
+    const ambiguity = text.includes("вечером")
+      ? { field: "time", candidates: ["18:00", "20:00"], reason: "«Вечером» не задаёт точное время." }
+      : { field: "date", candidates: ["сегодня", "завтра", "конкретная дата"], reason: "У задачи должна быть дата." };
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -138,18 +145,16 @@ async function installMutationFixtures(page: Page, options: {
           fields: {
             title: timed ? "Отправить отчёт" : text.includes("купить") ? "Купить продукты" : text,
             priority: "none",
-            due_date: undated ? null : "2026-08-14",
-            due_time: undated ? null : timed ? "18:30" : null,
-            timezone: undated ? null : timed ? "Europe/Moscow" : null
+            due_date: "2026-08-14",
+            due_time: timed ? "18:30" : null,
+            timezone: timed ? "Europe/Moscow" : null
           },
-          normalized_paraphrase: undated
-            ? `Задача «${text}» без срока.`
-            : timed
+          normalized_paraphrase: timed
             ? "Задача «Отправить отчёт» на 14 августа в 18:30 (Europe/Moscow)."
             : "Задача «Купить продукты» на 14 августа без времени."
         },
         confidence: ambiguous ? "medium" : "high",
-        ambiguities: ambiguous ? [{ field: "time", candidates: ["18:00", "20:00"], reason: "«Вечером» не задаёт точное время." }] : [],
+        ambiguities: ambiguous ? [ambiguity] : [],
         requires_confirmation: ambiguous,
         normalized_text: text,
         error_code: null,
@@ -158,9 +163,10 @@ async function installMutationFixtures(page: Page, options: {
     });
   });
 
-  await page.route("**/api/v1/planning/tasks", async (route) => {
+  await page.route(/\/api\/v1\/planning\/tasks(?:\?.*)?$/, async (route) => {
     if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(listEnvelope()) });
+      const view = new URL(route.request().url()).searchParams.get("view");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(listEnvelope(view)) });
       return;
     }
     if (route.request().method() !== "POST") return route.fallback();
@@ -185,6 +191,7 @@ async function installMutationFixtures(page: Page, options: {
       version: 1,
       updatedAt: "2026-08-12T09:01:00Z"
     };
+    undatedCreated = body.due_date === null;
     if (options.createResponseAlwaysLost || (options.createResponseLost && createAttempts === 1)) {
       await route.abort("timedout");
       return;
@@ -271,7 +278,74 @@ test.describe("B4.2 task mutations", () => {
     expect(page.url()).toContain("/tasks");
   });
 
-  test("creates a task without a due date and round-trips the canonical null shape", async ({ page }) => {
+  test("creates an explicitly undated task without parsing and keeps it discoverable", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page);
+    const requests: Array<Record<string, unknown>> = [];
+    const parseRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/v1/planning/tasks") && request.method() === "POST") requests.push(request.postDataJSON() as Record<string, unknown>);
+      if (new URL(request.url()).pathname === "/api/v1/planning/parse") parseRequests.push(request.method());
+    });
+    await page.goto("/tasks?theme=day");
+    await unlockTouchLockIfNeeded(page);
+    await page.getByRole("button", { name: "Без срока" }).click();
+    await page.getByRole("button", { name: "Создать задачу" }).click();
+    const sheet = page.getByTestId("planning-task-mutation");
+    await sheet.getByTestId("planning-task-due-mode").getByRole("button", { name: "Без срока" }).click();
+    expect(parseRequests).toEqual([]);
+    await sheet.getByLabel("Фраза").fill("Разобрать входящие");
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeEnabled();
+    await sheet.getByRole("button", { name: "Сохранить" }).click();
+    await expect(page.getByTestId("global-notice-stack")).toContainText("Задача создана");
+    expect(parseRequests).toEqual([]);
+    expect(requests).toEqual([{
+      title: "Разобрать входящие",
+      due_date: null,
+      due_time: null,
+      timezone: null,
+      priority: "none"
+    }]);
+    await expect(page.getByTestId("planning-task-detail")).toContainText("Без срока");
+    await expect(page.getByTestId("planning-task-detail")).not.toContainText("00:00");
+    await expect(page.getByTestId("planning-task-detail")).not.toContainText("Europe/Moscow");
+    await page.getByTestId("planning-task-detail").getByRole("button", { name: "Закрыть" }).click();
+    await expect(page).toHaveURL(/\/tasks(?:\?|$)/);
+    await expect(page.getByTestId("planning-task-list")).toContainText("Разобрать входящие");
+    await expect(page.getByTestId("planning-task-list")).not.toContainText("00:00");
+    await expect(page.locator(".planning-route-controls").getByRole("button", { name: "Без срока", exact: true })).toHaveAttribute("aria-pressed", "true");
+    const dimensions = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth
+    }));
+    expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+  });
+
+  test("dated mode preserves Alice no-date ambiguity until owner selects undated", async ({ page }) => {
+    test.skip(!taskMutationsEnabled, "Gated writer browser pass");
+    await installAccessFixture(page, "standard");
+    await installMutationFixtures(page);
+    const parseRequests: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/v1/planning/parse") parseRequests.push(request.method());
+    });
+    await openTaskCreator(page);
+    const sheet = page.getByTestId("planning-task-mutation");
+    await sheet.getByLabel("Фраза").fill("Разобрать входящие");
+    await expect(page.getByTestId("planning-task-ambiguities")).toContainText("У задачи должна быть дата");
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    expect(parseRequests).toEqual(["POST"]);
+    await sheet.getByTestId("planning-task-due-mode").getByRole("button", { name: "Без срока" }).click();
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeEnabled();
+    expect(parseRequests).toEqual(["POST"]);
+    await sheet.getByTestId("planning-task-due-mode").getByRole("button", { name: "Со сроком" }).click();
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    await expect(page.getByTestId("planning-task-ambiguities")).toContainText("У задачи должна быть дата");
+    expect(parseRequests).toEqual(["POST", "POST"]);
+  });
+
+  test("keeps the literal undated mode from stripping an entered phrase", async ({ page }) => {
     test.skip(!taskMutationsEnabled, "Gated writer browser pass");
     await installAccessFixture(page, "standard");
     await installMutationFixtures(page);
@@ -279,15 +353,18 @@ test.describe("B4.2 task mutations", () => {
     page.on("request", (request) => {
       if (request.url().endsWith("/api/v1/planning/tasks") && request.method() === "POST") requests.push(request.postDataJSON() as Record<string, unknown>);
     });
-    await page.goto("/tasks?theme=day");
-    await unlockTouchLockIfNeeded(page);
-    await page.getByRole("button", { name: "Без срока" }).click();
-    await page.getByRole("button", { name: "Создать задачу" }).click();
+    await openTaskCreator(page);
+    const sheet = page.getByTestId("planning-task-mutation");
+    await sheet.getByTestId("planning-task-due-mode").getByRole("button", { name: "Без срока" }).click();
     await saveTask(page, "разобрать входящие без срока");
-    await expect(page.getByTestId("global-notice-stack")).toContainText("Задача создана");
-    expect(requests[0]).toMatchObject({ priority: "none", due_date: null, due_time: null, timezone: null });
-    await expect(page.getByTestId("planning-task-detail")).toContainText("Без срока");
-    await expect(page.getByTestId("planning-task-detail")).not.toContainText("00:00");
+    expect(requests[0]).toEqual({
+      title: "разобрать входящие без срока",
+      due_date: null,
+      due_time: null,
+      timezone: null,
+      priority: "none"
+    });
+    expect(requests).toHaveLength(1);
   });
 
   test("persistent Full Access follows the shared confirmation-free policy", async ({ page }) => {
