@@ -408,9 +408,18 @@ function Invoke-ArtemRollback {
         -LockRequestId $LockRequestId `
         -ExpectedBuildRevision $RollbackHead | Out-Null
     Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
-    Set-Content -LiteralPath $Paths.LastKnownGood -Value $RollbackHead -Encoding ASCII
-    Write-ArtemUpdateState -Paths $Paths -Status "failed" -Result "rollback_restored"
-    Remove-ArtemUpdateTransaction -Paths $Paths
+    $rollbackDecision = Get-ArtemProductionRollbackState `
+        -RollbackHead $RollbackHead `
+        -TargetHead $TargetHead `
+        -ServedRollbackHealthy $true
+    if ($rollbackDecision.Result -ne "rollback_restored" -or $rollbackDecision.TargetDeployed) {
+        throw "Rollback verification did not restore the known-good deployment"
+    }
+    Set-Content -LiteralPath $Paths.LastKnownGood -Value $rollbackDecision.RollbackHead -Encoding ASCII
+    Write-ArtemUpdateState -Paths $Paths -Status $rollbackDecision.Status -Result $rollbackDecision.Result
+    if (-not $rollbackDecision.TransactionRemains) {
+        Remove-ArtemUpdateTransaction -Paths $Paths
+    }
 }
 
 function Get-ArtemUpdatePreflight {
@@ -526,28 +535,6 @@ function Get-ArtemRollbackCandidate {
     return $CurrentHead
 }
 
-function Test-ArtemProductionDeploymentHealthy {
-    param(
-        [Parameter(Mandatory)]$Paths,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedRevision
-    )
-    try {
-        Assert-ArtemProductionBuildIdentity `
-            -DashboardRoot $Paths.DashboardDist `
-            -ExpectedRevision $ExpectedRevision | Out-Null
-        if (-not (Test-ArtemRuntimeProcess -Paths $Paths) -or -not (Test-ArtemPanelReady -Paths $Paths)) {
-            return $false
-        }
-        Assert-ArtemServedProductionBuildIdentity `
-            -Paths $Paths `
-            -ExpectedRevision $ExpectedRevision | Out-Null
-        return $true
-    }
-    catch {
-        return $false
-    }
-}
-
 $paths = Get-ArtemRuntimePaths
 Initialize-ArtemRuntimeDirectories -Paths $paths
 Update-ArtemProcessPath
@@ -617,11 +604,11 @@ try {
     }
 
     $targetPhase = $false
+    $transaction = $existingTransaction
     if ($Continuation) {
         if (-not $hasExpected -or $currentHead -ne $ExpectedTargetHead -or $targetHead -ne $ExpectedTargetHead) {
             throw "Target updater continuation revision proof failed"
         }
-        $transaction = Get-ArtemUpdateTransaction -Paths $paths
         if (
             $null -eq $transaction -or
             [string]$transaction.targetHead -ne $ExpectedTargetHead -or
@@ -629,10 +616,19 @@ try {
         ) {
             throw "Target updater continuation marker does not match the locked target"
         }
+        $decision = Get-ArtemProductionUpdateDecision `
+            -CurrentHead $currentHead `
+            -TargetHead $targetHead `
+            -Transaction $transaction `
+            -RollbackCandidate $ExpectedCurrentHead `
+            -Continuation
+        if ($decision.Action -ne "target-phase") {
+            throw "Target updater continuation selected an invalid recovery action"
+        }
         Assert-ArtemTargetUpdaterLogic -Paths $paths -ExpectedTargetHead $ExpectedTargetHead
-        $currentHead = $ExpectedTargetHead
-        $targetHead = $ExpectedTargetHead
-        $rollbackHead = $ExpectedCurrentHead
+        $currentHead = $decision.CurrentHead
+        $targetHead = $decision.TargetHead
+        $rollbackHead = $decision.RollbackHead
         $transactionStarted = $true
         $runtimeStoppedForTransaction = $true
         Write-ArtemUpdateState -Paths $paths -Status "updating"
@@ -644,9 +640,27 @@ try {
             -LockRequestId $RequestId
         $targetPhase = $true
     }
-    elseif ($currentHead -eq $targetHead) {
-        $transaction = $existingTransaction
-        if ($null -eq $transaction -and (Test-ArtemProductionDeploymentHealthy -Paths $paths -ExpectedRevision $targetHead)) {
+    else {
+        $deploymentHealthy = $false
+        if ($currentHead -eq $targetHead -and $null -eq $transaction) {
+            $deploymentHealthy = Test-ArtemProductionDeploymentHealthy -Paths $paths -ExpectedRevision $targetHead
+        }
+        $rollbackCandidate = if ($currentHead -eq $targetHead -and $null -eq $transaction) {
+            Get-ArtemRollbackCandidate -Paths $paths -CurrentHead $currentHead
+        }
+        else {
+            $currentHead
+        }
+        $decision = Get-ArtemProductionUpdateDecision `
+            -CurrentHead $currentHead `
+            -TargetHead $targetHead `
+            -Transaction $transaction `
+            -RollbackCandidate $rollbackCandidate `
+            -ArtifactHealthy $deploymentHealthy `
+            -RuntimeReady $deploymentHealthy `
+            -ServedArtifactHealthy $deploymentHealthy
+
+        if ($decision.Action -eq "up-to-date") {
             Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Ensure-ArtemHealthyVisiblePanel `
                 -Paths $paths `
@@ -659,74 +673,74 @@ try {
             return
         }
 
-        if ($null -ne $transaction) {
-            if ([string]$transaction.targetHead -ne $targetHead) {
-                throw "An incomplete production update requires recovery before another update"
+        if ($decision.Action -eq "target-phase") {
+            $rollbackHead = $decision.RollbackHead
+            $runtimeStoppedForTransaction = $null -ne $transaction -and [string]$transaction.phase -in @("stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying")
+            if ($null -eq $transaction) {
+                $rollbackHead = $decision.RollbackHead
+                Write-ArtemUpdateTransaction `
+                    -Paths $paths `
+                    -Phase "started" `
+                    -PreviousHead $rollbackHead `
+                    -TargetHead $targetHead `
+                    -LockRequestId $RequestId
             }
-            $rollbackHead = [string]$transaction.previousHead
-            $runtimeStoppedForTransaction = [string]$transaction.phase -in @("stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying")
+            Assert-ArtemTargetUpdaterLogic -Paths $paths -ExpectedTargetHead $targetHead
+            $transactionStarted = $true
+            Write-ArtemUpdateState -Paths $paths -Status "updating"
+            $targetPhase = $true
         }
-        else {
-            $rollbackHead = Get-ArtemRollbackCandidate -Paths $paths -CurrentHead $currentHead
+        elseif ($decision.Action -eq "bootstrap") {
+            Write-ArtemUpdateState -Paths $paths -Status "updating"
+            Write-Host "Updating Artem Control Center"
+            Write-Host "From: $currentHead"
+            Write-Host "To:   $targetHead"
+
+            # From this point the production transaction owns runtime/repo recovery.
+            # The old updater performs only the safe checkout/bootstrap handoff.
+            $transactionStarted = $true
+            $rollbackHead = $decision.RollbackHead
             Write-ArtemUpdateTransaction `
                 -Paths $paths `
                 -Phase "started" `
                 -PreviousHead $rollbackHead `
                 -TargetHead $targetHead `
                 -LockRequestId $RequestId
+            Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
+            Write-ArtemUpdateTransaction `
+                -Paths $paths `
+                -Phase "stopping" `
+                -PreviousHead $rollbackHead `
+                -TargetHead $targetHead `
+                -LockRequestId $RequestId
+            Stop-ArtemRuntime -Paths $paths -Manual $false
+            $runtimeStoppedForTransaction = $true
+            Set-Content -LiteralPath $paths.RollbackHead -Value $rollbackHead -Encoding ASCII
+
+            # Merge the exact preflight target, never a moving symbolic ref.
+            Invoke-CheckedCommand `
+                -FilePath "git.exe" `
+                -Arguments @("merge", "--ff-only", $targetHead) `
+                -Description "fast-forward update"
+            Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
+            Write-ArtemUpdateTransaction `
+                -Paths $paths `
+                -Phase "checkout" `
+                -PreviousHead $rollbackHead `
+                -TargetHead $targetHead `
+                -LockRequestId $RequestId
+
+            $handoffStarted = $true
+            Invoke-ArtemTargetUpdater `
+                -Paths $paths `
+                -PreviousHead $rollbackHead `
+                -TargetHead $targetHead `
+                -LockRequestId $RequestId
+            return
         }
-        Assert-ArtemTargetUpdaterLogic -Paths $paths -ExpectedTargetHead $targetHead
-        $transactionStarted = $true
-        Write-ArtemUpdateState -Paths $paths -Status "updating"
-        $targetPhase = $true
-    }
-    else {
-        Write-ArtemUpdateState -Paths $paths -Status "updating"
-        Write-Host "Updating Artem Control Center"
-        Write-Host "From: $currentHead"
-        Write-Host "To:   $targetHead"
-
-        # From this point the production transaction owns runtime/repo recovery.
-        # The old updater performs only the safe checkout/bootstrap handoff.
-        $transactionStarted = $true
-        $rollbackHead = $currentHead
-        Write-ArtemUpdateTransaction `
-            -Paths $paths `
-            -Phase "started" `
-            -PreviousHead $rollbackHead `
-            -TargetHead $targetHead `
-            -LockRequestId $RequestId
-        Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
-        Write-ArtemUpdateTransaction `
-            -Paths $paths `
-            -Phase "stopping" `
-            -PreviousHead $rollbackHead `
-            -TargetHead $targetHead `
-            -LockRequestId $RequestId
-        Stop-ArtemRuntime -Paths $paths -Manual $false
-        $runtimeStoppedForTransaction = $true
-        Set-Content -LiteralPath $paths.RollbackHead -Value $rollbackHead -Encoding ASCII
-
-        # Merge the exact preflight target, never a moving symbolic ref.
-        Invoke-CheckedCommand `
-            -FilePath "git.exe" `
-            -Arguments @("merge", "--ff-only", $targetHead) `
-            -Description "fast-forward update"
-        Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
-        Write-ArtemUpdateTransaction `
-            -Paths $paths `
-            -Phase "checkout" `
-            -PreviousHead $rollbackHead `
-            -TargetHead $targetHead `
-            -LockRequestId $RequestId
-
-        $handoffStarted = $true
-        Invoke-ArtemTargetUpdater `
-            -Paths $paths `
-            -PreviousHead $rollbackHead `
-            -TargetHead $targetHead `
-            -LockRequestId $RequestId
-        return
+        else {
+            throw "Production update decision was not actionable: $($decision.Reason)"
+        }
     }
 
     if ($targetPhase) {
@@ -840,7 +854,11 @@ catch {
             Write-Host "Rollback successful: $rollbackHead"
         }
         catch {
-            Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "rollback_failed"
+            $rollbackFailure = Get-ArtemProductionRollbackState `
+                -RollbackHead $rollbackHead `
+                -TargetHead $targetHead `
+                -RollbackFailed $true
+            Write-ArtemUpdateState -Paths $paths -Status $rollbackFailure.Status -Result $rollbackFailure.Result
             Write-Warning "Automatic rollback also failed: $($_.Exception.Message)"
         }
     }
@@ -848,19 +866,22 @@ catch {
         Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "rollback_failed"
     }
     elseif ($transactionStarted -and -not $childAlreadyHandled) {
-        $failureResult = if ($failure.Exception.Message -like "*artifact identity*") {
-            "artifact_assertion_failed"
+        $failureStage = if ($failure.Exception.Message -like "*artifact identity*") {
+            "artifact-assertion"
         }
         elseif ($failure.Exception.Message -like "*Served production dashboard artifact*") {
-            "served_artifact_mismatch"
+            "served-verification"
         }
         elseif ($failure.Exception.Message -like "*runtime*healthy*" -or $failure.Exception.Message -like "*runtime*stop*") {
-            "restart_failed"
+            "restart"
         }
         else {
-            "build_failed"
+            "build"
         }
-        Write-ArtemUpdateState -Paths $paths -Status "failed" -Result $failureResult
+        $failureState = Get-ArtemProductionFailureState `
+            -Stage $failureStage `
+            -RuntimeStopped $runtimeStoppedForTransaction
+        Write-ArtemUpdateState -Paths $paths -Status $failureState.Status -Result $failureState.Result
     }
     else {
         Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "pre_update_failed"

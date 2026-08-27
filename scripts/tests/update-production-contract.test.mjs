@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../..");
 const updater = readFileSync(resolve(root, "scripts/windows/update-production.ps1"), "utf8");
+const recovery = readFileSync(resolve(root, "scripts/windows/updater-recovery.ps1"), "utf8");
 
 test("target-dependent update work is below the explicit target continuation", () => {
   const continuation = updater.indexOf("if ($Continuation)");
@@ -25,6 +26,19 @@ test("same-SHA updates require artifact and served-runtime proof", () => {
   assert.match(updater, /Assert-ArtemStagedProductionBuild/);
   assert.match(updater, /Assert-ArtemServedProductionBuildIdentity/);
   assert.doesNotMatch(updater, /if \(\$currentHead\s+-eq\s+\$targetHead\)\s*\{[\s\S]{0,240}?return/);
+  assert.match(updater, /Get-ArtemProductionUpdateDecision/);
+  assert.match(recovery, /function Get-ArtemProductionUpdateDecision/);
+});
+
+test("the production updater and executable recovery fixture share the bounded decision contract", () => {
+  for (const functionName of [
+    "Get-ArtemProductionUpdateDecision",
+    "Get-ArtemProductionFailureState",
+    "Get-ArtemProductionRollbackState",
+  ]) {
+    assert.match(recovery, new RegExp(`function ${functionName}`));
+    assert.match(updater, new RegExp(functionName));
+  }
 });
 
 test("interruption and failure paths retain bounded recovery state", () => {

@@ -125,8 +125,20 @@ try {
     if ($runtimeCommonText -match 'Get-ArtemVisibleKioskProcesses') {
         throw "Kiosk status must not use deprecated desktop-window detection"
     }
-    if ($runtimeCommonText -notmatch 'function Ensure-ArtemKioskVisible') {
-        throw "Visible kiosk restoration must use one canonical idempotent helper"
+    if ($runtimeCommonText -match '(?i)HWND|MainWindowHandle' -or $kioskPresenceText -match '(?i)HWND|MainWindowHandle') {
+        throw "Kiosk ownership and visibility must not use HWND/MainWindowHandle detection"
+    }
+    if ($kioskPresenceText -notmatch '(?m)^function Ensure-ArtemKioskVisible\b') {
+        throw "Visible kiosk restoration must use the canonical kiosk-presence helper"
+    }
+    if (([regex]::Matches($kioskPresenceText, '(?m)^function Ensure-ArtemKioskVisible\b')).Count -ne 1) {
+        throw "Kiosk presence must contain exactly one canonical visibility/restoration helper"
+    }
+    if ($runtimeCommonText -match '(?m)^function Ensure-ArtemKioskVisible\b') {
+        throw "Visible kiosk restoration must not have a second runtime-common implementation"
+    }
+    if ($runtimeCommonText -notmatch '\.\s+\$kioskPresenceScript') {
+        throw "runtime-common must source kiosk-presence.ps1"
     }
     if ($kioskPresenceText -notmatch 'Stop-ArtemKiosk[\s\S]*?Start-Process') {
         throw "Stale/background panel Edge must be cleared before relaunching the kiosk"

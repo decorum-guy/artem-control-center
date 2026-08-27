@@ -173,6 +173,33 @@ function Assert-ArtemServedProductionBuildIdentity {
     return $identity
 }
 
+function Test-ArtemProductionDeploymentHealthy {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedRevision
+    )
+    try {
+        # A valid marker without the required production entrypoint is an
+        # incomplete artifact and must not make a same-SHA update a no-op.
+        if (-not (Test-Path -LiteralPath (Join-Path $Paths.DashboardDist "index.html"))) {
+            return $false
+        }
+        Assert-ArtemProductionBuildIdentity `
+            -DashboardRoot $Paths.DashboardDist `
+            -ExpectedRevision $ExpectedRevision | Out-Null
+        if (-not (Test-ArtemRuntimeProcess -Paths $Paths) -or -not (Test-ArtemPanelReady -Paths $Paths)) {
+            return $false
+        }
+        Assert-ArtemServedProductionBuildIdentity `
+            -Paths $Paths `
+            -ExpectedRevision $ExpectedRevision | Out-Null
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
 function Assert-ArtemTargetUpdaterLogic {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -585,6 +612,11 @@ function Assert-ArtemProductionPrerequisites {
         throw "Production dashboard build identity is missing or invalid. Run npm run build:production."
     }
     $null = Get-Command node.exe -ErrorAction Stop
+}
+
+$updaterRecoveryScript = Join-Path $PSScriptRoot "updater-recovery.ps1"
+if (Test-Path -LiteralPath $updaterRecoveryScript) {
+    . $updaterRecoveryScript
 }
 
 $kioskPresenceScript = Join-Path $PSScriptRoot "kiosk-presence.ps1"
