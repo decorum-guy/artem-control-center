@@ -54,7 +54,11 @@ exit `$child.ExitCode
         UpdateScript = $scriptPath
     }
 
+    $callerLocation = (Get-Location).Path
     Assert-ArtemTargetUpdaterLogic -Paths $paths -ExpectedTargetHead $targetHead
+    if ((Get-Location).Path -ne $callerLocation) {
+        throw "Target updater logic assertion must preserve the caller location"
+    }
     Set-Content -LiteralPath $scriptPath -Value "Write-Output 'updater-A'" -Encoding ASCII
     $rejectedStaleLogic = $false
     try {

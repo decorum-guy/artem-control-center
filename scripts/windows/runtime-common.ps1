@@ -205,24 +205,29 @@ function Assert-ArtemTargetUpdaterLogic {
         [Parameter(Mandatory)]$Paths,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedTargetHead
     )
-    Set-Location -LiteralPath $Paths.RepoRoot
-    $head = (& git.exe rev-parse HEAD).Trim().ToLowerInvariant()
-    if ($LASTEXITCODE -ne 0 -or $head -ne $ExpectedTargetHead.ToLowerInvariant()) {
-        throw "Target updater checkout is not at the expected revision"
-    }
+    Push-Location -LiteralPath $Paths.RepoRoot
+    try {
+        $head = (& git.exe rev-parse HEAD).Trim().ToLowerInvariant()
+        if ($LASTEXITCODE -ne 0 -or $head -ne $ExpectedTargetHead.ToLowerInvariant()) {
+            throw "Target updater checkout is not at the expected revision"
+        }
 
-    # Compare the updater loaded by PowerShell with the exact target tree blob.
-    # The path is fixed by the repository contract; no caller-controlled script
-    # path, ref, branch, or shell command participates in this proof.
-    $targetBlob = (& git.exe rev-parse "${ExpectedTargetHead}:scripts/windows/update-production.ps1").Trim().ToLowerInvariant()
-    $workingBlob = (& git.exe hash-object --path=scripts/windows/update-production.ps1 $Paths.UpdateScript).Trim().ToLowerInvariant()
-    if (
-        $LASTEXITCODE -ne 0 -or
-        $targetBlob -notmatch '^[0-9a-f]{40}$' -or
-        $workingBlob -notmatch '^[0-9a-f]{40}$' -or
-        $targetBlob -ne $workingBlob
-    ) {
-        throw "Target updater logic does not match the expected target revision"
+        # Compare the updater loaded by PowerShell with the exact target tree blob.
+        # The path is fixed by the repository contract; no caller-controlled script
+        # path, ref, branch, or shell command participates in this proof.
+        $targetBlob = (& git.exe rev-parse "${ExpectedTargetHead}:scripts/windows/update-production.ps1").Trim().ToLowerInvariant()
+        $workingBlob = (& git.exe hash-object --path=scripts/windows/update-production.ps1 $Paths.UpdateScript).Trim().ToLowerInvariant()
+        if (
+            $LASTEXITCODE -ne 0 -or
+            $targetBlob -notmatch '^[0-9a-f]{40}$' -or
+            $workingBlob -notmatch '^[0-9a-f]{40}$' -or
+            $targetBlob -ne $workingBlob
+        ) {
+            throw "Target updater logic does not match the expected target revision"
+        }
+    }
+    finally {
+        Pop-Location
     }
 }
 
