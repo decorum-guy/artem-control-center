@@ -26,6 +26,8 @@ from .contracts import (
     OverviewLayoutPatch,
     OverviewLayoutResponse,
     PanelMode,
+    ReminderDeliveryPatch,
+    ReminderDeliverySettings,
     ServiceSnapshot,
 )
 from .fixtures import load_fixture_document, services_for_scenario
@@ -160,6 +162,23 @@ fixture_notifications = {
     "longRunning": {
         "enabled": True,
         "channels": {"telegram": False, "iphone": True},
+    },
+}
+fixture_reminder_delivery = {
+    "schemaVersion": "reminder.delivery-settings.v1",
+    "revision": 0,
+    "updatedAt": "2026-07-29T16:00:00Z",
+    "spokenEndpoint": "alice",
+    "phoneChannels": ["telegram"],
+    "channelHealth": {
+        "spoken": {
+            "alice": {"status": "available", "code": None},
+            "jarvis": {"status": "unavailable", "code": "jarvis_runtime_unavailable"},
+        },
+        "phone": {
+            "telegram": {"status": "available", "code": None},
+            "home_assistant": {"status": "available", "code": None},
+        },
     },
 }
 
@@ -672,6 +691,52 @@ async def patch_coffee_notification_settings(
         await snapshot_publisher.rebuild()
     response.headers["Cache-Control"] = "no-store"
     return CoffeeNotificationSettings(
+        **result,
+        sourceMode=source_mode,
+        writesEnabled=True,
+    )
+
+
+@app.get("/api/v1/settings/reminders/delivery", response_model=ReminderDeliverySettings)
+async def reminder_delivery_settings(response: Response) -> ReminderDeliverySettings:
+    response.headers["Cache-Control"] = "no-store"
+    if MODE in {"fixtures", "integration_test"}:
+        payload, source_mode = dict(fixture_reminder_delivery), "fixture"
+    else:
+        try:
+            payload, source_mode = await runtime.alice_control.get_reminder_delivery()
+        except AliceControlError as exc:
+            _raise_alice_error(exc)
+    return ReminderDeliverySettings(
+        **payload,
+        sourceMode=source_mode,
+        writesEnabled=_write_allowed(True),
+    )
+
+
+@app.patch("/api/v1/settings/reminders/delivery", response_model=ReminderDeliverySettings)
+async def patch_reminder_delivery_settings(
+    patch: ReminderDeliveryPatch,
+    response: Response,
+) -> ReminderDeliverySettings:
+    _require_write(True)
+    payload = patch.model_dump()
+    if MODE in {"fixtures", "integration_test"}:
+        if patch.expectedRevision != fixture_reminder_delivery["revision"]:
+            raise HTTPException(status_code=409, detail="revision_conflict")
+        fixture_reminder_delivery["spokenEndpoint"] = patch.spokenEndpoint
+        fixture_reminder_delivery["phoneChannels"] = list(patch.phoneChannels)
+        fixture_reminder_delivery["revision"] += 1
+        fixture_reminder_delivery["updatedAt"] = datetime.now(timezone.utc).isoformat()
+        result, source_mode = dict(fixture_reminder_delivery), "fixture"
+    else:
+        try:
+            result = await runtime.alice_control.patch_reminder_delivery(payload)
+        except AliceControlError as exc:
+            _raise_alice_error(exc)
+        source_mode = "live"
+    response.headers["Cache-Control"] = "no-store"
+    return ReminderDeliverySettings(
         **result,
         sourceMode=source_mode,
         writesEnabled=True,

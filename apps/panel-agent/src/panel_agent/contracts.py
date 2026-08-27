@@ -270,6 +270,74 @@ class CoffeeNotificationPatch(BaseModel):
     longRunning: Optional[CoffeeNotificationEventPatch] = None
 
 
+ReminderEndpoint = Literal["alice", "jarvis"]
+ReminderPhoneChannel = Literal["telegram", "home_assistant"]
+ReminderChannelStatus = Literal["available", "not_configured", "unavailable"]
+
+
+class ReminderChannelHealth(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    status: ReminderChannelStatus
+    code: Optional[str] = Field(default=None, max_length=128)
+
+
+class ReminderChannelHealthMap(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    alice: ReminderChannelHealth
+    jarvis: ReminderChannelHealth
+
+
+class ReminderPhoneHealthMap(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    telegram: ReminderChannelHealth
+    home_assistant: ReminderChannelHealth
+
+
+class ReminderDeliveryChannelHealth(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    spoken: ReminderChannelHealthMap
+    phone: ReminderPhoneHealthMap
+
+
+class ReminderDeliverySettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schemaVersion: Literal["reminder.delivery-settings.v1"]
+    revision: int = Field(ge=0)
+    updatedAt: str
+    spokenEndpoint: ReminderEndpoint
+    phoneChannels: List[ReminderPhoneChannel] = Field(min_length=1, max_length=2)
+    channelHealth: ReminderDeliveryChannelHealth
+    sourceMode: SourceMode = "live"
+    writesEnabled: bool = False
+
+    @field_validator("phoneChannels")
+    @classmethod
+    def _unique_channels(cls, value: List[ReminderPhoneChannel]) -> List[ReminderPhoneChannel]:
+        if len(set(value)) != len(value):
+            raise ValueError("phoneChannels must not contain duplicates")
+        return value
+
+
+class ReminderDeliveryPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expectedRevision: int = Field(ge=0, le=2_147_483_647)
+    spokenEndpoint: ReminderEndpoint
+    phoneChannels: List[ReminderPhoneChannel] = Field(min_length=1, max_length=2)
+
+    @field_validator("phoneChannels")
+    @classmethod
+    def _unique_channels(cls, value: List[ReminderPhoneChannel]) -> List[ReminderPhoneChannel]:
+        if len(set(value)) != len(value):
+            raise ValueError("phoneChannels must not contain duplicates")
+        return value
+
+
 class CoffeeActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
