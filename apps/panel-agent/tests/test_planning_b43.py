@@ -281,6 +281,54 @@ def test_b43_event_routes_are_strict_and_gate_is_false_by_default(tmp_path):
     assert query.status_code == 422
     assert malformed.status_code == 422
     assert transport.writes == []
+    assert adapter.projection is not None
+    assert adapter.projection.calendarMutationsEnabled is False
+
+
+def test_b43_calendar_gate_is_projected_to_snapshot_and_status(tmp_path):
+    transport = EventMutationTransport()
+    adapter = _adapter(tmp_path, transport)
+
+    async def exercise():
+        await adapter.start()
+        projection = adapter.projection
+        status = adapter.status_projection()
+        app = FastAPI()
+        app.include_router(build_planning_router(adapter))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://panel.test") as client:
+            status_response = await client.get("/api/v1/planning/status")
+        await adapter.close()
+        return projection, status, status_response
+
+    projection, status, status_response = asyncio.run(exercise())
+    assert projection is not None
+    assert projection.calendarMutationsEnabled is True
+    assert status is not None
+    assert status.calendarMutationsEnabled is True
+    assert status_response.status_code == 200
+    assert status_response.json()["calendarMutationsEnabled"] is True
+
+
+def test_b43_degraded_projection_and_status_fail_closed_calendar_writer(tmp_path):
+    transport = EventMutationTransport()
+    adapter = _adapter(tmp_path, transport)
+
+    async def exercise():
+        await adapter.start()
+        transport.fixture.scenario = "timeout"
+        await adapter.refresh_domains()
+        degraded = adapter.projection
+        status = adapter.status_projection()
+        await adapter.close()
+        return degraded, status
+
+    degraded, status = asyncio.run(exercise())
+    assert degraded is not None
+    assert degraded.sourceStatus == "degraded"
+    assert degraded.calendarMutationsEnabled is False
+    assert status is not None
+    assert status.sourceStatus == "degraded"
+    assert status.calendarMutationsEnabled is False
 
 
 def test_b43_event_mutation_body_rejects_provider_and_mixed_shape_fields(tmp_path):

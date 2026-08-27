@@ -523,6 +523,8 @@ export interface PlanningSnapshot {
   reminderMutationsEnabled?: boolean;
   /** Server/deployment task writer gate, distinct from profile permissions. */
   taskMutationsEnabled?: boolean;
+  /** Server/deployment calendar writer gate, distinct from profile permissions. */
+  calendarMutationsEnabled?: boolean;
   lastSyncedAt: string | null;
   staleAfter: string | null;
   reminders: {

@@ -1113,15 +1113,17 @@ class PlanningAdapter:
             except PlanningUpstreamError as exc:
                 self._record_failure("status", exc)
                 if self._projection is not None:
+                    source_status = (
+                        "degraded"
+                        if self._domains_current
+                        else self._failure_source_status()
+                    )
                     await self._set_projection(
                         self._projection.model_copy(
                             update={
                                 "generatedAt": self._now_text(),
-                                "sourceStatus": (
-                                    "degraded"
-                                    if self._domains_current
-                                    else self._failure_source_status()
-                                ),
+                                "sourceStatus": source_status,
+                                "calendarMutationsEnabled": False,
                             },
                             deep=True,
                         )
@@ -1143,15 +1145,17 @@ class PlanningAdapter:
         self._last_status = status
         self._last_status_at = self._clock()
         self._status_refresh_requested = False
+        source_status = self._status_source_status(current=self._domains_current)
         current = self._projection or empty_planning_projection(
             generated_at=self._now_text(),
-            source_status=self._status_source_status(current=self._domains_current),
+            source_status=source_status,
         )
         updates: dict[str, Any] = {
             "generatedAt": self._now_text(),
-            "sourceStatus": self._status_source_status(current=self._domains_current),
+            "sourceStatus": source_status,
             "reminderMutationsEnabled": self.reminder_mutations_enabled,
             "taskMutationsEnabled": self.task_mutations_enabled,
+            "calendarMutationsEnabled": self.calendar_mutations_enabled and source_status == "current",
             "capabilities": PlanningCapabilities(**self._effective_capabilities()),
         }
         if status.sources is not None:
@@ -1822,6 +1826,7 @@ class PlanningAdapter:
             update={
                 "generatedAt": self._now_text(now),
                 "sourceStatus": self._cache_source_status(age),
+                "calendarMutationsEnabled": False,
             },
             deep=True,
         )
@@ -2181,6 +2186,7 @@ class PlanningAdapter:
             sourceStatus=source_status,
             reminderMutationsEnabled=self.reminder_mutations_enabled,
             taskMutationsEnabled=self.task_mutations_enabled,
+            calendarMutationsEnabled=self.calendar_mutations_enabled and source_status == "current",
             lastSyncedAt=last_synced_at,
             staleAfter=stale_after,
             reminders=mapped["reminders"],
