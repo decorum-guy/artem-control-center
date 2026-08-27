@@ -1,5 +1,6 @@
 import type {
   DashboardSnapshot,
+  InterfaceCopyPageKey,
   ServiceGroup,
   ServiceSnapshot,
   WidgetManifest
@@ -19,6 +20,8 @@ import { RuntimeControls } from "./RuntimeControls";
 import { PlanningOverviewCard } from "./PlanningOverviewCard";
 import { RogG703Controls } from "./RogG703Controls";
 import { RouteHeader, WorkZone } from "./ShellPrimitives";
+import { pageSubtitleField, pageTitleField, useInterfaceCopy } from "./interfaceCopy";
+import { InterfaceCopySettingsPanel } from "./features/settings/InterfaceCopySettings";
 
 interface PageProps {
   snapshot: DashboardSnapshot;
@@ -30,13 +33,16 @@ interface PageProps {
 function PageHeading({
   eyebrow,
   title,
-  description
+  description,
+  copyKey
 }: {
   eyebrow: string;
   title: string;
   description: string;
+  copyKey?: InterfaceCopyPageKey;
 }) {
-  return <RouteHeader eyebrow={eyebrow} title={title} description={description} />;
+  const { copy } = useInterfaceCopy();
+  return <RouteHeader eyebrow={eyebrow} title={copyKey ? copy(pageTitleField(copyKey)) : title} description={copyKey ? copy(pageSubtitleField(copyKey)) : description} />;
 }
 
 function findManifestService(
@@ -69,6 +75,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
         eyebrow="Сегодня"
         title="Обзор"
         description="Дом, ближайшие дела и состояние сервисов."
+        copyKey="overview"
       />
 
       <div className="overview-focus" data-testid="overview-primary-content">
@@ -208,6 +215,7 @@ export function HomePage({ snapshot, onCoffeeAction, coffeeActionPending }: Page
           eyebrow="Устройства"
           title="Дом"
           description="Повседневные устройства и сцены."
+          copyKey="home"
         />
         <div className="infrastructure-indicator">
           <span>Home Assistant</span>
@@ -285,6 +293,7 @@ export function ServicesPage({ snapshot }: PageProps) {
         eyebrow="Операционный каталог"
         title="Сервисы"
         description="Состояние, свежесть и доступные операции сервисов."
+        copyKey="services"
       />
       <div className="service-summary-line">
         <span>{catalog.filter((service) => service.health === "healthy").length} работают</span>
@@ -326,6 +335,7 @@ export function SystemPage({ snapshot }: { snapshot: DashboardSnapshot }) {
         eyebrow="Питание и доступность"
         title="Система"
         description="Фиксированные действия для локальной панели и ASUS ROG G703GI."
+        copyKey="system"
       />
       {rogG703 ? (
         <RogG703Controls service={rogG703} />
@@ -386,7 +396,7 @@ export function PlaceholderPage({
   const copy = placeholderCopy[route];
   return (
     <div className="placeholder-page" data-testid={`route-${route.slice(1)}`}>
-      <PageHeading {...copy} />
+      <PageHeading {...copy} copyKey={route as InterfaceCopyPageKey} />
       <WorkZone className="placeholder-surface">
         <span className="placeholder-status">Подготовлено</span>
         <h2>{copy.status}</h2>
@@ -413,8 +423,16 @@ export function SettingsPage({
         eyebrow="Панель"
         title="Настройки"
         description="Внешний вид и поведение этого экрана."
+        copyKey="settings"
       />
       <CoffeeSettingsPanel />
+      <section className="settings-section">
+        <div>
+          <h2>Интерфейс</h2>
+          <p>Названия и подписи меняют только отображаемый текст.</p>
+        </div>
+        <InterfaceCopySettingsPanel />
+      </section>
       <section className="settings-section">
         <div>
           <h2>Тема</h2>

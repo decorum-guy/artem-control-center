@@ -5,6 +5,7 @@ import { resolveManifest } from "../../registry";
 import { StatusText } from "../../ShellPrimitives";
 import { CoffeeWidget } from "../../widgets";
 import { DeviceRow } from "../operations/DeviceRow";
+import { useInterfaceCopy } from "../../interfaceCopy";
 import {
   healthLabel,
   healthTone,
@@ -21,6 +22,7 @@ export function HomeV2Page({
   onCoffeeAction: (service: ServiceSnapshot, actionId: string) => void;
   coffeeActionPending: boolean;
 }) {
+  const { copy } = useInterfaceCopy();
   const selection = selectHomePrimaryDevices(snapshot.services);
   const authority = homeAuthority(snapshot.services);
   const authorityLabel = authority ? healthLabel(authority.health) : "Недоступен";
@@ -29,8 +31,8 @@ export function HomeV2Page({
   return (
     <div className="home-v2-page" data-testid="route-home-v2">
       <header className="density-route-toolbar" data-testid="home-v2-toolbar">
-        <h1>Дом</h1>
-        <span>Устройства и подтверждённые действия</span>
+        <h1>{copy("page.home.title")}</h1>
+        {copy("page.home.subtitle") && <span>{copy("page.home.subtitle")}</span>}
       </header>
 
       <section className={`home-authority-line${authority ? ` home-authority-line--${authority.health}` : " home-authority-line--unavailable"}`} data-testid="home-authority-line">

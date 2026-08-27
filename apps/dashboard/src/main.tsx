@@ -11,6 +11,7 @@ import { NoticeCenterProvider } from "./NoticeCenter";
 import { InteractionLockProvider } from "./InteractionLock";
 import { CalendarDisplayPreferencesProvider } from "./CalendarDisplayPreferences";
 import { KioskPresenceHeartbeat } from "./KioskPresenceHeartbeat";
+import { InterfaceCopyProvider } from "./interfaceCopy";
 import "./InteractionLock.css";
 import "./ActionConfirmations.css";
 import "./AvalarActions.css";
@@ -33,14 +34,16 @@ createRoot(document.getElementById("root")!).render(
         <CalendarDisplayPreferencesProvider>
           <AccessProvider>
             <ActionConfirmationProvider>
-              <WeatherProvider>
-                <WeatherAutoRefresh />
-                <ConnectivityActionsProvider>
-                  <AvalarActionsProvider>
-                    <App />
-                  </AvalarActionsProvider>
-                </ConnectivityActionsProvider>
-              </WeatherProvider>
+              <InterfaceCopyProvider>
+                <WeatherProvider>
+                  <WeatherAutoRefresh />
+                  <ConnectivityActionsProvider>
+                    <AvalarActionsProvider>
+                      <App />
+                    </AvalarActionsProvider>
+                  </ConnectivityActionsProvider>
+                </WeatherProvider>
+              </InterfaceCopyProvider>
             </ActionConfirmationProvider>
           </AccessProvider>
         </CalendarDisplayPreferencesProvider>

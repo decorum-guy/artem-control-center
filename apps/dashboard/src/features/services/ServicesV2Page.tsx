@@ -15,8 +15,10 @@ import {
   servicesByAttention
 } from "../operations/routeDensity";
 import { ServiceDetailsSheet } from "./ServiceDetailsSheet";
+import { useInterfaceCopy } from "../../interfaceCopy";
 
 export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
+  const { copy } = useInterfaceCopy();
   const [detailsService, setDetailsService] = useState<ServiceSnapshot | null>(null);
   const catalog = enabledServices(snapshot.services).filter((service) => !isHomeDevice(service));
   const counts = countHealth(catalog);
@@ -30,8 +32,8 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   return (
     <div className="services-v2-page" data-testid="route-services-v2">
       <header className="density-route-toolbar" data-testid="services-v2-toolbar">
-        <h1>Сервисы</h1>
-        <span>Внимание, свежесть и безопасные сведения</span>
+        <h1>{copy("page.services.title")}</h1>
+        {copy("page.services.subtitle") && <span>{copy("page.services.subtitle")}</span>}
       </header>
 
       <section className={`services-attention-summary${attention.length ? " services-attention-summary--attention" : ""}`} data-testid="services-attention-summary">

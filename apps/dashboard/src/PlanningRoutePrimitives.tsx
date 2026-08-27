@@ -1,11 +1,12 @@
 import { type ReactNode } from "react";
-import type { PlanningCalendarSource, PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
+import type { InterfaceCopyPageKey, PlanningCalendarSource, PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
 import type { PlanningReadEnvelope, PlanningReadError } from "./planningReadClient";
 import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
 import { Sheet } from "./Sheet";
 import type { PlanningModuleDefinition } from "./planningModuleRegistry";
 import { RouteHeader } from "./ShellPrimitives";
 import { useOwnerWarningDwell } from "./planningWarningDwell";
+import { pageSubtitleField, pageTitleField, useInterfaceCopy } from "./interfaceCopy";
 
 export function syncTimeLabel(value: string | null): string | null {
   if (!value) return null;
@@ -43,7 +44,6 @@ export function previewEnvelope<T>(
 export function PlanningRouteFrame({
   module,
   eyebrow = "Планирование",
-  description,
   sourceStatus,
   lastSyncedAt,
   sources,
@@ -60,7 +60,6 @@ export function PlanningRouteFrame({
 }: {
   module: PlanningModuleDefinition;
   eyebrow?: string;
-  description: string;
   sourceStatus: PlanningSourceStatus | "unavailable";
   lastSyncedAt: string | null;
   sources?: PlanningCalendarSource[];
@@ -76,6 +75,12 @@ export function PlanningRouteFrame({
   children: ReactNode;
   testId: string;
 }) {
+  const { copy } = useInterfaceCopy();
+  const pageKey: InterfaceCopyPageKey = module.domain === "calendar"
+    ? "calendar"
+    : module.domain === "tasks"
+      ? "tasks"
+      : "reminders";
   return (
     <div
       className="planning-route-page"
@@ -83,7 +88,7 @@ export function PlanningRouteFrame({
       data-planning-module={module.id}
       data-planning-domain={module.domain}
     >
-      <RouteHeader eyebrow={eyebrow} title={module.label} description={description} />
+      <RouteHeader eyebrow={eyebrow} title={copy(pageTitleField(pageKey))} description={copy(pageSubtitleField(pageKey))} />
       <div className="planning-route-heading-row">
         <div className={`planning-route-controls planning-route-controls--primary${module.domain === "calendar" ? " planning-route-controls--calendar" : ""}`}>{controls}</div>
         {futureAction && <div className="planning-future-action-slot" data-testid="planning-future-action-slot">{futureAction}</div>}

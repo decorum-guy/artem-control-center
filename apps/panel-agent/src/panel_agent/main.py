@@ -29,6 +29,8 @@ from .contracts import (
     ReminderDeliveryPatch,
     ReminderDeliverySettings,
     ServiceSnapshot,
+    InterfaceCopyPatch,
+    InterfaceCopySettingsResponse,
 )
 from .fixtures import load_fixture_document, services_for_scenario
 from .diagnostics import DiagnosticsCollector
@@ -59,6 +61,13 @@ from .capabilities import (
 from .ai_settings import AIProviderSettingsStore
 from .ai_text import AITextService
 from .ai_api import build_ai_router
+from .interface_copy import (
+    FIXTURE_INTERFACE_COPY_SCENARIOS,
+    InterfaceCopyRevisionConflict,
+    InterfaceCopySettingsStore,
+    InterfaceCopyStoreError,
+    fixture_interface_copy_response,
+)
 
 
 def configured_mode() -> PanelMode:
@@ -92,6 +101,9 @@ calendar_display_preferences_store = CalendarDisplayPreferencesStore(
 capability_override_store = CapabilityOverrideStore()
 ai_provider_settings_store = AIProviderSettingsStore(SETTINGS.ai_settings_path)
 ai_text_service = AITextService(SETTINGS, ai_provider_settings_store)
+interface_copy_store = InterfaceCopySettingsStore.from_environment(
+    writes_enabled=SETTINGS.writes_enabled,
+)
 
 
 @asynccontextmanager
@@ -215,7 +227,11 @@ def list_fixtures() -> dict:
     if MODE not in {"fixtures", "integration_test"}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     document = load_fixture_document()
-    return {"default": document["defaultScenario"], "scenarios": sorted(document["scenarios"].keys())}
+    return {
+        "default": document["defaultScenario"],
+        "scenarios": sorted(document["scenarios"].keys()),
+        "interfaceCopyScenarios": list(FIXTURE_INTERFACE_COPY_SCENARIOS),
+    }
 
 
 @app.get("/api/v1/snapshot", response_model=DashboardSnapshot)
@@ -308,12 +324,62 @@ def get_overview_layout(response: Response) -> OverviewLayoutResponse:
     return layout.model_copy(update={"writesEnabled": _overview_write_allowed()})
 
 
+@app.get(
+    "/api/v1/settings/interface-copy",
+    response_model=InterfaceCopySettingsResponse,
+)
+def get_interface_copy(
+    response: Response,
+    fixtureScenario: str | None = Query(default=None),
+) -> InterfaceCopySettingsResponse:
+    response.headers["Cache-Control"] = "no-store"
+    if MODE in {"fixtures", "integration_test"} and fixtureScenario:
+        fixture = fixture_interface_copy_response(fixtureScenario)
+        if fixture is not None:
+            response.headers["ETag"] = f'"{fixture.revision}"'
+            return fixture
+    settings = interface_copy_store.read()
+    response.headers["ETag"] = f'"{settings.revision}"'
+    response.headers["X-Interface-Copy-Writes-Enabled"] = str(_interface_copy_write_allowed()).lower()
+    return settings.model_copy(update={"writesEnabled": _interface_copy_write_allowed()})
+
+
+@app.patch(
+    "/api/v1/settings/interface-copy",
+    response_model=InterfaceCopySettingsResponse,
+)
+def patch_interface_copy(
+    patch: InterfaceCopyPatch,
+    response: Response,
+) -> InterfaceCopySettingsResponse:
+    if not _interface_copy_write_allowed():
+        raise HTTPException(status_code=403, detail="interface_copy_write_disabled")
+    try:
+        saved = interface_copy_store.write(patch)
+    except InterfaceCopyRevisionConflict:
+        current = interface_copy_store.read()
+        response.headers["ETag"] = f'"{current.revision}"'
+        raise HTTPException(status_code=409, detail="revision_conflict")
+    except InterfaceCopyStoreError as exc:
+        if str(exc) == "stored_copy_settings_unavailable":
+            raise HTTPException(status_code=503, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{saved.revision}"'
+    response.headers["X-Interface-Copy-Writes-Enabled"] = "true"
+    return saved.model_copy(update={"writesEnabled": True})
+
+
 def _calendar_display_write_allowed() -> bool:
     return _write_allowed(_immediate_capability_enabled("calendar_display_colors"))
 
 
 def _ai_settings_write_allowed() -> bool:
     return _write_allowed(SETTINGS.ai_settings_writes_enabled and SETTINGS.ai_text_enabled)
+
+
+def _interface_copy_write_allowed() -> bool:
+    return _write_allowed(True)
 
 
 def _calendar_display_known_identities() -> set[tuple[str, str]]:

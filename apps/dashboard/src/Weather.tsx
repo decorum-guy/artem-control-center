@@ -31,6 +31,7 @@ import { composeWeather, phaseTransform, readWeatherPhase, type WeatherPhase } f
 import { useWeatherMotionState } from "./weatherMotion";
 import { applyWeatherFixture, readWeatherFixtureId } from "./weatherFixtures";
 import { resolveWeatherHourPhase, weatherKind, weatherLabel, type WeatherGlyphPhase } from "./weatherPresentation";
+import { useInterfaceCopy } from "./interfaceCopy";
 import { useInteractionLock } from "./InteractionLock";
 
 interface WeatherContextValue {
@@ -275,6 +276,7 @@ export function WeatherHeaderSummary({ onOpen }: { onOpen: () => void }) {
 }
 
 function WeatherHero({ forecast, preview }: { forecast: WeatherForecast; preview: boolean }) {
+  const { copy } = useInterfaceCopy();
   const kind = weatherKind(forecast.current.weatherCode);
   const today = forecast.daily[0];
   return (
@@ -282,8 +284,9 @@ function WeatherHero({ forecast, preview }: { forecast: WeatherForecast; preview
       <div className="weather-hero__content">
         <div className="weather-hero__location">
           <div>
-            <p className="section-kicker">{preview ? "Предпросмотр" : "Сейчас"}</p>
+            <p className="section-kicker">{preview ? "Предпросмотр · " : ""}{copy("page.weather.title")}</p>
             <h1>{forecast.location.title}</h1>
+            {copy("page.weather.subtitle") && <small className="weather-page-subtitle">{copy("page.weather.subtitle")}</small>}
             <span>{forecast.location.normalizedAddress}</span>
           </div>
           <div className="weather-freshness">
@@ -754,6 +757,7 @@ function WeatherHeroV2({
   refreshing: boolean;
   error: string | null;
 }) {
+  const { copy } = useInterfaceCopy();
   const model = composeWeather({
     weatherCode: forecast.current.weatherCode,
     isDay: forecast.current.isDay,
@@ -785,8 +789,9 @@ function WeatherHeroV2({
       <div className="weather-hero__content">
         <div className="weather-hero__location">
           <div>
-            <p className="section-kicker">{preview ? "Предпросмотр" : "Сейчас"}</p>
+            <p className="section-kicker">{preview ? "Предпросмотр · " : ""}{copy("page.weather.title")}</p>
             <h1 title={forecast.location.title}>{forecast.location.title}</h1>
+            {copy("page.weather.subtitle") && <small className="weather-page-subtitle">{copy("page.weather.subtitle")}</small>}
             <span title={forecast.location.normalizedAddress}>{forecast.location.normalizedAddress}</span>
           </div>
           <div className="weather-freshness">

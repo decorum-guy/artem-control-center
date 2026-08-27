@@ -22,11 +22,13 @@ import { SettingsSummaryColumn, SettingsSummaryRow } from "./SettingsSummaryRow"
 import { CapabilitySettingsSheet, capabilityStateLabel, capabilitySummary, useCapabilities, type CapabilitiesController } from "./CapabilitySettings";
 import { AIProviderSettingsSheet, aiStateLabel, aiSummary, useAIProviderSettings, type AIProviderSettingsController } from "./AIProviderSettings";
 import { ReminderDeliverySettingsSheet, reminderDeliveryStateLabel, reminderDeliverySummary, useReminderDeliverySettings, type ReminderDeliverySettingsController } from "./ReminderDeliverySettings";
+import { InterfaceCopySettingsSheet } from "./InterfaceCopySettings";
+import { useInterfaceCopy } from "../../interfaceCopy";
 import "./settingsV2.css";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
-type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery";
+type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery" | "interface-copy";
 
 const motionLabels: Record<MotionMode, string> = {
   full: "Полное",
@@ -63,14 +65,15 @@ export function SettingsV2Page({
   const capabilities = useCapabilities();
   const ai = useAIProviderSettings();
   const reminderDelivery = useReminderDeliverySettings();
+  const { copy } = useInterfaceCopy();
   const [openSheet, setOpenSheet] = useState<SettingsSheet | null>(null);
 
   return (
     <div className="settings-v2-page" data-testid="route-settings">
       <RouteHeader
         eyebrow="Панель"
-        title="Настройки"
-        description="Внешний вид и доступные возможности панели."
+        title={copy("page.settings.title")}
+        description={copy("page.settings.subtitle")}
       />
 
       <section className="settings-v2-appearance" aria-labelledby="settings-v2-appearance-title">
@@ -116,6 +119,13 @@ export function SettingsV2Page({
 
       <div className="settings-v2-summary-grid">
         <SettingsSummaryColumn>
+          <SettingsSummaryRow
+            title="Названия и подписи"
+            summary="Настройте отображаемый текст без изменения маршрутов и действий"
+            stateLabel="Интерфейс"
+            testId="settings-summary-interface-copy"
+            onClick={() => setOpenSheet("interface-copy")}
+          />
           <SettingsSummaryRow
             title="Текстовый AI"
             summary={aiSummary(ai)}
@@ -220,6 +230,7 @@ function SettingsSheet({
   onRefreshCalendarMetadata: () => Promise<boolean>;
   onClose: () => void;
 }) {
+  if (kind === "interface-copy") return <InterfaceCopySettingsSheet onClose={onClose} />;
   if (kind === "calendars") {
     return (
       <CalendarSettingsSheet

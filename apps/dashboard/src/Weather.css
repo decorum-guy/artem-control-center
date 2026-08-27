@@ -119,6 +119,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.weather-page-subtitle {
+  display: block;
+  max-width: 620px;
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
 .weather-freshness { display: grid; gap: 4px; justify-items: end; text-align: right; }
 .weather-freshness span {
   padding: 5px 8px;

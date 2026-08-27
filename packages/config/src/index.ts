@@ -1,3 +1,6 @@
+import catalogJson from "../interface-copy-catalog.json";
+import type { InterfaceCopyCatalog } from "@artem/contracts";
+
 export const fixtureScenarios = [
   "ha-healthy",
   "home-normal",
@@ -30,3 +33,23 @@ export const fixtureScenarios = [
 ] as const;
 
 export type FixtureScenario = (typeof fixtureScenarios)[number];
+
+export const interfaceCopyCatalog = catalogJson satisfies InterfaceCopyCatalog;
+export type InterfaceCopyFixtureScenario =
+  | "defaults-only"
+  | "custom-navigation"
+  | "custom-page-copy"
+  | "removed-subtitle"
+  | "revision-conflict"
+  | "malformed"
+  | "unavailable";
+
+export const interfaceCopyFixtureScenarios: readonly InterfaceCopyFixtureScenario[] = [
+  "defaults-only",
+  "custom-navigation",
+  "custom-page-copy",
+  "removed-subtitle",
+  "revision-conflict",
+  "malformed",
+  "unavailable"
+];
