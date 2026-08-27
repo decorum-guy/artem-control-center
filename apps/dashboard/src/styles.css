@@ -1656,7 +1656,7 @@ body::-webkit-scrollbar {
 .v2-nav-link:active { background: var(--cc-pressed); }
 .v2-nav-link .v2-icon,
 .v2-nav-link > svg { flex: 0 0 20px; color: currentColor; }
-.v2-nav-link > span { min-width: 0; }
+.v2-nav-link > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .v2-nav-link--child {
   gap: 8px;
   padding-right: 6px;

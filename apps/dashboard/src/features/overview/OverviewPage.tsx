@@ -12,6 +12,7 @@ import { overviewFoundationLayout, overviewFixtureModeFromLocation } from "./ove
 import { overviewEditorDirty, overviewEditorReducer, createOverviewEditorState, makeShippedOverviewDocument, overviewItemsEqual } from "./overviewEditorReducer";
 import { validateOverviewLayout } from "./layoutValidation";
 import { useInteractionLock } from "../../InteractionLock";
+import { useInterfaceCopy } from "../../interfaceCopy";
 import "./overviewEditor.css";
 
 export function OverviewV2Page({
@@ -25,6 +26,7 @@ export function OverviewV2Page({
   onCoffeeAction: (service: ServiceSnapshot, actionId: string) => void;
   coffeeActionPending: boolean;
 }): ReactNode {
+  const { copy } = useInterfaceCopy();
   const fixtureMode = overviewFixtureModeFromLocation();
   const { showNotice } = useNoticeCenter();
   const { guardMutation } = useInteractionLock();
@@ -212,8 +214,8 @@ export function OverviewV2Page({
   ) : (
     <header className="overview-v2-toolbar" data-testid="overview-toolbar">
       <div className="overview-v2-toolbar__copy">
-        <h1>Обзор</h1>
-        <p>Сегодня, всё важное в первом экране</p>
+        <h1>{copy("page.overview.title")}</h1>
+        {copy("page.overview.subtitle") && <p>{copy("page.overview.subtitle")}</p>}
       </div>
       <button
         type="button"

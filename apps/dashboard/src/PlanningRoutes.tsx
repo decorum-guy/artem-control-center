@@ -569,7 +569,6 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
   return (
     <PlanningRouteFrame
       module={tasksModule}
-      description="Задачи по сроку, приоритету и проекту."
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       error={routeRead.error}
@@ -1237,7 +1236,6 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     <PlanningRouteFrame
       module={calendarModule}
       eyebrow="Расписание"
-      description=""
       sourceStatus={envelope?.sourceStatus ?? planning?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       sources={sources}
@@ -1789,7 +1787,6 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
   return (
     <PlanningRouteFrame
       module={remindersModule}
-      description="Активные сроки и состояние доставки. Напоминание остаётся открытым, пока его жизненный цикл не завершён."
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       error={routeRead.error}

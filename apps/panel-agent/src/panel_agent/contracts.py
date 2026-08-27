@@ -1,13 +1,63 @@
 import re
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .planning import PlanningProjection
 
 PanelMode = Literal["fixtures", "read_only", "integration_test", "production"]
 HealthState = Literal["healthy", "degraded", "offline", "stale"]
 SourceMode = Literal["live", "cached", "fixture", "stale", "unavailable"]
+InterfaceCopyNavigationKey = Literal[
+    "overview",
+    "weather",
+    "home",
+    "services",
+    "calendar",
+    "tasks",
+    "reminders",
+    "backups",
+    "apps",
+    "system",
+    "settings",
+]
+InterfaceCopyPageKey = InterfaceCopyNavigationKey
+InterfaceCopyField = Literal[
+    "navigation.overview",
+    "navigation.weather",
+    "navigation.home",
+    "navigation.services",
+    "navigation.calendar",
+    "navigation.tasks",
+    "navigation.reminders",
+    "navigation.backups",
+    "navigation.apps",
+    "navigation.system",
+    "navigation.settings",
+    "navigationGroup.planning",
+    "page.overview.title",
+    "page.overview.subtitle",
+    "page.weather.title",
+    "page.weather.subtitle",
+    "page.home.title",
+    "page.home.subtitle",
+    "page.services.title",
+    "page.services.subtitle",
+    "page.calendar.title",
+    "page.calendar.subtitle",
+    "page.tasks.title",
+    "page.tasks.subtitle",
+    "page.reminders.title",
+    "page.reminders.subtitle",
+    "page.backups.title",
+    "page.backups.subtitle",
+    "page.apps.title",
+    "page.apps.subtitle",
+    "page.system.title",
+    "page.system.subtitle",
+    "page.settings.title",
+    "page.settings.subtitle",
+]
 
 
 class ActionDescriptor(BaseModel):
@@ -197,6 +247,159 @@ class DashboardSnapshot(BaseModel):
     fixtureScenario: Optional[str]
     services: List[ServiceSnapshot]
     planning: Optional[PlanningProjection] = None
+
+
+class InterfaceCopyPageText(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str = Field(min_length=1, max_length=96)
+    subtitle: str = Field(max_length=240)
+
+
+class InterfaceCopyNavigation(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    overview: str = Field(min_length=1, max_length=48)
+    weather: str = Field(min_length=1, max_length=48)
+    home: str = Field(min_length=1, max_length=48)
+    services: str = Field(min_length=1, max_length=48)
+    calendar: str = Field(min_length=1, max_length=48)
+    tasks: str = Field(min_length=1, max_length=48)
+    reminders: str = Field(min_length=1, max_length=48)
+    backups: str = Field(min_length=1, max_length=48)
+    apps: str = Field(min_length=1, max_length=48)
+    system: str = Field(min_length=1, max_length=48)
+    settings: str = Field(min_length=1, max_length=48)
+
+
+class InterfaceCopyNavigationGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    planning: str = Field(min_length=1, max_length=48)
+
+
+class InterfaceCopyCatalog(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    navigation: InterfaceCopyNavigation
+    navigationGroup: InterfaceCopyNavigationGroup
+    page: "InterfaceCopyPageCatalog"
+
+
+class InterfaceCopyPageCatalog(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    overview: InterfaceCopyPageText
+    weather: InterfaceCopyPageText
+    home: InterfaceCopyPageText
+    services: InterfaceCopyPageText
+    calendar: InterfaceCopyPageText
+    tasks: InterfaceCopyPageText
+    reminders: InterfaceCopyPageText
+    backups: InterfaceCopyPageText
+    apps: InterfaceCopyPageText
+    system: InterfaceCopyPageText
+    settings: InterfaceCopyPageText
+
+
+InterfaceCopyCatalog.model_rebuild()
+
+
+class InterfaceCopyNavigationOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    overview: Optional[str] = Field(default=None, max_length=48)
+    weather: Optional[str] = Field(default=None, max_length=48)
+    home: Optional[str] = Field(default=None, max_length=48)
+    services: Optional[str] = Field(default=None, max_length=48)
+    calendar: Optional[str] = Field(default=None, max_length=48)
+    tasks: Optional[str] = Field(default=None, max_length=48)
+    reminders: Optional[str] = Field(default=None, max_length=48)
+    backups: Optional[str] = Field(default=None, max_length=48)
+    apps: Optional[str] = Field(default=None, max_length=48)
+    system: Optional[str] = Field(default=None, max_length=48)
+    settings: Optional[str] = Field(default=None, max_length=48)
+
+
+class InterfaceCopyNavigationGroupOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    planning: Optional[str] = Field(default=None, max_length=48)
+
+
+class InterfaceCopyPageTextOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: Optional[str] = Field(default=None, max_length=96)
+    subtitle: Optional[str] = Field(default=None, max_length=240)
+
+
+class InterfaceCopyPageOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    overview: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    weather: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    home: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    services: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    calendar: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    tasks: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    reminders: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    backups: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    apps: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    system: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    settings: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+
+
+class InterfaceCopyOverrides(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    navigation: InterfaceCopyNavigationOverrides = Field(default_factory=InterfaceCopyNavigationOverrides)
+    navigationGroup: InterfaceCopyNavigationGroupOverrides = Field(default_factory=InterfaceCopyNavigationGroupOverrides)
+    page: InterfaceCopyPageOverrides = Field(default_factory=InterfaceCopyPageOverrides)
+
+
+class InterfaceCopySettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schemaVersion: Literal["interface.copy-settings.v1"]
+    revision: int = Field(ge=0)
+    # Invalid persisted data cannot provide a trusted revision.  In that
+    # state the API exposes the deterministic recovery revision 0 instead.
+    recoveryRevision: Optional[int] = Field(default=None, ge=0)
+    updatedAt: str
+    defaults: InterfaceCopyCatalog
+    overrides: InterfaceCopyOverrides
+    effective: InterfaceCopyCatalog
+    available: bool
+    warnings: List[Literal["stored_copy_settings_unavailable"]] = Field(default_factory=list, max_length=1)
+    writesEnabled: bool = False
+
+    @model_validator(mode="after")
+    def _recovery_shape(self) -> "InterfaceCopySettingsResponse":
+        if self.available and self.recoveryRevision is not None:
+            raise ValueError("recoveryRevision is only valid for unavailable stores")
+        if not self.available and self.recoveryRevision != 0:
+            raise ValueError("unavailable stores require recoveryRevision 0")
+        return self
+
+
+class InterfaceCopyPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expectedRevision: int = Field(ge=0, le=2_147_483_647)
+    field: Optional[InterfaceCopyField] = None
+    value: Optional[str] = Field(default=None, max_length=240)
+    resetAll: bool = False
+
+    @model_validator(mode="after")
+    def _shape(self) -> "InterfaceCopyPatch":
+        supplied_value = "value" in self.model_fields_set
+        if self.resetAll:
+            if self.field is not None or supplied_value:
+                raise ValueError("resetAll cannot be combined with field or value")
+        elif self.field is None or not supplied_value:
+            raise ValueError("field and value are required unless resetAll is true")
+        return self
 
 
 class CoffeeTimingSettings(BaseModel):

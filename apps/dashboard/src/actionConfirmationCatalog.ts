@@ -12,7 +12,8 @@ export type ActionConfirmationId =
   | "planning.reminders.cancel"
   | "planning.tasks.complete"
   | "planning.tasks.archive"
-  | "planning.calendar.delete";
+  | "planning.calendar.delete"
+  | "settings.interface-copy.reset-all";
 
 export type ActionConfirmationLevel = "simple" | "strong";
 export type ActionConfirmationTone = "standard" | "production";
@@ -173,5 +174,15 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "Planning · AliceTG Bot",
     description: "Удалим локальное событие. Внешний календарь не изменится.",
     confirmLabel: "Удалить событие"
+  },
+  "settings.interface-copy.reset-all": {
+    id: "settings.interface-copy.reset-all",
+    level: "simple",
+    tone: "standard",
+    title: "Вернуть стандартные названия?",
+    target: "Интерфейс панели",
+    environment: "локальная панель",
+    description: "Все пользовательские названия и подписи будут заменены стандартными.",
+    confirmLabel: "Вернуть стандартные названия"
   }
 };

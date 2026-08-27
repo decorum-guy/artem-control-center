@@ -49,7 +49,9 @@ def test_ai_provider_settings_are_a_registered_standard_capability(tmp_path):
     assert client.patch("/api/v1/settings/ai/selection").status_code == 200
     assert capability_for_request("PATCH", "/api/v1/settings/ai/providers/gigachat/credential") == "settings.ai.providers"
     assert capability_for_request("PATCH", "/api/v1/settings/reminders/delivery") == "settings.reminder_delivery"
+    assert capability_for_request("PATCH", "/api/v1/settings/interface-copy") == "settings.interface_copy"
     assert CAPABILITIES["settings.reminder_delivery"] == "standard"
+    assert CAPABILITIES["settings.interface_copy"] == "standard"
 
 
 def build_planning_client(tmp_path):

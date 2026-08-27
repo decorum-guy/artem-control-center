@@ -1,6 +1,105 @@
 export type PanelMode = "fixtures" | "read_only" | "integration_test" | "production";
 export type HealthState = "healthy" | "degraded" | "offline" | "stale";
 export type SourceMode = "live" | "cached" | "fixture" | "stale" | "unavailable";
+
+export type InterfaceCopyNavigationKey =
+  | "overview"
+  | "weather"
+  | "home"
+  | "services"
+  | "calendar"
+  | "tasks"
+  | "reminders"
+  | "backups"
+  | "apps"
+  | "system"
+  | "settings";
+export type InterfaceCopyPageKey = InterfaceCopyNavigationKey;
+export type InterfaceCopyField =
+  | `navigation.${InterfaceCopyNavigationKey}`
+  | "navigationGroup.planning"
+  | `page.${InterfaceCopyPageKey}.title`
+  | `page.${InterfaceCopyPageKey}.subtitle`;
+
+export interface InterfaceCopyPageText {
+  title: string;
+  subtitle: string;
+}
+
+export interface InterfaceCopyCatalog {
+  navigation: {
+    overview: string;
+    weather: string;
+    home: string;
+    services: string;
+    calendar: string;
+    tasks: string;
+    reminders: string;
+    backups: string;
+    apps: string;
+    system: string;
+    settings: string;
+  };
+  navigationGroup: {
+    planning: string;
+  };
+  page: {
+    overview: InterfaceCopyPageText;
+    weather: InterfaceCopyPageText;
+    home: InterfaceCopyPageText;
+    services: InterfaceCopyPageText;
+    calendar: InterfaceCopyPageText;
+    tasks: InterfaceCopyPageText;
+    reminders: InterfaceCopyPageText;
+    backups: InterfaceCopyPageText;
+    apps: InterfaceCopyPageText;
+    system: InterfaceCopyPageText;
+    settings: InterfaceCopyPageText;
+  };
+}
+
+export type InterfaceCopyFieldOverrides<T> = {
+  [Key in keyof T]?: string | null;
+};
+
+export interface InterfaceCopyOverrides {
+  navigation: InterfaceCopyFieldOverrides<InterfaceCopyCatalog["navigation"]>;
+  navigationGroup: { planning?: string | null };
+  page: {
+    overview: Partial<InterfaceCopyPageText>;
+    weather: Partial<InterfaceCopyPageText>;
+    home: Partial<InterfaceCopyPageText>;
+    services: Partial<InterfaceCopyPageText>;
+    calendar: Partial<InterfaceCopyPageText>;
+    tasks: Partial<InterfaceCopyPageText>;
+    reminders: Partial<InterfaceCopyPageText>;
+    backups: Partial<InterfaceCopyPageText>;
+    apps: Partial<InterfaceCopyPageText>;
+    system: Partial<InterfaceCopyPageText>;
+    settings: Partial<InterfaceCopyPageText>;
+  };
+}
+
+export interface InterfaceCopySettings {
+  schemaVersion: "interface.copy-settings.v1";
+  revision: number;
+  /** 0 only when persisted data is unavailable and resetAll is recovery-gated. */
+  recoveryRevision: number | null;
+  updatedAt: string;
+  defaults: InterfaceCopyCatalog;
+  overrides: InterfaceCopyOverrides;
+  effective: InterfaceCopyCatalog;
+  available: boolean;
+  warnings: ("stored_copy_settings_unavailable")[];
+  writesEnabled: boolean;
+}
+
+export interface InterfaceCopyPatch {
+  expectedRevision: number;
+  field?: InterfaceCopyField;
+  value?: string | null;
+  resetAll?: boolean;
+}
 export type CoffeeStage =
   | "off"
   | "turning_on"

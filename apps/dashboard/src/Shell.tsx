@@ -9,6 +9,8 @@ import { v2VisualShellEnabled } from "./visualShellConfig";
 import { planningModuleForRoute, planningNavigationModules } from "./planningModuleRegistry";
 import { InteractionLockControl, InteractionLockStatus } from "./InteractionLock";
 import { currentProblemsForSnapshot, problemTone } from "./problemModel";
+import { useInterfaceCopy } from "./interfaceCopy";
+import type { InterfaceCopyField } from "@artem/contracts";
 
 export type RoutePath =
   | "/overview"
@@ -29,38 +31,38 @@ export type ShellNavigationTarget = ShellRoutePath | {
   readonly search?: string;
 };
 
-const primaryNavigation: Array<{ path: ShellRoutePath; label: string; short: string }> = [
-  { path: "/overview", label: "Обзор", short: "О" },
-  { path: "/weather", label: "Погода", short: "П" },
-  { path: "/home", label: "Дом", short: "Д" },
-  { path: "/services", label: "Сервисы", short: "С" },
-  { path: planningModuleForRoute("/calendar")!.route as "/calendar", label: planningModuleForRoute("/calendar")!.label, short: "К" },
-  { path: planningModuleForRoute("/tasks")!.route as "/tasks", label: planningModuleForRoute("/tasks")!.label, short: "З" },
-  { path: "/backups", label: "Резервные копии", short: "Б" }
+const primaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; short: string }> = [
+  { path: "/overview", copyKey: "navigation.overview", short: "О" },
+  { path: "/weather", copyKey: "navigation.weather", short: "П" },
+  { path: "/home", copyKey: "navigation.home", short: "Д" },
+  { path: "/services", copyKey: "navigation.services", short: "С" },
+  { path: planningModuleForRoute("/calendar")!.route as "/calendar", copyKey: "navigation.calendar", short: "К" },
+  { path: planningModuleForRoute("/tasks")!.route as "/tasks", copyKey: "navigation.tasks", short: "З" },
+  { path: "/backups", copyKey: "navigation.backups", short: "Б" }
 ];
 
-const secondaryNavigation: Array<{ path: ShellRoutePath; label: string }> = [
-  { path: "/apps", label: "Приложения" },
-  { path: "/system", label: "Система" },
-  { path: "/settings", label: "Настройки" }
+const secondaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField }> = [
+  { path: "/apps", copyKey: "navigation.apps" },
+  { path: "/system", copyKey: "navigation.system" },
+  { path: "/settings", copyKey: "navigation.settings" }
 ];
 
-const v2PrimaryNavigation: Array<{ path: ShellRoutePath; label: string; icon: IconName }> = [
-  { path: "/overview", label: "Обзор", icon: "overview" },
-  { path: "/weather", label: "Погода", icon: "weather" },
-  { path: "/home", label: "Дом", icon: "home" },
-  { path: "/services", label: "Сервисы", icon: "services" }
+const v2PrimaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; icon: IconName }> = [
+  { path: "/overview", copyKey: "navigation.overview", icon: "overview" },
+  { path: "/weather", copyKey: "navigation.weather", icon: "weather" },
+  { path: "/home", copyKey: "navigation.home", icon: "home" },
+  { path: "/services", copyKey: "navigation.services", icon: "services" }
 ];
 
-const v2PlanningNavigation: Array<{ path: ShellRoutePath; label: string; icon: IconName }> = planningNavigationModules.map((module) => ({
+const v2PlanningNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; icon: IconName }> = planningNavigationModules.map((module) => ({
   path: module.route,
-  label: module.label,
+  copyKey: `navigation.${module.domain}` as InterfaceCopyField,
   icon: module.icon
 }));
 
-const v2SecondaryNavigation: Array<{ path: ShellRoutePath; label: string; icon: IconName }> = [
-  { path: "/system", label: "Система", icon: "system" },
-  { path: "/settings", label: "Настройки", icon: "settings" }
+const v2SecondaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; icon: IconName }> = [
+  { path: "/system", copyKey: "navigation.system", icon: "system" },
+  { path: "/settings", copyKey: "navigation.settings", icon: "settings" }
 ];
 
 function NavigationLink({
@@ -131,6 +133,7 @@ function LegacyProductShell({
   onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
+  const { copy } = useInterfaceCopy();
   const [now, setNow] = useState(() => new Date());
   const currentProblems = currentProblemsForSnapshot(snapshot);
   const attentionCount = currentProblems.length;
@@ -151,7 +154,9 @@ function LegacyProductShell({
           {primaryNavigation.map((item) => (
             <NavigationLink
               key={item.path}
-              {...item}
+              path={item.path}
+              label={copy(item.copyKey)}
+              short={item.short}
               current={route}
               onNavigate={onNavigate}
             />
@@ -161,7 +166,8 @@ function LegacyProductShell({
           {secondaryNavigation.map((item) => (
             <NavigationLink
               key={item.path}
-              {...item}
+              path={item.path}
+              label={copy(item.copyKey)}
               current={route}
               onNavigate={onNavigate}
             />
@@ -196,7 +202,7 @@ function LegacyProductShell({
             <button
               className="settings-shortcut"
               type="button"
-              aria-label="Открыть настройки"
+              aria-label={`Открыть ${copy("navigation.settings")}`}
               onClick={() => onNavigate("/settings")}
             >
               А
@@ -289,6 +295,7 @@ function V2ProductShell({
   onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
+  const { copy } = useInterfaceCopy();
   const [now, setNow] = useState(() => new Date());
   const currentProblems = currentProblemsForSnapshot(snapshot);
   const attentionCount = currentProblems.length;
@@ -318,18 +325,22 @@ function V2ProductShell({
             {v2PrimaryNavigation.map((item) => (
               <V2NavigationLink
                 key={item.path}
-                {...item}
+                path={item.path}
+                label={copy(item.copyKey)}
+                icon={item.icon}
                 current={route}
                 onNavigate={onNavigate}
               />
             ))}
             <div className="v2-planning-group">
-              <p className="v2-nav-group-label">ПЛАНИРОВАНИЕ</p>
+              <p className="v2-nav-group-label">{copy("navigationGroup.planning")}</p>
               <nav aria-label="Планирование">
                 {v2PlanningNavigation.map((item) => (
                   <V2NavigationLink
                     key={item.path}
-                    {...item}
+                    path={item.path}
+                    label={copy(item.copyKey)}
+                    icon={item.icon}
                     child
                     current={route}
                     onNavigate={onNavigate}
@@ -342,7 +353,9 @@ function V2ProductShell({
             {v2SecondaryNavigation.map((item) => (
               <V2NavigationLink
                 key={item.path}
-                {...item}
+                path={item.path}
+                label={copy(item.copyKey)}
+                icon={item.icon}
                 current={route}
                 onNavigate={onNavigate}
               />
@@ -382,7 +395,7 @@ function V2ProductShell({
             <button
               className="settings-shortcut v2-settings-shortcut"
               type="button"
-              aria-label="Открыть настройки"
+              aria-label={`Открыть ${copy("navigation.settings")}`}
               onClick={() => onNavigate("/settings")}
             >
               <Icon name="settings" />

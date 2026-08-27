@@ -7,6 +7,7 @@ import { RuntimeControls } from "../../RuntimeControls";
 import { Sheet } from "../../Sheet";
 import { StatusText, WorkZone } from "../../ShellPrimitives";
 import { RogG703DetailControl } from "../../RogG703Controls";
+import { useInterfaceCopy } from "../../interfaceCopy";
 import {
   copyDiagnosticsText,
   currentProblemsForSnapshot,
@@ -112,6 +113,7 @@ function ProblemRow({ problem }: { problem: DiagnosticsProblem }) {
 }
 
 export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
+  const { copy } = useInterfaceCopy();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [report, setReport] = useState<DiagnosticsReport | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -180,7 +182,8 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   return (
     <div className="system-v2-page" data-testid="route-system" data-route-variant="v2">
       <header className="density-route-toolbar" data-testid="system-v2-toolbar">
-        <h1>Система</h1>
+        <h1>{copy("page.system.title")}</h1>
+        {copy("page.system.subtitle") && <span>{copy("page.system.subtitle")}</span>}
         <button type="button" onClick={() => setDetailsOpen(true)}>О системе</button>
       </header>
 
