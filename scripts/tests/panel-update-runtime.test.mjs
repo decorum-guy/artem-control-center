@@ -39,6 +39,8 @@ function updateLock(updatedAt, ownerPid) {
 test("panel update command accepts only exact bounded revision metadata", () => {
   assert.equal(isSafePanelUpdateCommand(validCommand()), true);
   assert.equal(isSafePanelUpdateCommand({ ...validCommand(), expectedTargetHead: CURRENT }), false);
+  assert.equal(isSafePanelUpdateCommand({ ...validCommand(), expectedTargetHead: CURRENT, repair: true }), true);
+  assert.equal(isSafePanelUpdateCommand({ ...validCommand(), expectedTargetHead: CURRENT, repair: false }), false);
   assert.equal(isSafePanelUpdateCommand({ ...validCommand(), requestId: "bad" }), false);
   assert.equal(isSafePanelUpdateCommand({ ...validCommand(), expectedCurrentHead: "main" }), false);
   assert.equal(isSafePanelUpdateCommand({ ...validCommand(), requestedAt: "not-a-date" }), false);

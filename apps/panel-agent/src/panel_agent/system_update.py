@@ -29,6 +29,11 @@ SAFE_OWNER_RESULTS = frozenset({
     "updater_unavailable",
     "capability_apply_active",
     "update_lock_mismatch",
+    "build_failed",
+    "artifact_assertion_failed",
+    "served_artifact_mismatch",
+    "restart_failed",
+    "repair_required",
 })
 
 
@@ -208,6 +213,7 @@ class PanelUpdateService:
         repo_root: Path,
         command_path: Path,
         capability_apply_state_path: Path | None = None,
+        dashboard_dist: Path | None = None,
         git_runner: GitRunner | None = None,
         update_owner_alive: UpdateOwnerAlive | None = None,
     ) -> None:
@@ -215,6 +221,7 @@ class PanelUpdateService:
         self.command_path = command_path
         self.runtime_root = command_path.parent
         self.capability_apply_state_path = capability_apply_state_path
+        self.dashboard_dist = dashboard_dist or (repo_root / "apps" / "dashboard" / "dist")
         self.lock_path = self.runtime_root / "update-lock.json"
         self.state_path = self.runtime_root / "update-state.json"
         self._git_runner = git_runner or self._run_git
@@ -227,10 +234,12 @@ class PanelUpdateService:
             return None
         repo_root = Path(__file__).resolve().parents[4]
         raw_apply_state = os.getenv("PANEL_CAPABILITY_APPLY_STATE_PATH", "").strip()
+        raw_dashboard_dist = os.getenv("PANEL_DASHBOARD_DIST", "").strip()
         return cls(
             repo_root=repo_root,
             command_path=Path(raw_command),
             capability_apply_state_path=Path(raw_apply_state) if raw_apply_state else None,
+            dashboard_dist=Path(raw_dashboard_dist) if raw_dashboard_dist else None,
         )
 
     @property
@@ -253,6 +262,18 @@ class PanelUpdateService:
 
     def _git(self, *arguments: str) -> GitCommandResult:
         return self._git_runner(tuple(arguments))
+
+    def _production_artifact_matches_revision(self, revision: str) -> bool:
+        marker = self.dashboard_dist / "dashboard-build.json"
+        payload = _read_json(marker)
+        return bool(
+            payload
+            and set(payload) == {"schemaVersion", "revision", "profile", "buildId"}
+            and payload.get("schemaVersion") == "dashboard-build.v1"
+            and payload.get("revision") == revision
+            and payload.get("profile") == "accepted-v2"
+            and payload.get("buildId") == f"{revision}:accepted-v2"
+        )
 
     def _blocked(
         self,
@@ -302,7 +323,16 @@ class PanelUpdateService:
             return self._blocked("invalid_repository")
 
         if current_head == target_head:
-            return UpdatePreflight(current_head, target_head, False, False, "up_to_date")
+            if self._production_artifact_matches_revision(current_head):
+                return UpdatePreflight(current_head, target_head, False, False, "up_to_date")
+            return UpdatePreflight(
+                current_head,
+                target_head,
+                True,
+                True,
+                "repair_required",
+                "production_artifact_mismatch",
+            )
 
         ancestor = self._git("merge-base", "--is-ancestor", current_head, target_head)
         if ancestor.returncode == 1:
@@ -405,17 +435,17 @@ class PanelUpdateService:
             if self.command_path.exists():
                 raise HTTPException(status_code=409, detail="runtime_command_busy")
 
-            _atomic_write_json(
-                self.command_path,
-                {
-                    "schemaVersion": 1,
-                    "action": "update_panel",
-                    "expectedCurrentHead": expected_current,
-                    "expectedTargetHead": expected_target,
-                    "requestId": request_id,
-                    "requestedAt": _iso_now(),
-                },
-            )
+            command = {
+                "schemaVersion": 1,
+                "action": "update_panel",
+                "expectedCurrentHead": expected_current,
+                "expectedTargetHead": expected_target,
+                "requestId": request_id,
+                "requestedAt": _iso_now(),
+            }
+            if preflight.status == "repair_required":
+                command["repair"] = True
+            _atomic_write_json(self.command_path, command)
             self._write_state("updating")
             return {"accepted": True, "status": "updating"}
         except Exception:

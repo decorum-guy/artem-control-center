@@ -1,5 +1,6 @@
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
+$runtimeCommonText = Get-Content -LiteralPath (Join-Path $PSScriptRoot "runtime-common.ps1") -Raw
 
 function Assert-EqualSet {
     param(
@@ -76,28 +77,11 @@ if ($root.OwnershipDepth -ne 0 -or $child.OwnershipDepth -ne 1 -or $grandchild.O
     throw "Owned Edge descendants must preserve bounded tree depth"
 }
 
-$visible = @(Get-ArtemVisibleKioskProcesses `
-    -Paths $paths `
-    -Processes $processes `
-    -WindowHandleResolver {
-        param($ProcessId)
-        switch ([int]$ProcessId) {
-            101 { return 424242 }
-            200 { return 999999 }
-            default { return 0 }
-        }
-    })
-Assert-EqualSet `
-    -Actual @($visible | ForEach-Object { [int]$_.ProcessId }) `
-    -Expected @(101) `
-    -Message "Visible descendant HWND must be accepted while unrelated visible Edge is rejected"
-
-$backgroundOnly = @(Get-ArtemVisibleKioskProcesses `
-    -Paths $paths `
-    -Processes $processes `
-    -WindowHandleResolver { param($ProcessId) return 0 })
-if ($backgroundOnly.Count -ne 0) {
-    throw "Background-only panel Edge tree must never count as a visible kiosk"
+# Kiosk visibility is proven by the application presence contract in
+# kiosk-presence.ps1. This process-tree fixture covers only ownership and the
+# bounded cleanup input; it must not reintroduce window-handle probing.
+if ($runtimeCommonText -match 'Get-ArtemVisibleKioskProcesses') {
+    throw "Kiosk process ownership must not use deprecated desktop-window probing"
 }
 
 $stopped = New-Object System.Collections.Generic.List[int]
@@ -131,4 +115,4 @@ if ($reusedOwned.Count -ne 0) {
     throw "A dead profile root or reused PID without the exact profile seed must not claim an unrelated tree"
 }
 
-Write-Host "Validated panel-owned Edge process tree: visible descendant HWND, unrelated rejection, background-only false, bounded cleanup and PID-reuse safety."
+Write-Host "Validated panel-owned Edge process tree: exact profile ownership, unrelated rejection, bounded cleanup and PID-reuse safety."

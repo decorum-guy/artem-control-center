@@ -58,6 +58,8 @@ jobs:
         run: |
           ./scripts/windows/test-production-scripts.ps1
           ./scripts/windows/test-update-production-validation-temp.ps1
+          ./scripts/windows/test-update-production-bootstrap.ps1
+          ./scripts/windows/test-update-production-recovery.ps1
           ./scripts/windows/test-connectivity-contract.ps1
           ./scripts/windows/test-connectivity-keygen.ps1
           ./scripts/windows/test-avalar-identities-contract.ps1
@@ -403,6 +405,9 @@ jobs:
           name: v2-full-access-touch-lock-review-${{ github.sha }}
           path: artifacts/v2-full-access-touch-lock-review
           if-no-files-found: error
+
+      - name: Build production profile for runtime smoke
+        run: npm run build:production
 
       - name: Smoke-test production runtime
         run: npm run test:production-smoke

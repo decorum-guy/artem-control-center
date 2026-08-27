@@ -190,8 +190,31 @@ function attachStream(stream, prefix, log) {
   });
 }
 
+export function readProductionBuildIdentity(path) {
+  const payload = JSON.parse(readFileSync(path, "utf8"));
+  if (
+    !payload
+    || typeof payload !== "object"
+    || Array.isArray(payload)
+    || Object.keys(payload).sort().join(",") !== "buildId,profile,revision,schemaVersion"
+    || payload.schemaVersion !== "dashboard-build.v1"
+    || typeof payload.revision !== "string"
+    || !/^[a-f0-9]{40}$/.test(payload.revision)
+    || payload.profile !== "accepted-v2"
+    || payload.buildId !== `${payload.revision}:accepted-v2`
+  ) {
+    throw new Error("Production dashboard build identity is invalid");
+  }
+  return {
+    schemaVersion: payload.schemaVersion,
+    revision: payload.revision,
+    profile: payload.profile,
+    buildId: payload.buildId
+  };
+}
+
 function currentRevision(root) {
-  const result = spawnSync("git", ["rev-parse", "--short=12", "HEAD"], {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], {
     cwd: root,
     encoding: "utf8",
     windowsHide: true
@@ -250,9 +273,13 @@ export function isSafePanelUpdateCommand(command) {
     "expectedTargetHead",
     "requestId",
     "requestedAt",
-    "schemaVersion"
+    "schemaVersion",
+    "repair"
   ].sort();
-  if (keys.length !== allowed.length || keys.some((key, index) => key !== allowed[index])) return false;
+  const withoutRepair = allowed.filter((key) => key !== "repair");
+  const hasRepairField = keys.length === allowed.length && keys.every((key, index) => key === allowed[index]);
+  const hasNormalFields = keys.length === withoutRepair.length && keys.every((key, index) => key === withoutRepair[index]);
+  if (!hasRepairField && !hasNormalFields) return false;
   return Boolean(
     command.schemaVersion === 1
     && command.action === "update_panel"
@@ -260,11 +287,12 @@ export function isSafePanelUpdateCommand(command) {
     && /^[a-f0-9]{40}$/.test(command.expectedCurrentHead)
     && typeof command.expectedTargetHead === "string"
     && /^[a-f0-9]{40}$/.test(command.expectedTargetHead)
-    && command.expectedCurrentHead !== command.expectedTargetHead
+    && (command.expectedCurrentHead !== command.expectedTargetHead || command.repair === true)
     && typeof command.requestId === "string"
     && /^[a-f0-9]{24}$/.test(command.requestId)
     && typeof command.requestedAt === "string"
     && Number.isFinite(Date.parse(command.requestedAt))
+    && (!hasRepairField || command.repair === true)
   );
 }
 
@@ -411,6 +439,7 @@ export async function runProductionRuntime() {
   const manualStopPath = join(runtimeDir, "manual-stop.json");
   const edgeProfileDir = join(runtimeDir, "edge-profile");
   const dashboardDist = resolve(root, "apps", "dashboard", "dist");
+  const dashboardBuildMetadata = join(dashboardDist, "dashboard-build.json");
   const capabilityOverridesPath = join(runtimeDir, "capability-overrides.json");
   const capabilityApplyStatePath = join(runtimeDir, "capability-apply-state.json");
   const updateLockPath = join(runtimeDir, "update-lock.json");
@@ -428,8 +457,9 @@ export async function runProductionRuntime() {
   }
   if (!existsSync(venvPython)) throw new Error("Python environment missing; run npm run setup");
   if (!existsSync(join(dashboardDist, "index.html"))) {
-    throw new Error("Dashboard build missing; run npm run build");
+    throw new Error("Production dashboard build missing; run npm run build:production");
   }
+  const dashboardBuild = readProductionBuildIdentity(dashboardBuildMetadata);
 
   const fileEnv = existsSync(configPath)
     ? parseEnvText(readFileSync(configPath, "utf8"))
@@ -511,6 +541,7 @@ export async function runProductionRuntime() {
       agentPid: agent?.pid ?? null,
       mode,
       revision,
+      buildProfile: dashboardBuild.profile,
       observedAt: new Date().toISOString(),
       restartCountInWindow: restartBudget.count(),
       ...extra

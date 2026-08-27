@@ -96,6 +96,9 @@ try {
     $updaterText = Get-Content `
         -LiteralPath (Join-Path $PSScriptRoot "update-production.ps1") `
         -Raw
+    $kioskPresenceText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "kiosk-presence.ps1") `
+        -Raw
 
     if ($installerText -notmatch 'npm\.cmd[\s\S]*?build:production') {
         throw "Production installer must use the deterministic accepted V2 build profile"
@@ -119,16 +122,25 @@ try {
     if ($runtimeCommonText -match 'CommandLine\s+-like\s+"\*--kiosk\*"') {
         throw "Kiosk shutdown must not depend on the transient --kiosk flag"
     }
-    if ($runtimeCommonText -notmatch 'function Get-ArtemVisibleKioskProcesses') {
-        throw "Visible kiosk detection must be distinct from the broad Edge profile process group"
+    if ($runtimeCommonText -match 'Get-ArtemVisibleKioskProcesses') {
+        throw "Kiosk status must not use deprecated desktop-window detection"
     }
-    if ($runtimeCommonText -notmatch 'MainWindowHandle') {
-        throw "Visible kiosk detection must require a real Edge top-level window"
+    if ($runtimeCommonText -match '(?i)HWND|MainWindowHandle' -or $kioskPresenceText -match '(?i)HWND|MainWindowHandle') {
+        throw "Kiosk ownership and visibility must not use HWND/MainWindowHandle detection"
     }
-    if ($runtimeCommonText -notmatch 'function Ensure-ArtemKioskVisible') {
-        throw "Visible kiosk restoration must use one canonical idempotent helper"
+    if ($kioskPresenceText -notmatch '(?m)^function Ensure-ArtemKioskVisible\b') {
+        throw "Visible kiosk restoration must use the canonical kiosk-presence helper"
     }
-    if ($runtimeCommonText -notmatch 'Stop-ArtemKiosk[\s\S]*?Start-Process') {
+    if (([regex]::Matches($kioskPresenceText, '(?m)^function Ensure-ArtemKioskVisible\b')).Count -ne 1) {
+        throw "Kiosk presence must contain exactly one canonical visibility/restoration helper"
+    }
+    if ($runtimeCommonText -match '(?m)^function Ensure-ArtemKioskVisible\b') {
+        throw "Visible kiosk restoration must not have a second runtime-common implementation"
+    }
+    if ($runtimeCommonText -notmatch '\.\s+\$kioskPresenceScript') {
+        throw "runtime-common must source kiosk-presence.ps1"
+    }
+    if ($kioskPresenceText -notmatch 'Stop-ArtemKiosk[\s\S]*?Start-Process') {
         throw "Stale/background panel Edge must be cleared before relaunching the kiosk"
     }
     if ($openText -notmatch 'Ensure-ArtemKioskVisible') {
@@ -192,6 +204,12 @@ try {
     if ($updaterText -notmatch 'New-ArtemUpdateLock') {
         throw "Software updater must serialize concurrent update transactions"
     }
+    if ($updaterText -notmatch '\$Continuation' -or $updaterText -notmatch 'Assert-ArtemTargetUpdaterLogic') {
+        throw "Updater must hand off target-dependent work to an explicit target continuation"
+    }
+    if ($updaterText -notmatch 'UpdateTransactionState' -or $updaterText -notmatch 'Assert-ArtemProductionBuildIdentity') {
+        throw "Updater must persist incomplete state and assert production artifact identity"
+    }
 
     $watcherText = Get-Content `
         -LiteralPath (Join-Path $PSScriptRoot "watch-kiosk.ps1") `
@@ -199,9 +217,6 @@ try {
     if ($watcherText -notmatch 'Invoke-ArtemKioskWatcherLoop') {
         throw "Kiosk watcher entrypoint must delegate to the shared watcher loop"
     }
-    $kioskPresenceText = Get-Content `
-        -LiteralPath (Join-Path $PSScriptRoot "kiosk-presence.ps1") `
-        -Raw
     if ($kioskPresenceText -notmatch 'ManualStop' -or $kioskPresenceText -notmatch 'Stop-ArtemKiosk') {
         throw "Kiosk watcher must close the dedicated profile after manual shutdown"
     }

@@ -12,7 +12,8 @@ import {
   isSafeCapabilityApplyCommand,
   planRestart,
   createCapabilityApplyLifecycle,
-  CAPABILITY_APPLY_MAX_RECOVERY_FAILURES
+  CAPABILITY_APPLY_MAX_RECOVERY_FAILURES,
+  readProductionBuildIdentity
 } from "../production-runtime.mjs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -182,6 +183,26 @@ test("production runtime uses an honest unknown revision when Git cannot provide
   });
 
   assert.equal(environment.PANEL_AGENT_BUILD_REVISION, "unknown");
+});
+
+test("production runtime accepts only the bounded dashboard build identity", () => {
+  const root = mkdtempSync(join(tmpdir(), "artem-production-build-identity-"));
+  const path = join(root, "dashboard-build.json");
+  const revision = "a".repeat(40);
+  writeFileSync(path, JSON.stringify({
+    schemaVersion: "dashboard-build.v1",
+    revision,
+    profile: "accepted-v2",
+    buildId: `${revision}:accepted-v2`
+  }));
+  assert.deepEqual(readProductionBuildIdentity(path).revision, revision);
+  writeFileSync(path, JSON.stringify({
+    schemaVersion: "dashboard-build.v1",
+    revision,
+    profile: "wrong",
+    buildId: `${revision}:wrong`
+  }));
+  assert.throws(() => readProductionBuildIdentity(path), /build identity is invalid/);
 });
 
 test("capability apply accepts only its fixed schema and revision metadata", () => {

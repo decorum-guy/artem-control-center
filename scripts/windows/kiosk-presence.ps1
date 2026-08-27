@@ -1,8 +1,8 @@
 # Application-level kiosk presence for Samsung/Edge kiosk mode.
-# MainWindowHandle is not a reliable signal on the production machine: a physically
-# visible fullscreen Edge kiosk reports HWND 0 for every msedge.exe process.
+# Process ownership and the dashboard heartbeat are intentionally separate signals.
 
 $script:ArtemKioskPresenceMaxAgeSeconds = 5
+$script:ArtemKioskWatcherMaxAgeMinutes = 15
 
 function Get-ArtemKioskPresencePath {
     param([Parameter(Mandatory)]$Paths)
@@ -29,9 +29,68 @@ function Test-ArtemKioskPresenceRecent {
     }
 }
 
+function Test-ArtemKioskWatcherOwned {
+    param([Parameter(Mandatory)]$Paths)
+    $payload = Get-ArtemJsonPayload -Path (Get-ArtemKioskWatcherOwnerPath -Paths $Paths)
+    if (
+        $null -eq $payload -or
+        $payload.schemaVersion -ne 1 -or
+        [string]$payload.watcherId -notmatch '^[0-9a-f]{32}$'
+    ) {
+        return $false
+    }
+    try {
+        $claimed = [DateTimeOffset]::Parse([string]$payload.claimedAt).ToUniversalTime()
+        $age = [DateTimeOffset]::UtcNow - $claimed
+        return $age.TotalSeconds -ge 0 -and $age.TotalMinutes -le $script:ArtemKioskWatcherMaxAgeMinutes
+    }
+    catch {
+        return $false
+    }
+}
+
+# Status is deliberately a small state contract rather than a single narrow
+# boolean. A transient process/heartbeat observation gap is reported as degraded
+# or unconfirmed while the owned runtime evidence remains visible to the owner.
+function Get-ArtemKioskStatus {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [bool]$RuntimeReady = $false
+    )
+    $processOwned = Test-ArtemKioskRunning -Paths $Paths
+    $presenceRecent = Test-ArtemKioskPresenceRecent -Paths $Paths
+    $watcherOwned = Test-ArtemKioskWatcherOwned -Paths $Paths
+    $presenceFile = Test-Path -LiteralPath (Get-ArtemKioskPresencePath -Paths $Paths)
+
+    $status = if ($processOwned -and $presenceRecent) {
+        "running"
+    }
+    elseif ($processOwned -or $watcherOwned) {
+        "degraded"
+    }
+    elseif ($presenceRecent -or ($presenceFile -and $RuntimeReady)) {
+        "unconfirmed"
+    }
+    else {
+        "stopped"
+    }
+
+    return [pscustomobject]@{
+        Status = $status
+        # An unconfirmed state is deliberately null rather than a misleading
+        # boolean. Running/degraded retain positive owned evidence; stopped is
+        # reserved for the absence of every kiosk signal.
+        Open = if ($status -eq "running" -or $status -eq "degraded") { $true } elseif ($status -eq "stopped") { $false } else { $null }
+        ProcessOwned = $processOwned
+        PresenceRecent = $presenceRecent
+        WatcherOwned = $watcherOwned
+    }
+}
+
 # Visibility is a conjunction: the rendered page is actively reporting that the
 # document is visible, and the dedicated Control Center Edge profile exists. This
-# prevents an ordinary browser tab from impersonating the kiosk while avoiding HWND.
+# prevents an ordinary browser tab from impersonating the kiosk without using
+# deprecated desktop-window probing.
 function Test-ArtemKioskVisible {
     param([Parameter(Mandatory)]$Paths)
     return (

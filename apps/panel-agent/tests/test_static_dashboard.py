@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -12,6 +14,16 @@ def make_dashboard(tmp_path):
     assets.mkdir(parents=True)
     (root / "index.html").write_text("<main>dashboard</main>", encoding="utf-8")
     (assets / "app.js").write_text("console.log('ok')", encoding="utf-8")
+    revision = "a" * 40
+    (root / "dashboard-build.json").write_text(
+        json.dumps({
+            "schemaVersion": "dashboard-build.v1",
+            "revision": revision,
+            "profile": "accepted-v2",
+            "buildId": f"{revision}:accepted-v2",
+        }),
+        encoding="utf-8",
+    )
     return root
 
 
@@ -34,6 +46,10 @@ def test_dashboard_serves_assets_and_spa_routes(tmp_path):
     assert overview.status_code == 200
     assert overview.text == "<main>dashboard</main>"
     assert overview.headers["cache-control"] == "no-store"
+
+    metadata = client.get("/api/v1/system/production-build")
+    assert metadata.status_code == 200
+    assert metadata.json()["revision"] == "a" * 40
 
     asset = client.get("/assets/app.js")
     assert asset.status_code == 200
@@ -63,3 +79,21 @@ def test_dashboard_blocks_path_escape(tmp_path):
     response = client.get("/%2e%2e/secret.txt")
     assert response.status_code == 404
     assert "secret" not in response.text
+
+
+def test_dashboard_build_metadata_fails_closed_when_marker_is_wrong(tmp_path):
+    root = make_dashboard(tmp_path)
+    (root / "dashboard-build.json").write_text(
+        json.dumps({
+            "schemaVersion": "dashboard-build.v1",
+            "revision": "b" * 40,
+            "profile": "developer",
+            "buildId": f"{'b' * 40}:developer",
+        }),
+        encoding="utf-8",
+    )
+    app = FastAPI()
+    install_dashboard_routes(app, root)
+    response = TestClient(app).get("/api/v1/system/production-build")
+    assert response.status_code == 503
+    assert str(root) not in response.text
