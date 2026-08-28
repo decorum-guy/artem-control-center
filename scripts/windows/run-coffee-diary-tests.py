@@ -61,9 +61,9 @@ def main() -> int:
         collection_process.wait(timeout=10)
         print("Timed out while collecting Coffee Diary tests", flush=True)
         return 124
-    print(collection_stdout, end="", flush=True)
-    print(collection_stderr, end="", file=sys.stderr, flush=True)
     if collection_process.returncode != 0:
+        print(collection_stdout, end="", flush=True)
+        print(collection_stderr, end="", file=sys.stderr, flush=True)
         return collection_process.returncode
 
     functions: list[str] = []
@@ -74,6 +74,7 @@ def main() -> int:
     if not functions:
         print("No Coffee Diary tests were collected", flush=True)
         return 1
+    print(f"Collected {len(functions)} Coffee Diary test functions", flush=True)
 
     for function in functions:
         result = run_pytest(f"{TEST_FILE}::{function}", "-q", timeout=30)
