@@ -175,25 +175,27 @@ export interface CoffeeData {
   timingPolicy: CoffeeTimingPolicy;
 }
 
-export type CoffeeDiaryRecipeFieldKind = "text" | "number";
+export type CoffeeDiaryPreferredDrink = "espresso" | "milk" | "universal";
 
-export interface CoffeeDiaryRecipeField {
-  key: string;
-  label: string;
-  kind: CoffeeDiaryRecipeFieldKind;
-  value: string | number;
-  unit: string | null;
-}
-
-export interface CoffeeDiaryRecipe {
-  method: string;
-  fields: CoffeeDiaryRecipeField[];
+export interface CoffeeDiaryPhoto {
+  id: string;
+  beanId: string;
+  storageId: string;
+  mediaType: string;
+  byteSize: number;
+  width: number;
+  height: number;
+  sha256: string;
+  createdAt: string;
+  deletedAt: string | null;
 }
 
 export interface CoffeeDiaryBean {
   id: string;
   version: number;
   name: string;
+  grindDescription: string | null;
+  preferredDrink: CoffeeDiaryPreferredDrink | null;
   roaster: string | null;
   roastDate: string | null;
   roastLevel: string | null;
@@ -201,7 +203,8 @@ export interface CoffeeDiaryBean {
   origin: string | null;
   processing: string | null;
   notes: string | null;
-  defaultRecipe: CoffeeDiaryRecipe | null;
+  favoriteExtractionId: string | null;
+  photoIds: string[];
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -212,8 +215,9 @@ export interface CoffeeDiaryExtraction {
   version: number;
   beanId: string;
   brewedAt: string;
-  method: string;
-  recipeSnapshot: CoffeeDiaryRecipe;
+  doseGrams: number;
+  extractionSeconds: number;
+  yieldGrams: number;
   notes: string | null;
   rating: number | null;
   createdAt: string;
@@ -227,6 +231,7 @@ export interface CoffeeDiaryCollection {
   updatedAt: string;
   beans: CoffeeDiaryBean[];
   recentExtractions: CoffeeDiaryExtraction[];
+  photos: CoffeeDiaryPhoto[];
   beanCount: number;
   extractionCount: number;
 }
@@ -243,6 +248,7 @@ export interface CoffeeDiaryExport {
   updatedAt: string;
   beans: CoffeeDiaryBean[];
   extractions: CoffeeDiaryExtraction[];
+  photos: CoffeeDiaryPhoto[];
 }
 
 export interface KettleData {

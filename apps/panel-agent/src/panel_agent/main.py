@@ -76,6 +76,7 @@ from .coffee_diary import (
     CoffeeDiaryBeanPatch,
     CoffeeDiaryCollection,
     CoffeeDiaryConflict,
+    CoffeeDiaryFavoriteExtractionPatch,
     CoffeeDiaryExtraction,
     CoffeeDiaryExtractionCreate,
     CoffeeDiaryNotFound,
@@ -429,7 +430,17 @@ def _parse_coffee_diary_payload(raw_body: bytes, model_type):
         raise HTTPException(status_code=400, detail="invalid_json")
     try:
         return model_type.model_validate(payload)
-    except ValidationError:
+    except ValidationError as exc:
+        for code in (
+            "coffee_diary_grams_invalid",
+            "coffee_diary_grams_precision_invalid",
+            "coffee_diary_preferred_drink_invalid",
+            "coffee_diary_extraction_belongs_to_another_bean",
+            "coffee_diary_favorite_extraction_required",
+            "coffee_diary_favorite_extraction_invalid",
+        ):
+            if code in str(exc):
+                raise HTTPException(status_code=422, detail=code)
         raise HTTPException(status_code=422, detail="invalid_coffee_diary_request")
 
 
@@ -448,6 +459,16 @@ _COFFEE_DIARY_PUBLIC_CODES = {
     "coffee_diary_store_write_failed",
     "coffee_diary_bean_not_found",
     "coffee_diary_extraction_not_found",
+    "coffee_diary_not_found",
+    "coffee_diary_extraction_belongs_to_another_bean",
+    "coffee_diary_favorite_extraction_required",
+    "coffee_diary_favorite_extraction_invalid",
+    "coffee_diary_grams_invalid",
+    "coffee_diary_grams_precision_invalid",
+    "coffee_diary_photo_storage_id_invalid",
+    "coffee_diary_photo_relationship_invalid",
+    "coffee_diary_preferred_drink_invalid",
+    "coffee_diary_relationship_duplicate_id",
     "coffee_diary_too_many_beans",
     "coffee_diary_too_many_extractions",
     "coffee_diary_write_disabled",
@@ -507,6 +528,23 @@ async def post_coffee_diary_bean(request: Request, response: Response) -> Coffee
     try:
         key = validate_idempotency_key(request.headers.get("Idempotency-Key"))
         result = coffee_diary_store.create_bean(payload, key)
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{result.version}"'
+    return result
+
+
+@app.patch("/api/v1/coffee-diary/beans/{bean_id}/favorite-extraction", response_model=CoffeeDiaryBean)
+async def patch_coffee_diary_favorite_extraction(bean_id: str, request: Request, response: Response) -> CoffeeDiaryBean:
+    _require_coffee_diary_write()
+    raw_body = await _read_bounded_coffee_diary_body(request)
+    payload = _parse_coffee_diary_payload(raw_body, CoffeeDiaryFavoriteExtractionPatch)
+    try:
+        result = coffee_diary_store.set_favorite_extraction(
+            validate_uuid4(bean_id), payload.extractionId, validate_if_match(request.headers.get("If-Match")),
+        )
     except Exception as exc:
         _coffee_diary_error(exc)
         raise AssertionError("unreachable")

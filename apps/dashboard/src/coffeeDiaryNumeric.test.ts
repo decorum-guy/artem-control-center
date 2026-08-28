@@ -23,4 +23,10 @@ describe("coffee diary numeric input", () => {
     expect(numericInputValue("12.")).toBeNull();
     expect(numericInputValue("12.5")).toBe(12.5);
   });
+
+  it("limits gram keypad input to one decimal place without rounding", () => {
+    expect(normalizeNumericInput("17,5", true, 8, 1)).toBe("17.5");
+    expect(normalizeNumericInput("17.15", true, 8, 1)).toBe("17.1");
+    expect(applyNumericKey("17.1", "5", true, 8, 1)).toBe("17.1");
+  });
 });

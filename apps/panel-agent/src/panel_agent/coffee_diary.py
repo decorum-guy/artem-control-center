@@ -16,12 +16,13 @@ import unicodedata
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from threading import RLock
 from typing import Any, Iterator, Mapping, Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr, UUID4, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, UUID4, field_validator, model_validator
 
 SCHEMA_VERSION = "coffee.diary.v1"
 EXPORT_SCHEMA_VERSION = "coffee.diary.export.v1"
@@ -30,13 +31,16 @@ MAX_REQUEST_BYTES = 256 * 1024
 MAX_BEANS = 500
 MAX_EXTRACTIONS = 5_000
 MAX_IDEMPOTENCY_RECORDS = 256
-MAX_RECIPE_FIELDS = 24
 MAX_COLLECTION_BEANS = 200
 MAX_COLLECTION_EXTRACTIONS = 200
-_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+MAX_PHOTOS = 2_000
+MAX_PHOTOS_PER_BEAN = 24
+MAX_PHOTO_BYTES = 25 * 1024 * 1024
 _IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+_STORAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _UTC_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_PREFERRED_DRINKS = {"espresso", "milk", "universal"}
 
 
 def _safe_text(value: str, *, limit: int, required: bool = False) -> str:
@@ -95,60 +99,47 @@ def _roast_date(value: Optional[str]) -> Optional[str]:
     return value
 
 
-class CoffeeDiaryRecipeField(BaseModel):
+def _grams(value: object) -> StrictFloat | StrictInt:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("coffee_diary_grams_invalid")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("coffee_diary_grams_invalid")
+    try:
+        decimal = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("coffee_diary_grams_invalid") from exc
+    if decimal <= 0 or decimal > Decimal("1000"):
+        raise ValueError("coffee_diary_grams_invalid")
+    if decimal.as_tuple().exponent < -1:
+        raise ValueError("coffee_diary_grams_precision_invalid")
+    return value  # type: ignore[return-value]
+
+
+class CoffeeDiaryPhoto(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    key: str = Field(min_length=1, max_length=32, pattern=_KEY_PATTERN.pattern)
-    label: str = Field(min_length=1, max_length=64)
-    kind: str = Field(pattern=r"^(text|number)$")
-    value: StrictStr | StrictInt | StrictFloat
-    unit: Optional[str] = Field(default=None, max_length=16)
+    id: UUID4
+    beanId: UUID4
+    storageId: str = Field(min_length=1, max_length=128, pattern=_STORAGE_ID_PATTERN.pattern)
+    mediaType: str = Field(min_length=1, max_length=64, pattern=r"^image/[a-z0-9.+-]+$")
+    byteSize: int = Field(gt=0, le=MAX_PHOTO_BYTES)
+    width: int = Field(gt=0, le=20_000)
+    height: int = Field(gt=0, le=20_000)
+    sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    createdAt: str
+    deletedAt: Optional[str] = None
 
-    @field_validator("label")
+    @field_validator("storageId")
     @classmethod
-    def _label(cls, value: str) -> str:
-        return _safe_text(value, limit=64, required=True)
-
-    @field_validator("unit")
-    @classmethod
-    def _unit(cls, value: Optional[str]) -> Optional[str]:
-        return _optional_text(value, limit=16)
-
-    @field_validator("value")
-    @classmethod
-    def _value_finite(cls, value: StrictStr | StrictInt | StrictFloat) -> StrictStr | StrictInt | StrictFloat:
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and (not math.isfinite(float(value)) or abs(float(value)) > 1_000_000_000):
-            raise ValueError("coffee_diary_recipe_number_invalid")
-        if isinstance(value, str):
-            return _safe_text(value, limit=160, required=True)
+    def _storage_id(cls, value: str) -> str:
+        if "/" in value or "\\" in value:
+            raise ValueError("coffee_diary_photo_storage_id_invalid")
         return value
 
-    @model_validator(mode="after")
-    def _kind_matches_value(self) -> "CoffeeDiaryRecipeField":
-        if self.kind == "number" and (isinstance(self.value, bool) or not isinstance(self.value, (int, float))):
-            raise ValueError("coffee_diary_recipe_number_required")
-        if self.kind == "text" and not isinstance(self.value, str):
-            raise ValueError("coffee_diary_recipe_text_required")
-        return self
-
-
-class CoffeeDiaryRecipe(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    method: str = Field(min_length=1, max_length=64)
-    fields: list[CoffeeDiaryRecipeField] = Field(default_factory=list, max_length=MAX_RECIPE_FIELDS)
-
-    @field_validator("method")
+    @field_validator("createdAt", "deletedAt")
     @classmethod
-    def _method(cls, value: str) -> str:
-        return _safe_text(value, limit=64, required=True)
-
-    @model_validator(mode="after")
-    def _unique_keys(self) -> "CoffeeDiaryRecipe":
-        keys = [field.key for field in self.fields]
-        if len(keys) != len(set(keys)):
-            raise ValueError("coffee_diary_recipe_duplicate_key")
-        return self
+    def _timestamps(cls, value: Optional[str]) -> Optional[str]:
+        return _utc_timestamp(value) if value is not None else None
 
 
 class CoffeeDiaryBean(BaseModel):
@@ -157,6 +148,8 @@ class CoffeeDiaryBean(BaseModel):
     id: UUID4
     version: int = Field(ge=1)
     name: str = Field(min_length=1, max_length=96)
+    grindDescription: Optional[str] = Field(default=None, max_length=240)
+    preferredDrink: Optional[str] = Field(default=None)
     roaster: Optional[str] = Field(default=None, max_length=96)
     roastDate: Optional[str] = Field(default=None, max_length=10)
     roastLevel: Optional[str] = Field(default=None, max_length=64)
@@ -164,7 +157,8 @@ class CoffeeDiaryBean(BaseModel):
     origin: Optional[str] = Field(default=None, max_length=96)
     processing: Optional[str] = Field(default=None, max_length=96)
     notes: Optional[str] = Field(default=None, max_length=2_000)
-    defaultRecipe: Optional[CoffeeDiaryRecipe] = None
+    favoriteExtractionId: Optional[UUID4] = None
+    photoIds: list[UUID4] = Field(default_factory=list, max_length=MAX_PHOTOS_PER_BEAN)
     createdAt: str
     updatedAt: str
     deletedAt: Optional[str] = None
@@ -173,6 +167,18 @@ class CoffeeDiaryBean(BaseModel):
     @classmethod
     def _name(cls, value: str) -> str:
         return _safe_text(value, limit=96, required=True)
+
+    @field_validator("grindDescription")
+    @classmethod
+    def _grind_description(cls, value: Optional[str]) -> Optional[str]:
+        return _optional_text(value, limit=240)
+
+    @field_validator("preferredDrink", mode="before")
+    @classmethod
+    def _preferred_drink(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in _PREFERRED_DRINKS:
+            raise ValueError("coffee_diary_preferred_drink_invalid")
+        return value
 
     @field_validator("roaster", "origin", "processing")
     @classmethod
@@ -212,8 +218,9 @@ class CoffeeDiaryExtraction(BaseModel):
     version: int = Field(ge=1)
     beanId: UUID4
     brewedAt: str
-    method: str = Field(min_length=1, max_length=64)
-    recipeSnapshot: CoffeeDiaryRecipe
+    doseGrams: StrictFloat | StrictInt
+    extractionSeconds: int = Field(ge=1, le=3_600)
+    yieldGrams: StrictFloat | StrictInt
     notes: Optional[str] = Field(default=None, max_length=4_000)
     rating: Optional[int] = Field(default=None, ge=1, le=10)
     createdAt: str
@@ -225,22 +232,15 @@ class CoffeeDiaryExtraction(BaseModel):
     def _timestamps(cls, value: Optional[str]) -> Optional[str]:
         return _utc_timestamp(value) if value is not None else None
 
-    @field_validator("method")
+    @field_validator("doseGrams", "yieldGrams", mode="before")
     @classmethod
-    def _method(cls, value: str) -> str:
-        return _safe_text(value, limit=64, required=True)
+    def _grams_value(cls, value: object) -> StrictFloat | StrictInt:
+        return _grams(value)
 
     @field_validator("notes")
     @classmethod
     def _notes(cls, value: Optional[str]) -> Optional[str]:
         return _optional_text(value, limit=4_000)
-
-    @model_validator(mode="after")
-    def _recipe_method_matches(self) -> "CoffeeDiaryExtraction":
-        if self.method != self.recipeSnapshot.method:
-            raise ValueError("coffee_diary_extraction_method_mismatch")
-        return self
-
 
 class CoffeeDiaryIdempotencyRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -259,12 +259,30 @@ class CoffeeDiaryDocument(BaseModel):
     updatedAt: str
     beans: list[CoffeeDiaryBean] = Field(default_factory=list, max_length=MAX_BEANS)
     extractions: list[CoffeeDiaryExtraction] = Field(default_factory=list, max_length=MAX_EXTRACTIONS)
+    photos: list[CoffeeDiaryPhoto] = Field(default_factory=list, max_length=MAX_PHOTOS)
     idempotency: list[CoffeeDiaryIdempotencyRecord] = Field(default_factory=list, max_length=MAX_IDEMPOTENCY_RECORDS)
 
     @field_validator("updatedAt")
     @classmethod
     def _updated_at(cls, value: str) -> str:
         return _utc_timestamp(value)
+
+    @model_validator(mode="after")
+    def _relationships(self) -> "CoffeeDiaryDocument":
+        extraction_by_id = {extraction.id: extraction for extraction in self.extractions}
+        photo_by_id = {photo.id: photo for photo in self.photos}
+        if len(extraction_by_id) != len(self.extractions) or len(photo_by_id) != len(self.photos):
+            raise ValueError("coffee_diary_relationship_duplicate_id")
+        for bean in self.beans:
+            if bean.favoriteExtractionId is not None:
+                favorite = extraction_by_id.get(bean.favoriteExtractionId)
+                if favorite is None or favorite.deletedAt is not None or favorite.beanId != bean.id:
+                    raise ValueError("coffee_diary_favorite_extraction_invalid")
+            for photo_id in bean.photoIds:
+                photo = photo_by_id.get(photo_id)
+                if photo is None or photo.deletedAt is not None or photo.beanId != bean.id:
+                    raise ValueError("coffee_diary_photo_relationship_invalid")
+        return self
 
 
 class CoffeeDiaryExport(BaseModel):
@@ -276,12 +294,15 @@ class CoffeeDiaryExport(BaseModel):
     updatedAt: str
     beans: list[CoffeeDiaryBean] = Field(max_length=MAX_BEANS)
     extractions: list[CoffeeDiaryExtraction] = Field(max_length=MAX_EXTRACTIONS)
+    photos: list[CoffeeDiaryPhoto] = Field(max_length=MAX_PHOTOS)
 
 
 class CoffeeDiaryBeanCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str = Field(min_length=1, max_length=96)
+    grindDescription: Optional[str] = Field(default=None, max_length=240)
+    preferredDrink: Optional[str] = Field(default=None)
     roaster: Optional[str] = Field(default=None, max_length=96)
     roastDate: Optional[str] = Field(default=None, max_length=10)
     roastLevel: Optional[str] = Field(default=None, max_length=64)
@@ -289,23 +310,37 @@ class CoffeeDiaryBeanCreate(BaseModel):
     origin: Optional[str] = Field(default=None, max_length=96)
     processing: Optional[str] = Field(default=None, max_length=96)
     notes: Optional[str] = Field(default=None, max_length=2_000)
-    defaultRecipe: Optional[CoffeeDiaryRecipe] = None
 
     @model_validator(mode="after")
     def _validate_texts(self) -> "CoffeeDiaryBeanCreate":
         CoffeeDiaryBean(
-            id=uuid4(), version=1, name=self.name, roaster=self.roaster,
+            id=uuid4(), version=1, name=self.name, grindDescription=self.grindDescription,
+            preferredDrink=self.preferredDrink, roaster=self.roaster,
             roastDate=self.roastDate, roastLevel=self.roastLevel, roastNotes=self.roastNotes,
             origin=self.origin, processing=self.processing, notes=self.notes,
-            defaultRecipe=self.defaultRecipe, createdAt=_canonical_now(), updatedAt=_canonical_now(),
+            favoriteExtractionId=None, photoIds=[], createdAt=_canonical_now(), updatedAt=_canonical_now(),
         )
         return self
+
+    @field_validator("grindDescription")
+    @classmethod
+    def _grind_description(cls, value: Optional[str]) -> Optional[str]:
+        return _optional_text(value, limit=240)
+
+    @field_validator("preferredDrink", mode="before")
+    @classmethod
+    def _preferred_drink(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in _PREFERRED_DRINKS:
+            raise ValueError("coffee_diary_preferred_drink_invalid")
+        return value
 
 
 class CoffeeDiaryBeanPatch(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=96)
+    grindDescription: Optional[str] = Field(default=None, max_length=240)
+    preferredDrink: Optional[str] = Field(default=None)
     roaster: Optional[str] = Field(default=None, max_length=96)
     roastDate: Optional[str] = Field(default=None, max_length=10)
     roastLevel: Optional[str] = Field(default=None, max_length=64)
@@ -313,7 +348,6 @@ class CoffeeDiaryBeanPatch(BaseModel):
     origin: Optional[str] = Field(default=None, max_length=96)
     processing: Optional[str] = Field(default=None, max_length=96)
     notes: Optional[str] = Field(default=None, max_length=2_000)
-    defaultRecipe: Optional[CoffeeDiaryRecipe] = None
 
     @model_validator(mode="after")
     def _non_empty(self) -> "CoffeeDiaryBeanPatch":
@@ -322,11 +356,13 @@ class CoffeeDiaryBeanPatch(BaseModel):
         supplied = self.model_dump(exclude_unset=True)
         if "name" in supplied:
             _safe_text(supplied["name"], limit=96, required=True)
-        for field, limit in (("roaster", 96), ("origin", 96), ("processing", 96), ("roastLevel", 64), ("roastNotes", 240), ("notes", 2_000)):
+        for field, limit in (("grindDescription", 240), ("roaster", 96), ("origin", 96), ("processing", 96), ("roastLevel", 64), ("roastNotes", 240), ("notes", 2_000)):
             if field in supplied:
                 _optional_text(supplied[field], limit=limit)
         if "roastDate" in supplied:
             _roast_date(supplied["roastDate"])
+        if "preferredDrink" in supplied and supplied["preferredDrink"] is not None and supplied["preferredDrink"] not in _PREFERRED_DRINKS:
+            raise ValueError("coffee_diary_preferred_drink_invalid")
         return self
 
 
@@ -334,18 +370,52 @@ class CoffeeDiaryExtractionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     brewedAt: str
-    method: str = Field(min_length=1, max_length=64)
-    recipeSnapshot: CoffeeDiaryRecipe
+    doseGrams: StrictFloat | StrictInt
+    extractionSeconds: int = Field(ge=1, le=3_600)
+    yieldGrams: StrictFloat | StrictInt
     notes: Optional[str] = Field(default=None, max_length=4_000)
     rating: Optional[int] = Field(default=None, ge=1, le=10)
+    makeFavorite: bool = False
 
     @model_validator(mode="after")
     def _validate(self) -> "CoffeeDiaryExtractionCreate":
         CoffeeDiaryExtraction(
             id=uuid4(), version=1, beanId=uuid4(), brewedAt=self.brewedAt,
-            method=self.method, recipeSnapshot=self.recipeSnapshot, notes=self.notes,
-            rating=self.rating, createdAt=_canonical_now(), updatedAt=_canonical_now(),
+            doseGrams=self.doseGrams, extractionSeconds=self.extractionSeconds, yieldGrams=self.yieldGrams,
+            notes=self.notes, rating=self.rating, createdAt=_canonical_now(), updatedAt=_canonical_now(),
         )
+        return self
+
+    @field_validator("doseGrams", "yieldGrams", mode="before")
+    @classmethod
+    def _grams_value(cls, value: object) -> StrictFloat | StrictInt:
+        return _grams(value)
+
+
+class CoffeeDiaryFavoriteExtractionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    extractionId: Optional[UUID4] = None
+
+    @field_validator("extractionId", mode="before")
+    @classmethod
+    def _uuid_value(cls, value: object) -> object:
+        if value is None or isinstance(value, UUID):
+            return value
+        if not isinstance(value, str):
+            raise ValueError("coffee_diary_favorite_extraction_invalid")
+        try:
+            parsed = UUID(value)
+        except ValueError as exc:
+            raise ValueError("coffee_diary_favorite_extraction_invalid") from exc
+        if parsed.version != 4:
+            raise ValueError("coffee_diary_favorite_extraction_invalid")
+        return parsed
+
+    @model_validator(mode="after")
+    def _required(self) -> "CoffeeDiaryFavoriteExtractionPatch":
+        if "extractionId" not in self.model_fields_set:
+            raise ValueError("coffee_diary_favorite_extraction_required")
         return self
 
 
@@ -357,6 +427,7 @@ class CoffeeDiaryCollection(BaseModel):
     updatedAt: str
     beans: list[CoffeeDiaryBean] = Field(max_length=MAX_COLLECTION_BEANS)
     recentExtractions: list[CoffeeDiaryExtraction] = Field(max_length=MAX_COLLECTION_EXTRACTIONS)
+    photos: list[CoffeeDiaryPhoto] = Field(max_length=MAX_PHOTOS)
     beanCount: int = Field(ge=0)
     extractionCount: int = Field(ge=0)
 
@@ -508,6 +579,7 @@ class CoffeeDiaryStore:
             updatedAt=document.updatedAt,
             beans=beans[:MAX_COLLECTION_BEANS],
             recentExtractions=active_extractions[:MAX_COLLECTION_EXTRACTIONS],
+            photos=[photo for photo in document.photos if photo.deletedAt is None][:MAX_PHOTOS],
             beanCount=len(beans),
             extractionCount=len(active_extractions),
         )
@@ -539,17 +611,12 @@ class CoffeeDiaryStore:
         return hashlib.sha256(_json_bytes(identity)).hexdigest()
 
     @staticmethod
-    def _legacy_idempotency_hash(operation: str, payload: BaseModel) -> str:
-        return hashlib.sha256(_json_bytes({"operation": operation, "payload": payload.model_dump(mode="json")})).hexdigest()
-
-    @staticmethod
     def _replay(
         document: CoffeeDiaryDocument,
         *,
         operation: str,
         key: str,
         request_hash: str,
-        legacy_request_hash: str | None = None,
         bean_id: UUID | None = None,
     ) -> Optional[BaseModel]:
         record = next((entry for entry in document.idempotency if entry.operation == operation and entry.key == key), None)
@@ -561,7 +628,7 @@ class CoffeeDiaryStore:
             resource = next((candidate for candidate in document.extractions if candidate.id == record.resourceId), None)
             if resource is None or bean_id is None or resource.beanId != bean_id:
                 raise CoffeeDiaryConflict("coffee_diary_idempotency_key_reused")
-        if record.requestHash != request_hash and (legacy_request_hash is None or record.requestHash != legacy_request_hash):
+        if record.requestHash != request_hash:
             raise CoffeeDiaryConflict("coffee_diary_idempotency_key_reused")
         if resource is None:
             raise CoffeeDiaryConflict("coffee_diary_idempotency_key_reused")
@@ -579,7 +646,10 @@ class CoffeeDiaryStore:
             if len(document.beans) >= MAX_BEANS:
                 raise CoffeeDiaryValidationError("coffee_diary_too_many_beans")
             now = _canonical_now()
-            bean = CoffeeDiaryBean(id=uuid4(), version=1, **payload.model_dump(), createdAt=now, updatedAt=now)
+            bean = CoffeeDiaryBean(
+                id=uuid4(), version=1, **payload.model_dump(), favoriteExtractionId=None, photoIds=[],
+                createdAt=now, updatedAt=now,
+            )
             next_idempotency = [*document.idempotency, CoffeeDiaryIdempotencyRecord(key=idempotency_key, operation="bean.create", requestHash=request_hash, resourceId=bean.id)]
             next_idempotency = next_idempotency[-MAX_IDEMPOTENCY_RECORDS:]
             next_document = document.model_copy(update={"revision": document.revision + 1, "updatedAt": now, "beans": [*document.beans, bean], "idempotency": next_idempotency})
@@ -612,6 +682,35 @@ class CoffeeDiaryStore:
 
         return self._mutate(operation)
 
+    def set_favorite_extraction(self, bean_id: UUID, extraction_id: UUID | None, expected_version: int) -> CoffeeDiaryBean:
+        def operation(document: CoffeeDiaryDocument):
+            bean_index = next((index for index, bean in enumerate(document.beans) if bean.id == bean_id), None)
+            if bean_index is None or document.beans[bean_index].deletedAt is not None:
+                raise CoffeeDiaryNotFound("coffee_diary_bean_not_found")
+            current = document.beans[bean_index]
+            if current.version != expected_version:
+                raise CoffeeDiaryConflict("revision_conflict")
+            if extraction_id is not None:
+                extraction = next((candidate for candidate in document.extractions if candidate.id == extraction_id and candidate.deletedAt is None), None)
+                if extraction is None:
+                    raise CoffeeDiaryNotFound("coffee_diary_extraction_not_found")
+                if extraction.beanId != bean_id:
+                    raise CoffeeDiaryValidationError("coffee_diary_extraction_belongs_to_another_bean")
+            if current.favoriteExtractionId == extraction_id:
+                return current, document
+            now = _canonical_now()
+            updated = current.model_copy(update={
+                "version": current.version + 1,
+                "favoriteExtractionId": extraction_id,
+                "updatedAt": now,
+            })
+            next_beans = [*document.beans]
+            next_beans[bean_index] = updated
+            next_document = document.model_copy(update={"revision": document.revision + 1, "updatedAt": now, "beans": next_beans})
+            return updated, next_document
+
+        return self._mutate(operation)
+
     def delete_bean(self, bean_id: UUID, expected_version: int) -> CoffeeDiaryBean:
         def operation(document: CoffeeDiaryDocument):
             index = next((index for index, bean in enumerate(document.beans) if bean.id == bean_id), None)
@@ -633,7 +732,6 @@ class CoffeeDiaryStore:
         if not _IDEMPOTENCY_PATTERN.fullmatch(idempotency_key):
             raise CoffeeDiaryValidationError("idempotency_key_invalid")
         request_hash = self._idempotency_hash("extraction.create", payload, bean_id=bean_id)
-        legacy_request_hash = self._legacy_idempotency_hash("extraction.create", payload)
 
         def operation(document: CoffeeDiaryDocument):
             replay = self._replay(
@@ -641,7 +739,6 @@ class CoffeeDiaryStore:
                 operation="extraction.create",
                 key=idempotency_key,
                 request_hash=request_hash,
-                legacy_request_hash=legacy_request_hash,
                 bean_id=bean_id,
             )
             if replay is not None:
@@ -652,10 +749,27 @@ class CoffeeDiaryStore:
             if len(document.extractions) >= MAX_EXTRACTIONS:
                 raise CoffeeDiaryValidationError("coffee_diary_too_many_extractions")
             now = _canonical_now()
-            extraction = CoffeeDiaryExtraction(id=uuid4(), version=1, beanId=bean_id, **payload.model_dump(), createdAt=now, updatedAt=now)
+            extraction = CoffeeDiaryExtraction(
+                id=uuid4(), version=1, beanId=bean_id,
+                **payload.model_dump(exclude={"makeFavorite"}), createdAt=now, updatedAt=now,
+            )
             next_idempotency = [*document.idempotency, CoffeeDiaryIdempotencyRecord(key=idempotency_key, operation="extraction.create", requestHash=request_hash, resourceId=extraction.id)]
             next_idempotency = next_idempotency[-MAX_IDEMPOTENCY_RECORDS:]
-            next_document = document.model_copy(update={"revision": document.revision + 1, "updatedAt": now, "extractions": [*document.extractions, extraction], "idempotency": next_idempotency})
+            next_beans = [*document.beans]
+            if payload.makeFavorite:
+                bean_index = next(index for index, candidate in enumerate(next_beans) if candidate.id == bean_id)
+                next_beans[bean_index] = bean.model_copy(update={
+                    "version": bean.version + 1,
+                    "favoriteExtractionId": extraction.id,
+                    "updatedAt": now,
+                })
+            next_document = document.model_copy(update={
+                "revision": document.revision + 1,
+                "updatedAt": now,
+                "beans": next_beans,
+                "extractions": [*document.extractions, extraction],
+                "idempotency": next_idempotency,
+            })
             return extraction, next_document
 
         return self._mutate(operation)
@@ -672,14 +786,36 @@ class CoffeeDiaryStore:
             deleted = current.model_copy(update={"version": current.version + 1, "updatedAt": now, "deletedAt": now})
             next_extractions = [*document.extractions]
             next_extractions[index] = deleted
-            next_document = document.model_copy(update={"revision": document.revision + 1, "updatedAt": now, "extractions": next_extractions})
+            next_beans = [*document.beans]
+            bean_index = next((index for index, bean in enumerate(next_beans) if bean.id == current.beanId), None)
+            if bean_index is not None and next_beans[bean_index].favoriteExtractionId == extraction_id:
+                bean = next_beans[bean_index]
+                next_beans[bean_index] = bean.model_copy(update={
+                    "version": bean.version + 1,
+                    "favoriteExtractionId": None,
+                    "updatedAt": now,
+                })
+            next_document = document.model_copy(update={
+                "revision": document.revision + 1,
+                "updatedAt": now,
+                "beans": next_beans,
+                "extractions": next_extractions,
+            })
             return deleted, next_document
 
         return self._mutate(operation)
 
     def export(self) -> CoffeeDiaryExport:
         document = self.read_document()
-        return CoffeeDiaryExport(schemaVersion=EXPORT_SCHEMA_VERSION, sourceSchemaVersion=SCHEMA_VERSION, revision=document.revision, updatedAt=document.updatedAt, beans=deepcopy(document.beans), extractions=deepcopy(document.extractions))
+        return CoffeeDiaryExport(
+            schemaVersion=EXPORT_SCHEMA_VERSION,
+            sourceSchemaVersion=SCHEMA_VERSION,
+            revision=document.revision,
+            updatedAt=document.updatedAt,
+            beans=deepcopy(document.beans),
+            extractions=deepcopy(document.extractions),
+            photos=deepcopy(document.photos),
+        )
 
     def export_bytes(self) -> bytes:
         return _json_bytes(self.export().model_dump(mode="json"))

@@ -37,11 +37,16 @@
 .coffee-diary-metadata dd { margin: 3px 0 0; color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
 .coffee-diary-long-text, .coffee-diary-extraction p { margin: 0 0 16px; color: var(--text-secondary); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .coffee-diary-recipe-card, .coffee-diary-history { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft); }
+.coffee-diary-best { margin-top: 18px; padding: 18px; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--accent-soft); }
+.coffee-diary-best h3 { margin: 2px 0 0; font-size: 19px; }
+.coffee-diary-best strong { display: block; margin-top: 14px; color: var(--text); font-size: 22px; font-variant-numeric: tabular-nums; }
+.coffee-diary-best p { margin: 14px 0 0; color: var(--text-secondary); }
 .coffee-diary-recipe-card ul, .coffee-diary-snapshot { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 0; padding: 0; list-style: none; }
 .coffee-diary-recipe-card li, .coffee-diary-snapshot li { max-width: 100%; padding: 7px 10px; border-radius: 6px; color: var(--text-secondary); background: var(--surface-secondary); overflow-wrap: anywhere; }
 .coffee-diary-recipe-card p, .coffee-diary-muted { color: var(--text-muted); }
 .coffee-diary-history__items { display: grid; gap: 10px; margin-top: 12px; }
 .coffee-diary-extraction { min-width: 0; padding: 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-secondary); }
+.coffee-diary-extraction.is-favorite { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .coffee-diary-extraction__header { display: flex; justify-content: space-between; gap: 12px; }
 .coffee-diary-extraction__header > div:first-child { min-width: 0; display: grid; gap: 4px; }
 .coffee-diary-extraction time { color: var(--text-muted); font-size: 12px; }
@@ -66,6 +71,9 @@
 .coffee-diary-recipe__field .coffee-diary-link-button { white-space: nowrap; }
 .coffee-diary-numeric-trigger { width: 100%; min-height: 48px; border: 1px solid var(--border); border-radius: var(--radius-control); padding: 10px 12px; color: var(--text); background: var(--surface-secondary); text-align: left; }
 .coffee-diary-form__error { margin: 0; color: var(--danger); line-height: 1.4; }
+.coffee-diary-secondary-fields { border-top: 1px solid var(--border-soft); padding-top: 14px; }
+.coffee-diary-secondary-fields summary { min-height: 48px; padding: 14px 0; color: var(--text-secondary); cursor: pointer; font-weight: 700; }
+.coffee-diary-secondary-fields[open] summary { color: var(--text); }
 .coffee-diary-keypad { display: grid; gap: 8px; max-width: 360px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--surface-primary); }
 .coffee-diary-keypad__display { min-height: 48px; border-radius: 6px; padding: 12px; color: var(--text); background: var(--surface-secondary); font-size: 20px; font-variant-numeric: tabular-nums; text-align: right; }
 .coffee-diary-keypad__grid { display: grid; grid-template-columns: repeat(3, minmax(48px, 1fr)); gap: 6px; }
