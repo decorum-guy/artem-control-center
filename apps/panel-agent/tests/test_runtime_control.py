@@ -153,12 +153,14 @@ def test_failed_command_write_preserves_target_and_cleans_only_own_temp(monkeypa
 
 
 def test_concurrent_kiosk_presence_requests_publish_complete_heartbeats(monkeypatch, tmp_path):
+    from panel_agent import runtime_control
+
     command_path = tmp_path / "runtime-command.json"
     module = load_app(monkeypatch, command_path, enabled=True)
     presence_path = tmp_path / "kiosk-presence.json"
     page_ids = [f"{index:024x}" for index in range(4)]
     replace_barrier = threading.Barrier(len(page_ids))
-    gate_private_replacements(monkeypatch, module, replace_barrier)
+    gate_private_replacements(monkeypatch, runtime_control, replace_barrier)
 
     def send_presence(page_id):
         with TestClient(module.app, raise_server_exceptions=False) as client:
