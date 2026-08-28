@@ -68,7 +68,11 @@ jobs:
 
       - name: Run focused Coffee Diary Windows store gate
         if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "not test_api"
+
+      - name: Run focused Coffee Diary Windows API gate
+        if: runner.os == 'Windows'
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_api"
 
       - name: Run focused Coffee Diary Windows lock gate
         if: runner.os == 'Windows'
