@@ -12,6 +12,37 @@ const labels: Record<CoffeeStage, string> = {
   stale: "Данные устарели"
 };
 
+export type CoffeeProgressTone = "cool-blue" | "transition-teal" | "ready-green";
+
+function clampProgress(progress: number): number {
+  return Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+}
+
+/**
+ * Progress tone is a semantic state value, not a decorative gradient. The
+ * source-owned color changes with canonical progress so an early warm-up
+ * cannot look ready merely because the fill is short.
+ */
+export function coffeeProgressTone(progress: number): CoffeeProgressTone {
+  const normalized = clampProgress(progress);
+  if (normalized < 0.3) return "cool-blue";
+  if (normalized < 0.8) return "transition-teal";
+  return "ready-green";
+}
+
+function interpolateChannel(start: number, end: number, progress: number): number {
+  return Math.round(start + (end - start) * progress);
+}
+
+/** Restrained blue-to-green interpolation for the current canonical value. */
+export function coffeeProgressColor(progress: number): string {
+  const normalized = clampProgress(progress);
+  const start = [77, 143, 199];
+  const end = [95, 170, 125];
+  const channels = start.map((channel, index) => interpolateChannel(channel, end[index], normalized));
+  return `rgb(${channels[0]} ${channels[1]} ${channels[2]})`;
+}
+
 function validPositive(value: number | null): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -78,6 +109,8 @@ export function coffeePresentation(data: CoffeeData, nowIso: string) {
     label: labels[stage],
     progress,
     progressText: progress === null ? null : `${Math.round(progress * 100)}%`,
+    progressTone: progress === null ? null : coffeeProgressTone(progress),
+    progressColor: progress === null ? null : coffeeProgressColor(progress),
     remainingSeconds,
     runningSeconds,
     timingMessage,

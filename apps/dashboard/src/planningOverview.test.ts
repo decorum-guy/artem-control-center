@@ -7,11 +7,14 @@ import {
   formatReminderDueLabel,
   formatReminderExactTime,
   planningHealthPresentation,
+  planningOverviewRowLimit,
   planningOverviewSummary,
   planningReferenceTime,
   selectNextCalendarEvent,
   selectNextReminder,
-  selectPrimaryOverdueTask
+  selectPrimaryOverdueTask,
+  selectUpcomingCalendarEvents,
+  selectUpcomingTasks
 } from "./planningOverview";
 
 const fixtureNow = new Date("2026-08-12T12:00:00Z");
@@ -176,6 +179,22 @@ describe("Planning Overview selectors and presentation", () => {
     expect(summary.reminder?.title).toBe("Позвонить в сервис");
     expect(summary.overdueTask?.title).toBe("Подготовить отчёт");
     expect(summary.event?.title).toBe("Встреча с командой");
+  });
+
+  it("projects a bounded deterministic density for a sufficiently large Overview widget", () => {
+    const summary = planningOverviewSummary(planningFixtures.overviewDensity, fixtureNow);
+    expect(summary.overviewItems.map((entry) => entry.item.title)).toEqual([
+      "Позвонить в сервис",
+      "Ранняя задача",
+      "Раннее событие",
+      "Поздняя задача",
+      "Позднее событие"
+    ]);
+    expect(selectUpcomingTasks(planningFixtures.overviewDensity).map((item) => item.title)).toEqual(["Ранняя задача", "Поздняя задача"]);
+    expect(selectUpcomingCalendarEvents(planningFixtures.overviewDensity, fixtureNow).map((item) => item.title)).toEqual(["Раннее событие", "Позднее событие"]);
+    expect(planningOverviewRowLimit("compact")).toBe(2);
+    expect(planningOverviewRowLimit("standard")).toBe(3);
+    expect(planningOverviewRowLimit("large")).toBe(3);
   });
 
   it("keeps the rest of `Дела` available when one summary selector fails", () => {

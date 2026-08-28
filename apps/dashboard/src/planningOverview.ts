@@ -68,12 +68,17 @@ function compareTimestampThenId(
 
 /** Select only the canonical active items from the bounded upcoming list. */
 export function selectNextReminder(snapshot: PlanningSnapshot): PlanningReminder | null {
+  return selectUpcomingReminders(snapshot)[0] ?? null;
+}
+
+/** Return the bounded active reminder projection in canonical due order. */
+export function selectUpcomingReminders(snapshot: PlanningSnapshot): PlanningReminder[] {
   return uniqueById(snapshot.reminders.upcoming)
     .filter((reminder) => reminderActiveStatuses.has(reminder.status))
     .sort((left, right) => compareTimestampThenId(
       { id: left.id, timestamp: left.dueAtUtc },
       { id: right.id, timestamp: right.dueAtUtc }
-    ))[0] ?? null;
+    ));
 }
 
 function taskDueSortKey(task: PlanningTask): string {
@@ -83,18 +88,33 @@ function taskDueSortKey(task: PlanningTask): string {
 
 /** Select the highest-priority open overdue task with deterministic due/ID ties. */
 export function selectPrimaryOverdueTask(snapshot: PlanningSnapshot): PlanningTask | null {
-  return selectOverdueTasks(snapshot)
-    .sort((left, right) => {
-      const priorityDifference = taskPriorityRank[left.priority] - taskPriorityRank[right.priority];
-      if (priorityDifference !== 0) return priorityDifference;
-      const dueDifference = compareStrings(taskDueSortKey(left), taskDueSortKey(right));
-      if (dueDifference !== 0) return dueDifference;
-      return compareStrings(left.id, right.id);
-    })[0] ?? null;
+  return sortOverdueTasks(selectOverdueTasks(snapshot))[0] ?? null;
 }
 
 export function selectOverdueTasks(snapshot: PlanningSnapshot): PlanningTask[] {
   return uniqueById(snapshot.tasks.overdue).filter((task) => task.status === "open");
+}
+
+function sortOverdueTasks(tasks: PlanningTask[]): PlanningTask[] {
+  return tasks.sort((left, right) => {
+    const priorityDifference = taskPriorityRank[left.priority] - taskPriorityRank[right.priority];
+    if (priorityDifference !== 0) return priorityDifference;
+    const dueDifference = compareStrings(taskDueSortKey(left), taskDueSortKey(right));
+    if (dueDifference !== 0) return dueDifference;
+    return compareStrings(left.id, right.id);
+  });
+}
+
+/** Select open upcoming tasks only when the snapshot has no overdue task slot. */
+export function selectUpcomingTasks(snapshot: PlanningSnapshot): PlanningTask[] {
+  return uniqueById(snapshot.tasks.upcoming)
+    .filter((task) => task.status === "open")
+    .sort((left, right) => {
+      const dueDifference = compareStrings(taskDueSortKey(left), taskDueSortKey(right));
+      if (dueDifference !== 0) return dueDifference;
+      const priorityDifference = taskPriorityRank[left.priority] - taskPriorityRank[right.priority];
+      return priorityDifference || compareStrings(left.id, right.id);
+    });
 }
 
 export function countOverdueTasks(snapshot: PlanningSnapshot): number {
@@ -234,6 +254,19 @@ export function selectNextCalendarEvent(
     .sort((left, right) => compareCalendarCandidates(left, right, "upcoming"))[0]?.event ?? null;
 }
 
+/** Return all bounded current-day/upcoming calendar events in display order. */
+export function selectUpcomingCalendarEvents(
+  snapshot: PlanningSnapshot,
+  liveNow: Date
+): PlanningCalendarEvent[] {
+  const referenceTime = planningReferenceTime(snapshot, liveNow);
+  const today = relevantCalendarCandidates(snapshot.calendar.today, referenceTime, "today")
+    .sort((left, right) => compareCalendarCandidates(left, right, "today"));
+  const upcoming = relevantCalendarCandidates(snapshot.calendar.upcoming, referenceTime, "upcoming")
+    .sort((left, right) => compareCalendarCandidates(left, right, "upcoming"));
+  return uniqueById([...today, ...upcoming].map((candidate) => candidate.event));
+}
+
 function formatClock(value: string, timeZone?: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
     hour: "2-digit",
@@ -361,7 +394,27 @@ export interface PlanningOverviewSummary {
   readonly overdueTask: PlanningTask | null;
   readonly overdueTaskCount: number;
   readonly event: PlanningCalendarEvent | null;
+  readonly overviewItems: readonly PlanningOverviewItem[];
   readonly modules: readonly PlanningOverviewModuleSummary[];
+}
+
+export type PlanningOverviewItem =
+  | { readonly kind: "reminder"; readonly item: PlanningReminder }
+  | { readonly kind: "task"; readonly item: PlanningTask; readonly overdue: boolean }
+  | { readonly kind: "calendar"; readonly item: PlanningCalendarEvent };
+
+function overviewItemSortKey(entry: PlanningOverviewItem): string {
+  if (entry.kind === "reminder") return entry.item.dueAtUtc ?? "9999-12-31T99:99:99";
+  if (entry.kind === "task") return taskDueSortKey(entry.item);
+  return entry.item.startAtUtc ?? "9999-12-31T99:99:99";
+}
+
+function overviewItemKindRank(kind: PlanningOverviewItem["kind"]): number {
+  return kind === "reminder" ? 0 : kind === "task" ? 1 : 2;
+}
+
+export function planningOverviewRowLimit(sizeVariant: string): 2 | 3 {
+  return sizeVariant === "compact" ? 2 : 3;
 }
 
 /** Fixed source-owned contribution layer for the compact `Дела` widget. */
@@ -384,17 +437,34 @@ export function planningOverviewSummary(
       overdueTask: null,
       overdueTaskCount: 0,
       event: null,
+      overviewItems: [],
       modules: planningOverviewModules.map((module) => ({ moduleId: module.id, status: "unavailable" }))
     };
   }
 
   const reminder = safe(() => selectNextReminder(snapshot), null);
-  const overdueTask = safe(() => selectPrimaryOverdueTask(snapshot), null);
-  const overdueTaskCount = safe(() => countOverdueTasks(snapshot), 0);
+  const overdueTasks = safe(() => sortOverdueTasks(selectOverdueTasks(snapshot)), []);
+  const overdueTask = overdueTasks[0] ?? null;
+  const overdueTaskCount = overdueTasks.length;
   const event = safe(() => selectNextCalendarEvent(snapshot, referenceTime), null);
+  const reminders = safe(() => selectUpcomingReminders(snapshot), []);
+  const tasks = overdueTasks.length > 0
+    ? overdueTasks.map((item) => ({ item, overdue: true as const }))
+    : safe(() => selectUpcomingTasks(snapshot), []).map((item) => ({ item, overdue: false as const }));
+  const events = safe(() => selectUpcomingCalendarEvents(snapshot, referenceTime), []);
+  const overviewItems: PlanningOverviewItem[] = [
+    ...reminders.map((item) => ({ kind: "reminder" as const, item })),
+    ...tasks.map(({ item, overdue }) => ({ kind: "task" as const, item, overdue })),
+    ...events.map((item) => ({ kind: "calendar" as const, item }))
+  ].sort((left, right) => {
+    const timestampDifference = compareStrings(overviewItemSortKey(left), overviewItemSortKey(right));
+    if (timestampDifference !== 0) return timestampDifference;
+    const kindDifference = overviewItemKindRank(left.kind) - overviewItemKindRank(right.kind);
+    return kindDifference || compareStrings(left.item.id, right.item.id);
+  });
   const modules = planningOverviewModules.map((module) => ({
     moduleId: module.id,
     status: "available" as const
   }));
-  return { health, reminder, overdueTask, overdueTaskCount, event, modules };
+  return { health, reminder, overdueTask, overdueTaskCount, event, overviewItems, modules };
 }

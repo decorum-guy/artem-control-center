@@ -30,6 +30,7 @@ type LayoutDocument = {
 };
 
 type PatchMode = "success" | "conflict" | "validation-error" | "server-error" | "abort" | "abort-different" | "abort-unavailable";
+type LayoutGateMode = "writer-true" | "writer-false" | "metadata-missing";
 
 function artifactDirectory(testInfo: { outputPath: (name: string) => string }): string {
   return process.env.V2_OVERVIEW_EDITOR_ARTIFACT_DIR ?? testInfo.outputPath("v2-overview-editor-review");
@@ -216,6 +217,25 @@ async function openEditor(page: Page, url = "/overview?theme=night"): Promise<vo
   await page.getByTestId("overview-configure").click();
   await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
   await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
+}
+
+async function installLayoutGateRoute(page: Page, mode: LayoutGateMode): Promise<{ patchCount: () => number }> {
+  let patches = 0;
+  await page.route("**/api/v1/overview/layout*", async (route) => {
+    if (route.request().method() !== "GET") {
+      patches += route.request().method() === "PATCH" ? 1 : 0;
+      await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ detail: "layout_write_not_expected" }) });
+      return;
+    }
+    const document = makeDocument();
+    const payload = mode === "metadata-missing"
+      ? Object.fromEntries(Object.entries(document).filter(([key]) => key !== "writesEnabled"))
+      : { ...document, writesEnabled: mode === "writer-true" };
+    const headers: Record<string, string> = { "cache-control": "no-store", etag: '"0"' };
+    if (mode !== "metadata-missing") headers["x-overview-layout-writes-enabled"] = String(mode === "writer-true");
+    await route.fulfill({ status: 200, contentType: "application/json", headers, body: JSON.stringify(payload) });
+  });
+  return { patchCount: () => patches };
 }
 
 async function selectFrame(page: Page, instanceId: string): Promise<void> {
@@ -432,6 +452,28 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     test.skip(!overviewV2Enabled || !overviewEditorEnabled, "Run with V2 and the Overview editor flags enabled.");
   });
 
+  test("communicates true, server-disabled, and unconfirmed layout writer gates", async ({ page }) => {
+    for (const [mode, gate, enabled, copy] of [
+      ["writer-true", "available", true, "Редактор панели готов."],
+      ["writer-false", "server-disabled", false, "Запись раскладки отключена сервером или deployment gate."],
+      ["metadata-missing", "metadata-unavailable", false, "Серверная доступность раскладки не подтверждена; запись отключена."]
+    ] as const) {
+      await page.unroute("**/api/v1/overview/layout*").catch(() => undefined);
+      const state = await installLayoutGateRoute(page, mode);
+      await page.goto("/overview?theme=night");
+      const toolbar = page.getByTestId("overview-toolbar");
+      const configure = page.getByTestId("overview-configure");
+      const note = page.locator("#overview-configure-note");
+      await expect(toolbar).toHaveAttribute("data-configure-gate", gate);
+      await expect(configure).toHaveJSProperty("disabled", !enabled);
+      await expect(note).toHaveText(copy);
+      await expect(note).toBeVisible();
+      await expect(configure).toHaveAttribute("aria-describedby", "overview-configure-note");
+      if (!enabled) await expect(configure).toHaveCSS("cursor", "not-allowed");
+      expect(state.patchCount()).toBe(0);
+    }
+  });
+
   test("keeps widget bodies inert and exposes touch-safe accessible handles", async ({ page }, testInfo) => {
     await installLayoutRoute(page);
     await openEditor(page);
@@ -625,6 +667,53 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await setCoffeeScale(page, "100");
     await assertCoffeeContentGeometry(page, "selected coffee-warming scale 100");
     await captureArtifact(page, testInfo, "overview-edit-coffee-warming-scale-100-selected.png");
+  });
+
+  test("keeps the larger Coffee composition inside compact, standard, and large variants", async ({ page }) => {
+    const routeState = await installLayoutRoute(page);
+    for (const variant of ["compact", "standard", "large"] as const) {
+      const items = cloneItems();
+      const coffee = items.find((item) => item.instanceId === "fixture.coffee");
+      const planning = items.find((item) => item.instanceId === "fixture.planning");
+      const quickActions = items.find((item) => item.instanceId === "fixture.quick-actions");
+      const health = items.find((item) => item.instanceId === "fixture.health");
+      if (coffee) {
+        coffee.sizeVariant = variant;
+        coffee.placement = variant === "compact"
+          ? { x: 0, y: 1, w: 4, h: 3 }
+          : variant === "large"
+            ? { x: 0, y: 1, w: 8, h: 5 }
+            : { x: 0, y: 1, w: 7, h: 4 };
+      }
+      if (planning) {
+        planning.sizeVariant = variant === "large" ? "compact" : "standard";
+        planning.placement = variant === "compact"
+          ? { x: 4, y: 1, w: 8, h: 3 }
+          : variant === "large"
+            ? { x: 8, y: 1, w: 4, h: 3 }
+            : { x: 7, y: 1, w: 5, h: 4 };
+      }
+      if (quickActions) quickActions.placement = variant === "large" ? { x: 0, y: 6, w: 7, h: 2 } : { x: 0, y: 5, w: 7, h: 2 };
+      if (health) health.placement = variant === "large" ? { x: 7, y: 6, w: 5, h: 2 } : { x: 7, y: 5, w: 5, h: 2 };
+      routeState.document = makeDocument(0, items);
+
+      await page.goto("/overview?scenario=coffee-off&theme=night");
+      const panel = page.getByTestId("widget-coffee-machine");
+      await expect(panel).toHaveAttribute("data-overview-size-variant", variant);
+      await expect(panel.locator(".coffee-asset__image")).toBeVisible();
+      await assertCoffeeContentGeometry(page, `Coffee ${variant}`);
+      const bounds = await panel.evaluate((element) => {
+        const panelRect = element.getBoundingClientRect();
+        const imageRect = element.querySelector(".coffee-asset__image")!.getBoundingClientRect();
+        return {
+          imageInsidePanel: imageRect.left >= panelRect.left && imageRect.right <= panelRect.right &&
+            imageRect.top >= panelRect.top && imageRect.bottom <= panelRect.bottom,
+          horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+        };
+      });
+      expect(bounds.imageInsidePanel, `Coffee ${variant} image clipped by its card`).toBe(true);
+      expect(bounds.horizontalOverflow, `Coffee ${variant} introduced horizontal overflow`).toBe(false);
+    }
   });
 
   test("scales the coffee image around its visual center without changing position", async ({ page }) => {

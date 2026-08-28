@@ -77,9 +77,10 @@ export async function getOverviewLayout(signal?: AbortSignal): Promise<OverviewL
     if (!response.ok || !payload) {
       throw new OverviewLayoutApiError("Панель не вернула сохранённую конфигурацию.", response.status);
     }
+    const writeMetadata = typeof payload.writesEnabled === "boolean" || response.headers.has("X-Overview-Layout-Writes-Enabled");
     const writesEnabled = payload.writesEnabled === true || response.headers.get("X-Overview-Layout-Writes-Enabled") === "true";
     const document = documentFromPayload(payload, writesEnabled);
-    return { document, etag: response.headers.get("ETag") ?? `"${document.revision}"`, available: true };
+    return { document, etag: response.headers.get("ETag") ?? `"${document.revision}"`, available: writeMetadata };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     if (error instanceof OverviewLayoutApiError && error.status !== 0) throw error;

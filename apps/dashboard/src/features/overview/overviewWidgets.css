@@ -50,13 +50,24 @@
 }
 
 .overview-v2-toolbar__note {
-  position: absolute;
-  width: 1px;
-  height: 1px;
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
+  color: var(--cc-text-muted);
+  font-size: var(--cc-type-metadata-size);
+  line-height: var(--cc-type-metadata-line);
   white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.overview-v2-toolbar[data-configure-gate="available"] .overview-v2-toolbar__note {
+  color: var(--cc-success);
+}
+.overview-v2-toolbar[data-configure-gate="server-disabled"] .overview-v2-toolbar__note,
+.overview-v2-toolbar[data-configure-gate="metadata-unavailable"] .overview-v2-toolbar__note,
+.overview-v2-toolbar[data-configure-gate="build-disabled"] .overview-v2-toolbar__note {
+  color: var(--cc-warning);
 }
 
 .overview-v2-real-widget {
@@ -289,6 +300,17 @@
   line-height: var(--cc-type-metadata-line);
 }
 
+.coffee-panel--overview .coffee-progress {
+  grid-template-columns: minmax(0, 250px) 42px;
+  width: min(100%, 304px);
+  gap: var(--cc-space-3);
+  margin-bottom: var(--cc-space-3);
+}
+.coffee-panel--overview .coffee-progress__track {
+  height: 10px;
+  border-radius: 6px;
+}
+
 .coffee-panel--overview .primary-action {
   min-width: 144px;
   min-height: 56px;
@@ -328,6 +350,8 @@
    visual wrapper moves the machine and its activity together, including the
    transformed image bounds used by the appearance controls. */
 .coffee-panel--overview .coffee-asset__visual {
+  position: relative;
+  left: 0;
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
@@ -336,8 +360,44 @@
   gap: 10px;
   max-width: 100%;
   max-height: 100%;
-  transform: scale(var(--cc-coffee-image-scale, 1));
+  transform: translateX(var(--cc-coffee-state-shift, 0px))
+    scale(calc(var(--cc-coffee-image-scale, 1) * var(--cc-coffee-state-scale, 1)));
   transform-origin: center center;
+  transition: none;
+}
+
+/* State changes animate the visual composition, while appearance-control
+   edits remain synchronous so the saved scale/position is immediately
+   inspectable in the editor. */
+.coffee-panel--overview.coffee-panel--transition-moving .coffee-asset__visual,
+.coffee-panel--overview.coffee-panel--transition-revealing .coffee-asset__visual {
+  transition: left 360ms var(--cc-motion-ease), transform 360ms var(--cc-motion-ease);
+}
+.coffee-panel--overview.coffee-panel--transition-moving .coffee-asset,
+.coffee-panel--overview.coffee-panel--transition-revealing .coffee-asset {
+  transition: transform 360ms var(--cc-motion-ease);
+}
+
+/* The larger resting canvas would otherwise place its transparent image box
+   over the adjacent health mark. Keep the resting/turning composition in the
+   asset column; the browser can animate this visual-only offset without
+   changing grid geometry. */
+.coffee-panel--overview.coffee-panel--off .coffee-asset__visual,
+.coffee-panel--overview.coffee-panel--turning_on .coffee-asset__visual {
+  left: clamp(72px, 8.5vw, 108px);
+}
+
+.coffee-panel--overview.coffee-panel--turning_on.coffee-panel--transition-moving,
+.coffee-panel--overview.coffee-panel--warming,
+.coffee-panel--overview.coffee-panel--ready,
+.coffee-panel--overview.coffee-panel--running,
+.coffee-panel--overview.coffee-panel--running_too_long {
+  --cc-coffee-state-shift: 18px;
+  --cc-coffee-state-scale: .94;
+}
+
+.coffee-panel--overview.coffee-panel--transition-moving .coffee-progress {
+  visibility: hidden;
 }
 
 /* Keep the quiet/default composition centered beneath the service status.
@@ -349,16 +409,36 @@
 
 .coffee-panel--overview .coffee-asset__image {
   width: auto;
-  height: 184px;
-  max-width: 140px;
+  height: 220px;
+  max-width: 164px;
   max-height: none;
   object-fit: contain;
   transform: none;
 }
 
 .coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset__image {
+  height: 176px;
+  max-width: 128px;
+}
+
+.coffee-panel--overview[data-overview-size-variant="compact"] {
+  grid-template-columns: minmax(0, 1fr) clamp(132px, 34%, 148px);
+}
+.coffee-panel--overview[data-overview-size-variant="compact"] .coffee-asset__image,
+.coffee-panel--overview[data-overview-size-variant="compact"][data-overview-copy-density="dense"] .coffee-asset__image {
   height: 148px;
   max-width: 104px;
+}
+.coffee-panel--overview[data-overview-size-variant="large"] .coffee-asset {
+  padding-right: 12px;
+}
+.coffee-panel--overview[data-overview-size-variant="large"] .coffee-asset__image {
+  height: 244px;
+  max-width: 184px;
+}
+.coffee-panel--overview[data-overview-size-variant="large"][data-overview-copy-density="dense"] .coffee-asset__image {
+  height: 196px;
+  max-width: 132px;
 }
 
 .coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset {
@@ -392,6 +472,19 @@
   transform: translateX(calc(-1 * clamp(96px, 11.2vw, 143px) + 12px * var(--cc-coffee-image-x, 0)))
     translateY(calc(4px * var(--cc-coffee-image-y, 0)));
 }
+.coffee-panel--overview[data-overview-size-variant="compact"][data-overview-copy-density="spacious"] .coffee-asset {
+  transform: translateX(0) translateY(calc(4px * var(--cc-coffee-image-y, 0)));
+}
+.overview-v2-grid-shell[data-grid-profile="landscape-12"]
+  .coffee-panel--overview[data-overview-size-variant="compact"][data-overview-copy-density="spacious"] .coffee-asset {
+  transform: translateX(0) translateY(calc(4px * var(--cc-coffee-image-y, 0)));
+}
+.coffee-panel--overview[data-overview-size-variant="compact"] .coffee-asset__visual {
+  left: 0;
+}
+.coffee-panel--overview[data-overview-copy-density="spacious"]:not([data-overview-size-variant="compact"]) .coffee-asset__visual {
+  left: clamp(72px, 8.5vw, 108px);
+}
 .coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset {
   transform: translateX(calc(12px * var(--cc-coffee-image-x, 0)))
     translateY(calc(4px * var(--cc-coffee-image-y, 0)));
@@ -411,6 +504,44 @@
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.coffee-panel--overview.coffee-panel--ready .coffee-panel__state strong {
+  color: var(--cc-success);
+  font-size: 32px;
+  font-weight: 760;
+  line-height: 34px;
+}
+.coffee-panel--overview.coffee-panel--ready .coffee-panel__state span {
+  color: var(--cc-text-secondary);
+  font-size: var(--cc-type-metadata-size);
+  line-height: var(--cc-type-metadata-line);
+}
+.coffee-panel--overview.coffee-panel--ready .coffee-state-marker {
+  color: var(--cc-success);
+  border-color: var(--cc-success-border);
+}
+
+.coffee-panel--overview .coffee-progress__track {
+  background: color-mix(in srgb, var(--cc-coffee-progress-color) 18%, var(--cc-surface-2));
+}
+.coffee-panel--overview .coffee-progress__track span {
+  background: var(--cc-coffee-progress-color);
+}
+
+.coffee-panel--overview .primary-action {
+  min-width: 144px;
+  min-height: 56px;
+}
+.coffee-panel--overview:not(.coffee-panel--off) .primary-action {
+  border-color: var(--cc-border);
+  color: var(--cc-text);
+  background: transparent;
+}
+.coffee-panel--overview:not(.coffee-panel--off) .primary-action:hover:not(:disabled),
+.coffee-panel--overview:not(.coffee-panel--off) .primary-action:focus-visible {
+  border-color: var(--cc-accent);
+  background: var(--cc-surface-2);
 }
 
 .coffee-panel--overview .coffee-activity {
@@ -609,6 +740,10 @@
   padding-bottom: 6px;
 }
 
+.overview-v2-grid-item > .planning-card[data-size-variant="compact"] .planning-card__rows {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
 .overview-v2-grid-item > .coffee-panel,
 .overview-v2-grid-item > .planning-card,
 .overview-v2-grid-item > .overview-v2-real-widget {
@@ -710,6 +845,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .coffee-panel--overview,
+  .coffee-panel--overview .coffee-asset,
+  .coffee-panel--overview .coffee-asset__visual,
   .coffee-panel--overview .coffee-progress__track span,
   .coffee-panel--overview .coffee-activity i {
     transition: none;

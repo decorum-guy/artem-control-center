@@ -16,6 +16,25 @@ async function mockPlanning(page: Page, fixture: PlanningSnapshot) {
   });
 }
 
+async function mockCompactOverviewLayout(page: Page) {
+  await page.route("**/api/v1/overview/layout*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    const payload = await response.json() as { items: Array<Record<string, unknown>> };
+    const coffee = payload.items.find((item) => item.instanceId === "fixture.coffee");
+    const planning = payload.items.find((item) => item.instanceId === "fixture.planning");
+    if (coffee) {
+      coffee.sizeVariant = "compact";
+      coffee.placement = { x: 0, y: 1, w: 4, h: 3 };
+    }
+    if (planning) {
+      planning.sizeVariant = "compact";
+      planning.placement = { x: 4, y: 1, w: 4, h: 3 };
+    }
+    await route.fulfill({ response, body: JSON.stringify(payload) });
+  });
+}
+
 async function expectInFirstViewport(locator: Locator) {
   const box = await locator.boundingBox();
   expect(box).not.toBeNull();
@@ -68,6 +87,31 @@ test.describe("B2 Planning Overview", () => {
     expect(header).not.toBeNull();
     expect(card).not.toBeNull();
     expect((card?.y ?? 0) >= ((header?.y ?? 0) + (header?.height ?? 0))).toBeTruthy();
+  });
+
+  test("uses the existing canonical projection to show up to three meaningful items by size", async ({ page }) => {
+    await mockPlanning(page, planningFixtures.overviewDensity);
+    await page.goto("/overview?theme=day");
+
+    const card = page.getByTestId("planning-overview-card");
+    await expect(card).toHaveAttribute("data-size-variant", "standard");
+    await expect(card).toHaveAttribute("data-visible-item-count", "3");
+    await expect(card.getByTestId("planning-reminder-row")).toContainText("Позвонить в сервис");
+    await expect(card.getByTestId("planning-task-row")).toContainText("Ранняя задача");
+    await expect(card.getByTestId("planning-event-row")).toContainText("Раннее событие");
+
+    const rows = await card.locator(".planning-row").evaluateAll((elements) => elements.map((element) => element.textContent?.trim()));
+    expect(rows).toEqual(expect.arrayContaining([expect.stringContaining("Ранняя задача"), expect.stringContaining("Раннее событие")]));
+
+    await mockCompactOverviewLayout(page);
+    await page.reload();
+    const compactCard = page.getByTestId("planning-overview-card");
+    await expect(compactCard).toHaveAttribute("data-size-variant", "compact");
+    await expect(compactCard).toHaveAttribute("data-visible-item-count", "2");
+    await expect(compactCard.locator(".planning-row")).toHaveCount(2);
+    await expect(compactCard.getByTestId("planning-reminder-row")).toContainText("Позвонить в сервис");
+    await expect(compactCard.getByTestId("planning-task-row")).toContainText("Ранняя задача");
+    await expectNoDocumentHorizontalOverflow(page);
   });
 
   test("routes only task and calendar rows, leaving reminders monitoring-only", async ({ page }) => {
