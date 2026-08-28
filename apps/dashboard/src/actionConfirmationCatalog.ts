@@ -13,7 +13,9 @@ export type ActionConfirmationId =
   | "planning.tasks.complete"
   | "planning.tasks.archive"
   | "planning.calendar.delete"
-  | "settings.interface-copy.reset-all";
+  | "settings.interface-copy.reset-all"
+  | "coffee-diary.bean.delete"
+  | "coffee-diary.extraction.delete";
 
 export type ActionConfirmationLevel = "simple" | "strong";
 export type ActionConfirmationTone = "standard" | "production";
@@ -184,5 +186,25 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "локальная панель",
     description: "Все пользовательские названия и подписи будут заменены стандартными.",
     confirmLabel: "Вернуть стандартные названия"
+  },
+  "coffee-diary.bean.delete": {
+    id: "coffee-diary.bean.delete",
+    level: "simple",
+    tone: "standard",
+    title: "Убрать кофе из активной коллекции?",
+    target: "Кофейное зерно",
+    environment: "Кофейный дневник",
+    description: "Зерно будет скрыто из активного списка, а история приготовлений сохранится.",
+    confirmLabel: "Убрать из коллекции"
+  },
+  "coffee-diary.extraction.delete": {
+    id: "coffee-diary.extraction.delete",
+    level: "simple",
+    tone: "standard",
+    title: "Удалить запись приготовления?",
+    target: "Приготовление кофе",
+    environment: "Кофейный дневник",
+    description: "Запись будет скрыта из истории, но останется в полном JSON-экспорте.",
+    confirmLabel: "Удалить запись"
   }
 };

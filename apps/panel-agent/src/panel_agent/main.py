@@ -68,6 +68,24 @@ from .interface_copy import (
     InterfaceCopyStoreError,
     fixture_interface_copy_response,
 )
+from .coffee_diary import (
+    MAX_REQUEST_BYTES as COFFEE_DIARY_MAX_REQUEST_BYTES,
+    CoffeeDiaryBean,
+    CoffeeDiaryBeanCreate,
+    CoffeeDiaryBeanDetail,
+    CoffeeDiaryBeanPatch,
+    CoffeeDiaryCollection,
+    CoffeeDiaryConflict,
+    CoffeeDiaryExtraction,
+    CoffeeDiaryExtractionCreate,
+    CoffeeDiaryNotFound,
+    CoffeeDiaryStore,
+    CoffeeDiaryStoreUnavailable,
+    CoffeeDiaryValidationError,
+    validate_if_match,
+    validate_idempotency_key,
+    validate_uuid4,
+)
 
 
 def configured_mode() -> PanelMode:
@@ -104,6 +122,7 @@ ai_text_service = AITextService(SETTINGS, ai_provider_settings_store)
 interface_copy_store = InterfaceCopySettingsStore.from_environment(
     writes_enabled=SETTINGS.writes_enabled,
 )
+coffee_diary_store = CoffeeDiaryStore.from_environment(writes_enabled=True)
 
 
 @asynccontextmanager
@@ -380,6 +399,168 @@ def _ai_settings_write_allowed() -> bool:
 
 def _interface_copy_write_allowed() -> bool:
     return _write_allowed(True)
+
+
+async def _read_bounded_coffee_diary_body(request: Request) -> bytes:
+    declared_length = request.headers.get("content-length")
+    if declared_length is not None:
+        try:
+            declared_bytes = int(declared_length)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid_content_length")
+        if declared_bytes < 0:
+            raise HTTPException(status_code=400, detail="invalid_content_length")
+        if declared_bytes > COFFEE_DIARY_MAX_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="coffee_diary_request_too_large")
+    chunks: list[bytes] = []
+    total_bytes = 0
+    async for chunk in request.stream():
+        total_bytes += len(chunk)
+        if total_bytes > COFFEE_DIARY_MAX_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="coffee_diary_request_too_large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _parse_coffee_diary_payload(raw_body: bytes, model_type):
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="invalid_json")
+    try:
+        return model_type.model_validate(payload)
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="invalid_coffee_diary_request")
+
+
+def _require_coffee_diary_write() -> None:
+    if not _write_allowed(True):
+        raise HTTPException(status_code=403, detail="coffee_diary_write_disabled")
+
+
+def _coffee_diary_error(exc: Exception) -> None:
+    if isinstance(exc, CoffeeDiaryStoreUnavailable):
+        raise HTTPException(status_code=503, detail=exc.code)
+    if isinstance(exc, CoffeeDiaryConflict):
+        raise HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, CoffeeDiaryNotFound):
+        raise HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, CoffeeDiaryValidationError):
+        code = str(exc)
+        if code == "coffee_diary_write_disabled":
+            raise HTTPException(status_code=403, detail=code)
+        if code in {"if_match_required", "idempotency_key_required"}:
+            raise HTTPException(status_code=428, detail=code)
+        raise HTTPException(status_code=422, detail=code)
+    raise HTTPException(status_code=500, detail="coffee_diary_unavailable")
+
+
+@app.get("/api/v1/coffee-diary", response_model=CoffeeDiaryCollection)
+def get_coffee_diary() -> CoffeeDiaryCollection:
+    try:
+        return coffee_diary_store.collection()
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+
+
+@app.get("/api/v1/coffee-diary/beans/{bean_id}", response_model=CoffeeDiaryBeanDetail)
+def get_coffee_diary_bean(bean_id: str) -> CoffeeDiaryBeanDetail:
+    try:
+        return coffee_diary_store.bean_detail(validate_uuid4(bean_id))
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+
+
+@app.post("/api/v1/coffee-diary/beans", response_model=CoffeeDiaryBean, status_code=201)
+async def post_coffee_diary_bean(request: Request, response: Response) -> CoffeeDiaryBean:
+    _require_coffee_diary_write()
+    raw_body = await _read_bounded_coffee_diary_body(request)
+    payload = _parse_coffee_diary_payload(raw_body, CoffeeDiaryBeanCreate)
+    try:
+        key = validate_idempotency_key(request.headers.get("Idempotency-Key"))
+        result = coffee_diary_store.create_bean(payload, key)
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{result.version}"'
+    return result
+
+
+@app.patch("/api/v1/coffee-diary/beans/{bean_id}", response_model=CoffeeDiaryBean)
+async def patch_coffee_diary_bean(bean_id: str, request: Request, response: Response) -> CoffeeDiaryBean:
+    _require_coffee_diary_write()
+    raw_body = await _read_bounded_coffee_diary_body(request)
+    payload = _parse_coffee_diary_payload(raw_body, CoffeeDiaryBeanPatch)
+    try:
+        result = coffee_diary_store.patch_bean(validate_uuid4(bean_id), payload, validate_if_match(request.headers.get("If-Match")))
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{result.version}"'
+    return result
+
+
+@app.delete("/api/v1/coffee-diary/beans/{bean_id}", response_model=CoffeeDiaryBean)
+def delete_coffee_diary_bean(bean_id: str, request: Request, response: Response) -> CoffeeDiaryBean:
+    _require_coffee_diary_write()
+    try:
+        result = coffee_diary_store.delete_bean(validate_uuid4(bean_id), validate_if_match(request.headers.get("If-Match")))
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{result.version}"'
+    return result
+
+
+@app.post("/api/v1/coffee-diary/beans/{bean_id}/extractions", response_model=CoffeeDiaryExtraction, status_code=201)
+async def post_coffee_diary_extraction(bean_id: str, request: Request, response: Response) -> CoffeeDiaryExtraction:
+    _require_coffee_diary_write()
+    raw_body = await _read_bounded_coffee_diary_body(request)
+    payload = _parse_coffee_diary_payload(raw_body, CoffeeDiaryExtractionCreate)
+    try:
+        key = validate_idempotency_key(request.headers.get("Idempotency-Key"))
+        result = coffee_diary_store.create_extraction(validate_uuid4(bean_id), payload, key)
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{result.version}"'
+    return result
+
+
+@app.delete("/api/v1/coffee-diary/extractions/{extraction_id}", response_model=CoffeeDiaryExtraction)
+def delete_coffee_diary_extraction(extraction_id: str, request: Request, response: Response) -> CoffeeDiaryExtraction:
+    _require_coffee_diary_write()
+    try:
+        result = coffee_diary_store.delete_extraction(validate_uuid4(extraction_id), validate_if_match(request.headers.get("If-Match")))
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{result.version}"'
+    return result
+
+
+@app.get("/api/v1/coffee-diary/export")
+def export_coffee_diary() -> Response:
+    try:
+        content = coffee_diary_store.export_bytes()
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": 'attachment; filename="coffee-diary.json"',
+        },
+    )
 
 
 def _calendar_display_known_identities() -> set[tuple[str, str]]:

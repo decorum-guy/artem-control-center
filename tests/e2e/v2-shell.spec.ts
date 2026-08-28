@@ -90,7 +90,7 @@ test.describe("Control Center V2 shell", () => {
     const navRoutes = await page.locator(".v2-nav-link").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-nav-route")));
     expect(navRoutes).toEqual([
       "/overview", "/weather", "/home", "/services",
-      "/calendar", "/tasks", "/reminders", "/system", "/settings"
+      "/coffee-diary", "/calendar", "/tasks", "/reminders", "/system", "/settings"
     ]);
     expect(await page.locator(".v2-nav-link > svg").count()).toBe(navRoutes.length);
     await expect(page.locator(".v2-navigation-primary .v2-nav-group-label")).toHaveText("ПЛАНИРОВАНИЕ");

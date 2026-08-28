@@ -73,6 +73,14 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run install:browsers
 
+      - name: Run focused Coffee Diary browser gate
+        if: runner.os == 'Linux'
+        env:
+          PANEL_COFFEE_DIARY_PATH: .cache/coffee-diary-e2e.json
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+        run: npm run test:e2e -- tests/e2e/coffee-diary.spec.ts
+
       - name: Run focused B0 browser gate
         if: runner.os == 'Linux'
         run: npm run test:e2e -- tests/e2e/b0-samsung.spec.ts

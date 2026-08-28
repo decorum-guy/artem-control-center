@@ -5,6 +5,7 @@ export type IconName =
   | "weather"
   | "home"
   | "services"
+  | "coffee"
   | "calendar"
   | "tasks"
   | "reminder"
@@ -50,6 +51,12 @@ const iconPaths: Record<IconName, ReactNode> = {
       <circle cx="7" cy="6" r="1" />
       <circle cx="17" cy="12" r="1" />
       <circle cx="9" cy="18" r="1" />
+    </>
+  ),
+  coffee: (
+    <>
+      <path d="M5 9h11v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9Z" />
+      <path d="M16 11h2a3 3 0 0 1 0 6h-2M8 5c0 1 1 1 1 2M12 5c0 1 1 1 1 2M5 21h13" />
     </>
   ),
   calendar: (

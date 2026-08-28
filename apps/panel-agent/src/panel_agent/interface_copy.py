@@ -51,6 +51,7 @@ _FIELDS: tuple[InterfaceCopyField, ...] = (
     "navigation.calendar",
     "navigation.tasks",
     "navigation.reminders",
+    "navigation.coffeeDiary",
     "navigation.backups",
     "navigation.apps",
     "navigation.system",
@@ -70,6 +71,8 @@ _FIELDS: tuple[InterfaceCopyField, ...] = (
     "page.tasks.subtitle",
     "page.reminders.title",
     "page.reminders.subtitle",
+    "page.coffeeDiary.title",
+    "page.coffeeDiary.subtitle",
     "page.backups.title",
     "page.backups.subtitle",
     "page.apps.title",
@@ -136,6 +139,7 @@ def _override_value(overrides: InterfaceCopyOverrides, field: InterfaceCopyField
     if field == "navigation.calendar": return overrides.navigation.calendar
     if field == "navigation.tasks": return overrides.navigation.tasks
     if field == "navigation.reminders": return overrides.navigation.reminders
+    if field == "navigation.coffeeDiary": return overrides.navigation.coffeeDiary
     if field == "navigation.backups": return overrides.navigation.backups
     if field == "navigation.apps": return overrides.navigation.apps
     if field == "navigation.system": return overrides.navigation.system
@@ -155,6 +159,8 @@ def _override_value(overrides: InterfaceCopyOverrides, field: InterfaceCopyField
     if field == "page.tasks.subtitle": return overrides.page.tasks.subtitle
     if field == "page.reminders.title": return overrides.page.reminders.title
     if field == "page.reminders.subtitle": return overrides.page.reminders.subtitle
+    if field == "page.coffeeDiary.title": return overrides.page.coffeeDiary.title
+    if field == "page.coffeeDiary.subtitle": return overrides.page.coffeeDiary.subtitle
     if field == "page.backups.title": return overrides.page.backups.title
     if field == "page.backups.subtitle": return overrides.page.backups.subtitle
     if field == "page.apps.title": return overrides.page.apps.title
