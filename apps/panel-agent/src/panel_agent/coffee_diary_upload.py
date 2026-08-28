@@ -325,15 +325,53 @@ class PhotoUploadRegistry:
         for session in self._sessions.values():
             if session.state in {"created", "uploading"} and now >= session.deadline:
                 session.state = "expired"
-        if len(self._sessions) > MAX_UPLOAD_REGISTRY_RECORDS:
-            terminal = [session for session in self._sessions.values() if session.state in {"consumed", "cancelled", "expired"}]
-            terminal.sort(key=lambda session: session.expires_at)
-            for session in terminal[: max(0, len(self._sessions) - MAX_UPLOAD_REGISTRY_RECORDS)]:
-                self._sessions.pop(session.session_id, None)
+        self._prune_evictable_locked()
+
+    def _session_is_evictable_locked(self, session: UploadSession, now: float) -> bool:
+        """Return whether removing a session cannot break a live capability.
+
+        Canonical photos outlive their bearer sessions.  Staged sessions are
+        retained while their separate attachment grace window is alive so the
+        authenticated panel status and pending preview remain authoritative.
+        """
+        if session.state in {"cancelled", "expired"}:
+            return True
+        if session.state == "consumed":
+            return now >= session.deadline
+        if session.state != "uploaded":
+            return False
+        if session.pending_attachment_id is None:
+            session.state = "expired"
+            return True
+        attachment = self._staged.get(session.pending_attachment_id)
+        if attachment is None:
+            session.state = "expired"
+            return True
+        if attachment.state == "uploaded" and not attachment.path.is_file():
+            session.state = "expired"
+            return True
+        return False
+
+    def _prune_evictable_locked(self, *, slots_needed: int = 0) -> None:
+        """Evict only deterministic, safely terminal records under the cap."""
+        target = max(0, MAX_UPLOAD_REGISTRY_RECORDS - slots_needed)
+        if len(self._sessions) <= target:
+            return
+        now = self._monotonic()
+        evictable = [
+            session
+            for session in self._sessions.values()
+            if self._session_is_evictable_locked(session, now)
+        ]
+        evictable.sort(key=lambda session: (session.deadline, session.session_id.hex))
+        remove_count = len(self._sessions) - target
+        for session in evictable[:remove_count]:
+            self._sessions.pop(session.session_id, None)
 
     def create(self, *, intent: Literal["bean", "bean_create"], bean_id: UUID | None) -> tuple[UploadSession, str]:
         with self._lock:
             self._cleanup_locked()
+            self._prune_evictable_locked(slots_needed=1)
             active = sum(session.state in {"created", "uploading"} for session in self._sessions.values())
             if active >= MAX_ACTIVE_UPLOAD_SESSIONS or len(self._sessions) >= MAX_UPLOAD_REGISTRY_RECORDS:
                 raise CoffeeDiaryValidationError("coffee_diary_upload_sessions_full")
@@ -391,6 +429,8 @@ class PhotoUploadRegistry:
                 session = self._lookup_by_token_locked(token)
             except CoffeeDiaryValidationError:
                 return UploadDecision(UploadResolution.INVALID)
+            if session.state in {"uploaded", "consumed"} and self._monotonic() >= session.deadline:
+                return UploadDecision(UploadResolution.EXPIRED)
             if session.state == "expired":
                 return UploadDecision(UploadResolution.EXPIRED)
             if session.state == "cancelled":

@@ -162,6 +162,198 @@ def test_registry_enforces_expiry_and_cancel_without_plaintext_tokens(tmp_path):
     assert pending_id not in registry._staged
 
 
+def test_terminal_existing_replay_expires_without_deleting_canonical_photo(monkeypatch, tmp_path):
+    module = _api_module(monkeypatch, tmp_path)
+    from panel_agent.coffee_diary_upload import UPLOAD_SESSION_TTL_SECONDS
+
+    monotonic_now = [0.0]
+    monkeypatch.setattr(module.coffee_upload_registry, "_monotonic", lambda: monotonic_now[0])
+    with TestClient(module.app) as client:
+        bean = create_bean(client, "Срок действия bearer")
+        created = client.post(f"/api/v1/coffee-diary/beans/{bean['id']}/photo-upload-sessions")
+        session = created.json()
+        token = session["uploadUrl"].split("#token=", 1)[1]
+
+        monotonic_now[0] = 1.0
+        first = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"},
+            content=image_bytes(),
+        )
+        assert first.status_code == 200
+        photo_id = first.json()["photoId"]
+        before = client.get("/api/v1/coffee-diary").json()
+        before_bean = next(item for item in before["beans"] if item["id"] == bean["id"])
+        before_revision = module.coffee_diary_store.read_document().revision
+        before_files = stored_image_files(module)
+        before_content = client.get(f"/api/v1/coffee-diary/photos/{photo_id}/content").content
+        before_hash = hashlib.sha256(before_content).hexdigest()
+
+        monotonic_now[0] = UPLOAD_SESSION_TTL_SECONDS - 1
+        inside_ttl = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "text/plain"},
+            content=b"the committed result ignores this retry body",
+        )
+        assert inside_ttl.status_code == 200
+        assert inside_ttl.json() == {"state": "consumed", "photoId": photo_id, "pendingAttachmentId": None}
+
+        monotonic_now[0] = UPLOAD_SESSION_TTL_SECONDS + 1
+        after_ttl = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "application/octet-stream"},
+            content=b"a different body remains unprocessed",
+        )
+        assert after_ttl.status_code == 410
+        assert after_ttl.json()["detail"] == "coffee_diary_upload_token_expired"
+
+        status = client.get(f"/api/v1/coffee-diary/photo-upload-sessions/{session['sessionId']}")
+        assert status.status_code == 200
+        assert status.json()["state"] == "consumed"
+        assert status.json()["photoId"] == photo_id
+        after = client.get("/api/v1/coffee-diary").json()
+        after_bean = next(item for item in after["beans"] if item["id"] == bean["id"])
+        assert after_bean["version"] == before_bean["version"]
+        assert module.coffee_diary_store.read_document().revision == before_revision
+        assert after["photos"] == before["photos"]
+        assert stored_image_files(module) == before_files
+        assert hashlib.sha256(client.get(f"/api/v1/coffee-diary/photos/{photo_id}/content").content).hexdigest() == before_hash
+
+
+def test_staged_attachment_grace_outlives_expired_upload_bearer(monkeypatch, tmp_path):
+    module = _api_module(monkeypatch, tmp_path)
+    from panel_agent.coffee_diary_upload import STAGED_ATTACHMENT_GRACE_SECONDS, UPLOAD_SESSION_TTL_SECONDS
+
+    monotonic_now = [0.0]
+    monkeypatch.setattr(module.coffee_upload_registry, "_monotonic", lambda: monotonic_now[0])
+    with TestClient(module.app) as client:
+        created = client.post("/api/v1/coffee-diary/photo-upload-sessions", json={"intent": "bean_create"})
+        session = created.json()
+        token = session["uploadUrl"].split("#token=", 1)[1]
+
+        monotonic_now[0] = 1.0
+        first = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"},
+            content=image_bytes("JPEG", exif=True),
+        )
+        assert first.status_code == 200
+        pending_id = first.json()["pendingAttachmentId"]
+        assert pending_id is not None
+
+        monotonic_now[0] = UPLOAD_SESSION_TTL_SECONDS - 1
+        inside_ttl = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "text/plain"},
+            content=b"terminal staged replay ignores this body",
+        )
+        assert inside_ttl.status_code == 200
+        assert inside_ttl.json() == {"state": "uploaded", "photoId": None, "pendingAttachmentId": pending_id}
+
+        monotonic_now[0] = UPLOAD_SESSION_TTL_SECONDS + 1
+        assert monotonic_now[0] < STAGED_ATTACHMENT_GRACE_SECONDS
+        after_ttl = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/png"},
+            content=image_bytes("PNG"),
+        )
+        assert after_ttl.status_code == 410
+        assert after_ttl.json()["detail"] == "coffee_diary_upload_token_expired"
+
+        preview = client.get(f"/api/v1/coffee-diary/pending-photo-attachments/{pending_id}/content")
+        assert preview.status_code == 200
+        status = client.get(f"/api/v1/coffee-diary/photo-upload-sessions/{session['sessionId']}")
+        assert status.status_code == 200
+        assert status.json()["state"] == "uploaded"
+        assert status.json()["pendingAttachmentId"] == pending_id
+
+        bean = client.post(
+            "/api/v1/coffee-diary/beans",
+            headers={"Idempotency-Key": f"bean-{uuid4().hex}"},
+            json={**api_bean("Grace после TTL"), "pendingPhotoAttachmentIds": [pending_id]},
+        )
+        assert bean.status_code == 201
+        photo_id = bean.json()["photoIds"][0]
+        collection = client.get("/api/v1/coffee-diary").json()
+        assert len(collection["photos"]) == 1
+        assert collection["photos"][0]["id"] == photo_id
+        assert len(stored_image_files(module)) == 1
+
+        claimed_status = client.get(f"/api/v1/coffee-diary/photo-upload-sessions/{session['sessionId']}")
+        assert claimed_status.json()["state"] == "consumed"
+        assert claimed_status.json()["photoId"] == photo_id
+
+
+def test_registry_prunes_old_terminal_records_before_exact_capacity(monkeypatch, tmp_path):
+    import panel_agent.coffee_diary_upload as upload_module
+    from panel_agent.coffee_diary_upload import PhotoStorage, PhotoUploadRegistry, UPLOAD_SESSION_TTL_SECONDS, UploadResolution
+
+    monkeypatch.setattr(upload_module, "MAX_UPLOAD_REGISTRY_RECORDS", 3)
+    monotonic_now = [0.0]
+    registry = PhotoUploadRegistry(PhotoStorage(tmp_path / "images"), monotonic=lambda: monotonic_now[0])
+
+    old_session, old_token = registry.create(intent="bean", bean_id=uuid4())
+    registry.begin_upload(old_token)
+    registry.finish_existing(old_session.session_id, uuid4())
+    monotonic_now[0] = UPLOAD_SESSION_TTL_SECONDS + 1
+
+    fresh_session, fresh_token = registry.create(intent="bean", bean_id=uuid4())
+    registry.begin_upload(fresh_token)
+    fresh_photo_id = uuid4()
+    registry.finish_existing(fresh_session.session_id, fresh_photo_id)
+    cancelled_session, cancelled_token = registry.create(intent="bean_create", bean_id=None)
+    registry.cancel(cancelled_session.session_id)
+    assert len(registry.sessions) == 3
+
+    new_session, _ = registry.create(intent="bean_create", bean_id=None)
+    assert new_session.session_id in registry.sessions
+    assert old_session.session_id not in registry.sessions
+    assert len(registry.sessions) == 3
+    fresh_decision = registry.resolve_upload(fresh_token)
+    assert fresh_decision.resolution is UploadResolution.TERMINAL_CONSUMED
+    assert fresh_decision.terminal_result == {
+        "state": "consumed",
+        "photoId": str(fresh_photo_id),
+        "pendingAttachmentId": None,
+    }
+
+    for _ in range(4):
+        monotonic_now[0] += UPLOAD_SESSION_TTL_SECONDS + 1
+        cycling_session, cycling_token = registry.create(intent="bean", bean_id=uuid4())
+        registry.begin_upload(cycling_token)
+        registry.finish_existing(cycling_session.session_id, uuid4())
+        assert len(registry.sessions) <= 3
+
+
+def test_registry_active_session_cap_remains_fail_closed(monkeypatch, tmp_path):
+    import panel_agent.coffee_diary_upload as upload_module
+    from panel_agent.coffee_diary import CoffeeDiaryValidationError
+    from panel_agent.coffee_diary_upload import PhotoStorage, PhotoUploadRegistry
+
+    monkeypatch.setattr(upload_module, "MAX_ACTIVE_UPLOAD_SESSIONS", 2)
+    monkeypatch.setattr(upload_module, "MAX_UPLOAD_REGISTRY_RECORDS", 4)
+    registry = PhotoUploadRegistry(PhotoStorage(tmp_path / "images"))
+    registry.create(intent="bean_create", bean_id=None)
+    registry.create(intent="bean_create", bean_id=None)
+    with pytest.raises(CoffeeDiaryValidationError, match="coffee_diary_upload_sessions_full"):
+        registry.create(intent="bean_create", bean_id=None)
+
+
+def test_registry_rejects_when_all_records_at_capacity_are_non_evictable(monkeypatch, tmp_path):
+    import panel_agent.coffee_diary_upload as upload_module
+    from panel_agent.coffee_diary import CoffeeDiaryValidationError
+    from panel_agent.coffee_diary_upload import PhotoStorage, PhotoUploadRegistry
+
+    monkeypatch.setattr(upload_module, "MAX_UPLOAD_REGISTRY_RECORDS", 2)
+    registry = PhotoUploadRegistry(PhotoStorage(tmp_path / "images"))
+    for _ in range(2):
+        session, token = registry.create(intent="bean", bean_id=uuid4())
+        registry.begin_upload(token)
+        registry.finish_existing(session.session_id, uuid4())
+    with pytest.raises(CoffeeDiaryValidationError, match="coffee_diary_upload_sessions_full"):
+        registry.create(intent="bean_create", bean_id=None)
+
+
 @pytest.mark.parametrize(
     ("format_name", "media_type"),
     [("JPEG", "image/jpeg"), ("PNG", "image/png"), ("WEBP", "image/webp")],
