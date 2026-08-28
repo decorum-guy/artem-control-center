@@ -369,8 +369,7 @@ test.describe("PR4 curated Overview", () => {
       rog.getByTestId("overview-rog-g703-hibernate"),
       page.getByTestId("widget-coffee-machine").getByRole("button"),
       page.getByTestId("overview-home-device-kettle"),
-      page.getByTestId("planning-reminder-row"),
-      page.getByTestId("planning-task-row")
+      page.getByTestId("planning-overview-card").locator(".planning-row").first()
     ]) {
       const box = await control.boundingBox();
       expect(box?.width).toBeGreaterThanOrEqual(48);
@@ -539,7 +538,7 @@ test.describe("PR4 curated Overview", () => {
       expect(layout.scrollHeight).toBeLessThanOrEqual(layout.clientHeight);
     }
 
-    const metadata = page.getByTestId("planning-reminder-row").locator(".planning-row__meta");
+    const metadata = page.getByTestId("planning-overview-card").locator(".planning-row__meta").first();
     await expect(metadata).toHaveCSS("font-size", "13px");
     await expect(metadata).toHaveCSS("line-height", "18px");
   });
@@ -573,9 +572,9 @@ test.describe("PR4 curated Overview", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    for (const rowId of ["planning-reminder-row", "planning-task-row", "planning-event-row"]) {
-      const row = page.getByTestId(rowId);
-      const title = row.locator(".planning-row__title");
+    const titles = page.getByTestId("planning-overview-card").locator(".planning-row__title");
+    for (let index = 0; index < await titles.count(); index += 1) {
+      const title = titles.nth(index);
       const layout = await title.evaluate((element) => ({
         clientHeight: element.clientHeight,
         overflow: getComputedStyle(element).overflow,
@@ -605,9 +604,9 @@ test.describe("PR4 curated Overview", () => {
 
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    await expect(page.getByTestId("planning-reminder-row")).toBeVisible();
-    await expect(page.getByTestId("planning-task-row")).toBeVisible();
-    await expect(page.getByTestId("planning-event-row")).toBeVisible();
+    const planning = page.getByTestId("planning-overview-card");
+    await expect(planning).toHaveAttribute("data-visible-item-count", "3");
+    await expect(planning.locator(".planning-row")).toHaveCount(3);
     await expect(page.getByTestId("overview-home-device-kettle")).toContainText("Чайник");
     await expect(page.getByTestId("overview-health-widget")).toContainText("требуют внимания");
     await expectNoOverflow(page);
