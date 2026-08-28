@@ -71,7 +71,10 @@ jobs:
         shell: pwsh
         run: |
           $collected = @(node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py --collect-only -q)
-          $testNodes = @($collected | Where-Object { $_ -match '::test_' } | ForEach-Object { ($_ -split '\[')[0] } | Select-Object -Unique)
+          $testNodes = @($collected | Where-Object { $_ -match '::test_' } | ForEach-Object {
+            $node = ($_ -split '\[')[0]
+            if ($node.StartsWith('tests/')) { "apps/panel-agent/$node" } else { $node }
+          } | Select-Object -Unique)
           if ($testNodes.Count -eq 0) {
             throw 'No Coffee Diary tests were collected'
           }
