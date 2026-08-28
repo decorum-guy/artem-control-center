@@ -505,91 +505,80 @@ def _file_lock(path: Path) -> Iterator[None]:
                 initializer.flush()
         except FileExistsError:
             pass
-    with lock_path.open("r+b", buffering=0) as handle:
-        if os.fstat(handle.fileno()).st_size == 0:
-            handle.write(b"0")
-            handle.flush()
-        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+    deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+
+    def retry_or_raise(exc: OSError) -> None:
+        if time.monotonic() >= deadline:
+            raise CoffeeDiaryStoreUnavailable("coffee_diary_store_lock_busy") from exc
+        time.sleep(min(_LOCK_RETRY_SECONDS, max(0.0, deadline - time.monotonic())))
+
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.LockFile.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+        ]
+        kernel32.LockFile.restype = wintypes.BOOL
+        kernel32.UnlockFile.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.DWORD,
+        ]
+        kernel32.UnlockFile.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        access = 0x80000000 | 0x40000000  # GENERIC_READ | GENERIC_WRITE
+        share = 0x00000001 | 0x00000002 | 0x00000004  # read/write/delete
+        windows_handle = kernel32.CreateFileW(str(lock_path), access, share, None, 3, 0x00000080, None)
+        invalid_handle = ctypes.c_void_p(-1).value
+        if windows_handle is None or getattr(windows_handle, "value", windows_handle) == invalid_handle:
+            error_code = ctypes.get_last_error()
+            raise OSError(error_code, "CreateFileW failed for Coffee Diary lock")
         locked = False
-
-        def retry_or_raise(exc: OSError) -> None:
-            if time.monotonic() >= deadline:
-                raise CoffeeDiaryStoreUnavailable("coffee_diary_store_lock_busy") from exc
-            time.sleep(min(_LOCK_RETRY_SECONDS, max(0.0, deadline - time.monotonic())))
-
-        if os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
-
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.CreateFileW.argtypes = [
-                wintypes.LPCWSTR,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                ctypes.c_void_p,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.HANDLE,
-            ]
-            kernel32.CreateFileW.restype = wintypes.HANDLE
-            kernel32.LockFile.argtypes = [
-                wintypes.HANDLE,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-            ]
-            kernel32.LockFile.restype = wintypes.BOOL
-            kernel32.UnlockFile.argtypes = [
-                wintypes.HANDLE,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-            ]
-            kernel32.UnlockFile.restype = wintypes.BOOL
-            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-            kernel32.CloseHandle.restype = wintypes.BOOL
-
-            access = 0x80000000 | 0x40000000  # GENERIC_READ | GENERIC_WRITE
-            share = 0x00000001 | 0x00000002 | 0x00000004  # read/write/delete
-            flags = 0x00000080  # FILE_ATTRIBUTE_NORMAL
-            windows_handle = kernel32.CreateFileW(str(lock_path), access, share, None, 3, flags, None)
-            invalid_handle = ctypes.c_void_p(-1).value
-            if windows_handle is None or getattr(windows_handle, "value", windows_handle) == invalid_handle:
+        lock_errors = {5, 32, 33}  # ACCESS_DENIED, SHARING_VIOLATION, LOCK_VIOLATION
+        try:
+            while not locked:
+                if kernel32.LockFile(windows_handle, 0, 0, 1, 0):
+                    locked = True
+                    continue
                 error_code = ctypes.get_last_error()
-                raise OSError(error_code, "CreateFileW failed for Coffee Diary lock")
-            lock_errors = {5, 32, 33}  # ACCESS_DENIED, SHARING_VIOLATION, LOCK_VIOLATION
+                if error_code not in lock_errors:
+                    raise OSError(error_code, "LockFile failed for Coffee Diary lock")
+                retry_or_raise(OSError(error_code, "Coffee Diary lock is busy"))
             try:
-                while not locked:
-                    if kernel32.LockFile(
-                        windows_handle,
-                        0,
-                        0,
-                        1,
-                        0,
-                    ):
-                        locked = True
-                        continue
-                    error_code = ctypes.get_last_error()
-                    if error_code not in lock_errors:
-                        raise OSError(error_code, "LockFile failed for Coffee Diary lock")
-                    retry_or_raise(OSError(error_code, "Coffee Diary lock is busy"))
-                try:
-                    yield
-                finally:
-                    if locked and not kernel32.UnlockFile(
-                        windows_handle,
-                        0,
-                        0,
-                        1,
-                        0,
-                    ):
-                        error_code = ctypes.get_last_error()
-                        raise OSError(error_code, "UnlockFile failed for Coffee Diary lock")
+                yield
             finally:
-                kernel32.CloseHandle(windows_handle)
-        else:
-            import fcntl
+                if locked and not kernel32.UnlockFile(windows_handle, 0, 0, 1, 0):
+                    error_code = ctypes.get_last_error()
+                    raise OSError(error_code, "UnlockFile failed for Coffee Diary lock")
+        finally:
+            kernel32.CloseHandle(windows_handle)
+    else:
+        import fcntl
+
+        with lock_path.open("r+b", buffering=0) as handle:
+            if os.fstat(handle.fileno()).st_size == 0:
+                handle.write(b"0")
+                handle.flush()
+            locked = False
             while not locked:
                 try:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
