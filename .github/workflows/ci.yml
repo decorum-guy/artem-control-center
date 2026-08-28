@@ -68,28 +68,7 @@ jobs:
 
       - name: Run focused Coffee Diary Windows store gate
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $collected = @(node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py --collect-only -q)
-          $testNodes = @($collected | Where-Object { $_ -match '::test_' } | ForEach-Object {
-            $node = ($_ -split '\[')[0]
-            if ($node.StartsWith('tests/')) { "apps/panel-agent/$node" } else { $node }
-          } | Select-Object -Unique)
-          if ($testNodes.Count -eq 0) {
-            throw 'No Coffee Diary tests were collected'
-          }
-          foreach ($testNode in $testNodes) {
-            Write-Host "Running $testNode"
-            $process = Start-Process -FilePath node -ArgumentList @('scripts/python.mjs', '-m', 'pytest', $testNode, '-q') -NoNewWindow -PassThru
-            if (-not $process.WaitForExit(30000)) {
-              try { $process.Kill($true) } catch { }
-              throw "Coffee Diary test timed out: $testNode"
-            }
-            if ($process.ExitCode -ne 0) {
-              throw "Coffee Diary test failed: $testNode (exit $($process.ExitCode))"
-            }
-          }
-          node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary_lock.py -q
+        run: node scripts/python.mjs scripts/windows/run-coffee-diary-tests.py
 
       - name: Run full validation
         run: npm run check
