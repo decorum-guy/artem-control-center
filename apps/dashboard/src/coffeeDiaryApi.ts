@@ -4,8 +4,10 @@ import type {
   CoffeeDiaryCollection,
   CoffeeDiaryExport,
   CoffeeDiaryExtraction,
+  CoffeeDiaryPhotoUploadResult,
   CoffeeDiaryPhoto,
-  CoffeeDiaryPreferredDrink
+  CoffeeDiaryPreferredDrink,
+  CoffeeDiaryUploadSession
 } from "@artem/contracts";
 
 export class CoffeeDiaryApiError extends Error {
@@ -235,4 +237,110 @@ export function deleteCoffeeDiaryExtraction(extractionId: string, version: numbe
 
 export function getCoffeeDiaryExport(): Promise<CoffeeDiaryExport> {
   return requestJson("/api/v1/coffee-diary/export", parseCoffeeDiaryExport);
+}
+
+function parseUploadSession(value: unknown): CoffeeDiaryUploadSession {
+  const raw = object(value, "upload_session");
+  const hasUrl = Object.prototype.hasOwnProperty.call(raw, "uploadUrl");
+  exactKeys(raw, hasUrl
+    ? ["sessionId", "state", "expiresAt", "remainingSeconds", "uploadUrl", "pendingAttachmentId", "photoId"]
+    : ["sessionId", "state", "expiresAt", "remainingSeconds", "pendingAttachmentId", "photoId"], "upload_session");
+  if (typeof raw.sessionId !== "string" || typeof raw.expiresAt !== "string" || typeof raw.remainingSeconds !== "number" || !Number.isSafeInteger(raw.remainingSeconds) || raw.remainingSeconds < 0) throw new Error("invalid_upload_session");
+  if (!(["created", "uploading", "uploaded", "consumed", "cancelled", "expired"] as const).includes(raw.state as CoffeeDiaryUploadSession["state"])) throw new Error("invalid_upload_session_state");
+  if (raw.pendingAttachmentId !== null && typeof raw.pendingAttachmentId !== "string") throw new Error("invalid_pending_attachment");
+  if (raw.photoId !== null && typeof raw.photoId !== "string") throw new Error("invalid_upload_photo");
+  if (hasUrl && typeof raw.uploadUrl !== "string") throw new Error("invalid_upload_url");
+  return {
+    sessionId: raw.sessionId,
+    state: raw.state as CoffeeDiaryUploadSession["state"],
+    expiresAt: raw.expiresAt,
+    remainingSeconds: raw.remainingSeconds,
+    uploadUrl: hasUrl ? raw.uploadUrl as string : undefined,
+    pendingAttachmentId: raw.pendingAttachmentId as string | null,
+    photoId: raw.photoId as string | null
+  };
+}
+
+function parsePhotoUploadResult(value: unknown): CoffeeDiaryPhotoUploadResult {
+  const raw = object(value, "photo_upload");
+  exactKeys(raw, ["state", "pendingAttachmentId", "photoId"], "photo_upload");
+  if (raw.state !== "uploaded" && raw.state !== "consumed") throw new Error("invalid_photo_upload_state");
+  if (raw.pendingAttachmentId !== null && typeof raw.pendingAttachmentId !== "string") throw new Error("invalid_pending_attachment");
+  if (raw.photoId !== null && typeof raw.photoId !== "string") throw new Error("invalid_upload_photo");
+  return {
+    state: raw.state,
+    pendingAttachmentId: raw.pendingAttachmentId as string | null,
+    photoId: raw.photoId as string | null
+  };
+}
+
+export function createCoffeeDiaryPhotoUploadSession(beanId: string): Promise<CoffeeDiaryUploadSession> {
+  return requestJson(`/api/v1/coffee-diary/beans/${encodeURIComponent(beanId)}/photo-upload-sessions`, parseUploadSession, { method: "POST" });
+}
+
+export function createCoffeeDiaryBeanPhotoUploadSession(): Promise<CoffeeDiaryUploadSession> {
+  return requestJson("/api/v1/coffee-diary/photo-upload-sessions", parseUploadSession, { method: "POST", body: JSON.stringify({ intent: "bean_create" }) });
+}
+
+export function getCoffeeDiaryPhotoUploadSession(sessionId: string): Promise<CoffeeDiaryUploadSession> {
+  return requestJson(`/api/v1/coffee-diary/photo-upload-sessions/${encodeURIComponent(sessionId)}`, parseUploadSession);
+}
+
+export function cancelCoffeeDiaryPhotoUploadSession(sessionId: string): Promise<CoffeeDiaryUploadSession> {
+  return requestJson(`/api/v1/coffee-diary/photo-upload-sessions/${encodeURIComponent(sessionId)}`, parseUploadSession, { method: "DELETE" });
+}
+
+export async function discardCoffeeDiaryPendingPhoto(pendingId: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1/coffee-diary/pending-photo-attachments/${encodeURIComponent(pendingId)}`, { method: "DELETE", cache: "no-store" });
+  } catch {
+    throw new CoffeeDiaryApiError(0, "network");
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: unknown } | null;
+    throw new CoffeeDiaryApiError(response.status, typeof body?.detail === "string" ? body.detail : `http_${response.status}`);
+  }
+}
+
+export async function uploadCoffeeDiaryPhoto(token: string, file: File): Promise<CoffeeDiaryPhotoUploadResult> {
+  let response: Response;
+  try {
+    response = await fetch("/api/v1/coffee-diary/photo-upload", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "X-Coffee-Upload-Token": token, "Content-Type": file.type },
+      body: file
+    });
+  } catch {
+    throw new CoffeeDiaryApiError(0, "network");
+  }
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const code = body && typeof body === "object" && typeof (body as { detail?: unknown }).detail === "string"
+      ? (body as { detail: string }).detail
+      : `http_${response.status}`;
+    throw new CoffeeDiaryApiError(response.status, code);
+  }
+  try {
+    return parsePhotoUploadResult(body);
+  } catch {
+    throw new CoffeeDiaryApiError(response.status, "contract");
+  }
+}
+
+export function coffeeDiaryPhotoContentUrl(photoId: string): string {
+  return `/api/v1/coffee-diary/photos/${encodeURIComponent(photoId)}/content`;
+}
+
+export function coffeeDiaryPendingPhotoContentUrl(pendingId: string): string {
+  return `/api/v1/coffee-diary/pending-photo-attachments/${encodeURIComponent(pendingId)}/content`;
+}
+
+export function downloadCoffeeDiaryCsv(): void {
+  window.location.assign("/api/v1/coffee-diary/export.csv");
+}
+
+export function downloadCoffeeDiaryZip(): void {
+  window.location.assign("/api/v1/coffee-diary/export.zip");
 }

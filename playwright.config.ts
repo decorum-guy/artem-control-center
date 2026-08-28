@@ -1,4 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const planningOverviewFlag = process.env.B2_PLANNING_OVERVIEW_ENABLED === "true" ? "true" : "false";
 const planningTasksFlag = process.env.B3_PLANNING_TASKS_ROUTE_ENABLED === "true" ? "true" : "false";
@@ -15,6 +17,7 @@ const overviewLayoutPath = process.env.PANEL_OVERVIEW_LAYOUT_PATH ?? ".cache/ove
 const touchInputLockFlag = process.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true" ? "true" : "false";
 const touchInputLockStartLockedFlag = process.env.VITE_TOUCH_INPUT_LOCK_START_LOCKED === "true" ? "true" : "false";
 const coffeeDiaryPath = process.env.PANEL_COFFEE_DIARY_PATH ?? ".cache/coffee-diary-e2e.json";
+const coffeeDiaryImageDir = process.env.PANEL_COFFEE_DIARY_IMAGE_DIR ?? join(tmpdir(), "artem-control-center-coffee-diary-images");
 const planningFixtureScenario = planningTasksFlag === "true" || planningCalendarFlag === "true" || planningRemindersFlag === "true"
   ? "b3-healthy"
   : "overview-healthy";
@@ -39,7 +42,7 @@ export default defineConfig({
     }
   ],
   webServer: useExternalServer ? undefined : {
-    command: `PANEL_AGENT_RELOAD=false PANEL_WRITES_ENABLED=true PANEL_COFFEE_DIARY_PATH=${coffeeDiaryPath} PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED=${overviewLayoutWritesFlag} PANEL_OVERVIEW_LAYOUT_PATH=${overviewLayoutPath} PANEL_COFFEE_TIMING_WRITES_ENABLED=true PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED=true PANEL_COFFEE_ACTIONS_ENABLED=true PANEL_PLANNING_ENABLED=true PANEL_PLANNING_BASE_URL=http://fixture.test PANEL_PLANNING_INTERNAL_SECRET=synthetic-internal-secret PANEL_PLANNING_SECRET=synthetic-panel-agent-secret PANEL_PLANNING_FIXTURE_SCENARIO=${planningFixtureScenario} PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED=${planningReminderMutationsFlag} PANEL_PLANNING_TASK_MUTATIONS_ENABLED=${planningTaskMutationsFlag} PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED=${planningCalendarMutationsFlag} VITE_V2_VISUAL_SHELL=${visualShellFlag} VITE_OVERVIEW_V2_ENABLED=${overviewV2Flag} VITE_OVERVIEW_EDITOR_ENABLED=${overviewEditorFlag} VITE_PLANNING_OVERVIEW_ENABLED=${planningOverviewFlag} VITE_PLANNING_TASKS_ROUTE_ENABLED=${planningTasksFlag} VITE_PLANNING_CALENDAR_ROUTE_ENABLED=${planningCalendarFlag} VITE_PLANNING_REMINDERS_ROUTE_ENABLED=${planningRemindersFlag} VITE_PLANNING_REMINDER_MUTATIONS_ENABLED=${planningReminderMutationsFlag} VITE_PLANNING_TASK_MUTATIONS_ENABLED=${planningTaskMutationsFlag} VITE_TOUCH_INPUT_LOCK_ENABLED=${touchInputLockFlag} VITE_TOUCH_INPUT_LOCK_START_LOCKED=${touchInputLockStartLockedFlag} npm run dev:fixtures`,
+    command: `PANEL_AGENT_RELOAD=false PANEL_WRITES_ENABLED=true PANEL_COFFEE_DIARY_PATH=${coffeeDiaryPath} PANEL_COFFEE_DIARY_IMAGE_DIR=${coffeeDiaryImageDir} PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED=${overviewLayoutWritesFlag} PANEL_OVERVIEW_LAYOUT_PATH=${overviewLayoutPath} PANEL_COFFEE_TIMING_WRITES_ENABLED=true PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED=true PANEL_COFFEE_ACTIONS_ENABLED=true PANEL_PLANNING_ENABLED=true PANEL_PLANNING_BASE_URL=http://fixture.test PANEL_PLANNING_INTERNAL_SECRET=synthetic-internal-secret PANEL_PLANNING_SECRET=synthetic-panel-agent-secret PANEL_PLANNING_FIXTURE_SCENARIO=${planningFixtureScenario} PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED=${planningReminderMutationsFlag} PANEL_PLANNING_TASK_MUTATIONS_ENABLED=${planningTaskMutationsFlag} PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED=${planningCalendarMutationsFlag} VITE_V2_VISUAL_SHELL=${visualShellFlag} VITE_OVERVIEW_V2_ENABLED=${overviewV2Flag} VITE_OVERVIEW_EDITOR_ENABLED=${overviewEditorFlag} VITE_PLANNING_OVERVIEW_ENABLED=${planningOverviewFlag} VITE_PLANNING_TASKS_ROUTE_ENABLED=${planningTasksFlag} VITE_PLANNING_REMINDERS_ROUTE_ENABLED=${planningRemindersFlag} VITE_PLANNING_REMINDER_MUTATIONS_ENABLED=${planningReminderMutationsFlag} VITE_PLANNING_TASK_MUTATIONS_ENABLED=${planningTaskMutationsFlag} VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED=${planningCalendarMutationsFlag} VITE_TOUCH_INPUT_LOCK_ENABLED=${touchInputLockFlag} VITE_TOUCH_INPUT_LOCK_START_LOCKED=${touchInputLockStartLockedFlag} npm run dev:fixtures`,
     url: "http://127.0.0.1:5173",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000

@@ -7,7 +7,9 @@ store and it has no relationship to the Home Assistant coffee-machine state.
 from __future__ import annotations
 
 import errno
+import csv
 import hashlib
+import io
 import json
 import math
 import os
@@ -15,13 +17,14 @@ import re
 import tempfile
 import time
 import unicodedata
+import zipfile
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from threading import RLock
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, UUID4, field_validator, model_validator
@@ -38,6 +41,7 @@ MAX_COLLECTION_EXTRACTIONS = 200
 MAX_PHOTOS = 2_000
 MAX_PHOTOS_PER_BEAN = 24
 MAX_PHOTO_BYTES = 25 * 1024 * 1024
+MAX_EXPORT_ZIP_BYTES = 512 * 1024 * 1024
 _LOCK_TIMEOUT_SECONDS = 2.0
 _LOCK_RETRY_SECONDS = 0.02
 _IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
@@ -45,6 +49,20 @@ _STORAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _UTC_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PREFERRED_DRINKS = {"espresso", "milk", "universal"}
+CSV_COLUMNS = (
+    "coffee_id",
+    "coffee_name",
+    "grind_description",
+    "preferred_drink",
+    "extraction_id",
+    "brewed_at",
+    "dose_grams",
+    "extraction_seconds",
+    "yield_grams",
+    "notes",
+    "rating",
+    "is_favorite",
+)
 
 
 def _safe_text(value: str, *, limit: int, required: bool = False) -> str:
@@ -336,6 +354,7 @@ class CoffeeDiaryBeanCreate(BaseModel):
     origin: Optional[str] = Field(default=None, max_length=96)
     processing: Optional[str] = Field(default=None, max_length=96)
     notes: Optional[str] = Field(default=None, max_length=2_000)
+    pendingPhotoAttachmentIds: list[UUID4] = Field(default_factory=list, max_length=MAX_PHOTOS_PER_BEAN)
 
     @model_validator(mode="after")
     def _validate_texts(self) -> "CoffeeDiaryBeanCreate":
@@ -359,6 +378,27 @@ class CoffeeDiaryBeanCreate(BaseModel):
         if value is not None and value not in _PREFERRED_DRINKS:
             raise ValueError("coffee_diary_preferred_drink_invalid")
         return value
+
+    @field_validator("pendingPhotoAttachmentIds", mode="before")
+    @classmethod
+    def _pending_photo_ids(cls, value: object) -> object:
+        if not isinstance(value, list):
+            raise ValueError("coffee_diary_upload_staged_attachment_invalid")
+        parsed: list[UUID] = []
+        for item in value:
+            if isinstance(item, UUID):
+                candidate = item
+            elif isinstance(item, str):
+                try:
+                    candidate = UUID(item)
+                except ValueError as exc:
+                    raise ValueError("coffee_diary_upload_staged_attachment_invalid") from exc
+            else:
+                raise ValueError("coffee_diary_upload_staged_attachment_invalid")
+            if candidate.version != 4:
+                raise ValueError("coffee_diary_upload_staged_attachment_invalid")
+            parsed.append(candidate)
+        return parsed
 
 
 class CoffeeDiaryBeanPatch(BaseModel):
@@ -603,6 +643,27 @@ def _json_bytes(value: Mapping[str, Any]) -> bytes:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
+def _file_digest(path: Path) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    total = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(128 * 1024):
+            total += len(chunk)
+            digest.update(chunk)
+    return total, digest.hexdigest()
+
+
+def _csv_cell(value: object) -> object:
+    """Neutralize spreadsheet formulas in user-controlled text cells."""
+    if isinstance(value, str) and value[:1] in {"=", "+", "-", "@"}:
+        return "'" + value
+    return value
+
+
+def _csv_grams(value: StrictFloat | StrictInt) -> str:
+    return format(Decimal(str(value)).quantize(Decimal("0.1")), "f")
+
+
 class CoffeeDiaryStore:
     def __init__(self, path: str | Path | None = None, *, writes_enabled: bool = False) -> None:
         self.path = Path(path) if path else coffee_diary_store_path()
@@ -738,7 +799,15 @@ class CoffeeDiaryStore:
             raise CoffeeDiaryConflict("coffee_diary_idempotency_key_reused")
         return resource
 
-    def create_bean(self, payload: CoffeeDiaryBeanCreate, idempotency_key: str) -> CoffeeDiaryBean:
+    def create_bean(
+        self,
+        payload: CoffeeDiaryBeanCreate,
+        idempotency_key: str,
+        *,
+        prepare_pending: Callable[[UUID, Sequence[UUID]], Sequence[CoffeeDiaryPhoto]] | None = None,
+        rollback_pending: Callable[[], None] | None = None,
+        finalize_pending: Callable[[], None] | None = None,
+    ) -> CoffeeDiaryBean:
         if not _IDEMPOTENCY_PATTERN.fullmatch(idempotency_key):
             raise CoffeeDiaryValidationError("idempotency_key_invalid")
         request_hash = self._idempotency_hash("bean.create", payload)
@@ -749,17 +818,36 @@ class CoffeeDiaryStore:
                 return replay, document
             if len(document.beans) >= MAX_BEANS:
                 raise CoffeeDiaryValidationError("coffee_diary_too_many_beans")
+            pending_ids = list(payload.pendingPhotoAttachmentIds)
+            if len(pending_ids) > MAX_PHOTOS_PER_BEAN or len(document.photos) + len(pending_ids) > MAX_PHOTOS:
+                raise CoffeeDiaryValidationError("coffee_diary_upload_staged_attachment_invalid")
             now = _canonical_now()
             bean = CoffeeDiaryBean(
-                id=uuid4(), version=1, **payload.model_dump(), favoriteExtractionId=None, photoIds=[],
+                id=uuid4(), version=1, **payload.model_dump(exclude={"pendingPhotoAttachmentIds"}), favoriteExtractionId=None,
                 createdAt=now, updatedAt=now,
             )
+            pending_photos: Sequence[CoffeeDiaryPhoto] = ()
+            if pending_ids:
+                if prepare_pending is None:
+                    raise CoffeeDiaryValidationError("coffee_diary_upload_staged_attachment_invalid")
+                pending_photos = prepare_pending(bean.id, pending_ids)
+                if len(pending_photos) != len(pending_ids):
+                    raise CoffeeDiaryValidationError("coffee_diary_upload_staged_attachment_invalid")
+                bean = bean.model_copy(update={"photoIds": [photo.id for photo in pending_photos]})
             next_idempotency = [*document.idempotency, CoffeeDiaryIdempotencyRecord(key=idempotency_key, operation="bean.create", requestHash=request_hash, resourceId=bean.id)]
             next_idempotency = next_idempotency[-MAX_IDEMPOTENCY_RECORDS:]
-            next_document = document.model_copy(update={"revision": document.revision + 1, "updatedAt": now, "beans": [*document.beans, bean], "idempotency": next_idempotency})
+            next_document = document.model_copy(update={"revision": document.revision + 1, "updatedAt": now, "beans": [*document.beans, bean], "photos": [*document.photos, *pending_photos], "idempotency": next_idempotency})
             return bean, next_document
 
-        return self._mutate(operation)
+        try:
+            result = self._mutate(operation)
+        except Exception:
+            if rollback_pending is not None:
+                rollback_pending()
+            raise
+        if finalize_pending is not None:
+            finalize_pending()
+        return result
 
     def patch_bean(self, bean_id: UUID, payload: CoffeeDiaryBeanPatch, expected_version: int) -> CoffeeDiaryBean:
         def operation(document: CoffeeDiaryDocument):
@@ -783,6 +871,37 @@ class CoffeeDiaryStore:
             next_beans[index] = updated
             next_document = document.model_copy(update={"revision": document.revision + 1, "updatedAt": updated.updatedAt, "beans": next_beans})
             return updated, next_document
+
+        return self._mutate(operation)
+
+    def attach_photo(self, bean_id: UUID, photo: CoffeeDiaryPhoto) -> CoffeeDiaryPhoto:
+        if photo.beanId != bean_id or photo.deletedAt is not None:
+            raise CoffeeDiaryValidationError("coffee_diary_photo_relationship_invalid")
+
+        def operation(document: CoffeeDiaryDocument):
+            bean_index = next((index for index, bean in enumerate(document.beans) if bean.id == bean_id), None)
+            if bean_index is None or document.beans[bean_index].deletedAt is not None:
+                raise CoffeeDiaryNotFound("coffee_diary_upload_target_not_found")
+            if len(document.photos) >= MAX_PHOTOS or len(document.beans[bean_index].photoIds) >= MAX_PHOTOS_PER_BEAN:
+                raise CoffeeDiaryValidationError("coffee_diary_photo_relationship_invalid")
+            if any(candidate.id == photo.id for candidate in document.photos):
+                raise CoffeeDiaryConflict("coffee_diary_photo_relationship_invalid")
+            bean = document.beans[bean_index]
+            now = _canonical_now()
+            updated = bean.model_copy(update={
+                "version": bean.version + 1,
+                "photoIds": [*bean.photoIds, photo.id],
+                "updatedAt": now,
+            })
+            next_beans = [*document.beans]
+            next_beans[bean_index] = updated
+            next_document = document.model_copy(update={
+                "revision": document.revision + 1,
+                "updatedAt": now,
+                "beans": next_beans,
+                "photos": [*document.photos, photo],
+            })
+            return photo, next_document
 
         return self._mutate(operation)
 
@@ -923,6 +1042,103 @@ class CoffeeDiaryStore:
 
     def export_bytes(self) -> bytes:
         return _json_bytes(self.export().model_dump(mode="json"))
+
+    def export_csv_bytes(self) -> bytes:
+        document = self.read_document()
+        active_beans = {bean.id: bean for bean in document.beans if bean.deletedAt is None}
+        writer_buffer = io.StringIO(newline="")
+        writer = csv.writer(writer_buffer, lineterminator="\r\n", quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(CSV_COLUMNS)
+        extractions = sorted(
+            (extraction for extraction in document.extractions if extraction.deletedAt is None and extraction.beanId in active_beans),
+            key=lambda extraction: (extraction.brewedAt, str(extraction.id)),
+        )
+        for extraction in extractions:
+            bean = active_beans[extraction.beanId]
+            writer.writerow([
+                str(bean.id),
+                _csv_cell(bean.name),
+                _csv_cell(bean.grindDescription or ""),
+                _csv_cell(bean.preferredDrink or ""),
+                str(extraction.id),
+                extraction.brewedAt,
+                _csv_grams(extraction.doseGrams),
+                str(extraction.extractionSeconds),
+                _csv_grams(extraction.yieldGrams),
+                _csv_cell(extraction.notes or ""),
+                "" if extraction.rating is None else str(extraction.rating),
+                "true" if bean.favoriteExtractionId == extraction.id else "false",
+            ])
+        # UTF-8 BOM keeps Russian CSV readable by the normal Windows Excel path.
+        return ("\ufeff" + writer_buffer.getvalue()).encode("utf-8")
+
+    def export_zip_path(self, image_dir: str | Path | None = None) -> Path:
+        from .coffee_diary_upload import PhotoStorage
+
+        document = self.read_document()
+        storage_root = (PhotoStorage(image_dir).root if image_dir is not None else PhotoStorage().root)
+        active_beans = {bean.id for bean in document.beans if bean.deletedAt is None}
+        active_photos = [photo for photo in document.photos if photo.deletedAt is None and photo.beanId in active_beans]
+        total_image_bytes = sum(photo.byteSize for photo in active_photos)
+        if total_image_bytes > MAX_EXPORT_ZIP_BYTES:
+            raise CoffeeDiaryValidationError("coffee_diary_export_too_large")
+
+        image_entries: list[tuple[CoffeeDiaryPhoto, Path, str]] = []
+        for photo in sorted(active_photos, key=lambda item: str(item.id)):
+            if photo.storageId in {".", ".."} or "/" in photo.storageId or "\\" in photo.storageId:
+                raise CoffeeDiaryStoreUnavailable("coffee_diary_photo_file_missing")
+            candidate = (storage_root / photo.storageId).resolve()
+            try:
+                candidate.relative_to(storage_root)
+            except ValueError as exc:
+                raise CoffeeDiaryStoreUnavailable("coffee_diary_photo_file_missing") from exc
+            if not candidate.is_file():
+                raise CoffeeDiaryStoreUnavailable("coffee_diary_photo_file_missing")
+            try:
+                actual_size, actual_sha256 = _file_digest(candidate)
+            except OSError as exc:
+                raise CoffeeDiaryStoreUnavailable("coffee_diary_photo_file_missing") from exc
+            if actual_size != photo.byteSize or actual_sha256 != photo.sha256:
+                raise CoffeeDiaryStoreUnavailable("coffee_diary_photo_file_missing")
+            image_entries.append((photo, candidate, f"images/{photo.storageId}"))
+
+        manifest = {
+            "schemaVersion": "coffee.diary.bundle.v1",
+            "exportedAt": _canonical_now(),
+            "jsonPath": "coffee-diary.json",
+            "csvPath": "coffee-diary-extractions.csv",
+            "images": [
+                {
+                    "photoId": str(photo.id),
+                    "beanId": str(photo.beanId),
+                    "path": archive_path,
+                    "sha256": photo.sha256,
+                    "mediaType": photo.mediaType,
+                    "byteSize": photo.byteSize,
+                }
+                for photo, _, archive_path in image_entries
+            ],
+        }
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix="coffee-diary-", suffix=".zip", delete=False) as handle:
+                temporary = Path(handle.name)
+            with zipfile.ZipFile(temporary, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+                archive.writestr("coffee-diary.json", self.export_bytes())
+                archive.writestr("coffee-diary-extractions.csv", self.export_csv_bytes())
+                archive.writestr("manifest.json", _json_bytes(manifest))
+                for _, path, archive_path in image_entries:
+                    archive.write(path, archive_path)
+            if temporary.stat().st_size > MAX_EXPORT_ZIP_BYTES:
+                raise CoffeeDiaryValidationError("coffee_diary_export_too_large")
+            return temporary
+        except Exception:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
 
 
 def validate_idempotency_key(value: Optional[str]) -> str:

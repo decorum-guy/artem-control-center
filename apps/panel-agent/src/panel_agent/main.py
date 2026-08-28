@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List
+from urllib.parse import quote, urlsplit
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import ValidationError
 
 from .alice_control import AliceControlError
@@ -80,12 +84,21 @@ from .coffee_diary import (
     CoffeeDiaryExtraction,
     CoffeeDiaryExtractionCreate,
     CoffeeDiaryNotFound,
+    CoffeeDiaryPhoto,
     CoffeeDiaryStore,
     CoffeeDiaryStoreUnavailable,
     CoffeeDiaryValidationError,
     validate_if_match,
     validate_idempotency_key,
     validate_uuid4,
+)
+from .coffee_diary_upload import (
+    ACCEPTED_MEDIA_TYPES,
+    MAX_UPLOAD_BYTES,
+    NormalizedImage,
+    PhotoStorage,
+    PhotoUploadRegistry,
+    normalize_image,
 )
 
 
@@ -124,6 +137,8 @@ interface_copy_store = InterfaceCopySettingsStore.from_environment(
     writes_enabled=SETTINGS.writes_enabled,
 )
 coffee_diary_store = CoffeeDiaryStore.from_environment(writes_enabled=True)
+coffee_photo_storage = PhotoStorage(cleanup_staged=True)
+coffee_upload_registry = PhotoUploadRegistry(coffee_photo_storage)
 
 
 @asynccontextmanager
@@ -423,6 +438,67 @@ async def _read_bounded_coffee_diary_body(request: Request) -> bytes:
     return b"".join(chunks)
 
 
+async def _stream_bounded_photo_body(request: Request, destination) -> int:
+    declared = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if declared not in ACCEPTED_MEDIA_TYPES:
+        raise CoffeeDiaryValidationError("coffee_diary_upload_media_type_invalid")
+    declared_length = request.headers.get("content-length")
+    if declared_length is not None:
+        try:
+            length = int(declared_length)
+        except ValueError as exc:
+            raise CoffeeDiaryValidationError("coffee_diary_upload_file_too_large") from exc
+        if length < 1 or length > MAX_UPLOAD_BYTES:
+            raise CoffeeDiaryValidationError("coffee_diary_upload_file_too_large")
+    total = 0
+    with destination.open("wb") as handle:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                raise CoffeeDiaryValidationError("coffee_diary_upload_file_too_large")
+            handle.write(chunk)
+        handle.flush()
+        os.fsync(handle.fileno())
+    if total == 0:
+        raise CoffeeDiaryValidationError("coffee_diary_upload_image_invalid")
+    return total
+
+
+def _coffee_upload_origin(request: Request) -> str:
+    configured = os.getenv("PANEL_COFFEE_DIARY_UPLOAD_ORIGIN", "").strip()
+    candidate = configured or f"{request.url.scheme}://{request.headers.get('host', '')}"
+    parsed = urlsplit(candidate)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="coffee_diary_upload_origin_invalid") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or port is None and ":" in parsed.netloc.rsplit("]", 1)[-1]
+    ):
+        raise HTTPException(status_code=500, detail="coffee_diary_upload_origin_invalid")
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _coffee_upload_session_response(request: Request, response: Response, session, token: str) -> dict[str, object]:
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "sessionId": str(session.session_id),
+        "state": session.state,
+        "expiresAt": session.expires_at.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "remainingSeconds": max(0, int(session.deadline - time.monotonic())),
+        "uploadUrl": f"{_coffee_upload_origin(request)}/coffee-upload#token={quote(token, safe='-_')}",
+        "pendingAttachmentId": None,
+        "photoId": None,
+    }
+
+
 def _parse_coffee_diary_payload(raw_body: bytes, model_type):
     try:
         payload = json.loads(raw_body.decode("utf-8"))
@@ -473,6 +549,24 @@ _COFFEE_DIARY_PUBLIC_CODES = {
     "coffee_diary_too_many_beans",
     "coffee_diary_too_many_extractions",
     "coffee_diary_write_disabled",
+    "coffee_diary_upload_token_invalid",
+    "coffee_diary_upload_token_expired",
+    "coffee_diary_upload_token_consumed",
+    "coffee_diary_upload_token_cancelled",
+    "coffee_diary_upload_attempts_exhausted",
+    "coffee_diary_upload_in_progress",
+    "coffee_diary_upload_file_too_large",
+    "coffee_diary_upload_media_type_invalid",
+    "coffee_diary_upload_image_invalid",
+    "coffee_diary_upload_dimensions_invalid",
+    "coffee_diary_upload_target_not_found",
+    "coffee_diary_upload_staged_attachment_invalid",
+    "coffee_diary_upload_sessions_full",
+    "coffee_diary_upload_session_not_found",
+    "coffee_diary_staged_attachment_not_found",
+    "coffee_diary_photo_file_missing",
+    "coffee_diary_export_too_large",
+    "coffee_diary_upload_origin_invalid",
     "if_match_invalid",
     "if_match_required",
     "idempotency_key_invalid",
@@ -503,6 +597,31 @@ def _coffee_diary_error(exc: Exception) -> None:
     raise HTTPException(status_code=500, detail="coffee_diary_unavailable")
 
 
+def _coffee_upload_error(exc: Exception) -> None:
+    code = str(getattr(exc, "code", exc))
+    if code == "coffee_diary_upload_token_invalid":
+        raise HTTPException(status_code=403, detail=code)
+    if code in {"coffee_diary_upload_token_expired", "coffee_diary_upload_token_cancelled"}:
+        raise HTTPException(status_code=410, detail=code)
+    if code == "coffee_diary_upload_token_consumed":
+        raise HTTPException(status_code=409, detail=code)
+    if code == "coffee_diary_upload_in_progress":
+        raise HTTPException(status_code=409, detail=code)
+    if code == "coffee_diary_upload_file_too_large":
+        raise HTTPException(status_code=413, detail=code)
+    if code == "coffee_diary_upload_sessions_full":
+        raise HTTPException(status_code=429, detail=code)
+    if code in {"coffee_diary_upload_session_not_found", "coffee_diary_staged_attachment_not_found", "coffee_diary_upload_target_not_found"}:
+        raise HTTPException(status_code=404, detail=code)
+    if isinstance(exc, CoffeeDiaryNotFound):
+        raise HTTPException(status_code=404, detail=code)
+    if isinstance(exc, CoffeeDiaryStoreUnavailable):
+        raise HTTPException(status_code=503, detail=_safe_coffee_diary_code(code, "coffee_diary_store_unavailable"))
+    if isinstance(exc, CoffeeDiaryValidationError):
+        raise HTTPException(status_code=422, detail=_safe_coffee_diary_code(code, "coffee_diary_upload_image_invalid"))
+    raise HTTPException(status_code=500, detail="coffee_diary_upload_unavailable")
+
+
 @app.get("/api/v1/coffee-diary", response_model=CoffeeDiaryCollection)
 def get_coffee_diary() -> CoffeeDiaryCollection:
     try:
@@ -521,14 +640,209 @@ def get_coffee_diary_bean(bean_id: str) -> CoffeeDiaryBeanDetail:
         raise AssertionError("unreachable")
 
 
+@app.post("/api/v1/coffee-diary/beans/{bean_id}/photo-upload-sessions")
+def create_coffee_diary_photo_upload_session(bean_id: str, request: Request, response: Response) -> dict[str, object]:
+    _require_coffee_diary_write()
+    try:
+        parsed_bean_id = validate_uuid4(bean_id)
+        coffee_diary_store.bean_detail(parsed_bean_id)
+        session, token = coffee_upload_registry.create(intent="bean", bean_id=parsed_bean_id)
+        return _coffee_upload_session_response(request, response, session, token)
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise
+        if isinstance(exc, CoffeeDiaryNotFound):
+            raise HTTPException(status_code=404, detail="coffee_diary_upload_target_not_found")
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+
+
+@app.post("/api/v1/coffee-diary/photo-upload-sessions")
+async def create_coffee_diary_staged_upload_session(request: Request, response: Response) -> dict[str, object]:
+    _require_coffee_diary_write()
+    raw_body = await _read_bounded_coffee_diary_body(request)
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="invalid_json") from exc
+    if not isinstance(payload, dict) or set(payload) - {"intent"} or payload.get("intent", "bean_create") != "bean_create":
+        raise HTTPException(status_code=422, detail="coffee_diary_upload_staged_attachment_invalid")
+    try:
+        session, token = coffee_upload_registry.create(intent="bean_create", bean_id=None)
+        return _coffee_upload_session_response(request, response, session, token)
+    except Exception as exc:
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+
+
+@app.get("/api/v1/coffee-diary/photo-upload-sessions/{session_id}")
+def get_coffee_diary_photo_upload_session(session_id: str, response: Response) -> dict[str, object]:
+    _require_coffee_diary_write()
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return coffee_upload_registry.status(validate_uuid4(session_id))
+    except Exception as exc:
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+
+
+@app.delete("/api/v1/coffee-diary/photo-upload-sessions/{session_id}")
+def cancel_coffee_diary_photo_upload_session(session_id: str, request: Request, response: Response) -> dict[str, object]:
+    _require_coffee_diary_write()
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return coffee_upload_registry.cancel(validate_uuid4(session_id))
+    except Exception as exc:
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+
+
+@app.delete("/api/v1/coffee-diary/pending-photo-attachments/{pending_id}", status_code=204)
+def discard_coffee_diary_pending_photo(pending_id: str, request: Request) -> Response:
+    _require_coffee_diary_write()
+    try:
+        coffee_upload_registry.discard_pending(validate_uuid4(pending_id))
+    except Exception as exc:
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/v1/coffee-diary/pending-photo-attachments/{pending_id}/content")
+def get_coffee_diary_pending_photo_content(pending_id: str) -> FileResponse:
+    _require_coffee_diary_write()
+    try:
+        attachment = coffee_upload_registry.pending_content(validate_uuid4(pending_id))
+        return FileResponse(
+            attachment.path,
+            media_type=attachment.media_type,
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Length": str(attachment.byte_size),
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    except Exception as exc:
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+
+
+@app.post("/api/v1/coffee-diary/photo-upload")
+async def upload_coffee_diary_photo(request: Request, response: Response) -> dict[str, object]:
+    token = request.headers.get("X-Coffee-Upload-Token")
+    try:
+        session = coffee_upload_registry.begin_upload(token or "")
+    except Exception as exc:
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+
+    upload_path = None
+    normalized: NormalizedImage | None = None
+    try:
+        upload_path = coffee_photo_storage.new_temp_file()
+        try:
+            await _stream_bounded_photo_body(request, upload_path)
+            normalized = normalize_image(upload_path, request.headers.get("content-type", ""), coffee_photo_storage)
+        except CoffeeDiaryValidationError as exc:
+            code = str(exc)
+            if code.startswith("coffee_diary_upload_"):
+                coffee_upload_registry.invalid_attempt(session.session_id)
+            else:
+                coffee_upload_registry.fail_upload(session.session_id)
+            _coffee_upload_error(exc)
+            raise AssertionError("unreachable")
+
+        if session.intent == "bean":
+            if session.bean_id is None:
+                coffee_upload_registry.fail_upload(session.session_id)
+                raise HTTPException(status_code=422, detail="coffee_diary_upload_target_not_found")
+            finalized = normalized
+            storage_id, final_path = coffee_photo_storage.move_normalized_to_final(finalized)
+            normalized = None
+            photo = CoffeeDiaryPhoto(
+                id=uuid4(),
+                beanId=session.bean_id,
+                storageId=storage_id,
+                mediaType=finalized.media_type,
+                byteSize=finalized.byte_size,
+                width=finalized.width,
+                height=finalized.height,
+                sha256=finalized.sha256,
+                createdAt=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            )
+            try:
+                coffee_diary_store.attach_photo(session.bean_id, photo)
+            except Exception:
+                coffee_photo_storage.remove(final_path)
+                coffee_upload_registry.fail_upload(session.session_id)
+                raise
+            coffee_upload_registry.finish_existing(session.session_id, photo.id)
+            response.headers.update({"Cache-Control": "no-store"})
+            return {"state": "consumed", "photoId": str(photo.id), "pendingAttachmentId": None}
+
+        pending_id, _ = coffee_upload_registry.finish_staged(session.session_id, normalized)
+        normalized = None
+        response.headers.update({"Cache-Control": "no-store"})
+        return {"state": "uploaded", "photoId": None, "pendingAttachmentId": str(pending_id)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        coffee_upload_registry.fail_upload(session.session_id)
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+    finally:
+        if upload_path is not None:
+            coffee_photo_storage.remove(upload_path)
+        if normalized is not None:
+            coffee_photo_storage.remove(normalized.path)
+
+
+@app.get("/api/v1/coffee-diary/photos/{photo_id}/content")
+def get_coffee_diary_photo_content(photo_id: str) -> FileResponse:
+    try:
+        parsed_photo_id = validate_uuid4(photo_id)
+        document = coffee_diary_store.read_document()
+        photo = next((candidate for candidate in document.photos if candidate.id == parsed_photo_id and candidate.deletedAt is None), None)
+        if photo is None:
+            raise CoffeeDiaryNotFound("coffee_diary_photo_file_missing")
+        path = coffee_photo_storage.final_path(photo.storageId)
+        if not path.is_file():
+            raise CoffeeDiaryNotFound("coffee_diary_photo_file_missing")
+        return FileResponse(
+            path,
+            media_type=photo.mediaType,
+            headers={
+                "Cache-Control": "private, max-age=3600",
+                "ETag": f'"{photo.sha256}"',
+                "X-Content-Type-Options": "nosniff",
+                "Content-Length": str(photo.byteSize),
+            },
+        )
+    except Exception as exc:
+        _coffee_upload_error(exc)
+        raise AssertionError("unreachable")
+
+
 @app.post("/api/v1/coffee-diary/beans", response_model=CoffeeDiaryBean, status_code=201)
 async def post_coffee_diary_bean(request: Request, response: Response) -> CoffeeDiaryBean:
     _require_coffee_diary_write()
     raw_body = await _read_bounded_coffee_diary_body(request)
     payload = _parse_coffee_diary_payload(raw_body, CoffeeDiaryBeanCreate)
+    prepared = []
     try:
         key = validate_idempotency_key(request.headers.get("Idempotency-Key"))
-        result = coffee_diary_store.create_bean(payload, key)
+        def prepare_pending(bean_id: UUID, pending_ids) -> list[CoffeeDiaryPhoto]:
+            prepared.clear()
+            prepared.extend(coffee_upload_registry.prepare_pending(pending_ids, bean_id))
+            return [item.photo for item in prepared]
+
+        result = coffee_diary_store.create_bean(
+            payload,
+            key,
+            prepare_pending=prepare_pending,
+            rollback_pending=lambda: coffee_upload_registry.rollback_prepared(prepared),
+            finalize_pending=lambda: coffee_upload_registry.finalize_prepared(prepared),
+        )
     except Exception as exc:
         _coffee_diary_error(exc)
         raise AssertionError("unreachable")
@@ -625,6 +939,39 @@ def export_coffee_diary() -> Response:
             "Cache-Control": "no-store",
             "Content-Disposition": 'attachment; filename="coffee-diary.json"',
         },
+    )
+
+
+@app.get("/api/v1/coffee-diary/export.csv")
+def export_coffee_diary_csv() -> Response:
+    try:
+        content = coffee_diary_store.export_csv_bytes()
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": 'attachment; filename="coffee-diary-extractions.csv"',
+        },
+    )
+
+
+@app.get("/api/v1/coffee-diary/export.zip")
+def export_coffee_diary_zip() -> FileResponse:
+    try:
+        archive_path = coffee_diary_store.export_zip_path(coffee_photo_storage.root)
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename="coffee-diary.zip",
+        headers={"Cache-Control": "no-store"},
+        background=BackgroundTask(lambda: archive_path.unlink(missing_ok=True)),
     )
 
 
