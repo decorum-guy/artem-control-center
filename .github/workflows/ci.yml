@@ -68,8 +68,7 @@ jobs:
 
       - name: Run focused Coffee Diary Windows store gate
         if: runner.os == 'Windows'
-        timeout-minutes: 3
-        run: node scripts/python.mjs scripts/windows/run-coffee-diary-tests.py
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q
 
       - name: Run focused Coffee Diary Windows lock gate
         if: runner.os == 'Windows'
