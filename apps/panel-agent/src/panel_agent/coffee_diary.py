@@ -495,7 +495,12 @@ def coffee_diary_store_path() -> Path:
 def _file_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f".{path.name}.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as handle:
+    # Do not use append mode here.  On Windows, msvcrt.locking() operates on
+    # the current file position, so an append handle can make the byte being
+    # locked depend on the previous write position.  Create the sentinel
+    # without truncating it, then always operate on byte zero.
+    lock_path.touch(exist_ok=True)
+    with lock_path.open("r+b") as handle:
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
             handle.write(b"0")
