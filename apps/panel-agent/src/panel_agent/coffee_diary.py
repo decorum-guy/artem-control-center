@@ -497,9 +497,16 @@ def _file_lock(path: Path) -> Iterator[None]:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     # Do not use append mode here.  On Windows, msvcrt.locking() operates on
     # the current file position, so an append handle can make the byte being
-    # locked depend on the previous write position.  Create the sentinel
-    # without truncating it, then always operate on byte zero.
-    lock_path.touch(exist_ok=True)
+    # locked depend on the previous write position.  Create the one-byte
+    # sentinel only when absent; updating an existing lock file before
+    # acquisition can itself contend with a lock held by another process.
+    if not lock_path.exists():
+        try:
+            with lock_path.open("xb") as initializer:
+                initializer.write(b"0")
+                initializer.flush()
+        except FileExistsError:
+            pass
     with lock_path.open("r+b") as handle:
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
