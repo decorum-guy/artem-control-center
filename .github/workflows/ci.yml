@@ -68,11 +68,11 @@ jobs:
 
       - name: Run focused Coffee Diary Windows store gate
         if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -vv
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q
 
       - name: Run focused Coffee Diary Windows lock gate
         if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary_lock.py -vv
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary_lock.py -q
 
       - name: Run full validation
         run: npm run check

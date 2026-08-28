@@ -522,53 +522,19 @@ def _file_lock(path: Path) -> Iterator[None]:
             time.sleep(min(_LOCK_RETRY_SECONDS, max(0.0, deadline - time.monotonic())))
 
         if os.name == "nt":
-            import ctypes
             import msvcrt
-            from ctypes import wintypes
-
-            class _Overlapped(ctypes.Structure):
-                _fields_ = [
-                    ("Internal", ctypes.c_void_p),
-                    ("InternalHigh", ctypes.c_void_p),
-                    ("Offset", wintypes.DWORD),
-                    ("OffsetHigh", wintypes.DWORD),
-                    ("hEvent", wintypes.HANDLE),
-                ]
-
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            lock_file_ex = kernel32.LockFileEx
-            lock_file_ex.argtypes = [
-                wintypes.HANDLE,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                ctypes.POINTER(_Overlapped),
-            ]
-            lock_file_ex.restype = wintypes.BOOL
-            unlock_file_ex = kernel32.UnlockFileEx
-            unlock_file_ex.argtypes = [
-                wintypes.HANDLE,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                ctypes.POINTER(_Overlapped),
-            ]
-            unlock_file_ex.restype = wintypes.BOOL
-            lock_file_flags = 0x00000001 | 0x00000002  # FAIL_IMMEDIATELY | EXCLUSIVE
-            lock_errors = {5, 32, 33}  # ACCESS_DENIED, SHARING_VIOLATION, LOCK_VIOLATION
-            overlapped = _Overlapped()
-            overlapped.Offset = 0
-            overlapped.OffsetHigh = 0
-            windows_handle = wintypes.HANDLE(msvcrt.get_osfhandle(handle.fileno()))
             while not locked:
-                if lock_file_ex(windows_handle, lock_file_flags, 0, 1, 0, ctypes.byref(overlapped)):
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
                     locked = True
-                    continue
-                error_code = ctypes.get_last_error()
-                if error_code not in lock_errors:
-                    raise OSError(error_code, "LockFileEx failed")
-                retry_or_raise(OSError(error_code, "Coffee Diary lock is busy"))
+                except OSError as exc:
+                    if not isinstance(exc, PermissionError) and getattr(exc, "errno", None) not in {
+                        errno.EACCES,
+                        errno.EAGAIN,
+                    }:
+                        raise
+                    retry_or_raise(exc)
         else:
             import fcntl
             while not locked:
@@ -583,9 +549,9 @@ def _file_lock(path: Path) -> Iterator[None]:
             yield
         finally:
             if locked and os.name == "nt":
-                if not unlock_file_ex(windows_handle, 0, 1, 0, ctypes.byref(overlapped)):
-                    error_code = ctypes.get_last_error()
-                    raise OSError(error_code, "UnlockFileEx failed")
+                import msvcrt
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             elif locked:
                 import fcntl
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
