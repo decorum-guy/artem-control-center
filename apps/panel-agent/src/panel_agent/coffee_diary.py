@@ -532,76 +532,60 @@ def _file_lock(path: Path) -> Iterator[None]:
                 wintypes.HANDLE,
             ]
             kernel32.CreateFileW.restype = wintypes.HANDLE
-            kernel32.LockFileEx.argtypes = [
+            kernel32.LockFile.argtypes = [
                 wintypes.HANDLE,
                 wintypes.DWORD,
                 wintypes.DWORD,
                 wintypes.DWORD,
                 wintypes.DWORD,
-                ctypes.c_void_p,
             ]
-            kernel32.LockFileEx.restype = wintypes.BOOL
-            kernel32.UnlockFileEx.argtypes = [
+            kernel32.LockFile.restype = wintypes.BOOL
+            kernel32.UnlockFile.argtypes = [
                 wintypes.HANDLE,
                 wintypes.DWORD,
                 wintypes.DWORD,
                 wintypes.DWORD,
-                ctypes.c_void_p,
             ]
-            kernel32.UnlockFileEx.restype = wintypes.BOOL
+            kernel32.UnlockFile.restype = wintypes.BOOL
             kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
             kernel32.CloseHandle.restype = wintypes.BOOL
 
-            class _Overlapped(ctypes.Structure):
-                _fields_ = [
-                    ("Internal", ctypes.c_void_p),
-                    ("InternalHigh", ctypes.c_void_p),
-                    ("Offset", wintypes.DWORD),
-                    ("OffsetHigh", wintypes.DWORD),
-                    ("hEvent", wintypes.HANDLE),
-                ]
-
             access = 0x80000000 | 0x40000000  # GENERIC_READ | GENERIC_WRITE
             share = 0x00000001 | 0x00000002 | 0x00000004  # read/write/delete
-            flags = 0x00000080  # FILE_ATTRIBUTE_NORMAL; keep LockFileEx synchronous
+            flags = 0x00000080  # FILE_ATTRIBUTE_NORMAL
             windows_handle = kernel32.CreateFileW(str(lock_path), access, share, None, 3, flags, None)
             invalid_handle = ctypes.c_void_p(-1).value
             if windows_handle is None or getattr(windows_handle, "value", windows_handle) == invalid_handle:
                 error_code = ctypes.get_last_error()
                 raise OSError(error_code, "CreateFileW failed for Coffee Diary lock")
-            overlapped = _Overlapped()
-            overlapped.Offset = 0
-            overlapped.OffsetHigh = 0
-            lock_flags = 0x00000001 | 0x00000002  # FAIL_IMMEDIATELY | EXCLUSIVE
             lock_errors = {5, 32, 33}  # ACCESS_DENIED, SHARING_VIOLATION, LOCK_VIOLATION
             try:
                 while not locked:
-                    if kernel32.LockFileEx(
+                    if kernel32.LockFile(
                         windows_handle,
-                        lock_flags,
+                        0,
                         0,
                         1,
                         0,
-                        ctypes.byref(overlapped),
                     ):
                         locked = True
                         continue
                     error_code = ctypes.get_last_error()
                     if error_code not in lock_errors:
-                        raise OSError(error_code, "LockFileEx failed for Coffee Diary lock")
+                        raise OSError(error_code, "LockFile failed for Coffee Diary lock")
                     retry_or_raise(OSError(error_code, "Coffee Diary lock is busy"))
                 try:
                     yield
                 finally:
-                    if locked and not kernel32.UnlockFileEx(
+                    if locked and not kernel32.UnlockFile(
                         windows_handle,
+                        0,
                         0,
                         1,
                         0,
-                        ctypes.byref(overlapped),
                     ):
                         error_code = ctypes.get_last_error()
-                        raise OSError(error_code, "UnlockFileEx failed for Coffee Diary lock")
+                        raise OSError(error_code, "UnlockFile failed for Coffee Diary lock")
             finally:
                 kernel32.CloseHandle(windows_handle)
         else:
