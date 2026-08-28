@@ -10,7 +10,7 @@ type RogStatus = "online" | "offline" | "waking" | "sleeping" | "hibernating" | 
 type RogAction = "system.rog_g703.wake" | "system.rog_g703.sleep" | "system.rog_g703.hibernate";
 type ConnectivityFixture = "available" | "pending" | "unavailable";
 type HomeFixture = "one" | "two";
-type CoffeeFixtureOverride = "off" | "warming" | "warming-early" | "warming-mid" | "warming-late" | null;
+type CoffeeFixtureOverride = "off" | "turning-on" | "warming" | "warming-early" | "warming-mid" | "warming-late" | null;
 
 let rogStatus: RogStatus = "online";
 let longRussian = false;
@@ -111,11 +111,13 @@ async function installCuratedMocks(page: Page) {
           "warming-mid": "2026-07-29T11:53:30Z",
           "warming-late": "2026-07-29T11:48:18Z"
         } as const;
-        const isWarming = coffeeFixtureOverride !== "off";
-        coffeeData.machine.state = isWarming ? "on" : "off";
+        const isTurningOn = coffeeFixtureOverride === "turning-on";
+        const isWarming = coffeeFixtureOverride !== "off" && !isTurningOn;
+        coffeeData.machine.state = isTurningOn ? "turning_on" : isWarming ? "on" : "off";
         coffeeData.machine.available = true;
         coffeeData.machine.stale = false;
-        coffeeData.machine.turnedOnAt = coffeeFixtureOverride === "off" ? null : warmingAt[coffeeFixtureOverride];
+        const warmingFixture = isWarming ? coffeeFixtureOverride : null;
+        coffeeData.machine.turnedOnAt = warmingFixture ? warmingAt[warmingFixture] : null;
       }
     }
     if (coffeeTimingUnavailable) {
@@ -128,7 +130,7 @@ async function installCuratedMocks(page: Page) {
         coffeeData.machine.turnedOnAt = "2026-07-29T11:54:09Z";
         coffeeData.timingPolicy.warmupDurationSeconds = null;
         coffeeData.timingPolicy.longRunningThresholdSeconds = null;
-        coffeeData.timingPolicy.sourceAvailable = false;
+        coffeeData.timingPolicy.sourceAvailable = true;
         coffeeData.timingPolicy.stale = false;
       }
     }
@@ -796,6 +798,60 @@ test.describe("PR4 curated Overview", () => {
     await waitForOverview(page);
     await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-transition", "idle");
     await expect(page.getByTestId("widget-coffee-machine").getByTestId("coffee-progress")).toBeVisible();
+  });
+
+  test("holds the settled composition through a slow canonical turning_on state", async ({ page }) => {
+    await page.addInitScript(() => {
+      type Handler = (event: Event) => void;
+      const sources: Array<{ handlers: Map<string, Handler[]> }> = [];
+      class FakeEventSource {
+        handlers = new Map<string, Handler[]>();
+        constructor() { sources.push(this); }
+        addEventListener(type: string, handler: Handler) {
+          this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler]);
+        }
+        close() {}
+      }
+      Object.defineProperty(window, "EventSource", { configurable: true, value: FakeEventSource });
+      (window as unknown as { emitSnapshot: () => void }).emitSnapshot = () => {
+        for (const source of sources) {
+          for (const handler of source.handlers.get("snapshot") ?? []) handler(new MessageEvent("snapshot", { data: "{}" }));
+        }
+      };
+    });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    coffeeFixtureOverride = "off";
+    await page.goto("/overview?theme=night");
+    await waitForOverview(page);
+    const coffee = page.getByTestId("widget-coffee-machine");
+    const visual = coffee.locator(".coffee-asset__visual");
+    const resting = await visual.boundingBox();
+    expect(resting).not.toBeNull();
+
+    coffeeFixtureOverride = "turning-on";
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await expect(coffee).toHaveAttribute("data-canonical-state", "turning_on");
+    await expect(coffee).toHaveAttribute("data-transition", "moving");
+    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    await page.waitForTimeout(420);
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    await page.waitForTimeout(320);
+    const settled = await visual.boundingBox();
+    expect(settled?.x).toBeGreaterThan((resting?.x ?? Number.NaN) + 5);
+    expect(settled?.width).toBeLessThan((resting?.width ?? Number.NaN) - 2);
+    const settledTransform = await visual.evaluate((element) => getComputedStyle(element).transform);
+
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await page.waitForTimeout(80);
+    await expect(coffee).toHaveAttribute("data-canonical-state", "turning_on");
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    expect(await visual.evaluate((element) => getComputedStyle(element).transform)).toBe(settledTransform);
+
+    coffeeFixtureOverride = "warming";
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await expect(coffee).toHaveAttribute("data-canonical-state", "on");
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
   });
 
   test("reduced motion renders the confirmed Coffee composition immediately", async ({ page }) => {

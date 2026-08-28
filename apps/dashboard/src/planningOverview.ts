@@ -86,6 +86,57 @@ function taskDueSortKey(task: PlanningTask): string {
   return `${task.dueDate}T${task.dueTime ?? "99:99:99"}`;
 }
 
+type ZonedDateTimeParts = { date: string; time: string };
+
+function zonedDateTimeParts(instant: Date, timeZone: string): ZonedDateTimeParts | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(instant);
+    const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+    if (!values.year || !values.month || !values.day || !values.hour || !values.minute) return null;
+    return { date: `${values.year}-${values.month}-${values.day}`, time: `${values.hour}:${values.minute}` };
+  } catch {
+    return null;
+  }
+}
+
+function timezoneOffsetAt(instantMs: number, timeZone: string): number | null {
+  const parts = zonedDateTimeParts(new Date(instantMs), timeZone);
+  if (!parts) return null;
+  const representedAsUtc = Date.parse(`${parts.date}T${parts.time}:00Z`);
+  return Number.isFinite(representedAsUtc) ? representedAsUtc - instantMs : null;
+}
+
+/** Resolve an explicit task wall-clock time without using the browser timezone. */
+export function planningTaskDueInstant(task: PlanningTask): number | null {
+  if (!task.dueDate || !task.dueTime || !task.timezone || !/^\d{4}-\d{2}-\d{2}$/.test(task.dueDate) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(task.dueTime)) {
+    return null;
+  }
+  const timeZone = task.timezone;
+  const naiveMs = Date.parse(`${task.dueDate}T${task.dueTime}:00Z`);
+  if (!Number.isFinite(naiveMs)) return null;
+
+  const offsets = new Set<number>();
+  for (const probe of [-86_400_000, 0, 86_400_000]) {
+    const offset = timezoneOffsetAt(naiveMs + probe, timeZone);
+    if (offset !== null) offsets.add(offset);
+  }
+  const candidates = [...offsets]
+    .map((offset) => naiveMs - offset)
+    .filter((candidate) => {
+      const local = zonedDateTimeParts(new Date(candidate), timeZone);
+      return local !== null && local.date === task.dueDate && local.time === task.dueTime;
+    });
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 /** Select the highest-priority open overdue task with deterministic due/ID ties. */
 export function selectPrimaryOverdueTask(snapshot: PlanningSnapshot): PlanningTask | null {
   return sortOverdueTasks(selectOverdueTasks(snapshot))[0] ?? null;
@@ -403,10 +454,58 @@ export type PlanningOverviewItem =
   | { readonly kind: "task"; readonly item: PlanningTask; readonly overdue: boolean }
   | { readonly kind: "calendar"; readonly item: PlanningCalendarEvent };
 
-function overviewItemSortKey(entry: PlanningOverviewItem): string {
-  if (entry.kind === "reminder") return entry.item.dueAtUtc ?? "9999-12-31T99:99:99";
-  if (entry.kind === "task") return taskDueSortKey(entry.item);
-  return entry.item.startAtUtc ?? "9999-12-31T99:99:99";
+type OverviewOrderKey =
+  | { readonly precision: "instant"; readonly timestamp: number }
+  | { readonly precision: "date"; readonly date: string; readonly timeZone: string | null }
+  | { readonly precision: "undated" };
+
+function overviewOrderKey(entry: PlanningOverviewItem): OverviewOrderKey {
+  if (entry.kind === "reminder") {
+    const timestamp = timestampValue(entry.item.dueAtUtc);
+    return Number.isFinite(timestamp)
+      ? { precision: "instant", timestamp }
+      : { precision: "undated" };
+  }
+  if (entry.kind === "task") {
+    const timestamp = planningTaskDueInstant(entry.item);
+    if (timestamp !== null) return { precision: "instant", timestamp };
+    if (entry.item.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(entry.item.dueDate)) {
+      return { precision: "date", date: entry.item.dueDate, timeZone: entry.item.timezone };
+    }
+    return { precision: "undated" };
+  }
+  if (!entry.item.allDay) {
+    const timestamp = timestampValue(entry.item.startAtUtc);
+    return Number.isFinite(timestamp)
+      ? { precision: "instant", timestamp }
+      : { precision: "undated" };
+  }
+  if (entry.item.startDate && /^\d{4}-\d{2}-\d{2}$/.test(entry.item.startDate)) {
+    return { precision: "date", date: entry.item.startDate, timeZone: entry.item.timezone };
+  }
+  return { precision: "undated" };
+}
+
+function dateForInstant(timestamp: number, timeZone: string | null): string {
+  return (timeZone ? localDateKey(new Date(timestamp), timeZone) : null) ?? new Date(timestamp).toISOString().slice(0, 10);
+}
+
+/** Date-only items sort by calendar day and precede exact-time items on that same day. */
+function compareOverviewOrder(left: OverviewOrderKey, right: OverviewOrderKey): number {
+  if (left.precision === "instant" && right.precision === "instant") return left.timestamp - right.timestamp;
+  if (left.precision === "undated" || right.precision === "undated") {
+    return left.precision === right.precision ? 0 : left.precision === "undated" ? 1 : -1;
+  }
+
+  const leftDate = left.precision === "date"
+    ? left.date
+    : dateForInstant(left.timestamp, right.precision === "date" ? right.timeZone : null);
+  const rightDate = right.precision === "date"
+    ? right.date
+    : dateForInstant(right.timestamp, left.precision === "date" ? left.timeZone : null);
+  const dateDifference = compareStrings(leftDate, rightDate);
+  if (dateDifference !== 0) return dateDifference;
+  return left.precision === right.precision ? 0 : left.precision === "date" ? -1 : 1;
 }
 
 function overviewItemKindRank(kind: PlanningOverviewItem["kind"]): number {
@@ -457,8 +556,8 @@ export function planningOverviewSummary(
     ...tasks.map(({ item, overdue }) => ({ kind: "task" as const, item, overdue })),
     ...events.map((item) => ({ kind: "calendar" as const, item }))
   ].sort((left, right) => {
-    const timestampDifference = compareStrings(overviewItemSortKey(left), overviewItemSortKey(right));
-    if (timestampDifference !== 0) return timestampDifference;
+    const temporalDifference = compareOverviewOrder(overviewOrderKey(left), overviewOrderKey(right));
+    if (temporalDifference !== 0) return temporalDifference;
     const kindDifference = overviewItemKindRank(left.kind) - overviewItemKindRank(right.kind);
     return kindDifference || compareStrings(left.item.id, right.item.id);
   });

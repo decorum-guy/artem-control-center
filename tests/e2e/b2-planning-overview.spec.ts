@@ -114,6 +114,28 @@ test.describe("B2 Planning Overview", () => {
     await expectNoDocumentHorizontalOverflow(page);
   });
 
+  test("renders the next same-kind items before adding truthful placeholders", async ({ page }) => {
+    const repeatedReminders = structuredClone(planningFixtures.overviewDensity);
+    const first = repeatedReminders.reminders.upcoming[0];
+    repeatedReminders.reminders.upcoming = [
+      { ...first, id: "00000000-0000-4000-8000-000000000081", title: "Напоминание 1", dueAtUtc: "2026-08-12T12:10:00Z" },
+      { ...first, id: "00000000-0000-4000-8000-000000000082", title: "Напоминание 2", dueAtUtc: "2026-08-12T12:20:00Z" },
+      { ...first, id: "00000000-0000-4000-8000-000000000083", title: "Напоминание 3", dueAtUtc: "2026-08-12T12:30:00Z" }
+    ];
+    repeatedReminders.tasks = { ...repeatedReminders.tasks, overdue: [], upcoming: [] };
+    repeatedReminders.calendar = { ...repeatedReminders.calendar, today: [], upcoming: [] };
+    await mockPlanning(page, repeatedReminders);
+    await page.goto("/overview?theme=day");
+
+    const card = page.getByTestId("planning-overview-card");
+    await expect(card).toHaveAttribute("data-visible-item-count", "3");
+    await expect(card.getByTestId("planning-reminder-row")).toContainText("Напоминание 1");
+    await expect(card.getByTestId("planning-reminder-row-2")).toContainText("Напоминание 2");
+    await expect(card.getByTestId("planning-reminder-row-3")).toContainText("Напоминание 3");
+    await expect(card.getByTestId("planning-task-row")).toHaveCount(0);
+    await expect(card.getByTestId("planning-event-row")).toHaveCount(0);
+  });
+
   test("routes only task and calendar rows, leaving reminders monitoring-only", async ({ page }) => {
     await mockPlanning(page, planningFixtures.healthy);
     await page.goto("/overview");

@@ -6,10 +6,12 @@ import {
   formatOverdueTaskCount,
   formatReminderDueLabel,
   formatReminderExactTime,
+  formatTaskDueLabel,
   planningHealthPresentation,
   planningOverviewRowLimit,
   planningOverviewSummary,
   planningReferenceTime,
+  planningTaskDueInstant,
   selectNextCalendarEvent,
   selectNextReminder,
   selectPrimaryOverdueTask,
@@ -195,6 +197,75 @@ describe("Planning Overview selectors and presentation", () => {
     expect(planningOverviewRowLimit("compact")).toBe(2);
     expect(planningOverviewRowLimit("standard")).toBe(3);
     expect(planningOverviewRowLimit("large")).toBe(3);
+  });
+
+  it("keeps the next same-kind real items ahead of placeholders", () => {
+    const first = planningFixtures.overviewDensity.reminders.upcoming[0];
+    const reminders = [
+      { ...first, id: "00000000-0000-4000-8000-000000000041", title: "Напоминание 1", dueAtUtc: "2026-08-12T12:10:00Z" },
+      { ...first, id: "00000000-0000-4000-8000-000000000042", title: "Напоминание 2", dueAtUtc: "2026-08-12T12:20:00Z" },
+      { ...first, id: "00000000-0000-4000-8000-000000000043", title: "Напоминание 3", dueAtUtc: "2026-08-12T12:30:00Z" }
+    ];
+    const snapshot = {
+      ...planningFixtures.overviewDensity,
+      reminders: { ...planningFixtures.overviewDensity.reminders, upcoming: reminders },
+      tasks: { ...planningFixtures.overviewDensity.tasks, overdue: [], upcoming: [] },
+      calendar: { ...planningFixtures.overviewDensity.calendar, today: [], upcoming: [] }
+    };
+    const summary = planningOverviewSummary(snapshot, fixtureNow);
+    expect(summary.overviewItems.map((entry) => entry.item.title)).toEqual(["Напоминание 1", "Напоминание 2", "Напоминание 3"]);
+    expect(formatTaskDueLabel({ ...planningFixtures.overviewDensity.tasks.upcoming[0], dueDate: "2026-08-14", dueTime: null, timezone: null })).not.toContain("00:00");
+  });
+
+  it("orders cross-kind timed items by their actual instant and handles ties deterministically", () => {
+    const baseTask = planningFixtures.overviewDensity.tasks.upcoming[0];
+    const moscowTask = {
+      ...baseTask,
+      id: "00000000-0000-4000-8000-000000000051",
+      title: "Задача Москва",
+      dueDate: "2026-08-13",
+      dueTime: "14:00",
+      timezone: "Europe/Moscow"
+    };
+    const reminder = {
+      ...planningFixtures.overviewDensity.reminders.upcoming[0],
+      id: "00000000-0000-4000-8000-000000000052",
+      dueAtUtc: "2026-08-13T12:00:00Z",
+      title: "UTC напоминание"
+    };
+    const event = {
+      ...planningFixtures.overviewDensity.calendar.upcoming[0],
+      id: "00000000-0000-4000-8000-000000000053",
+      title: "UTC событие",
+      startAtUtc: "2026-08-13T13:00:00Z",
+      endAtUtc: "2026-08-13T14:00:00Z"
+    };
+    const snapshot = {
+      ...planningFixtures.empty,
+      reminders: { ...planningFixtures.empty.reminders, upcoming: [reminder] },
+      tasks: { ...planningFixtures.empty.tasks, upcoming: [moscowTask] },
+      calendar: { ...planningFixtures.empty.calendar, upcoming: [event] }
+    };
+    expect(planningTaskDueInstant(moscowTask)).toBe(Date.parse("2026-08-13T11:00:00Z"));
+    expect(planningOverviewSummary(snapshot, fixtureNow).overviewItems.map((entry) => entry.item.title))
+      .toEqual(["Задача Москва", "UTC напоминание", "UTC событие"]);
+
+    const tiedReminder = { ...reminder, id: "00000000-0000-4000-8000-000000000050", title: "UTC напоминание раньше по ID" };
+    const tiedSnapshot = { ...snapshot, reminders: { ...snapshot.reminders, upcoming: [reminder, tiedReminder] } };
+    expect(planningOverviewSummary(tiedSnapshot, fixtureNow).overviewItems.filter((entry) => entry.kind === "reminder").map((entry) => entry.item.id))
+      .toEqual([tiedReminder.id, reminder.id]);
+  });
+
+  it("places date-only items by date and undated tasks last without inventing a clock time", () => {
+    const baseTask = planningFixtures.overviewDensity.tasks.upcoming[0];
+    const dateOnly = { ...baseTask, id: "00000000-0000-4000-8000-000000000061", title: "Дата без времени", dueDate: "2026-08-14", dueTime: null, timezone: null };
+    const undated = { ...baseTask, id: "00000000-0000-4000-8000-000000000062", title: "Без срока", dueDate: null, dueTime: null, timezone: null };
+    const snapshot = { ...planningFixtures.empty, tasks: { ...planningFixtures.empty.tasks, upcoming: [undated, dateOnly] } };
+    expect(planningOverviewSummary(snapshot, fixtureNow).overviewItems.map((entry) => entry.item.title))
+      .toEqual(["Дата без времени", "Без срока"]);
+    expect(formatTaskDueLabel(dateOnly)).toMatch(/^срок /);
+    expect(formatTaskDueLabel(dateOnly)).not.toContain("00:00");
+    expect(planningTaskDueInstant(dateOnly)).toBeNull();
   });
 
   it("keeps the rest of `Дела` available when one summary selector fails", () => {

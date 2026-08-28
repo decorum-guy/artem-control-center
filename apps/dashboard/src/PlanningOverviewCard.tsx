@@ -30,15 +30,8 @@ function displayItemsForSummary(
   meaningful: readonly PlanningOverviewItem[],
   limit: 2 | 3
 ): PlanningDisplayItem[] {
-  const items: PlanningDisplayItem[] = [];
-  const represented = new Set<PlanningOverviewItem["kind"]>();
-  for (const entry of meaningful) {
-    if (items.length >= limit) break;
-    if (!represented.has(entry.kind)) {
-      items.push(entry);
-      represented.add(entry.kind);
-    }
-  }
+  const items: PlanningDisplayItem[] = meaningful.slice(0, limit);
+  const represented = new Set(items.map((entry) => entry.kind));
   const placeholders: PlanningDisplayItem[] = [
     { kind: "reminder", item: null },
     { kind: "task", item: null, overdue: false },
@@ -50,10 +43,6 @@ function displayItemsForSummary(
       items.push(placeholder);
       represented.add(placeholder.kind);
     }
-  }
-  for (const entry of meaningful) {
-    if (items.length >= limit) break;
-    if (!items.includes(entry)) items.push(entry);
   }
   return items;
 }

@@ -388,6 +388,7 @@
 }
 
 .coffee-panel--overview.coffee-panel--turning_on.coffee-panel--transition-moving,
+.coffee-panel--overview.coffee-panel--turning_on.coffee-panel--transition-revealing,
 .coffee-panel--overview.coffee-panel--warming,
 .coffee-panel--overview.coffee-panel--ready,
 .coffee-panel--overview.coffee-panel--running,

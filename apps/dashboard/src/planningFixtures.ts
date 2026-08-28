@@ -265,8 +265,8 @@ export const planningFixtures = {
         calendarEvent({
           id: ids.overviewEventEarlier,
           title: "Раннее событие",
-          startAtUtc: "2026-08-13T15:00:00Z",
-          endAtUtc: "2026-08-13T16:00:00Z"
+          startAtUtc: "2026-08-13T11:00:00Z",
+          endAtUtc: "2026-08-13T12:00:00Z"
         })
       ],
       conflicts: []

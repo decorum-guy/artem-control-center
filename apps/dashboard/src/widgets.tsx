@@ -316,7 +316,7 @@ export function CoffeeWidget({
           </div>
         )}
 
-        {(data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable") && (
+        {showsPolicyNote && (
           <p className={`coffee-policy-note ${data.timingPolicy.stale ? "coffee-policy-note--stale" : ""}`}>
             {view.timingMessage}
           </p>
