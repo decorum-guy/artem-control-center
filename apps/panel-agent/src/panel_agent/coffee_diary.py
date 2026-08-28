@@ -495,11 +495,9 @@ def coffee_diary_store_path() -> Path:
 def _file_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f".{path.name}.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # Do not use append mode here.  On Windows, msvcrt.locking() operates on
-    # the current file position, so an append handle can make the byte being
-    # locked depend on the previous write position.  Create the one-byte
-    # sentinel only when absent; updating an existing lock file before
-    # acquisition can itself contend with a lock held by another process.
+    # Create the one-byte sentinel only when absent; updating an existing lock
+    # file before acquisition can itself contend with a lock held by another
+    # process.
     if not lock_path.exists():
         try:
             with lock_path.open("xb", buffering=0) as initializer:
@@ -514,32 +512,98 @@ def _file_lock(path: Path) -> Iterator[None]:
         deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
         locked = False
 
-        def seek_lock_byte() -> None:
-            # msvcrt.locking() consumes the CRT fd's current position.  Use
-            # the fd-level seek so the position used by lock and unlock is
-            # unambiguously the same byte even with Windows file wrappers.
-            handle.flush()
-            os.lseek(handle.fileno(), 0, os.SEEK_SET)
-
         def retry_or_raise(exc: OSError) -> None:
             if time.monotonic() >= deadline:
                 raise CoffeeDiaryStoreUnavailable("coffee_diary_store_lock_busy") from exc
             time.sleep(min(_LOCK_RETRY_SECONDS, max(0.0, deadline - time.monotonic())))
 
         if os.name == "nt":
-            import msvcrt
-            while not locked:
-                seek_lock_byte()
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateFileW.argtypes = [
+                wintypes.LPCWSTR,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                ctypes.c_void_p,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                wintypes.HANDLE,
+            ]
+            kernel32.CreateFileW.restype = wintypes.HANDLE
+            kernel32.LockFileEx.argtypes = [
+                wintypes.HANDLE,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                ctypes.c_void_p,
+            ]
+            kernel32.LockFileEx.restype = wintypes.BOOL
+            kernel32.UnlockFileEx.argtypes = [
+                wintypes.HANDLE,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                ctypes.c_void_p,
+            ]
+            kernel32.UnlockFileEx.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+
+            class _Overlapped(ctypes.Structure):
+                _fields_ = [
+                    ("Internal", ctypes.c_void_p),
+                    ("InternalHigh", ctypes.c_void_p),
+                    ("Offset", wintypes.DWORD),
+                    ("OffsetHigh", wintypes.DWORD),
+                    ("hEvent", wintypes.HANDLE),
+                ]
+
+            access = 0x80000000 | 0x40000000  # GENERIC_READ | GENERIC_WRITE
+            share = 0x00000001 | 0x00000002 | 0x00000004  # read/write/delete
+            flags = 0x00000080 | 0x40000000  # FILE_ATTRIBUTE_NORMAL | OVERLAPPED
+            windows_handle = kernel32.CreateFileW(str(lock_path), access, share, None, 3, flags, None)
+            invalid_handle = ctypes.c_void_p(-1).value
+            if windows_handle is None or getattr(windows_handle, "value", windows_handle) == invalid_handle:
+                error_code = ctypes.get_last_error()
+                raise OSError(error_code, "CreateFileW failed for Coffee Diary lock")
+            overlapped = _Overlapped()
+            overlapped.Offset = 0
+            overlapped.OffsetHigh = 0
+            lock_flags = 0x00000001 | 0x00000002  # FAIL_IMMEDIATELY | EXCLUSIVE
+            lock_errors = {5, 32, 33}  # ACCESS_DENIED, SHARING_VIOLATION, LOCK_VIOLATION
+            try:
+                while not locked:
+                    if kernel32.LockFileEx(
+                        windows_handle,
+                        lock_flags,
+                        0,
+                        1,
+                        0,
+                        ctypes.byref(overlapped),
+                    ):
+                        locked = True
+                        continue
+                    error_code = ctypes.get_last_error()
+                    if error_code not in lock_errors:
+                        raise OSError(error_code, "LockFileEx failed for Coffee Diary lock")
+                    retry_or_raise(OSError(error_code, "Coffee Diary lock is busy"))
                 try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                    locked = True
-                except OSError as exc:
-                    if not isinstance(exc, PermissionError) and getattr(exc, "errno", None) not in {
-                        errno.EACCES,
-                        errno.EAGAIN,
-                    }:
-                        raise
-                    retry_or_raise(exc)
+                    yield
+                finally:
+                    if locked and not kernel32.UnlockFileEx(
+                        windows_handle,
+                        0,
+                        1,
+                        0,
+                        ctypes.byref(overlapped),
+                    ):
+                        error_code = ctypes.get_last_error()
+                        raise OSError(error_code, "UnlockFileEx failed for Coffee Diary lock")
+            finally:
+                kernel32.CloseHandle(windows_handle)
         else:
             import fcntl
             while not locked:
@@ -550,16 +614,11 @@ def _file_lock(path: Path) -> Iterator[None]:
                     if getattr(exc, "errno", None) not in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}:
                         raise
                     retry_or_raise(exc)
-        try:
-            yield
-        finally:
-            if locked and os.name == "nt":
-                import msvcrt
-                seek_lock_byte()
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            elif locked:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            try:
+                yield
+            finally:
+                if locked:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _empty_document() -> CoffeeDiaryDocument:
