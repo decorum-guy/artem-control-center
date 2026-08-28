@@ -141,6 +141,11 @@ function PhotoUploadDialog({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
   const handledRef = useRef(false);
+  const onSessionUpdateRef = useRef(onSessionUpdate);
+  const onUploadedRef = useRef(onUploaded);
+  const { sessionId, state } = session;
+  onSessionUpdateRef.current = onSessionUpdate;
+  onUploadedRef.current = onUploaded;
 
   useEffect(() => {
     let cancelled = false;
@@ -152,18 +157,18 @@ function PhotoUploadDialog({
   }, [session.uploadUrl]);
 
   useEffect(() => {
-    if (!session || !["created", "uploading"].includes(session.state)) return;
+    if (!["created", "uploading"].includes(state)) return;
     const timer = window.setInterval(() => {
-      void getCoffeeDiaryPhotoUploadSession(session.sessionId).then((next) => {
-        onSessionUpdate(next);
+      void getCoffeeDiaryPhotoUploadSession(sessionId).then((next) => {
+        onSessionUpdateRef.current(next);
         if (!handledRef.current && ((next.state === "consumed" && next.photoId) || (next.state === "uploaded" && next.pendingAttachmentId))) {
           handledRef.current = true;
-          onUploaded(next);
+          onUploadedRef.current(next);
         }
       }).catch(() => setPollError("Не удалось обновить статус. Ожидаем соединение…"));
     }, 1_000);
     return () => window.clearInterval(timer);
-  }, [onSessionUpdate, onUploaded, session, session.sessionId, session.state]);
+  }, [sessionId, state]);
 
   const terminal = session.state === "expired" || session.state === "cancelled" || session.state === "consumed" || session.state === "uploaded";
   return (
@@ -510,7 +515,7 @@ export function CoffeeDiaryPage() {
       {sheet === "add-bean" && <BeanSheet onClose={() => setSheet(null)} onSaved={(bean) => { setSheet(null); setSelectedId(bean.id); void reload(); }} onConflict={reconcileConflict} />}
       {sheet === "edit-bean" && selectedBean && <BeanSheet bean={selectedBean} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void reload(); }} onConflict={reconcileConflict} />}
       {sheet === "add-extraction" && selectedBean && <ExtractionSheet bean={selectedBean} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void reload(); }} />}
-      {photoSession && <PhotoUploadDialog session={photoSession} onClose={() => void closeExistingPhotoUpload()} onSessionUpdate={(next) => setPhotoSession((current) => current ? { ...next, uploadUrl: next.uploadUrl ?? current.uploadUrl } : next)} onUploaded={() => { setPhotoSession(null); void reload(); }} />}
+      {photoSession && <PhotoUploadDialog session={photoSession} onClose={() => void closeExistingPhotoUpload()} onSessionUpdate={(next) => setPhotoSession((current) => current ? { ...next, uploadUrl: next.uploadUrl ?? current.uploadUrl } : next)} onUploaded={(next) => { setPhotoSession(next); void reload(); }} />}
     </div>
   );
 }
