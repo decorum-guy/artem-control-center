@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import importlib
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -67,6 +71,100 @@ def test_kiosk_presence_writes_only_bounded_local_heartbeat(monkeypatch, tmp_pat
         json={"pageId": "not-bounded", "extra": True},
     )
     assert malformed.status_code == 422
+
+
+def test_concurrent_command_writers_use_private_atomic_temps(monkeypatch, tmp_path):
+    from panel_agent import runtime_control
+
+    command_path = tmp_path / "runtime-command.json"
+    payloads = [
+        {"schemaVersion": 1, "action": "hide", "writer": index}
+        for index in range(4)
+    ]
+    replace_barrier = threading.Barrier(len(payloads))
+    replace_sources: list[Path] = []
+    replace_sources_lock = threading.Lock()
+    original_replace = runtime_control.os.replace
+
+    def synchronized_replace(source, destination):
+        source_path = Path(source)
+        with replace_sources_lock:
+            replace_sources.append(source_path)
+        replace_barrier.wait(timeout=5)
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(runtime_control.os, "replace", synchronized_replace)
+
+    with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
+        list(executor.map(lambda payload: runtime_control._write_command(command_path, payload), payloads))
+
+    assert len(replace_sources) == len(payloads)
+    assert len(set(replace_sources)) == len(payloads)
+    assert all(source.parent == command_path.parent for source in replace_sources)
+    assert json.loads(command_path.read_text(encoding="utf-8")) in payloads
+    assert list(tmp_path.glob(f".{command_path.name}.*.tmp")) == []
+
+
+def test_failed_command_write_preserves_target_and_cleans_only_own_temp(monkeypatch, tmp_path):
+    from panel_agent import runtime_control
+
+    command_path = tmp_path / "runtime-command.json"
+    existing = {"schemaVersion": 1, "action": "existing"}
+    command_path.write_text(json.dumps(existing), encoding="utf-8")
+    unrelated_temp = tmp_path / f".{command_path.name}.unrelated.tmp"
+    unrelated_temp.write_text("unrelated", encoding="utf-8")
+    attempted_sources: list[Path] = []
+
+    def failing_replace(source, destination):
+        attempted_sources.append(Path(source))
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(runtime_control.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="injected replace failure"):
+        runtime_control._write_command(
+            command_path,
+            {"schemaVersion": 1, "action": "replacement"},
+        )
+
+    assert attempted_sources
+    assert not attempted_sources[0].exists()
+    assert json.loads(command_path.read_text(encoding="utf-8")) == existing
+    assert unrelated_temp.read_text(encoding="utf-8") == "unrelated"
+    assert list(tmp_path.glob(f".{command_path.name}.*.tmp")) == [unrelated_temp]
+
+
+def test_concurrent_kiosk_presence_requests_publish_complete_heartbeats(monkeypatch, tmp_path):
+    command_path = tmp_path / "runtime-command.json"
+    module = load_app(monkeypatch, command_path, enabled=True)
+    presence_path = tmp_path / "kiosk-presence.json"
+    page_ids = [f"{index:024x}" for index in range(4)]
+    replace_barrier = threading.Barrier(len(page_ids))
+    original_replace = module.os.replace
+
+    def synchronized_replace(source, destination):
+        replace_barrier.wait(timeout=5)
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", synchronized_replace)
+
+    def send_presence(page_id):
+        with TestClient(module.app, raise_server_exceptions=False) as client:
+            return client.post(
+                "/api/v1/system/runtime/kiosk-presence",
+                headers={"x-panel-intent": "kiosk-presence"},
+                json={"pageId": page_id},
+            )
+
+    with ThreadPoolExecutor(max_workers=len(page_ids)) as executor:
+        responses = list(executor.map(send_presence, page_ids))
+
+    assert [response.status_code for response in responses] == [204] * len(page_ids)
+    heartbeat = json.loads(presence_path.read_text(encoding="utf-8"))
+    assert heartbeat["schemaVersion"] == 1
+    assert heartbeat["pageId"] in page_ids
+    assert isinstance(heartbeat["observedAt"], str)
+    assert set(heartbeat) == {"schemaVersion", "pageId", "observedAt"}
+    assert list(tmp_path.glob(f".{presence_path.name}.*.tmp")) == []
 
 
 def test_runtime_control_writes_only_narrow_commands(monkeypatch, tmp_path):
