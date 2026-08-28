@@ -6,6 +6,7 @@ import secrets
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Response, status
@@ -17,6 +18,10 @@ from .system_update import software_update_active
 RuntimeAction = Literal["hide", "shutdown", "apply_capabilities"]
 
 router = APIRouter(prefix="/api/v1/system/runtime", tags=["system"])
+
+_REPLACE_LOCK_TIMEOUT_SECONDS = 5.0
+_replace_locks = {}
+_replace_locks_guard = Lock()
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -61,6 +66,28 @@ class KioskPresenceRequest(BaseModel):
     pageId: str = Field(pattern=r"^[0-9a-f]{24}$")
 
 
+def _replace_lock_for(path: Path):
+    with _replace_locks_guard:
+        return _replace_locks.setdefault(path, Lock())
+
+
+def _atomic_replace(temporary: Path, path: Path) -> None:
+    # Windows can reject simultaneous replacements of the same destination
+    # even when each source is a different, closed file. Serialize only that
+    # short publication step per target, with a bounded wait; temp creation and
+    # JSON writes remain concurrent and cross-process temp names remain private.
+    if os.name != "nt":
+        os.replace(temporary, path)
+        return
+    replace_lock = _replace_lock_for(path)
+    if not replace_lock.acquire(timeout=_REPLACE_LOCK_TIMEOUT_SECONDS):
+        raise OSError(f"timed out publishing runtime command: {path}")
+    try:
+        os.replace(temporary, path)
+    finally:
+        replace_lock.release()
+
+
 def _write_command(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
@@ -80,7 +107,7 @@ def _write_command(path: Path, payload: dict) -> None:
         # file before replacement is required for Windows, while fsync would
         # add crash-durability overhead that these ephemeral commands do not
         # currently promise.
-        os.replace(temporary, path)
+        _atomic_replace(temporary, path)
     finally:
         if temporary is not None:
             try:

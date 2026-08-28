@@ -22,6 +22,35 @@ def load_app(monkeypatch, command_path, *, enabled: bool):
     return importlib.reload(panel_agent.main)
 
 
+def gate_private_replacements(monkeypatch, module, barrier, sources=None):
+    """Release writers after their temp is ready, before publication."""
+    sources_lock = threading.Lock()
+    original_publish = getattr(module, "_atomic_replace", None)
+    if original_publish is not None:
+        def synchronized_publish(source, destination):
+            if sources is not None:
+                with sources_lock:
+                    sources.append(Path(source))
+            barrier.wait(timeout=5)
+            return original_publish(source, destination)
+
+        monkeypatch.setattr(module, "_atomic_replace", synchronized_publish)
+        return
+
+    # Compatibility path used when this regression is run against the old
+    # main implementation, which has no publication helper to instrument.
+    original_replace = module.os.replace
+
+    def synchronized_replace(source, destination):
+        if sources is not None:
+            with sources_lock:
+                sources.append(Path(source))
+        barrier.wait(timeout=5)
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", synchronized_replace)
+
+
 def test_runtime_control_status_and_intent_gate(monkeypatch, tmp_path):
     command_path = tmp_path / "runtime-command.json"
     close_request_path = tmp_path / "kiosk-close-request.json"
@@ -83,17 +112,7 @@ def test_concurrent_command_writers_use_private_atomic_temps(monkeypatch, tmp_pa
     ]
     replace_barrier = threading.Barrier(len(payloads))
     replace_sources: list[Path] = []
-    replace_sources_lock = threading.Lock()
-    original_replace = runtime_control.os.replace
-
-    def synchronized_replace(source, destination):
-        source_path = Path(source)
-        with replace_sources_lock:
-            replace_sources.append(source_path)
-        replace_barrier.wait(timeout=5)
-        return original_replace(source, destination)
-
-    monkeypatch.setattr(runtime_control.os, "replace", synchronized_replace)
+    gate_private_replacements(monkeypatch, runtime_control, replace_barrier, replace_sources)
 
     with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
         list(executor.map(lambda payload: runtime_control._write_command(command_path, payload), payloads))
@@ -139,13 +158,7 @@ def test_concurrent_kiosk_presence_requests_publish_complete_heartbeats(monkeypa
     presence_path = tmp_path / "kiosk-presence.json"
     page_ids = [f"{index:024x}" for index in range(4)]
     replace_barrier = threading.Barrier(len(page_ids))
-    original_replace = module.os.replace
-
-    def synchronized_replace(source, destination):
-        replace_barrier.wait(timeout=5)
-        return original_replace(source, destination)
-
-    monkeypatch.setattr(module.os, "replace", synchronized_replace)
+    gate_private_replacements(monkeypatch, module, replace_barrier)
 
     def send_presence(page_id):
         with TestClient(module.app, raise_server_exceptions=False) as client:
