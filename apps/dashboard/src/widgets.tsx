@@ -225,7 +225,8 @@ export function CoffeeWidget({
       minute: "2-digit"
     })}`;
   }
-  const showsPolicyNote = data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable";
+  const showsPolicyNote = data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable"
+    || (view.progress === null && (view.stage === "running" || view.stage === "running_too_long"));
   const overviewCopyDensity = warming || stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
     ? "dense"
     : "spacious";

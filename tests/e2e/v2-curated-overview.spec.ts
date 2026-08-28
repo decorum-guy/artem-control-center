@@ -16,6 +16,7 @@ let rogStatus: RogStatus = "online";
 let longRussian = false;
 let homeFixture: HomeFixture = "one";
 let coffeeFixtureOverride: CoffeeFixtureOverride = null;
+let coffeeTimingUnavailable = false;
 const postedActions: Array<{ actionId?: string }> = [];
 
 function rogService(status: RogStatus) {
@@ -102,7 +103,7 @@ async function installCuratedMocks(page: Page) {
     }
     if (coffeeFixtureOverride) {
       const coffee = snapshot.services.find((service) => service.id === "coffee-machine");
-      const coffeeData = coffee?.data as { machine?: Record<string, unknown> } | undefined;
+      const coffeeData = coffee?.data as { machine?: Record<string, unknown>; timingPolicy?: Record<string, unknown> } | undefined;
       if (coffee && coffeeData?.machine) {
         const warmingAt = {
           warming: "2026-07-29T11:54:09Z",
@@ -115,6 +116,20 @@ async function installCuratedMocks(page: Page) {
         coffeeData.machine.available = true;
         coffeeData.machine.stale = false;
         coffeeData.machine.turnedOnAt = coffeeFixtureOverride === "off" ? null : warmingAt[coffeeFixtureOverride];
+      }
+    }
+    if (coffeeTimingUnavailable) {
+      const coffee = snapshot.services.find((service) => service.id === "coffee-machine");
+      const coffeeData = coffee?.data as { machine?: Record<string, unknown>; timingPolicy?: Record<string, unknown> } | undefined;
+      if (coffeeData?.machine && coffeeData.timingPolicy) {
+        coffeeData.machine.state = "on";
+        coffeeData.machine.available = true;
+        coffeeData.machine.stale = false;
+        coffeeData.machine.turnedOnAt = "2026-07-29T11:54:09Z";
+        coffeeData.timingPolicy.warmupDurationSeconds = null;
+        coffeeData.timingPolicy.longRunningThresholdSeconds = null;
+        coffeeData.timingPolicy.sourceAvailable = false;
+        coffeeData.timingPolicy.stale = false;
       }
     }
     await route.fulfill({
@@ -290,6 +305,7 @@ test.describe("PR4 curated Overview", () => {
     longRussian = false;
     homeFixture = "one";
     coffeeFixtureOverride = null;
+    coffeeTimingUnavailable = false;
     postedActions.length = 0;
     await installCuratedMocks(page);
     await installRogMocks(page);
@@ -710,6 +726,18 @@ test.describe("PR4 curated Overview", () => {
       }
       await expectNoOverflow(page);
     }
+  });
+
+  test("shows truthful degraded timing copy when canonical progress is unavailable", async ({ page }) => {
+    coffeeTimingUnavailable = true;
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/overview?theme=night");
+    await waitForOverview(page);
+    const coffee = page.getByTestId("widget-coffee-machine");
+    await expect(coffee).toHaveAttribute("data-stage", "running");
+    await expect(coffee).toHaveAttribute("data-progress-tone", "unknown");
+    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    await expect(coffee).toContainText("Параметры разогрева временно недоступны");
   });
 
   test("animates only an observed OFF to confirmed heating transition and settles truthfully", async ({ page }) => {
