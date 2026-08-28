@@ -70,29 +70,9 @@ jobs:
         if: runner.os == 'Windows'
         run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary_lock.py -q
 
-      - name: Run focused Coffee Diary Windows model gate
+      - name: Run focused Coffee Diary Windows store gate
         if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_empty_store or test_bean_core_fields or test_preferred_drink or test_invalid_preferred_drink or test_dose_grams or test_yield_grams or test_grams_reject"
-
-      - name: Run focused Coffee Diary Windows mutation gate
-        if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_extraction_shot_fields or test_favorite_can_change or test_create_make_favorite or test_deleting_current_favorite or test_deleted_extraction"
-
-      - name: Run focused Coffee Diary Windows relationship gate
-        if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_same_idempotency or test_extraction_idempotency or test_photo_relationship or test_malformed_relationship or test_deleted_bean_may_own or test_active_photo"
-
-      - name: Run focused Coffee Diary Windows corruption gate
-        if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_corrupt_unsupported"
-
-      - name: Run focused Coffee Diary Windows atomic-write gate
-        if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_atomic_write_failure"
-
-      - name: Run focused Coffee Diary Windows export gate
-        if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_export_has_relationships"
+        run: node scripts/python.mjs scripts/windows/run-coffee-diary-tests.py
 
       - name: Run focused Coffee Diary Windows API gate
         if: runner.os == 'Windows'

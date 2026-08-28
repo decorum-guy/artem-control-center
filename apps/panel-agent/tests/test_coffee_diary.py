@@ -409,7 +409,11 @@ def test_active_photo_requires_exactly_one_coherent_owner_reference(tmp_path):
     assert document.photos[0].deletedAt is None
 
 
-@pytest.mark.parametrize("raw", [b"{not-json", json.dumps({"schemaVersion": "coffee.diary.v0"}).encode(), b"x" * (MAX_FILE_BYTES + 1)])
+@pytest.mark.parametrize(
+    "raw",
+    [b"{not-json", json.dumps({"schemaVersion": "coffee.diary.v0"}).encode(), b"x" * (MAX_FILE_BYTES + 1)],
+    ids=["invalid-json", "unsupported-schema", "oversized"],
+)
 def test_corrupt_unsupported_oversized_store_fails_closed_and_is_not_overwritten(tmp_path, raw):
     path = tmp_path / "coffee.json"
     path.write_bytes(raw)
