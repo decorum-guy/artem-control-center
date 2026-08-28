@@ -563,7 +563,7 @@ def _file_lock(path: Path) -> Iterator[None]:
 
             access = 0x80000000 | 0x40000000  # GENERIC_READ | GENERIC_WRITE
             share = 0x00000001 | 0x00000002 | 0x00000004  # read/write/delete
-            flags = 0x00000080 | 0x40000000  # FILE_ATTRIBUTE_NORMAL | OVERLAPPED
+            flags = 0x00000080  # FILE_ATTRIBUTE_NORMAL; keep LockFileEx synchronous
             windows_handle = kernel32.CreateFileW(str(lock_path), access, share, None, 3, flags, None)
             invalid_handle = ctypes.c_void_p(-1).value
             if windows_handle is None or getattr(windows_handle, "value", windows_handle) == invalid_handle:
