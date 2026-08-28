@@ -12,7 +12,9 @@ import { useActionConfirmation } from "./ActionConfirmations";
 import { useInteractionLock } from "./InteractionLock";
 import { NumericKeypad } from "./NumericKeypad";
 import { normalizeNumericInput, numericInputValue } from "./coffeeDiaryNumeric";
+import { coffeeDiaryApiMessage } from "./coffeeDiaryMessages";
 import {
+  CoffeeDiaryApiError,
   createCoffeeDiaryBean,
   createCoffeeDiaryExtraction,
   deleteCoffeeDiaryBean,
@@ -21,7 +23,6 @@ import {
   getCoffeeDiaryBean,
   getCoffeeDiaryExport,
   patchCoffeeDiaryBean,
-  type CoffeeDiaryApiError
 } from "./coffeeDiaryApi";
 import { coffeeDiaryRecipeLines } from "./coffeeDiaryPresentation";
 import "./coffeeDiary.css";
@@ -87,14 +88,8 @@ function toUtcTimestamp(localValue: string): string | null {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
 }
 
-function apiMessage(reason: unknown): string {
-  const code = reason && typeof reason === "object" && "code" in reason ? String((reason as CoffeeDiaryApiError).code) : "";
-  if (code === "revision_conflict") return "Данные изменились в другом окне. Загружено актуальное состояние.";
-  if (code === "coffee_diary_write_disabled") return "Изменения недоступны в режиме только чтения.";
-  if (code === "coffee_diary_store_unavailable" || code.startsWith("coffee_diary_store_")) return "Дневник временно недоступен: сохранённые данные не изменены.";
-  if (code === "coffee_diary_idempotency_key_reused") return "Повторная команда с другим содержимым отклонена.";
-  if (code === "coffee_diary_bean_not_found") return "Зерно не найдено в активном дневнике.";
-  return "Не удалось сохранить дневник. Проверьте поля и повторите попытку.";
+function isRevisionConflict(reason: unknown): boolean {
+  return reason instanceof CoffeeDiaryApiError && reason.code === "revision_conflict";
 }
 
 function RecipeEditor({ recipe, onChange, prefix }: { recipe: RecipeDraft; onChange: (recipe: RecipeDraft) => void; prefix: string }) {
@@ -132,7 +127,7 @@ function RecipeEditor({ recipe, onChange, prefix }: { recipe: RecipeDraft; onCha
   );
 }
 
-function BeanSheet({ bean, onClose, onSaved }: { bean?: CoffeeDiaryBean; onClose: () => void; onSaved: (bean: CoffeeDiaryBean) => void }) {
+function BeanSheet({ bean, onClose, onSaved, onConflict }: { bean?: CoffeeDiaryBean; onClose: () => void; onSaved: (bean: CoffeeDiaryBean) => void; onConflict: () => Promise<void> }) {
   const { guardMutation } = useInteractionLock();
   const [draft, setDraft] = useState(() => beanToDraft(bean));
   const [recipe, setRecipe] = useState(() => recipeToDraft(bean?.defaultRecipe));
@@ -150,7 +145,10 @@ function BeanSheet({ bean, onClose, onSaved }: { bean?: CoffeeDiaryBean; onClose
         : await createCoffeeDiaryBean(payload, crypto.randomUUID());
       onSaved(saved);
       onClose();
-    } catch (reason) { setError(apiMessage(reason)); }
+    } catch (reason) {
+      if (isRevisionConflict(reason)) { await onConflict(); return; }
+      setError(coffeeDiaryApiMessage(reason));
+    }
   }
   return (
     <Sheet testId="coffee-diary-bean-sheet" eyebrow="Кофе" title={bean ? "Изменить кофе" : "Добавить кофе"} description="Сохраняются только явно заполненные сведения о зерне и рецепте." onClose={onClose} footer={<div className="coffee-diary-sheet-actions"><button type="button" className="coffee-diary-secondary-button" onClick={onClose}>Отмена</button><button type="submit" form="coffee-diary-bean-form" className="coffee-diary-primary-button">Сохранить</button></div>}>
@@ -192,7 +190,7 @@ function ExtractionSheet({ bean, onClose, onSaved }: { bean: CoffeeDiaryBean; on
       const saved = await createCoffeeDiaryExtraction(bean.id, { brewedAt: brewedAtUtc, method: recipePayload.method, recipeSnapshot: recipePayload, notes: notes || null, rating: ratingValue }, crypto.randomUUID());
       onSaved(saved);
       onClose();
-    } catch (reason) { setError(apiMessage(reason)); }
+    } catch (reason) { setError(coffeeDiaryApiMessage(reason)); }
   }
   return (
     <Sheet testId="coffee-diary-extraction-sheet" eyebrow={bean.name} title="Добавить приготовление" description="В историю попадёт отдельная копия текущего рецепта." onClose={onClose} footer={<div className="coffee-diary-sheet-actions"><button type="button" className="coffee-diary-secondary-button" onClick={onClose}>Отмена</button><button type="submit" form="coffee-diary-extraction-form" className="coffee-diary-primary-button">Сохранить</button></div>}>
@@ -220,21 +218,28 @@ export function CoffeeDiaryPage() {
 
   const selectedBean = useMemo(() => collection?.beans.find((bean) => bean.id === selectedId) ?? null, [collection, selectedId]);
 
-  async function reload() {
+  async function reload(): Promise<boolean> {
     setLoading(true);
     try {
       const next = await getCoffeeDiary();
       setCollection(next);
       setSelectedId((current) => current && next.beans.some((bean) => bean.id === current) ? current : next.beans[0]?.id ?? null);
       setError(null);
-    } catch (reason) { setError(apiMessage(reason)); }
+      return true;
+    } catch (reason) { setError(coffeeDiaryApiMessage(reason)); }
     finally { setLoading(false); }
+    return false;
+  }
+
+  async function reconcileConflict() {
+    setSheet(null);
+    if (await reload()) setError("Данные изменились. Показана актуальная версия.");
   }
 
   useEffect(() => { void reload(); }, []);
   useEffect(() => {
     if (!selectedId) { setSelectedDetail(null); return; }
-    void getCoffeeDiaryBean(selectedId).then(setSelectedDetail).catch((reason) => setError(apiMessage(reason)));
+    void getCoffeeDiaryBean(selectedId).then(setSelectedDetail).catch((reason) => setError(coffeeDiaryApiMessage(reason)));
   }, [selectedId, collection?.revision]);
 
   async function deleteBean() {
@@ -242,7 +247,10 @@ export function CoffeeDiaryPage() {
     const confirmation = await confirmAction("coffee-diary.bean.delete", { target: selectedBean.name });
     if (!confirmation.confirmed || !guardMutation()) return;
     try { await deleteCoffeeDiaryBean(selectedBean.id, selectedBean.version); await reload(); }
-    catch (reason) { setError(apiMessage(reason)); }
+    catch (reason) {
+      if (isRevisionConflict(reason)) { await reconcileConflict(); return; }
+      setError(coffeeDiaryApiMessage(reason));
+    }
   }
 
   async function deleteExtraction(extraction: CoffeeDiaryExtraction) {
@@ -250,7 +258,10 @@ export function CoffeeDiaryPage() {
     const confirmation = await confirmAction("coffee-diary.extraction.delete", { target: extraction.method });
     if (!confirmation.confirmed || !guardMutation()) return;
     try { await deleteCoffeeDiaryExtraction(extraction.id, extraction.version); await reload(); }
-    catch (reason) { setError(apiMessage(reason)); }
+    catch (reason) {
+      if (isRevisionConflict(reason)) { await reconcileConflict(); return; }
+      setError(coffeeDiaryApiMessage(reason));
+    }
   }
 
   async function exportDiary() {
@@ -262,7 +273,7 @@ export function CoffeeDiaryPage() {
       link.download = "coffee-diary.json";
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    } catch (reason) { setError(apiMessage(reason)); }
+    } catch (reason) { setError(coffeeDiaryApiMessage(reason)); }
   }
 
   return (
@@ -286,8 +297,8 @@ export function CoffeeDiaryPage() {
           <section className="coffee-diary-history" data-testid="coffee-diary-history"><div className="coffee-diary-section-heading"><div><p className="section-kicker">История</p><h3>Приготовления</h3></div><button type="button" className="coffee-diary-primary-button" onClick={() => setSheet("add-extraction")}>Добавить</button></div>{selectedDetail?.extractions.length ? <div className="coffee-diary-history__items">{selectedDetail.extractions.map((extraction) => <article className="coffee-diary-extraction" key={extraction.id}><div className="coffee-diary-extraction__header"><div><strong>{extraction.method}</strong><time dateTime={extraction.brewedAt}>{new Date(extraction.brewedAt).toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" })}</time></div><div className="coffee-diary-extraction__tools">{extraction.rating !== null && <span className="coffee-diary-rating">{extraction.rating}/10</span>}<button type="button" className="coffee-diary-link-button" onClick={() => void deleteExtraction(extraction)}>Удалить</button></div></div><ul className="coffee-diary-snapshot">{coffeeDiaryRecipeLines(extraction.recipeSnapshot).slice(1).map((line) => <li key={line}>{line}</li>)}</ul>{extraction.notes && <p>{extraction.notes}</p>}</article>)}</div> : <p className="coffee-diary-muted">Приготовлений пока нет.</p>}</section>
         </section>}
       </div>}
-      {sheet === "add-bean" && <BeanSheet onClose={() => setSheet(null)} onSaved={(bean) => { setSheet(null); setSelectedId(bean.id); void reload(); }} />}
-      {sheet === "edit-bean" && selectedBean && <BeanSheet bean={selectedBean} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void reload(); }} />}
+      {sheet === "add-bean" && <BeanSheet onClose={() => setSheet(null)} onSaved={(bean) => { setSheet(null); setSelectedId(bean.id); void reload(); }} onConflict={reconcileConflict} />}
+      {sheet === "edit-bean" && selectedBean && <BeanSheet bean={selectedBean} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void reload(); }} onConflict={reconcileConflict} />}
       {sheet === "add-extraction" && selectedBean && <ExtractionSheet bean={selectedBean} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void reload(); }} />}
     </div>
   );

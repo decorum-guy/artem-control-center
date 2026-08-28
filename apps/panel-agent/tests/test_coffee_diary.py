@@ -110,8 +110,23 @@ def test_same_idempotency_key_replays_and_different_body_conflicts(tmp_path):
     replay = store.create_bean(bean_create("Один"), "bean-key-0004")
     assert replay.id == first.id
     assert store.read_document().revision == 1
-    with pytest.raises(CoffeeDiaryConflict, match="idempotency_key_reused"):
+    with pytest.raises(CoffeeDiaryConflict, match="coffee_diary_idempotency_key_reused"):
         store.create_bean(bean_create("Другой"), "bean-key-0004")
+
+
+def test_extraction_idempotency_is_bound_to_bean_and_payload(tmp_path):
+    store = CoffeeDiaryStore(tmp_path / "coffee.json", writes_enabled=True)
+    bean_a = store.create_bean(bean_create("А"), "bean-key-0009")
+    bean_b = store.create_bean(bean_create("Б"), "bean-key-0010")
+    first = store.create_extraction(bean_a.id, extraction_create(), "extract-key-05")
+    replay = store.create_extraction(bean_a.id, extraction_create(), "extract-key-05")
+    assert replay.id == first.id
+    assert store.read_document().revision == 3
+    with pytest.raises(CoffeeDiaryConflict, match="coffee_diary_idempotency_key_reused"):
+        store.create_extraction(bean_b.id, extraction_create(), "extract-key-05")
+    with pytest.raises(CoffeeDiaryConflict, match="coffee_diary_idempotency_key_reused"):
+        store.create_extraction(bean_a.id, extraction_create(recipe("V60", dose=20)), "extract-key-05")
+    assert len(store.read_document().extractions) == 1
 
 
 @pytest.mark.parametrize("raw", [b"{not-json", json.dumps({"schemaVersion": "coffee.diary.v0"}).encode(), b"x" * (MAX_FILE_BYTES + 1)])
@@ -209,3 +224,24 @@ def test_api_uses_fixed_routes_headers_and_rejects_unknown_shape(monkeypatch, tm
         assert exported.headers["content-type"].startswith("application/json")
         assert exported.json()["schemaVersion"] == "coffee.diary.export.v1"
         assert not any(getattr(route, "path", "").endswith("/{path}") for route in module.app.routes)
+
+
+def test_api_extraction_idempotency_is_target_aware_and_stable(monkeypatch, tmp_path):
+    module = _api_module(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        recipe_payload = {"method": "Эспрессо", "fields": [{"key": "dose", "label": "Кофе", "kind": "number", "value": 18, "unit": "г"}]}
+        bean_a = client.post("/api/v1/coffee-diary/beans", headers={"Idempotency-Key": "api-bean-0011"}, json={"name": "A", "defaultRecipe": recipe_payload}).json()
+        bean_b = client.post("/api/v1/coffee-diary/beans", headers={"Idempotency-Key": "api-bean-0012"}, json={"name": "B", "defaultRecipe": recipe_payload}).json()
+        payload = {"brewedAt": "2026-08-28T10:00:00Z", "method": "Эспрессо", "recipeSnapshot": recipe_payload, "notes": None, "rating": None}
+        first = client.post(f"/api/v1/coffee-diary/beans/{bean_a['id']}/extractions", headers={"Idempotency-Key": "api-extract-02"}, json=payload)
+        replay = client.post(f"/api/v1/coffee-diary/beans/{bean_a['id']}/extractions", headers={"Idempotency-Key": "api-extract-02"}, json=payload)
+        assert first.status_code == replay.status_code == 201
+        assert replay.json()["id"] == first.json()["id"]
+        cross_bean = client.post(f"/api/v1/coffee-diary/beans/{bean_b['id']}/extractions", headers={"Idempotency-Key": "api-extract-02"}, json=payload)
+        assert cross_bean.status_code == 409
+        assert cross_bean.json()["detail"] == "coffee_diary_idempotency_key_reused"
+        changed_payload = {**payload, "method": "V60", "recipeSnapshot": {"method": "V60", "fields": []}}
+        changed_body = client.post(f"/api/v1/coffee-diary/beans/{bean_a['id']}/extractions", headers={"Idempotency-Key": "api-extract-02"}, json=changed_payload)
+        assert changed_body.status_code == 409
+        assert changed_body.json()["detail"] == "coffee_diary_idempotency_key_reused"
+        assert client.get("/api/v1/coffee-diary").json()["extractionCount"] == 1

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseCoffeeDiaryExport, parseCoffeeDiaryRecipe } from "./coffeeDiaryApi";
+import { CoffeeDiaryApiError, parseCoffeeDiaryExport, parseCoffeeDiaryRecipe } from "./coffeeDiaryApi";
+import { coffeeDiaryApiMessage } from "./coffeeDiaryMessages";
 
 const bean = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -44,5 +45,10 @@ describe("coffee diary API contracts", () => {
       beans: Array.from({ length: 501 }, () => bean),
       extractions: []
     })).toThrow("invalid_coffee_diary_export");
+  });
+
+  it("maps the stable idempotency conflict code to the Russian UI message", () => {
+    expect(coffeeDiaryApiMessage(new CoffeeDiaryApiError(409, "coffee_diary_idempotency_key_reused")))
+      .toBe("Повторная команда с другим содержимым отклонена.");
   });
 });

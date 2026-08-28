@@ -438,15 +438,41 @@ def _require_coffee_diary_write() -> None:
         raise HTTPException(status_code=403, detail="coffee_diary_write_disabled")
 
 
+_COFFEE_DIARY_PUBLIC_CODES = {
+    "coffee_diary_conflict",
+    "coffee_diary_id_invalid",
+    "coffee_diary_idempotency_key_reused",
+    "coffee_diary_store_not_canonical",
+    "coffee_diary_store_oversized",
+    "coffee_diary_store_unavailable",
+    "coffee_diary_store_write_failed",
+    "coffee_diary_bean_not_found",
+    "coffee_diary_extraction_not_found",
+    "coffee_diary_too_many_beans",
+    "coffee_diary_too_many_extractions",
+    "coffee_diary_write_disabled",
+    "if_match_invalid",
+    "if_match_required",
+    "idempotency_key_invalid",
+    "idempotency_key_required",
+    "revision_conflict",
+}
+
+
+def _safe_coffee_diary_code(value: object, fallback: str) -> str:
+    candidate = str(value)
+    return candidate if candidate in _COFFEE_DIARY_PUBLIC_CODES else fallback
+
+
 def _coffee_diary_error(exc: Exception) -> None:
     if isinstance(exc, CoffeeDiaryStoreUnavailable):
-        raise HTTPException(status_code=503, detail=exc.code)
+        raise HTTPException(status_code=503, detail=_safe_coffee_diary_code(exc.code, "coffee_diary_store_unavailable"))
     if isinstance(exc, CoffeeDiaryConflict):
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(status_code=409, detail=_safe_coffee_diary_code(exc, "coffee_diary_conflict"))
     if isinstance(exc, CoffeeDiaryNotFound):
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=_safe_coffee_diary_code(exc, "coffee_diary_not_found"))
     if isinstance(exc, CoffeeDiaryValidationError):
-        code = str(exc)
+        code = _safe_coffee_diary_code(exc, "coffee_diary_validation_failed")
         if code == "coffee_diary_write_disabled":
             raise HTTPException(status_code=403, detail=code)
         if code in {"if_match_required", "idempotency_key_required"}:

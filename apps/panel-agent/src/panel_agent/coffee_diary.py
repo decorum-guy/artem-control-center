@@ -532,19 +532,40 @@ class CoffeeDiaryStore:
                 return result
 
     @staticmethod
-    def _idempotency_hash(operation: str, payload: BaseModel) -> str:
+    def _idempotency_hash(operation: str, payload: BaseModel, *, bean_id: UUID | None = None) -> str:
+        identity: dict[str, Any] = {"operation": operation, "payload": payload.model_dump(mode="json")}
+        if bean_id is not None:
+            identity["beanId"] = str(bean_id)
+        return hashlib.sha256(_json_bytes(identity)).hexdigest()
+
+    @staticmethod
+    def _legacy_idempotency_hash(operation: str, payload: BaseModel) -> str:
         return hashlib.sha256(_json_bytes({"operation": operation, "payload": payload.model_dump(mode="json")})).hexdigest()
 
     @staticmethod
-    def _replay(document: CoffeeDiaryDocument, *, operation: str, key: str, request_hash: str) -> Optional[BaseModel]:
+    def _replay(
+        document: CoffeeDiaryDocument,
+        *,
+        operation: str,
+        key: str,
+        request_hash: str,
+        legacy_request_hash: str | None = None,
+        bean_id: UUID | None = None,
+    ) -> Optional[BaseModel]:
         record = next((entry for entry in document.idempotency if entry.operation == operation and entry.key == key), None)
         if record is None:
             return None
-        if record.requestHash != request_hash:
-            raise CoffeeDiaryConflict("idempotency_key_reused")
         if operation == "bean.create":
-            return next((bean for bean in document.beans if bean.id == record.resourceId), None)
-        return next((extraction for extraction in document.extractions if extraction.id == record.resourceId), None)
+            resource = next((candidate for candidate in document.beans if candidate.id == record.resourceId), None)
+        else:
+            resource = next((candidate for candidate in document.extractions if candidate.id == record.resourceId), None)
+            if resource is None or bean_id is None or resource.beanId != bean_id:
+                raise CoffeeDiaryConflict("coffee_diary_idempotency_key_reused")
+        if record.requestHash != request_hash and (legacy_request_hash is None or record.requestHash != legacy_request_hash):
+            raise CoffeeDiaryConflict("coffee_diary_idempotency_key_reused")
+        if resource is None:
+            raise CoffeeDiaryConflict("coffee_diary_idempotency_key_reused")
+        return resource
 
     def create_bean(self, payload: CoffeeDiaryBeanCreate, idempotency_key: str) -> CoffeeDiaryBean:
         if not _IDEMPOTENCY_PATTERN.fullmatch(idempotency_key):
@@ -611,10 +632,18 @@ class CoffeeDiaryStore:
     def create_extraction(self, bean_id: UUID, payload: CoffeeDiaryExtractionCreate, idempotency_key: str) -> CoffeeDiaryExtraction:
         if not _IDEMPOTENCY_PATTERN.fullmatch(idempotency_key):
             raise CoffeeDiaryValidationError("idempotency_key_invalid")
-        request_hash = self._idempotency_hash("extraction.create", payload)
+        request_hash = self._idempotency_hash("extraction.create", payload, bean_id=bean_id)
+        legacy_request_hash = self._legacy_idempotency_hash("extraction.create", payload)
 
         def operation(document: CoffeeDiaryDocument):
-            replay = self._replay(document, operation="extraction.create", key=idempotency_key, request_hash=request_hash)
+            replay = self._replay(
+                document,
+                operation="extraction.create",
+                key=idempotency_key,
+                request_hash=request_hash,
+                legacy_request_hash=legacy_request_hash,
+                bean_id=bean_id,
+            )
             if replay is not None:
                 return replay, document
             bean = next((candidate for candidate in document.beans if candidate.id == bean_id and candidate.deletedAt is None), None)

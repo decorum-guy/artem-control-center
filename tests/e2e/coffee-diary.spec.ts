@@ -113,4 +113,51 @@ test.describe("Coffee Diary Slice 1", () => {
     expect(shortTargets, JSON.stringify(shortTargets)).toEqual([]);
     await page.getByRole("button", { name: "Отмена" }).last().click();
   });
+
+  test("reconciles stale edit and delete conflicts without retrying mutations", async ({ page }) => {
+    await page.goto("/coffee-diary");
+    await expect(page.getByTestId("route-coffee-diary")).toBeVisible();
+    await page.getByTestId("coffee-diary-add-bean").click();
+    await page.getByTestId("coffee-diary-input-name").fill("Конфликтное зерно");
+    await page.getByRole("button", { name: "Сохранить" }).last().click();
+    await expect(page.getByTestId("coffee-diary-detail")).toContainText("Конфликтное зерно");
+
+    const collection = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { beans: Array<{ id: string; version: number }> };
+    const bean = collection.beans[0];
+    expect(bean).toMatchObject({ version: 1 });
+    await page.getByRole("button", { name: "Изменить" }).click();
+
+    const patchRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes(`/api/v1/coffee-diary/beans/${bean.id}`) && request.method() === "PATCH") patchRequests.push(request.headers()["if-match"] ?? "");
+    });
+    const externalEdit = await page.request.patch(`/api/v1/coffee-diary/beans/${bean.id}`, { headers: { "If-Match": '"1"' }, data: { name: "Каноническая версия" } });
+    expect(externalEdit.status()).toBe(200);
+    await page.getByTestId("coffee-diary-input-name").fill("Старая версия");
+    await page.getByRole("button", { name: "Сохранить" }).last().click();
+    await expect(page.getByTestId("coffee-diary-bean-sheet")).toHaveCount(0);
+    await expect(page.getByRole("alert")).toContainText("Данные изменились. Показана актуальная версия.");
+    expect(patchRequests).toEqual(['"1"']);
+    await expect(page.getByTestId("coffee-diary-detail")).toContainText("Каноническая версия");
+
+    patchRequests.length = 0;
+    await page.getByRole("button", { name: "Изменить" }).click();
+    await expect(page.getByTestId("coffee-diary-input-name")).toHaveValue("Каноническая версия");
+    await page.getByTestId("coffee-diary-input-name").fill("Каноническая версия · подтверждено");
+    await page.getByRole("button", { name: "Сохранить" }).last().click();
+    await expect(page.getByTestId("coffee-diary-detail")).toContainText("Каноническая версия · подтверждено");
+    expect(patchRequests).toEqual(['"2"']);
+
+    const externalDeleteRace = await page.request.patch(`/api/v1/coffee-diary/beans/${bean.id}`, { headers: { "If-Match": '"3"' }, data: { name: "Удалённое позже" } });
+    expect(externalDeleteRace.status()).toBe(200);
+    const deleteRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes(`/api/v1/coffee-diary/beans/${bean.id}`) && request.method() === "DELETE") deleteRequests.push(request.method());
+    });
+    await page.getByRole("button", { name: "Удалить" }).last().click();
+    await page.getByTestId("action-confirmation").getByRole("button", { name: "Убрать из коллекции" }).click();
+    await expect(page.getByRole("alert")).toContainText("Данные изменились. Показана актуальная версия.");
+    await expect(page.getByTestId("coffee-diary-detail")).toContainText("Удалённое позже");
+    expect(deleteRequests).toEqual(["DELETE"]);
+  });
 });
