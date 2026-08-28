@@ -66,6 +66,10 @@ jobs:
           ./scripts/windows/test-avalar-identities.ps1
           ./scripts/windows/test-rog-g703-companion.ps1
 
+      - name: Run focused Coffee Diary Windows store gate
+        if: runner.os == 'Windows'
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary_lock.py -q
+
       - name: Run full validation
         run: npm run check
 

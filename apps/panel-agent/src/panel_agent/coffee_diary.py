@@ -6,12 +6,14 @@ store and it has no relationship to the Home Assistant coffee-machine state.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import math
 import os
 import re
 import tempfile
+import time
 import unicodedata
 from contextlib import contextmanager
 from copy import deepcopy
@@ -36,6 +38,8 @@ MAX_COLLECTION_EXTRACTIONS = 200
 MAX_PHOTOS = 2_000
 MAX_PHOTOS_PER_BEAN = 24
 MAX_PHOTO_BYTES = 25 * 1024 * 1024
+_LOCK_TIMEOUT_SECONDS = 2.0
+_LOCK_RETRY_SECONDS = 0.02
 _IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 _STORAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _UTC_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
@@ -492,23 +496,51 @@ def _file_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_name(f".{path.name}.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as handle:
-        if os.name == "nt":
-            import msvcrt
-            handle.seek(0)
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
             handle.write(b"0")
             handle.flush()
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        handle.seek(0)
+        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        locked = False
+
+        def retry_or_raise(exc: OSError) -> None:
+            if time.monotonic() >= deadline:
+                raise CoffeeDiaryStoreUnavailable("coffee_diary_store_lock_busy") from exc
+            time.sleep(min(_LOCK_RETRY_SECONDS, max(0.0, deadline - time.monotonic())))
+
+        if os.name == "nt":
+            import msvcrt
+            while not locked:
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    locked = True
+                except OSError as exc:
+                    if not isinstance(exc, PermissionError) and getattr(exc, "errno", None) not in {
+                        errno.EACCES,
+                        errno.EAGAIN,
+                    }:
+                        raise
+                    retry_or_raise(exc)
         else:
             import fcntl
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            while not locked:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    locked = True
+                except OSError as exc:
+                    if getattr(exc, "errno", None) not in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}:
+                        raise
+                    retry_or_raise(exc)
         try:
             yield
         finally:
-            if os.name == "nt":
+            if locked and os.name == "nt":
                 import msvcrt
                 handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
+            elif locked:
                 import fcntl
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 

@@ -455,6 +455,7 @@ _COFFEE_DIARY_PUBLIC_CODES = {
     "coffee_diary_idempotency_key_reused",
     "coffee_diary_store_not_canonical",
     "coffee_diary_store_oversized",
+    "coffee_diary_store_lock_busy",
     "coffee_diary_store_unavailable",
     "coffee_diary_store_write_failed",
     "coffee_diary_bean_not_found",
