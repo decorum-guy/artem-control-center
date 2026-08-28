@@ -269,19 +269,41 @@ class CoffeeDiaryDocument(BaseModel):
 
     @model_validator(mode="after")
     def _relationships(self) -> "CoffeeDiaryDocument":
+        bean_by_id = {bean.id: bean for bean in self.beans}
         extraction_by_id = {extraction.id: extraction for extraction in self.extractions}
         photo_by_id = {photo.id: photo for photo in self.photos}
-        if len(extraction_by_id) != len(self.extractions) or len(photo_by_id) != len(self.photos):
+        if len(bean_by_id) != len(self.beans) or len(extraction_by_id) != len(self.extractions) or len(photo_by_id) != len(self.photos):
             raise ValueError("coffee_diary_relationship_duplicate_id")
+
+        for extraction in self.extractions:
+            if extraction.beanId not in bean_by_id:
+                raise ValueError("coffee_diary_relationship_orphaned_resource")
+
+        for photo in self.photos:
+            if photo.beanId not in bean_by_id:
+                raise ValueError("coffee_diary_relationship_orphaned_resource")
+
+        photo_reference_counts: dict[UUID, int] = {}
         for bean in self.beans:
             if bean.favoriteExtractionId is not None:
                 favorite = extraction_by_id.get(bean.favoriteExtractionId)
                 if favorite is None or favorite.deletedAt is not None or favorite.beanId != bean.id:
                     raise ValueError("coffee_diary_favorite_extraction_invalid")
+            if len(set(bean.photoIds)) != len(bean.photoIds):
+                raise ValueError("coffee_diary_relationship_duplicate_id")
             for photo_id in bean.photoIds:
                 photo = photo_by_id.get(photo_id)
                 if photo is None or photo.deletedAt is not None or photo.beanId != bean.id:
                     raise ValueError("coffee_diary_photo_relationship_invalid")
+
+                photo_reference_counts[photo_id] = photo_reference_counts.get(photo_id, 0) + 1
+
+        for photo in self.photos:
+            references = photo_reference_counts.get(photo.id, 0)
+            if photo.deletedAt is None and references != 1:
+                raise ValueError("coffee_diary_photo_relationship_invalid")
+            if photo.deletedAt is not None and references != 0:
+                raise ValueError("coffee_diary_photo_relationship_invalid")
         return self
 
 

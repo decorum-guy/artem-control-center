@@ -11,9 +11,11 @@ from pydantic import ValidationError
 from panel_agent.coffee_diary import (
     MAX_FILE_BYTES,
     CoffeeDiaryBeanCreate,
+    CoffeeDiaryBean,
     CoffeeDiaryBeanPatch,
     CoffeeDiaryConflict,
     CoffeeDiaryDocument,
+    CoffeeDiaryExtraction,
     CoffeeDiaryExtractionCreate,
     CoffeeDiaryNotFound,
     CoffeeDiaryPhoto,
@@ -57,6 +59,78 @@ def extraction_create(
         rating=rating,
         makeFavorite=make_favorite,
     )
+
+
+GRAPH_TIMESTAMP = "2026-08-28T10:00:00Z"
+GRAPH_BEAN_A = UUID("11111111-1111-4111-8111-111111111111")
+GRAPH_BEAN_B = UUID("22222222-2222-4222-8222-222222222222")
+GRAPH_ORPHAN_BEAN = UUID("33333333-3333-4333-8333-333333333333")
+GRAPH_EXTRACTION = UUID("44444444-4444-4444-8444-444444444444")
+GRAPH_PHOTO = UUID("55555555-5555-4555-8555-555555555555")
+
+
+def _graph_bean(bean_id: UUID, *, photo_ids: list[UUID] | None = None, deleted_at: str | None = None) -> dict:
+    return CoffeeDiaryBean(
+        id=bean_id,
+        version=1,
+        name="Графовый кофе",
+        grindDescription="Средний",
+        preferredDrink="espresso",
+        notes="Проверка связей",
+        favoriteExtractionId=None,
+        photoIds=photo_ids or [],
+        createdAt=GRAPH_TIMESTAMP,
+        updatedAt=GRAPH_TIMESTAMP,
+        deletedAt=deleted_at,
+    ).model_dump(mode="json")
+
+
+def _graph_extraction(bean_id: UUID, *, extraction_id: UUID = GRAPH_EXTRACTION, deleted_at: str | None = None) -> dict:
+    return CoffeeDiaryExtraction(
+        id=extraction_id,
+        version=1,
+        beanId=bean_id,
+        brewedAt=GRAPH_TIMESTAMP,
+        doseGrams=17.5,
+        extractionSeconds=27,
+        yieldGrams=36.0,
+        notes="История",
+        createdAt=GRAPH_TIMESTAMP,
+        updatedAt=GRAPH_TIMESTAMP,
+        deletedAt=deleted_at,
+    ).model_dump(mode="json")
+
+
+def _graph_photo(bean_id: UUID, *, photo_id: UUID = GRAPH_PHOTO, deleted_at: str | None = None) -> dict:
+    return CoffeeDiaryPhoto(
+        id=photo_id,
+        beanId=bean_id,
+        storageId="photo-graph-1",
+        mediaType="image/jpeg",
+        byteSize=100,
+        width=10,
+        height=10,
+        sha256="a" * 64,
+        createdAt=GRAPH_TIMESTAMP,
+        deletedAt=deleted_at,
+    ).model_dump(mode="json")
+
+
+def _graph_bytes(*, beans: list[dict], extractions: list[dict] | None = None, photos: list[dict] | None = None) -> bytes:
+    return json.dumps(
+        {
+            "schemaVersion": "coffee.diary.v1",
+            "revision": 1,
+            "updatedAt": GRAPH_TIMESTAMP,
+            "beans": beans,
+            "extractions": extractions or [],
+            "photos": photos or [],
+            "idempotency": [],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
 
 
 def test_empty_store_is_valid_and_survives_reinstantiation(tmp_path):
@@ -237,6 +311,102 @@ def test_photo_relationship_envelope_is_strict_and_empty_by_default(tmp_path):
             id=photo.id, beanId=bean.id, storageId="/absolute/path", mediaType="image/jpeg",
             byteSize=100, width=10, height=10, sha256="a" * 64, createdAt="2026-08-28T10:00:00Z",
         )
+
+
+@pytest.mark.parametrize(
+    ("name", "raw"),
+    [
+        (
+            "duplicate bean IDs",
+            _graph_bytes(beans=[_graph_bean(GRAPH_BEAN_A), _graph_bean(GRAPH_BEAN_B) | {"id": str(GRAPH_BEAN_A)}]),
+        ),
+        (
+            "orphan extraction",
+            _graph_bytes(beans=[_graph_bean(GRAPH_BEAN_A)], extractions=[_graph_extraction(GRAPH_ORPHAN_BEAN)]),
+        ),
+        (
+            "orphan photo",
+            _graph_bytes(beans=[_graph_bean(GRAPH_BEAN_A)], photos=[_graph_photo(GRAPH_ORPHAN_BEAN)]),
+        ),
+        (
+            "active photo missing from owner",
+            _graph_bytes(beans=[_graph_bean(GRAPH_BEAN_A)], photos=[_graph_photo(GRAPH_BEAN_A)]),
+        ),
+        (
+            "duplicate photo reference",
+            _graph_bytes(beans=[_graph_bean(GRAPH_BEAN_A, photo_ids=[GRAPH_PHOTO, GRAPH_PHOTO])], photos=[_graph_photo(GRAPH_BEAN_A)]),
+        ),
+        (
+            "cross-bean photo reference",
+            _graph_bytes(
+                beans=[_graph_bean(GRAPH_BEAN_A, photo_ids=[GRAPH_PHOTO]), _graph_bean(GRAPH_BEAN_B)],
+                photos=[_graph_photo(GRAPH_BEAN_B)],
+            ),
+        ),
+        (
+            "deleted photo still referenced",
+            _graph_bytes(
+                beans=[_graph_bean(GRAPH_BEAN_A, photo_ids=[GRAPH_PHOTO])],
+                photos=[_graph_photo(GRAPH_BEAN_A, deleted_at=GRAPH_TIMESTAMP)],
+            ),
+        ),
+    ],
+)
+def test_malformed_relationship_graph_fails_closed_without_overwriting(tmp_path, name, raw):
+    path = tmp_path / f"{name}.json"
+    path.write_bytes(raw)
+    before = path.read_bytes()
+    store = CoffeeDiaryStore(path, writes_enabled=True)
+
+    with pytest.raises(CoffeeDiaryStoreUnavailable):
+        store.read_document()
+    with pytest.raises(CoffeeDiaryStoreUnavailable):
+        store.create_bean(bean_create(), "graph-mutation-0001")
+
+    assert path.read_bytes() == before
+
+
+def test_deleted_bean_may_own_historical_extraction(tmp_path):
+    store = CoffeeDiaryStore(tmp_path / "coffee.json", writes_enabled=True)
+    bean = store.create_bean(bean_create(), "graph-history-0001")
+    extraction = store.create_extraction(bean.id, extraction_create(), "graph-history-0002")
+    deleted = store.delete_bean(bean.id, 1)
+
+    document = store.read_document()
+    assert deleted.deletedAt is not None
+    assert document.beans[0].deletedAt is not None
+    assert document.extractions[0].beanId == bean.id == extraction.beanId
+
+
+def test_deleted_bean_may_own_tombstoned_photo_without_active_reference(tmp_path):
+    path = tmp_path / "history.json"
+    path.write_bytes(
+        _graph_bytes(
+            beans=[_graph_bean(GRAPH_BEAN_A, deleted_at=GRAPH_TIMESTAMP)],
+            photos=[_graph_photo(GRAPH_BEAN_A, deleted_at=GRAPH_TIMESTAMP)],
+        )
+    )
+
+    document = CoffeeDiaryStore(path).read_document()
+    assert document.beans[0].deletedAt == GRAPH_TIMESTAMP
+    assert document.photos[0].beanId == GRAPH_BEAN_A
+    assert document.photos[0].deletedAt == GRAPH_TIMESTAMP
+    assert document.beans[0].photoIds == []
+
+
+def test_active_photo_requires_exactly_one_coherent_owner_reference(tmp_path):
+    path = tmp_path / "active-photo.json"
+    path.write_bytes(
+        _graph_bytes(
+            beans=[_graph_bean(GRAPH_BEAN_A, photo_ids=[GRAPH_PHOTO])],
+            photos=[_graph_photo(GRAPH_BEAN_A)],
+        )
+    )
+
+    document = CoffeeDiaryStore(path).read_document()
+    assert document.beans[0].photoIds == [GRAPH_PHOTO]
+    assert document.photos[0].beanId == GRAPH_BEAN_A
+    assert document.photos[0].deletedAt is None
 
 
 @pytest.mark.parametrize("raw", [b"{not-json", json.dumps({"schemaVersion": "coffee.diary.v0"}).encode(), b"x" * (MAX_FILE_BYTES + 1)])
