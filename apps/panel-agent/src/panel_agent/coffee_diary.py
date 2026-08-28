@@ -502,19 +502,24 @@ def _file_lock(path: Path) -> Iterator[None]:
     # acquisition can itself contend with a lock held by another process.
     if not lock_path.exists():
         try:
-            with lock_path.open("xb") as initializer:
+            with lock_path.open("xb", buffering=0) as initializer:
                 initializer.write(b"0")
                 initializer.flush()
         except FileExistsError:
             pass
-    with lock_path.open("r+b") as handle:
-        handle.seek(0, os.SEEK_END)
-        if handle.tell() == 0:
+    with lock_path.open("r+b", buffering=0) as handle:
+        if os.fstat(handle.fileno()).st_size == 0:
             handle.write(b"0")
             handle.flush()
-        handle.seek(0)
         deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
         locked = False
+
+        def seek_lock_byte() -> None:
+            # msvcrt.locking() consumes the CRT fd's current position.  Use
+            # the fd-level seek so the position used by lock and unlock is
+            # unambiguously the same byte even with Windows file wrappers.
+            handle.flush()
+            os.lseek(handle.fileno(), 0, os.SEEK_SET)
 
         def retry_or_raise(exc: OSError) -> None:
             if time.monotonic() >= deadline:
@@ -524,7 +529,7 @@ def _file_lock(path: Path) -> Iterator[None]:
         if os.name == "nt":
             import msvcrt
             while not locked:
-                handle.seek(0)
+                seek_lock_byte()
                 try:
                     msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
                     locked = True
@@ -550,7 +555,7 @@ def _file_lock(path: Path) -> Iterator[None]:
         finally:
             if locked and os.name == "nt":
                 import msvcrt
-                handle.seek(0)
+                seek_lock_byte()
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             elif locked:
                 import fcntl
