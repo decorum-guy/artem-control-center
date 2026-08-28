@@ -82,9 +82,17 @@ jobs:
         if: runner.os == 'Windows'
         run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_same_idempotency or test_extraction_idempotency or test_photo_relationship or test_malformed_relationship or test_deleted_bean_may_own or test_active_photo"
 
-      - name: Run focused Coffee Diary Windows persistence gate
+      - name: Run focused Coffee Diary Windows corruption gate
         if: runner.os == 'Windows'
-        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_corrupt_unsupported or test_atomic_write_failure or test_export_has_relationships"
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_corrupt_unsupported"
+
+      - name: Run focused Coffee Diary Windows atomic-write gate
+        if: runner.os == 'Windows'
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_atomic_write_failure"
+
+      - name: Run focused Coffee Diary Windows export gate
+        if: runner.os == 'Windows'
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_export_has_relationships"
 
       - name: Run focused Coffee Diary Windows API gate
         if: runner.os == 'Windows'
