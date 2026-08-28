@@ -17,36 +17,57 @@ NODE_PATTERN = re.compile(r"test_coffee_diary\.py::(test_[^\[\r\n]+)")
 def run_pytest(*arguments: str, timeout: float) -> int:
     command = [sys.executable, "-m", "pytest", *arguments]
     print("$ " + " ".join(command), flush=True)
+    process = subprocess.Popen(command, cwd=ROOT)
     try:
-        result = subprocess.run(command, cwd=ROOT, check=False, timeout=timeout)
+        result = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                timeout=10,
+            )
+        else:
+            process.kill()
+        process.wait(timeout=10)
         print(f"Timed out after {timeout:.0f}s: {' '.join(arguments)}", flush=True)
         return 124
-    return result.returncode
+    return result
 
 
 def main() -> int:
     print(f"Collecting {TEST_FILE}", flush=True)
     collection_command = [sys.executable, "-m", "pytest", str(TEST_FILE), "--collect-only", "-q"]
+    collection_process = subprocess.Popen(
+        collection_command,
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     try:
-        collected = subprocess.run(
-            collection_command,
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        collection_stdout, collection_stderr = collection_process.communicate(timeout=30)
     except subprocess.TimeoutExpired:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(collection_process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                timeout=10,
+            )
+        else:
+            collection_process.kill()
+        collection_process.wait(timeout=10)
         print("Timed out while collecting Coffee Diary tests", flush=True)
         return 124
-    print(collected.stdout, end="", flush=True)
-    print(collected.stderr, end="", file=sys.stderr, flush=True)
-    if collected.returncode != 0:
-        return collected.returncode
+    print(collection_stdout, end="", flush=True)
+    print(collection_stderr, end="", file=sys.stderr, flush=True)
+    if collection_process.returncode != 0:
+        return collection_process.returncode
 
     functions: list[str] = []
-    for match in NODE_PATTERN.finditer(collected.stdout):
+    for match in NODE_PATTERN.finditer(collection_stdout):
         function = match.group(1)
         if function not in functions:
             functions.append(function)
