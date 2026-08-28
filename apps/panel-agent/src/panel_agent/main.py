@@ -98,6 +98,7 @@ from .coffee_diary_upload import (
     NormalizedImage,
     PhotoStorage,
     PhotoUploadRegistry,
+    UploadResolution,
     normalize_image,
 )
 
@@ -730,11 +731,23 @@ def get_coffee_diary_pending_photo_content(pending_id: str) -> FileResponse:
 @app.post("/api/v1/coffee-diary/photo-upload")
 async def upload_coffee_diary_photo(request: Request, response: Response) -> dict[str, object]:
     token = request.headers.get("X-Coffee-Upload-Token")
-    try:
-        session = coffee_upload_registry.begin_upload(token or "")
-    except Exception as exc:
-        _coffee_upload_error(exc)
+    decision = coffee_upload_registry.resolve_upload(token or "")
+    if decision.resolution in {UploadResolution.TERMINAL_UPLOADED, UploadResolution.TERMINAL_CONSUMED}:
+        if decision.terminal_result is None:
+            _coffee_upload_error(CoffeeDiaryValidationError("coffee_diary_upload_token_invalid"))
+            raise AssertionError("unreachable")
+        response.headers.update({"Cache-Control": "no-store"})
+        return decision.terminal_result
+    if decision.resolution != UploadResolution.BEGIN_NEW_UPLOAD or decision.session is None:
+        resolution_errors = {
+            UploadResolution.INVALID: "coffee_diary_upload_token_invalid",
+            UploadResolution.EXPIRED: "coffee_diary_upload_token_expired",
+            UploadResolution.CANCELLED: "coffee_diary_upload_token_cancelled",
+            UploadResolution.IN_PROGRESS: "coffee_diary_upload_in_progress",
+        }
+        _coffee_upload_error(CoffeeDiaryValidationError(resolution_errors.get(decision.resolution, "coffee_diary_upload_token_invalid")))
         raise AssertionError("unreachable")
+    session = decision.session
 
     upload_path = None
     normalized: NormalizedImage | None = None

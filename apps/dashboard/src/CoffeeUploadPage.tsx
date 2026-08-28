@@ -22,7 +22,7 @@ function uploadErrorCopy(reason: unknown): string {
   if (code === "coffee_diary_upload_media_type_invalid") return "Этот формат изображения не поддерживается.";
   if (code === "coffee_diary_upload_dimensions_invalid") return "Размер изображения слишком большой.";
   if (code === "coffee_diary_upload_image_invalid") return "Не удалось прочитать изображение. Выберите другое фото.";
-  if (code === "network") return "Не удалось связаться с панелью. Проверьте соединение и повторите.";
+  if (code === "network") return "Ответ сервера не получен. Можно повторить загрузку — фото не будет добавлено дважды.";
   return "Фото не загружено. Повторите попытку.";
 }
 

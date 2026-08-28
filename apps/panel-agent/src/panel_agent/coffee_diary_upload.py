@@ -17,6 +17,7 @@ import time
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from pathlib import Path
 from threading import RLock
 from typing import Callable, Literal, Sequence
@@ -97,6 +98,25 @@ class UploadSession:
     failed_attempts: int = 0
     pending_attachment_id: UUID | None = None
     photo_id: UUID | None = None
+
+
+class UploadResolution(str, Enum):
+    """Atomic registry outcomes for a token presented to the upload route."""
+
+    BEGIN_NEW_UPLOAD = "begin_new_upload"
+    IN_PROGRESS = "in_progress"
+    TERMINAL_UPLOADED = "terminal_uploaded"
+    TERMINAL_CONSUMED = "terminal_consumed"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+    INVALID = "invalid"
+
+
+@dataclass(frozen=True)
+class UploadDecision:
+    resolution: UploadResolution
+    session: UploadSession | None = None
+    terminal_result: dict[str, object] | None = None
 
 
 @dataclass
@@ -340,22 +360,73 @@ class PhotoUploadRegistry:
                 return session
         raise CoffeeDiaryValidationError("coffee_diary_upload_token_invalid")
 
-    def begin_upload(self, token: str) -> UploadSession:
+    def _terminal_result_locked(self, session: UploadSession) -> dict[str, object] | None:
+        if session.state == "consumed" and session.photo_id is not None:
+            return {
+                "state": "consumed",
+                "photoId": str(session.photo_id),
+                "pendingAttachmentId": None,
+            }
+        if session.state != "uploaded" or session.pending_attachment_id is None:
+            return None
+        attachment = self._staged.get(session.pending_attachment_id)
+        if attachment is None or attachment.state != "uploaded" or not attachment.path.is_file():
+            return None
+        return {
+            "state": "uploaded",
+            "photoId": None,
+            "pendingAttachmentId": str(attachment.pending_id),
+        }
+
+    def resolve_upload(self, token: str) -> UploadDecision:
+        """Resolve a token and transition a fresh session atomically.
+
+        Terminal success is returned while holding the registry lock so a
+        retry can replay the committed response without touching its request
+        body or the server-owned image storage.
+        """
         with self._lock:
             self._cleanup_locked()
-            session = self._lookup_by_token_locked(token)
+            try:
+                session = self._lookup_by_token_locked(token)
+            except CoffeeDiaryValidationError:
+                return UploadDecision(UploadResolution.INVALID)
             if session.state == "expired":
-                raise CoffeeDiaryValidationError("coffee_diary_upload_token_expired")
+                return UploadDecision(UploadResolution.EXPIRED)
             if session.state == "cancelled":
-                raise CoffeeDiaryValidationError("coffee_diary_upload_token_cancelled")
-            if session.state in {"consumed", "uploaded"}:
-                raise CoffeeDiaryValidationError("coffee_diary_upload_token_consumed")
+                return UploadDecision(UploadResolution.CANCELLED)
+            if session.state == "consumed":
+                result = self._terminal_result_locked(session)
+                return UploadDecision(UploadResolution.TERMINAL_CONSUMED, terminal_result=result) if result else UploadDecision(UploadResolution.INVALID)
+            if session.state == "uploaded":
+                attachment = self._staged.get(session.pending_attachment_id) if session.pending_attachment_id is not None else None
+                if attachment is not None and attachment.state != "uploaded":
+                    return UploadDecision(UploadResolution.IN_PROGRESS)
+                result = self._terminal_result_locked(session)
+                if result is not None:
+                    return UploadDecision(UploadResolution.TERMINAL_UPLOADED, terminal_result=result)
+                session.state = "expired"
+                return UploadDecision(UploadResolution.EXPIRED)
             if session.state == "uploading":
-                raise CoffeeDiaryValidationError("coffee_diary_upload_in_progress")
+                return UploadDecision(UploadResolution.IN_PROGRESS)
             if session.state != "created":
-                raise CoffeeDiaryValidationError("coffee_diary_upload_token_invalid")
+                return UploadDecision(UploadResolution.INVALID)
             session.state = "uploading"
-            return session
+            return UploadDecision(UploadResolution.BEGIN_NEW_UPLOAD, session=session)
+
+    def begin_upload(self, token: str) -> UploadSession:
+        """Begin a new upload, preserving the legacy exception seam."""
+        decision = self.resolve_upload(token)
+        if decision.resolution == UploadResolution.BEGIN_NEW_UPLOAD and decision.session is not None:
+            return decision.session
+        code = {
+            UploadResolution.EXPIRED: "coffee_diary_upload_token_expired",
+            UploadResolution.CANCELLED: "coffee_diary_upload_token_cancelled",
+            UploadResolution.TERMINAL_UPLOADED: "coffee_diary_upload_token_consumed",
+            UploadResolution.TERMINAL_CONSUMED: "coffee_diary_upload_token_consumed",
+            UploadResolution.IN_PROGRESS: "coffee_diary_upload_in_progress",
+        }.get(decision.resolution, "coffee_diary_upload_token_invalid")
+        raise CoffeeDiaryValidationError(code)
 
     def invalid_attempt(self, session_id: UUID) -> None:
         with self._lock:

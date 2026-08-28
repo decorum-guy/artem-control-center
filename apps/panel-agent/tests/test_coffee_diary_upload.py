@@ -5,6 +5,8 @@ import io
 import json
 import re
 import struct
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 import zipfile
 import zlib
 from datetime import datetime, timezone
@@ -83,6 +85,35 @@ def upload_existing_photo(client: TestClient, bean_id: str, payload: bytes, medi
     )
 
 
+def stored_image_files(module) -> list[str]:
+    root = module.coffee_photo_storage.root
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())
+
+
+def race_upload_requests(module, monkeypatch, token: str, payloads: tuple[bytes, bytes], media_type: str):
+    barrier = Barrier(2, timeout=10)
+    original_resolve = module.coffee_upload_registry.resolve_upload
+
+    def synchronized_resolve(candidate: str):
+        barrier.wait()
+        return original_resolve(candidate)
+
+    monkeypatch.setattr(module.coffee_upload_registry, "resolve_upload", synchronized_resolve)
+
+    def post(payload: bytes):
+        with TestClient(module.app) as concurrent_client:
+            return concurrent_client.post(
+                "/api/v1/coffee-diary/photo-upload",
+                headers={"X-Coffee-Upload-Token": token, "Content-Type": media_type},
+                content=payload,
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = [future.result(timeout=15) for future in [executor.submit(post, payload) for payload in payloads]]
+    monkeypatch.setattr(module.coffee_upload_registry, "resolve_upload", original_resolve)
+    return responses
+
+
 def test_registry_enforces_expiry_and_cancel_without_plaintext_tokens(tmp_path):
     from panel_agent.coffee_diary import CoffeeDiaryValidationError
     from panel_agent.coffee_diary_upload import (
@@ -91,6 +122,7 @@ def test_registry_enforces_expiry_and_cancel_without_plaintext_tokens(tmp_path):
         NormalizedImage,
         PhotoStorage,
         PhotoUploadRegistry,
+        UploadResolution,
     )
 
     monotonic_now = [10.0]
@@ -120,6 +152,10 @@ def test_registry_enforces_expiry_and_cancel_without_plaintext_tokens(tmp_path):
         NormalizedImage(normalized, "image/jpeg", 10, 2, 2, hashlib.sha256(b"normalized").hexdigest()),
     )
     assert staged_path.is_file()
+    registry._staged[pending_id].state = "claiming"
+    assert registry.resolve_upload(staged_token).resolution is UploadResolution.IN_PROGRESS
+    registry._staged[pending_id].state = "uploaded"
+    assert registry.resolve_upload(staged_token).resolution is UploadResolution.TERMINAL_UPLOADED
     monotonic_now[0] += STAGED_ATTACHMENT_GRACE_SECONDS + 1
     assert registry.status(staged_session.session_id)["state"] == "expired"
     assert not staged_path.exists()
@@ -254,7 +290,7 @@ def test_exif_gps_and_orientation_are_removed_while_dimensions_and_hash_are_cano
             assert normalized.getexif().get_ifd(0x8825) == {}
 
 
-def test_upload_token_is_hashed_opaque_one_time_and_bound_to_existing_bean(monkeypatch, tmp_path):
+def test_upload_token_is_hashed_opaque_and_replays_committed_existing_bean_result(monkeypatch, tmp_path):
     module = _api_module(monkeypatch, tmp_path)
     with TestClient(module.app) as client:
         bean = create_bean(client, "A")
@@ -270,16 +306,41 @@ def test_upload_token_is_hashed_opaque_one_time_and_bound_to_existing_bean(monke
 
         uploaded = client.post(f"/api/v1/coffee-diary/photo-upload?beanId={other_bean['id']}&storageId=outside", headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"}, content=image_bytes())
         assert uploaded.status_code == 200
-        photo_id = uploaded.json()["photoId"]
-        replay = client.post("/api/v1/coffee-diary/photo-upload", headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"}, content=image_bytes())
-        assert replay.status_code == 409
-        assert replay.json()["detail"] == "coffee_diary_upload_token_consumed"
+        first_result = uploaded.json()
+        photo_id = first_result["photoId"]
+        first_collection = client.get("/api/v1/coffee-diary").json()
+        first_bean = next(item for item in first_collection["beans"] if item["id"] == bean["id"])
+        first_revision = module.coffee_diary_store.read_document().revision
+        first_content = client.get(f"/api/v1/coffee-diary/photos/{photo_id}/content")
+        first_hash = hashlib.sha256(first_content.content).hexdigest()
+        first_files = stored_image_files(module)
+        assert first_files == [first_collection["photos"][0]["storageId"]]
 
-        collection = client.get("/api/v1/coffee-diary").json()
-        assert collection["beans"][0]["photoIds"] == [photo_id]
-        assert collection["beans"][1]["photoIds"] == []
-        photo = collection["photos"][0]
-        assert photo["sha256"] == hashlib.sha256(client.get(f"/api/v1/coffee-diary/photos/{photo_id}/content").content).hexdigest()
+        def replay_side_effect(*args, **kwargs):
+            pytest.fail("terminal replay must not process the upload body")
+
+        monkeypatch.setattr(module.coffee_photo_storage, "new_temp_file", replay_side_effect)
+        monkeypatch.setattr(module, "_stream_bounded_photo_body", replay_side_effect)
+        monkeypatch.setattr(module, "normalize_image", replay_side_effect)
+        replay = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "text/plain"},
+            content=b"this body is deliberately not an image",
+        )
+        assert replay.status_code == 200
+        assert replay.json() == {"state": "consumed", "photoId": photo_id, "pendingAttachmentId": None}
+
+        replay_collection = client.get("/api/v1/coffee-diary").json()
+        replay_bean = next(item for item in replay_collection["beans"] if item["id"] == bean["id"])
+        assert first_result == {"state": "consumed", "photoId": photo_id, "pendingAttachmentId": None}
+        assert replay_bean["version"] == first_bean["version"]
+        assert module.coffee_diary_store.read_document().revision == first_revision
+        assert replay_collection["photos"] == first_collection["photos"]
+        assert replay_bean["photoIds"] == [photo_id]
+        assert next(item for item in replay_collection["beans"] if item["id"] == other_bean["id"])["photoIds"] == []
+        assert stored_image_files(module) == first_files
+        assert hashlib.sha256(client.get(f"/api/v1/coffee-diary/photos/{photo_id}/content").content).hexdigest() == first_hash
+        photo = replay_collection["photos"][0]
         content = client.get(f"/api/v1/coffee-diary/photos/{photo_id}/content")
         assert content.status_code == 200
         assert content.headers["etag"] == '"' + photo["sha256"] + '"'
@@ -295,7 +356,7 @@ def test_upload_token_is_hashed_opaque_one_time_and_bound_to_existing_bean(monke
         assert invalid.status_code == 403
 
 
-def test_invalid_image_retry_budget_and_staged_new_bean_idempotent_claim(monkeypatch, tmp_path):
+def test_invalid_image_retry_budget_and_staged_upload_replay_and_idempotent_claim(monkeypatch, tmp_path):
     module = _api_module(monkeypatch, tmp_path)
     with TestClient(module.app) as client:
         staged = client.post("/api/v1/coffee-diary/photo-upload-sessions", json={"intent": "bean_create"}).json()
@@ -316,8 +377,31 @@ def test_invalid_image_retry_budget_and_staged_new_bean_idempotent_claim(monkeyp
         accepted = client.post("/api/v1/coffee-diary/photo-upload", headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"}, content=image_bytes("JPEG", exif=True))
         assert accepted.status_code == 200
         pending_id = accepted.json()["pendingAttachmentId"]
+        first_staged_result = accepted.json()
+        staged_files = stored_image_files(module)
+        assert len(staged_files) == 1
         preview = client.get(f"/api/v1/coffee-diary/pending-photo-attachments/{pending_id}/content")
         assert preview.status_code == 200
+
+        def staged_replay_side_effect(*args, **kwargs):
+            pytest.fail("staged terminal replay must not process the upload body")
+
+        monkeypatch.setattr(module.coffee_photo_storage, "new_temp_file", staged_replay_side_effect)
+        monkeypatch.setattr(module, "_stream_bounded_photo_body", staged_replay_side_effect)
+        monkeypatch.setattr(module, "normalize_image", staged_replay_side_effect)
+        staged_replay = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "text/plain"},
+            content=b"different retry body is ignored",
+        )
+        assert staged_replay.status_code == 200
+        assert staged_replay.json() == {
+            "state": "uploaded",
+            "photoId": None,
+            "pendingAttachmentId": pending_id,
+        }
+        assert staged_replay.json() == first_staged_result
+        assert stored_image_files(module) == staged_files
 
         body = {**api_bean("Эфиопия"), "pendingPhotoAttachmentIds": [pending_id]}
         key = f"bean-{uuid4().hex}"
@@ -330,6 +414,85 @@ def test_invalid_image_retry_budget_and_staged_new_bean_idempotent_claim(monkeyp
         photo = next(item for item in document["photos"] if item["id"] == first.json()["photoIds"][0])
         assert photo["beanId"] == first.json()["id"]
         assert len(document["photos"]) == 1
+        claimed_revision = document["revision"]
+        claimed_bean_version = next(item for item in document["beans"] if item["id"] == first.json()["id"])["version"]
+        claimed_files = stored_image_files(module)
+        assert len(claimed_files) == 1
+
+        consumed_replay = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "application/octet-stream"},
+            content=b"post-claim body is ignored",
+        )
+        assert consumed_replay.status_code == 200
+        assert consumed_replay.json() == {
+            "state": "consumed",
+            "photoId": photo["id"],
+            "pendingAttachmentId": None,
+        }
+        replay_document = module.coffee_diary_store.read_document().model_dump(mode="json")
+        assert replay_document["revision"] == claimed_revision
+        assert len(replay_document["photos"]) == 1
+        assert next(item for item in replay_document["beans"] if item["id"] == first.json()["id"])["version"] == claimed_bean_version
+        assert stored_image_files(module) == claimed_files
+
+
+def test_same_token_concurrent_existing_upload_mutates_once(monkeypatch, tmp_path):
+    module = _api_module(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        bean = create_bean(client, "Гонка существующего фото")
+        session = client.post(f"/api/v1/coffee-diary/beans/{bean['id']}/photo-upload-sessions").json()
+        token = session["uploadUrl"].split("#token=", 1)[1]
+        responses = race_upload_requests(module, monkeypatch, token, (image_bytes(), image_bytes("JPEG", exif=True)), "image/jpeg")
+        assert all(response.status_code in {200, 409} for response in responses)
+        assert any(response.status_code == 200 for response in responses)
+        successful = [response.json() for response in responses if response.status_code == 200]
+        assert all(result == successful[0] for result in successful)
+        assert successful[0]["state"] == "consumed"
+
+        replay = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "text/plain"},
+            content=b"terminal replay ignores this body",
+        )
+        assert replay.status_code == 200
+        assert replay.json() == successful[0]
+        collection = client.get("/api/v1/coffee-diary").json()
+        assert len(collection["photos"]) == 1
+        assert collection["beans"][0]["photoIds"] == [successful[0]["photoId"]]
+        assert len(stored_image_files(module)) == 1
+
+
+def test_same_token_concurrent_staged_upload_mutates_once(monkeypatch, tmp_path):
+    module = _api_module(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        staged = client.post("/api/v1/coffee-diary/photo-upload-sessions", json={"intent": "bean_create"}).json()
+        token = staged["uploadUrl"].split("#token=", 1)[1]
+        responses = race_upload_requests(module, monkeypatch, token, (image_bytes(), image_bytes("JPEG", exif=True)), "image/jpeg")
+        assert all(response.status_code in {200, 409} for response in responses)
+        assert any(response.status_code == 200 for response in responses)
+        successful = [response.json() for response in responses if response.status_code == 200]
+        assert all(result == successful[0] for result in successful)
+        assert successful[0]["state"] == "uploaded"
+        pending_id = successful[0]["pendingAttachmentId"]
+        assert len(stored_image_files(module)) == 1
+
+        body = {**api_bean("Гонка staged фото"), "pendingPhotoAttachmentIds": [pending_id]}
+        created = client.post("/api/v1/coffee-diary/beans", headers={"Idempotency-Key": f"bean-{uuid4().hex}"}, json=body)
+        assert created.status_code == 201
+        consumed = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "text/plain"},
+            content=b"terminal staged replay ignores this body",
+        )
+        assert consumed.status_code == 200
+        assert consumed.json()["state"] == "consumed"
+        assert consumed.json()["photoId"] == created.json()["photoIds"][0]
+        assert consumed.json()["pendingAttachmentId"] is None
+        collection = client.get("/api/v1/coffee-diary").json()
+        assert len(collection["photos"]) == 1
+        assert len(collection["beans"]) == 1
+        assert len(stored_image_files(module)) == 1
 
 
 def test_missing_canonical_photo_file_fails_truthfully_without_deleting_metadata(monkeypatch, tmp_path):
