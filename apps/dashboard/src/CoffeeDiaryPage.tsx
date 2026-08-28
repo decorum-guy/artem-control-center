@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   CoffeeDiaryBean,
   CoffeeDiaryCollection,
@@ -13,6 +13,7 @@ import { useInteractionLock } from "./InteractionLock";
 import { NumericKeypad } from "./NumericKeypad";
 import { normalizeNumericInput, numericInputValue } from "./coffeeDiaryNumeric";
 import { coffeeDiaryApiMessage } from "./coffeeDiaryMessages";
+import { createCoffeeDiaryCreateAttempt, type CoffeeDiaryCreateAttempt } from "./coffeeDiaryCreateAttempt";
 import {
   CoffeeDiaryApiError,
   createCoffeeDiaryBean,
@@ -129,29 +130,39 @@ function RecipeEditor({ recipe, onChange, prefix }: { recipe: RecipeDraft; onCha
 
 function BeanSheet({ bean, onClose, onSaved, onConflict }: { bean?: CoffeeDiaryBean; onClose: () => void; onSaved: (bean: CoffeeDiaryBean) => void; onConflict: () => Promise<void> }) {
   const { guardMutation } = useInteractionLock();
+  const createAttemptRef = useRef<CoffeeDiaryCreateAttempt | null>(null);
   const [draft, setDraft] = useState(() => beanToDraft(bean));
   const [recipe, setRecipe] = useState(() => recipeToDraft(bean?.defaultRecipe));
   const [hasRecipe, setHasRecipe] = useState(() => bean ? bean.defaultRecipe !== null : true);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!guardMutation()) return;
     const preparedRecipe = hasRecipe ? recipeToPayload(recipe) : null;
     if (!draft.name.trim() || (hasRecipe && !preparedRecipe)) { setError("Заполните название и проверьте поля рецепта."); return; }
     const payload = { ...draft, roastDate: draft.roastDate || null, defaultRecipe: preparedRecipe };
+    const createAttempt = bean ? null : (createAttemptRef.current ??= createCoffeeDiaryCreateAttempt()).begin(payload);
+    if (!bean && !createAttempt) return;
+    setError(null);
+    setSaving(true);
     try {
       const saved = bean
         ? await patchCoffeeDiaryBean(bean.id, bean.version, payload)
-        : await createCoffeeDiaryBean(payload, crypto.randomUUID());
+        : await createCoffeeDiaryBean(payload, createAttempt!.key);
+      if (!bean) createAttemptRef.current?.complete();
+      setSaving(false);
       onSaved(saved);
       onClose();
     } catch (reason) {
+      if (!bean) createAttemptRef.current?.release();
+      setSaving(false);
       if (isRevisionConflict(reason)) { await onConflict(); return; }
       setError(coffeeDiaryApiMessage(reason));
     }
   }
   return (
-    <Sheet testId="coffee-diary-bean-sheet" eyebrow="Кофе" title={bean ? "Изменить кофе" : "Добавить кофе"} description="Сохраняются только явно заполненные сведения о зерне и рецепте." onClose={onClose} footer={<div className="coffee-diary-sheet-actions"><button type="button" className="coffee-diary-secondary-button" onClick={onClose}>Отмена</button><button type="submit" form="coffee-diary-bean-form" className="coffee-diary-primary-button">Сохранить</button></div>}>
+    <Sheet testId="coffee-diary-bean-sheet" eyebrow="Кофе" title={bean ? "Изменить кофе" : "Добавить кофе"} description="Сохраняются только явно заполненные сведения о зерне и рецепте." onClose={onClose} footer={<div className="coffee-diary-sheet-actions"><button type="button" className="coffee-diary-secondary-button" onClick={onClose}>Отмена</button><button type="submit" form="coffee-diary-bean-form" className="coffee-diary-primary-button" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button></div>}>
       <form id="coffee-diary-bean-form" className="coffee-diary-form" onSubmit={(event) => void submit(event)}>
         <div className="coffee-diary-form__grid">
           {(["name", "roaster", "origin", "processing", "roastLevel", "roastDate"] as const).map((field) => (
@@ -173,11 +184,13 @@ function BeanSheet({ bean, onClose, onSaved, onConflict }: { bean?: CoffeeDiaryB
 
 function ExtractionSheet({ bean, onClose, onSaved }: { bean: CoffeeDiaryBean; onClose: () => void; onSaved: (extraction: CoffeeDiaryExtraction) => void }) {
   const { guardMutation } = useInteractionLock();
+  const createAttemptRef = useRef<CoffeeDiaryCreateAttempt | null>(null);
   const [recipe, setRecipe] = useState(() => recipeToDraft(bean.defaultRecipe));
   const [brewedAt, setBrewedAt] = useState(localDateTimeValue);
   const [rating, setRating] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [ratingKeypadOpen, setRatingKeypadOpen] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -186,14 +199,25 @@ function ExtractionSheet({ bean, onClose, onSaved }: { bean: CoffeeDiaryBean; on
     const brewedAtUtc = toUtcTimestamp(brewedAt);
     const ratingValue = rating ? numericInputValue(normalizeNumericInput(rating, false)) : null;
     if (!recipePayload || !brewedAtUtc || (rating && (!ratingValue || !Number.isInteger(ratingValue) || ratingValue < 1 || ratingValue > 10))) { setError("Проверьте рецепт, дату и оценку от 1 до 10."); return; }
+    const payload = { brewedAt: brewedAtUtc, method: recipePayload.method, recipeSnapshot: recipePayload, notes: notes || null, rating: ratingValue };
+    const createAttempt = (createAttemptRef.current ??= createCoffeeDiaryCreateAttempt()).begin(payload, bean.id);
+    if (!createAttempt) return;
+    setError(null);
+    setSaving(true);
     try {
-      const saved = await createCoffeeDiaryExtraction(bean.id, { brewedAt: brewedAtUtc, method: recipePayload.method, recipeSnapshot: recipePayload, notes: notes || null, rating: ratingValue }, crypto.randomUUID());
+      const saved = await createCoffeeDiaryExtraction(bean.id, payload, createAttempt.key);
+      createAttemptRef.current?.complete();
+      setSaving(false);
       onSaved(saved);
       onClose();
-    } catch (reason) { setError(coffeeDiaryApiMessage(reason)); }
+    } catch (reason) {
+      createAttemptRef.current?.release();
+      setSaving(false);
+      setError(coffeeDiaryApiMessage(reason));
+    }
   }
   return (
-    <Sheet testId="coffee-diary-extraction-sheet" eyebrow={bean.name} title="Добавить приготовление" description="В историю попадёт отдельная копия текущего рецепта." onClose={onClose} footer={<div className="coffee-diary-sheet-actions"><button type="button" className="coffee-diary-secondary-button" onClick={onClose}>Отмена</button><button type="submit" form="coffee-diary-extraction-form" className="coffee-diary-primary-button">Сохранить</button></div>}>
+    <Sheet testId="coffee-diary-extraction-sheet" eyebrow={bean.name} title="Добавить приготовление" description="В историю попадёт отдельная копия текущего рецепта." onClose={onClose} footer={<div className="coffee-diary-sheet-actions"><button type="button" className="coffee-diary-secondary-button" onClick={onClose}>Отмена</button><button type="submit" form="coffee-diary-extraction-form" className="coffee-diary-primary-button" disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button></div>}>
       <form id="coffee-diary-extraction-form" className="coffee-diary-form" onSubmit={(event) => void submit(event)}>
         <label className="coffee-diary-form__field"><span>Когда приготовлено</span><input type="datetime-local" value={brewedAt} onChange={(event) => setBrewedAt(event.target.value)} /></label>
         <RecipeEditor recipe={recipe} onChange={setRecipe} prefix="coffee-diary-extraction" />

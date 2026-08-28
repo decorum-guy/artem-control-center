@@ -1,4 +1,26 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+type BeanRecord = { id: string; version: number };
+type ExtractionRecord = { id: string; version: number; beanId: string };
+
+async function seedBean(page: Page, name: string, idempotencyKey: string): Promise<BeanRecord> {
+  const response = await page.request.post("/api/v1/coffee-diary/beans", {
+    headers: { "Idempotency-Key": idempotencyKey },
+    data: { name, defaultRecipe: { method: "Эспрессо", fields: [{ key: "dose", label: "Кофе", kind: "number", value: 18, unit: "г" }] } }
+  });
+  expect(response.status()).toBe(201);
+  return await response.json() as BeanRecord;
+}
+
+async function removeBean(page: Page, bean: BeanRecord): Promise<void> {
+  const response = await page.request.delete(`/api/v1/coffee-diary/beans/${bean.id}`, { headers: { "If-Match": `"${bean.version}"` } });
+  expect(response.status()).toBe(200);
+}
+
+async function removeExtraction(page: Page, extraction: ExtractionRecord): Promise<void> {
+  const response = await page.request.delete(`/api/v1/coffee-diary/extractions/${extraction.id}`, { headers: { "If-Match": `"${extraction.version}"` } });
+  expect(response.status()).toBe(200);
+}
 
 test.describe("Coffee Diary Slice 1", () => {
   test("creates, edits, snapshots, deletes, and exports a diary record", async ({ page }) => {
@@ -69,6 +91,140 @@ test.describe("Coffee Diary Slice 1", () => {
     await expect(page.getByTestId("action-confirmation")).toBeVisible();
     await page.getByTestId("action-confirmation").getByRole("button", { name: "Убрать из коллекции" }).click();
     await expect(page.getByTestId("coffee-diary-empty")).toBeVisible();
+  });
+
+  test("blocks a rapid bean double-submit with one POST", async ({ page }) => {
+    await page.goto("/coffee-diary");
+    await page.getByTestId("coffee-diary-add-bean").click();
+    await page.getByTestId("coffee-diary-input-name").fill("Двойное касание зерна");
+
+    const keys: string[] = [];
+    let resolvePostStarted!: () => void;
+    const postStarted = new Promise<void>((resolve) => { resolvePostStarted = resolve; });
+    await page.route("**/api/v1/coffee-diary/beans", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      keys.push(route.request().headers()["idempotency-key"] ?? "");
+      resolvePostStarted();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await route.continue();
+    });
+
+    await page.locator("#coffee-diary-bean-form").evaluate((form) => {
+      (form as HTMLFormElement).requestSubmit();
+      (form as HTMLFormElement).requestSubmit();
+    });
+    await postStarted;
+    await expect(page.getByRole("button", { name: "Сохраняем…" })).toBeDisabled();
+    await expect(page.getByTestId("coffee-diary-detail")).toContainText("Двойное касание зерна");
+    expect(keys).toHaveLength(1);
+
+    const collection = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { beans: BeanRecord[]; beanCount: number };
+    expect(collection.beanCount).toBe(1);
+    await removeBean(page, collection.beans[0]);
+    await page.unroute("**/api/v1/coffee-diary/beans");
+  });
+
+  test("reuses a bean key after a committed response is lost", async ({ page }) => {
+    await page.goto("/coffee-diary");
+    await page.getByTestId("coffee-diary-add-bean").click();
+    await page.getByTestId("coffee-diary-input-name").fill("Потерянный ответ зерна");
+
+    const keys: string[] = [];
+    await page.route("**/api/v1/coffee-diary/beans", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      keys.push(route.request().headers()["idempotency-key"] ?? "");
+      if (keys.length === 1) {
+        const response = await route.fetch();
+        await response.body();
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.getByRole("button", { name: "Сохранить" }).last().click();
+    await expect(page.getByRole("alert")).toContainText("Ответ сервера не получен. Можно повторить сохранение — дубликат создан не будет.");
+    await expect(page.getByTestId("coffee-diary-bean-sheet")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Сохранить" }).last()).toBeEnabled();
+    await page.getByRole("button", { name: "Сохранить" }).last().click();
+    await expect(page.getByTestId("coffee-diary-detail")).toContainText("Потерянный ответ зерна");
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+
+    const collection = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { beans: BeanRecord[]; beanCount: number };
+    expect(collection.beanCount).toBe(1);
+    await removeBean(page, collection.beans[0]);
+    await page.unroute("**/api/v1/coffee-diary/beans");
+  });
+
+  test("blocks a rapid extraction double-submit with one POST", async ({ page }) => {
+    await page.goto("/coffee-diary");
+    const bean = await seedBean(page, "Двойное касание приготовления", "e2e-seed-extraction-double");
+    await page.reload();
+    await expect(page.getByTestId("coffee-diary-detail")).toContainText("Двойное касание приготовления");
+    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить" }).click();
+
+    const keys: string[] = [];
+    let resolvePostStarted!: () => void;
+    const postStarted = new Promise<void>((resolve) => { resolvePostStarted = resolve; });
+    await page.route("**/api/v1/coffee-diary/beans/*/extractions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      keys.push(route.request().headers()["idempotency-key"] ?? "");
+      resolvePostStarted();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await route.continue();
+    });
+
+    await page.locator("#coffee-diary-extraction-form").evaluate((form) => {
+      (form as HTMLFormElement).requestSubmit();
+      (form as HTMLFormElement).requestSubmit();
+    });
+    await postStarted;
+    await expect(page.getByRole("button", { name: "Сохраняем…" })).toBeDisabled();
+    await expect(page.getByTestId("coffee-diary-extraction-sheet")).toHaveCount(0);
+    expect(keys).toHaveLength(1);
+
+    const detail = await page.request.get(`/api/v1/coffee-diary/beans/${bean.id}`).then((response) => response.json()) as { bean: BeanRecord; extractions: ExtractionRecord[] };
+    expect(detail.extractions).toHaveLength(1);
+    expect(detail.extractions[0].beanId).toBe(bean.id);
+    await removeExtraction(page, detail.extractions[0]);
+    await removeBean(page, bean);
+    await page.unroute("**/api/v1/coffee-diary/beans/*/extractions");
+  });
+
+  test("reuses an extraction key after a committed response is lost", async ({ page }) => {
+    await page.goto("/coffee-diary");
+    const bean = await seedBean(page, "Потерянный ответ приготовления", "e2e-seed-extraction-loss");
+    await page.reload();
+    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить" }).click();
+
+    const keys: string[] = [];
+    await page.route("**/api/v1/coffee-diary/beans/*/extractions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      keys.push(route.request().headers()["idempotency-key"] ?? "");
+      if (keys.length === 1) {
+        const response = await route.fetch();
+        await response.body();
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.getByRole("button", { name: "Сохранить" }).last().click();
+    await expect(page.getByRole("alert")).toContainText("Ответ сервера не получен. Можно повторить сохранение — дубликат создан не будет.");
+    await expect(page.getByTestId("coffee-diary-extraction-sheet")).toBeVisible();
+    await page.getByRole("button", { name: "Сохранить" }).last().click();
+    await expect(page.getByTestId("coffee-diary-extraction-sheet")).toHaveCount(0);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+
+    const detail = await page.request.get(`/api/v1/coffee-diary/beans/${bean.id}`).then((response) => response.json()) as { bean: BeanRecord; extractions: ExtractionRecord[] };
+    expect(detail.extractions).toHaveLength(1);
+    expect(detail.extractions[0].beanId).toBe(bean.id);
+    await removeExtraction(page, detail.extractions[0]);
+    await removeBean(page, bean);
+    await page.unroute("**/api/v1/coffee-diary/beans/*/extractions");
   });
 
   test("interaction lock prevents diary mutation requests", async ({ page }) => {
