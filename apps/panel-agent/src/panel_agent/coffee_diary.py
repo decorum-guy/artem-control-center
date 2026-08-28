@@ -540,6 +540,7 @@ def _file_lock(path: Path) -> Iterator[None]:
             wintypes.DWORD,
             wintypes.DWORD,
             wintypes.DWORD,
+            wintypes.DWORD,
         ]
         kernel32.UnlockFile.restype = wintypes.BOOL
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
