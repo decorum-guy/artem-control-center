@@ -32,6 +32,7 @@ import { ServicesV2Page } from "./features/services/ServicesV2Page";
 import { SystemV2Page } from "./features/system/SystemV2Page";
 import { SettingsV2Page } from "./features/settings/SettingsV2Page";
 import { useInteractionLock } from "./InteractionLock";
+import { CoffeeDiaryPage } from "./CoffeeDiaryPage";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -41,6 +42,7 @@ const userRoutes: ShellRoutePath[] = [
   "/weather",
   "/home",
   "/services",
+  "/coffee-diary",
   ...planningRoutePaths,
   "/reminders",
   "/backups",
@@ -372,6 +374,7 @@ export function App() {
               ? <ServicesV2Page snapshot={snapshot} />
               : <ServicesPage snapshot={snapshot} onNavigate={navigate} />
           )}
+          {route === "/coffee-diary" && <CoffeeDiaryPage />}
           {route === "/settings" && (
             v2VisualShellEnabled ? (
               <SettingsV2Page
@@ -395,7 +398,7 @@ export function App() {
           {route === "/tasks" && (planningRouteEnabled("/tasks") ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
           {route === "/calendar" && (planningRouteEnabled("/calendar") ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
           {route === "/reminders" && planningRouteEnabled("/reminders") && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
-          {!["/overview", "/weather", "/home", "/services", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
+          {!["/overview", "/weather", "/home", "/services", "/coffee-diary", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
             <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}
         </ProductShell>

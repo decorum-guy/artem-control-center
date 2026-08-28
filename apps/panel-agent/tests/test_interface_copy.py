@@ -120,7 +120,7 @@ def test_invalid_documents_fail_closed_and_recover_only_through_global_reset(tmp
         "navigationGroup": {},
         "page": {
             "overview": {}, "weather": {}, "home": {}, "services": {},
-            "calendar": {}, "tasks": {}, "reminders": {}, "backups": {},
+            "calendar": {}, "tasks": {}, "reminders": {}, "coffeeDiary": {}, "backups": {},
             "apps": {}, "system": {}, "settings": {}
         },
     }

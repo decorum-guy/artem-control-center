@@ -353,7 +353,7 @@ export function SystemPage({ snapshot }: { snapshot: DashboardSnapshot }) {
 }
 
 const placeholderCopy: Record<
-  Exclude<RoutePath, "/overview" | "/home" | "/services" | "/settings" | "/reminders" | "/dev/widget-gallery">,
+  Exclude<RoutePath, "/overview" | "/home" | "/services" | "/settings" | "/reminders" | "/coffee-diary" | "/dev/widget-gallery">,
   { eyebrow: string; title: string; description: string; status: string }
 > = {
   "/calendar": {

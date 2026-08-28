@@ -19,6 +19,7 @@ export type RoutePath =
   | "/calendar"
   | "/tasks"
   | "/reminders"
+  | "/coffee-diary"
   | "/backups"
   | "/apps"
   | "/settings"
@@ -36,6 +37,7 @@ const primaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyFie
   { path: "/weather", copyKey: "navigation.weather", short: "П" },
   { path: "/home", copyKey: "navigation.home", short: "Д" },
   { path: "/services", copyKey: "navigation.services", short: "С" },
+  { path: "/coffee-diary", copyKey: "navigation.coffeeDiary", short: "К" },
   { path: planningModuleForRoute("/calendar")!.route as "/calendar", copyKey: "navigation.calendar", short: "К" },
   { path: planningModuleForRoute("/tasks")!.route as "/tasks", copyKey: "navigation.tasks", short: "З" },
   { path: "/backups", copyKey: "navigation.backups", short: "Б" }
@@ -51,7 +53,8 @@ const v2PrimaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyF
   { path: "/overview", copyKey: "navigation.overview", icon: "overview" },
   { path: "/weather", copyKey: "navigation.weather", icon: "weather" },
   { path: "/home", copyKey: "navigation.home", icon: "home" },
-  { path: "/services", copyKey: "navigation.services", icon: "services" }
+  { path: "/services", copyKey: "navigation.services", icon: "services" },
+  { path: "/coffee-diary", copyKey: "navigation.coffeeDiary", icon: "coffee" }
 ];
 
 const v2PlanningNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; icon: IconName }> = planningNavigationModules.map((module) => ({

@@ -10,6 +10,7 @@ export type InterfaceCopyNavigationKey =
   | "calendar"
   | "tasks"
   | "reminders"
+  | "coffeeDiary"
   | "backups"
   | "apps"
   | "system"
@@ -35,6 +36,7 @@ export interface InterfaceCopyCatalog {
     calendar: string;
     tasks: string;
     reminders: string;
+    coffeeDiary: string;
     backups: string;
     apps: string;
     system: string;
@@ -51,6 +53,7 @@ export interface InterfaceCopyCatalog {
     calendar: InterfaceCopyPageText;
     tasks: InterfaceCopyPageText;
     reminders: InterfaceCopyPageText;
+    coffeeDiary: InterfaceCopyPageText;
     backups: InterfaceCopyPageText;
     apps: InterfaceCopyPageText;
     system: InterfaceCopyPageText;
@@ -73,6 +76,7 @@ export interface InterfaceCopyOverrides {
     calendar: Partial<InterfaceCopyPageText>;
     tasks: Partial<InterfaceCopyPageText>;
     reminders: Partial<InterfaceCopyPageText>;
+    coffeeDiary: Partial<InterfaceCopyPageText>;
     backups: Partial<InterfaceCopyPageText>;
     apps: Partial<InterfaceCopyPageText>;
     system: Partial<InterfaceCopyPageText>;
@@ -169,6 +173,82 @@ export interface CoffeeTimingPolicy {
 export interface CoffeeData {
   machine: CoffeeMachineState;
   timingPolicy: CoffeeTimingPolicy;
+}
+
+export type CoffeeDiaryPreferredDrink = "espresso" | "milk" | "universal";
+
+export interface CoffeeDiaryPhoto {
+  id: string;
+  beanId: string;
+  storageId: string;
+  mediaType: string;
+  byteSize: number;
+  width: number;
+  height: number;
+  sha256: string;
+  createdAt: string;
+  deletedAt: string | null;
+}
+
+export interface CoffeeDiaryBean {
+  id: string;
+  version: number;
+  name: string;
+  grindDescription: string | null;
+  preferredDrink: CoffeeDiaryPreferredDrink | null;
+  roaster: string | null;
+  roastDate: string | null;
+  roastLevel: string | null;
+  roastNotes: string | null;
+  origin: string | null;
+  processing: string | null;
+  notes: string | null;
+  favoriteExtractionId: string | null;
+  photoIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface CoffeeDiaryExtraction {
+  id: string;
+  version: number;
+  beanId: string;
+  brewedAt: string;
+  doseGrams: number;
+  extractionSeconds: number;
+  yieldGrams: number;
+  notes: string | null;
+  rating: number | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+export interface CoffeeDiaryCollection {
+  schemaVersion: "coffee.diary.v1";
+  revision: number;
+  updatedAt: string;
+  beans: CoffeeDiaryBean[];
+  recentExtractions: CoffeeDiaryExtraction[];
+  photos: CoffeeDiaryPhoto[];
+  beanCount: number;
+  extractionCount: number;
+}
+
+export interface CoffeeDiaryBeanDetail {
+  bean: CoffeeDiaryBean;
+  extractions: CoffeeDiaryExtraction[];
+}
+
+export interface CoffeeDiaryExport {
+  schemaVersion: "coffee.diary.export.v1";
+  sourceSchemaVersion: "coffee.diary.v1";
+  revision: number;
+  updatedAt: string;
+  beans: CoffeeDiaryBean[];
+  extractions: CoffeeDiaryExtraction[];
+  photos: CoffeeDiaryPhoto[];
 }
 
 export interface KettleData {

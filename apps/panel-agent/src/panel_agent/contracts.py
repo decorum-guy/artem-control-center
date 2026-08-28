@@ -16,6 +16,7 @@ InterfaceCopyNavigationKey = Literal[
     "calendar",
     "tasks",
     "reminders",
+    "coffeeDiary",
     "backups",
     "apps",
     "system",
@@ -30,6 +31,7 @@ InterfaceCopyField = Literal[
     "navigation.calendar",
     "navigation.tasks",
     "navigation.reminders",
+    "navigation.coffeeDiary",
     "navigation.backups",
     "navigation.apps",
     "navigation.system",
@@ -266,6 +268,7 @@ class InterfaceCopyNavigation(BaseModel):
     calendar: str = Field(min_length=1, max_length=48)
     tasks: str = Field(min_length=1, max_length=48)
     reminders: str = Field(min_length=1, max_length=48)
+    coffeeDiary: str = Field(min_length=1, max_length=48)
     backups: str = Field(min_length=1, max_length=48)
     apps: str = Field(min_length=1, max_length=48)
     system: str = Field(min_length=1, max_length=48)
@@ -296,6 +299,7 @@ class InterfaceCopyPageCatalog(BaseModel):
     calendar: InterfaceCopyPageText
     tasks: InterfaceCopyPageText
     reminders: InterfaceCopyPageText
+    coffeeDiary: InterfaceCopyPageText
     backups: InterfaceCopyPageText
     apps: InterfaceCopyPageText
     system: InterfaceCopyPageText
@@ -315,6 +319,7 @@ class InterfaceCopyNavigationOverrides(BaseModel):
     calendar: Optional[str] = Field(default=None, max_length=48)
     tasks: Optional[str] = Field(default=None, max_length=48)
     reminders: Optional[str] = Field(default=None, max_length=48)
+    coffeeDiary: Optional[str] = Field(default=None, max_length=48)
     backups: Optional[str] = Field(default=None, max_length=48)
     apps: Optional[str] = Field(default=None, max_length=48)
     system: Optional[str] = Field(default=None, max_length=48)
@@ -344,6 +349,7 @@ class InterfaceCopyPageOverrides(BaseModel):
     calendar: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     tasks: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     reminders: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    coffeeDiary: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     backups: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     apps: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     system: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)

@@ -7,7 +7,7 @@ function response(overrides: unknown = {
   navigationGroup: {},
   page: {
     overview: {}, weather: {}, home: {}, services: {}, calendar: {}, tasks: {},
-    reminders: {}, backups: {}, apps: {}, system: {}, settings: {}
+    reminders: {}, coffeeDiary: {}, backups: {}, apps: {}, system: {}, settings: {}
   }
 }) {
   return {
@@ -38,7 +38,7 @@ describe("interface copy contract", () => {
       navigationGroup: {},
       page: {
         overview: { subtitle: "" }, weather: {}, home: {}, services: {}, calendar: {}, tasks: {},
-        reminders: {}, backups: {}, apps: {}, system: {}, settings: {}
+        reminders: {}, coffeeDiary: {}, backups: {}, apps: {}, system: {}, settings: {}
       }
     }));
     expect(parsed.overrides.page.overview.subtitle).toBe("");
@@ -51,7 +51,7 @@ describe("interface copy contract", () => {
       navigationGroup: {},
       page: {
         overview: {}, weather: {}, home: {}, services: {}, calendar: {}, tasks: {},
-        reminders: {}, backups: {}, apps: {}, system: {}, settings: {}
+        reminders: {}, coffeeDiary: {}, backups: {}, apps: {}, system: {}, settings: {}
       }
     }))).toThrow();
   });

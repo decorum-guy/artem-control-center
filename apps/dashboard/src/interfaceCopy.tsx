@@ -20,6 +20,7 @@ export function copyFromCatalog(catalog: InterfaceCopyCatalog, field: InterfaceC
     case "navigation.calendar": return catalog.navigation.calendar;
     case "navigation.tasks": return catalog.navigation.tasks;
     case "navigation.reminders": return catalog.navigation.reminders;
+    case "navigation.coffeeDiary": return catalog.navigation.coffeeDiary;
     case "navigation.backups": return catalog.navigation.backups;
     case "navigation.apps": return catalog.navigation.apps;
     case "navigation.system": return catalog.navigation.system;
@@ -39,6 +40,8 @@ export function copyFromCatalog(catalog: InterfaceCopyCatalog, field: InterfaceC
     case "page.tasks.subtitle": return catalog.page.tasks.subtitle;
     case "page.reminders.title": return catalog.page.reminders.title;
     case "page.reminders.subtitle": return catalog.page.reminders.subtitle;
+    case "page.coffeeDiary.title": return catalog.page.coffeeDiary.title;
+    case "page.coffeeDiary.subtitle": return catalog.page.coffeeDiary.subtitle;
     case "page.backups.title": return catalog.page.backups.title;
     case "page.backups.subtitle": return catalog.page.backups.subtitle;
     case "page.apps.title": return catalog.page.apps.title;
@@ -67,6 +70,7 @@ export function copyOverrideValue(overrides: InterfaceCopyOverrides, field: Inte
     case "navigation.calendar": return overrides.navigation.calendar ?? null;
     case "navigation.tasks": return overrides.navigation.tasks ?? null;
     case "navigation.reminders": return overrides.navigation.reminders ?? null;
+    case "navigation.coffeeDiary": return overrides.navigation.coffeeDiary ?? null;
     case "navigation.backups": return overrides.navigation.backups ?? null;
     case "navigation.apps": return overrides.navigation.apps ?? null;
     case "navigation.system": return overrides.navigation.system ?? null;
@@ -86,6 +90,8 @@ export function copyOverrideValue(overrides: InterfaceCopyOverrides, field: Inte
     case "page.tasks.subtitle": return overrides.page.tasks.subtitle ?? null;
     case "page.reminders.title": return overrides.page.reminders.title ?? null;
     case "page.reminders.subtitle": return overrides.page.reminders.subtitle ?? null;
+    case "page.coffeeDiary.title": return overrides.page.coffeeDiary.title ?? null;
+    case "page.coffeeDiary.subtitle": return overrides.page.coffeeDiary.subtitle ?? null;
     case "page.backups.title": return overrides.page.backups.title ?? null;
     case "page.backups.subtitle": return overrides.page.backups.subtitle ?? null;
     case "page.apps.title": return overrides.page.apps.title ?? null;
@@ -109,7 +115,7 @@ function defaultSettings(): InterfaceCopySettings {
       navigationGroup: {},
       page: {
         overview: {}, weather: {}, home: {}, services: {}, calendar: {}, tasks: {},
-        reminders: {}, backups: {}, apps: {}, system: {}, settings: {}
+        reminders: {}, coffeeDiary: {}, backups: {}, apps: {}, system: {}, settings: {}
       }
     },
     effective: defaultInterfaceCopyCatalog,
