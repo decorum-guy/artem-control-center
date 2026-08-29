@@ -62,6 +62,12 @@ function updateFailureCopy(result?: string): string {
   return "Обновление не завершено. Повторите попытку или проверьте установку панели.";
 }
 
+function updateObserverFailureCopy(reason: "served_mismatch" | "served_unverified"): string {
+  return reason === "served_mismatch"
+    ? "Обновление завершилось, но панель обслуживает другую версию. Нужна проверка установки."
+    : "Обновление завершилось, но целевая версия панели не подтверждена. Нужна проверка установки.";
+}
+
 function shortSha(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
 }
@@ -189,8 +195,8 @@ export function RuntimeControls({
     if (event.type === "failure") {
       setUpdateDialog("error");
       setUpdateMessage(
-        event.reason === "served_mismatch"
-          ? "Обновление завершилось, но панель обслуживает другую версию. Нужна проверка установки."
+        event.reason === "served_mismatch" || event.reason === "served_unverified"
+          ? updateObserverFailureCopy(event.reason)
           : updateFailureCopy(event.state.result)
       );
       return;
@@ -221,8 +227,8 @@ export function RuntimeControls({
         if (!active) return;
         if (event.type === "failure") {
           setNotice(
-            event.reason === "served_mismatch"
-              ? "Последнее обновление обслуживает другую версию. Нужна проверка установки."
+            event.reason === "served_mismatch" || event.reason === "served_unverified"
+              ? updateObserverFailureCopy(event.reason)
               : updateFailureCopy(event.state.result)
           );
           return;

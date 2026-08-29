@@ -53,7 +53,11 @@ export type UpdateObserverEvent =
   | { type: "waiting"; state: UpdateOwnerState }
   | { type: "reconnecting" }
   | { type: "success"; state: UpdateOwnerState }
-  | { type: "failure"; state: UpdateOwnerState; reason: "authoritative" | "served_mismatch" };
+  | {
+      type: "failure";
+      state: UpdateOwnerState;
+      reason: "authoritative" | "served_mismatch" | "served_unverified";
+    };
 
 export function isActiveUpdateState(state: UpdateOwnerState): boolean {
   return state.status === "checking" || state.status === "updating";
@@ -68,7 +72,17 @@ export async function resolvePanelUpdateState(
     return { type: "failure", state, reason: "authoritative" };
   }
   if (state.status === "success") {
+    // An update terminal result is only owner-visible success after the
+    // intended target is confirmed by the served build identity. The
+    // up-to-date check is the one normal terminal flow with no target: it did
+    // not change the installation, so there is no update target to verify.
+    if (state.result === "updated" && !state.targetHead) {
+      return { type: "failure", state, reason: "served_unverified" };
+    }
     if (state.targetHead) {
+      if (state.servedRevision && state.servedRevision !== state.targetHead) {
+        return { type: "failure", state, reason: "served_mismatch" };
+      }
       const served = await fetchBuild();
       if (served.revision !== state.targetHead) {
         return { type: "failure", state, reason: "served_mismatch" };

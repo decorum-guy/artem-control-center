@@ -90,6 +90,23 @@ def _safe_request_id(value: object) -> str | None:
     return value
 
 
+def _recent_update_transaction(transaction: dict | None) -> bool:
+    """Return whether a valid transaction heartbeat is within the handoff grace.
+
+    This is deliberately separate from the updater-process lease. It covers a
+    short atomic publication/read gap while still giving the server a bounded,
+    owner-controlled stale result when both the process lease and its recent
+    transaction heartbeat have disappeared.
+    """
+    if not transaction:
+        return False
+    updated = _parse_time(transaction.get("updatedAt"))
+    if updated is None:
+        return False
+    now = _utc_now()
+    return updated <= now and now - updated <= UPDATE_HANDOFF_MAX_AGE
+
+
 def _read_json(path: Path) -> dict | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -416,13 +433,14 @@ class PanelUpdateService:
             lock_payload,
             owner_alive=self._update_owner_alive,
         )
+        transaction_active = transaction_valid and _recent_update_transaction(transaction)
 
         # The lease and transaction are the server-owned liveness evidence. A
         # browser cannot keep an update alive, and a stale active state must not
         # remain indefinitely visible after its owner has disappeared.
         active_state = state_status in {"checking", "updating"}
         transaction_needs_owner = transaction_valid and state_status not in {"success", "failed"}
-        if (active_state or transaction_needs_owner) and not lock_active:
+        if (active_state or transaction_needs_owner) and not (lock_active or transaction_active):
             effective_target = (
                 _safe_revision(payload.get("targetHead"))
                 or (_safe_revision(transaction.get("targetHead")) if transaction_valid else None)
@@ -449,7 +467,7 @@ class PanelUpdateService:
             # before its finally block removes the lock. Preserve that
             # authoritative result across the short overlap.
             status = state_status
-        elif lock_active:
+        elif lock_active or transaction_active:
             status = state_status if active_state else "updating"
         else:
             status = state_status

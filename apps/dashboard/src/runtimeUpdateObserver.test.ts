@@ -101,6 +101,28 @@ describe("server-owned panel update observer", () => {
     stop();
   });
 
+  it("does not claim an updated terminal result without a target revision", async () => {
+    vi.useFakeTimers();
+    const events: UpdateObserverEvent[] = [];
+    const state: UpdateOwnerState = {
+      schemaVersion: 1,
+      status: "success",
+      result: "updated"
+    };
+    const stop = observePanelUpdate({
+      fetchStatus: async () => state,
+      fetchBuild: async () => {
+        throw new Error("must not infer the missing target");
+      },
+      onEvent: (event) => events.push(event)
+    });
+
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(events).toEqual([{ type: "failure", state, reason: "served_unverified" }]);
+    stop();
+  });
+
   it("keeps an authoritative terminal failure visible", async () => {
     vi.useFakeTimers();
     const events: UpdateObserverEvent[] = [];

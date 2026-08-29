@@ -570,6 +570,78 @@ def test_status_uses_server_owned_dead_owner_evidence(monkeypatch, tmp_path):
     assert payload["result"] == "updater_stale"
 
 
+def write_update_transaction(path: Path, *, updated_at: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "incomplete",
+            "phase": "building",
+            "previousHead": CURRENT,
+            "targetHead": TARGET,
+            "requestId": REQUEST,
+            "updatedAt": updated_at,
+        }),
+        encoding="utf-8",
+    )
+
+
+def test_status_keeps_recent_transaction_active_during_lock_publication_gap(monkeypatch, tmp_path):
+    client, service = make_client(
+        monkeypatch,
+        tmp_path,
+        FakeGit(),
+        profile="full",
+        owner_alive=lambda _pid, _request_id: False,
+    )
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "updating",
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "updating"
+    assert payload["currentHead"] == CURRENT
+    assert payload["targetHead"] == TARGET
+    assert "result" not in payload
+
+
+def test_status_marks_transaction_stale_after_server_owned_heartbeat_grace(monkeypatch, tmp_path):
+    client, service = make_client(
+        monkeypatch,
+        tmp_path,
+        FakeGit(),
+        profile="full",
+        owner_alive=lambda _pid, _request_id: False,
+    )
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "updating",
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        updated_at=(datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(),
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "failed"
+    assert payload["result"] == "updater_stale"
+
+
 def test_terminal_state_retains_target_and_served_revision_but_not_arbitrary_fields(monkeypatch, tmp_path):
     client, service = make_client(monkeypatch, tmp_path, FakeGit())
     service.runtime_root.mkdir(parents=True, exist_ok=True)
