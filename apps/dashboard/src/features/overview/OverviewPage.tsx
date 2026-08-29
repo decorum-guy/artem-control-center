@@ -80,6 +80,22 @@ export function OverviewV2Page({
   const dirty = overviewEditorDirty(editor);
   const canWrite = overviewV2Enabled && overviewEditorEnabled && layoutAvailable && editor.canonical.writesEnabled === true;
   const canEnterEdit = canWrite && !layoutLoading;
+  const configureGateState = !overviewV2Enabled || !overviewEditorEnabled
+    ? "build-disabled"
+    : layoutLoading
+      ? "checking"
+      : !layoutAvailable
+        ? "metadata-unavailable"
+        : editor.canonical.writesEnabled !== true
+          ? "server-disabled"
+          : "available";
+  const configureGateCopy = {
+    "build-disabled": "Редактор выключен в этой сборке.",
+    checking: "Проверяем доступность редактора…",
+    "metadata-unavailable": "Серверная доступность раскладки не подтверждена; запись отключена.",
+    "server-disabled": "Запись раскладки отключена сервером или deployment gate.",
+    available: "Редактор панели готов."
+  } as const;
   const visibleItems = editMode ? editor.draft : editor.canonical.items;
   const appearanceItem = appearanceInstanceId
     ? editor.draft.find((item) => item.instanceId === appearanceInstanceId) ?? null
@@ -212,7 +228,7 @@ export function OverviewV2Page({
       onLoadCurrent={() => void loadCurrentServer()}
     />
   ) : (
-    <header className="overview-v2-toolbar" data-testid="overview-toolbar">
+    <header className="overview-v2-toolbar" data-testid="overview-toolbar" data-configure-gate={configureGateState}>
       <div className="overview-v2-toolbar__copy">
         <h1>{copy("page.overview.title")}</h1>
         {copy("page.overview.subtitle") && <p>{copy("page.overview.subtitle")}</p>}
@@ -224,21 +240,13 @@ export function OverviewV2Page({
         aria-disabled={!canEnterEdit}
         aria-describedby="overview-configure-note"
         data-testid="overview-configure"
-        title={canEnterEdit ? "Редактировать расположение и виджеты" : "Редактор панели сейчас недоступен"}
+        title={canEnterEdit ? "Редактировать расположение и виджеты" : configureGateCopy[configureGateState]}
         onClick={() => dispatch({ type: "enter" })}
       >
         Настроить
       </button>
-      <span id="overview-configure-note" className="overview-v2-toolbar__note">
-        {!overviewEditorEnabled
-          ? "Редактор панели выключен флагом продукта."
-          : layoutLoading
-            ? "Проверяем панель…"
-            : !layoutAvailable
-              ? "Сохранённая конфигурация недоступна; показывается стандартная раскладка."
-              : !canWrite
-                ? "Сохранение панели отключено."
-                : "Редактор панели готов."}
+      <span id="overview-configure-note" className="overview-v2-toolbar__note" role="status">
+        {configureGateCopy[configureGateState]}
       </span>
     </header>
   );

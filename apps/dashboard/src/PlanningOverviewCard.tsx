@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import type { PlanningCalendarSourceCalendar, PlanningProviderFreshnessStatus, PlanningSnapshot } from "@artem/contracts";
+import type { PlanningCalendarEvent, PlanningCalendarSourceCalendar, PlanningProviderFreshnessStatus, PlanningReminder, PlanningSnapshot, PlanningTask } from "@artem/contracts";
 import type { ShellNavigationTarget } from "./Shell";
 import { Sheet } from "./Sheet";
 import { calendarLocalDateForEvent, calendarNavigationForDate, type CalendarNavigationTarget } from "./calendarNavigation";
@@ -11,13 +11,41 @@ import {
   formatReminderExactTime,
   formatTaskDueLabel,
   planningHealthPresentation,
-  planningOverviewSummary
+  planningOverviewRowLimit,
+  planningOverviewSummary,
+  type PlanningOverviewItem
 } from "./planningOverview";
 import { planningRemindersRouteEnabled } from "./planningRouteConfig";
 import { calendarEventColor } from "./planningRouteLogic";
 import { useCalendarDisplayPreferences } from "./CalendarDisplayPreferences";
 
 type PlanningNavigationTarget = Extract<ShellNavigationTarget, "/calendar" | "/tasks" | "/reminders"> | CalendarNavigationTarget;
+
+type PlanningDisplayItem =
+  | { readonly kind: "reminder"; readonly item: PlanningReminder | null }
+  | { readonly kind: "task"; readonly item: PlanningTask | null; readonly overdue: boolean }
+  | { readonly kind: "calendar"; readonly item: PlanningCalendarEvent | null };
+
+function displayItemsForSummary(
+  meaningful: readonly PlanningOverviewItem[],
+  limit: 2 | 3
+): PlanningDisplayItem[] {
+  const items: PlanningDisplayItem[] = meaningful.slice(0, limit);
+  const represented = new Set(items.map((entry) => entry.kind));
+  const placeholders: PlanningDisplayItem[] = [
+    { kind: "reminder", item: null },
+    { kind: "task", item: null, overdue: false },
+    { kind: "calendar", item: null }
+  ];
+  for (const placeholder of placeholders) {
+    if (items.length >= limit) break;
+    if (!represented.has(placeholder.kind)) {
+      items.push(placeholder);
+      represented.add(placeholder.kind);
+    }
+  }
+  return items;
+}
 
 function usePlanningPresentationNow(sourceStatus: PlanningSnapshot["sourceStatus"] | "unavailable") {
   const [now, setNow] = useState(() => new Date());
@@ -250,11 +278,13 @@ function PlanningHealthAction({
 export function PlanningOverviewCard({
   planning,
   onNavigate,
-  density = "comfortable"
+  density = "comfortable",
+  sizeVariant = "standard"
 }: {
   planning?: PlanningSnapshot | null;
   onNavigate: (target: PlanningNavigationTarget) => void;
   density?: "comfortable" | "compact";
+  sizeVariant?: "compact" | "standard" | "large";
 }) {
   const { preferences: calendarDisplayPreferences } = useCalendarDisplayPreferences();
   const initialHealth = planningHealthPresentation(planning);
@@ -277,23 +307,9 @@ export function PlanningOverviewCard({
     );
   }
 
-  const reminder = summary.reminder;
-  const overdueTask = summary.overdueTask;
-  const event = summary.event;
-  const overdueCount = formatOverdueTaskCount(summary.overdueTaskCount);
   const currentData = planning.sourceStatus === "current";
-  const reminderTitle = reminder?.title ?? unavailableRowTitle(health, "Напоминаний нет");
-  const taskTitle = overdueTask?.title ?? unavailableRowTitle(health, "Нет просроченных задач");
-  const eventTitle = event?.title ?? unavailableRowTitle(health, "Событий нет");
-  const eventDate = event ? formatCalendarEventDate(event) : null;
-  const eventColor = event
-    ? calendarEventColor(event, planning.providerStatuses, calendarDisplayPreferences?.overrides ?? [])
-    : undefined;
-  const taskMeta = overdueTask
-    ? formatTaskDueLabel(overdueTask)
-    : health.state === "current" || health.state === "degraded"
-      ? overdueCount
-      : undefined;
+  const displayItems = displayItemsForSummary(summary.overviewItems, planningOverviewRowLimit(sizeVariant));
+  const overdueCount = formatOverdueTaskCount(summary.overdueTaskCount);
 
   return (
     <section
@@ -301,6 +317,8 @@ export function PlanningOverviewCard({
       data-testid="planning-overview-card"
       data-state={health.state}
       data-density={density}
+      data-size-variant={sizeVariant}
+      data-visible-item-count={displayItems.length}
       aria-label="Дела"
     >
       <header className="planning-card__header">
@@ -312,44 +330,72 @@ export function PlanningOverviewCard({
       </header>
 
       <div className="planning-card__rows">
-        <PlanningRow
-          testId="planning-reminder-row"
-          className={!currentData ? "planning-row--not-current" : ""}
-          label="Напоминание"
-          title={reminderTitle}
-          meta={reminder ? formatReminderDueLabel(reminder, planning.sourceStatus, now) : undefined}
-          time={reminder ? formatReminderExactTime(reminder) : undefined}
-          dateTime={reminder?.dueAtUtc}
-          onClick={reminder && planningRemindersRouteEnabled ? () => onNavigate("/reminders") : undefined}
-          ariaLabel={reminder ? `${reminder.title}. ${formatReminderDueLabel(reminder, planning.sourceStatus, now)}. Точное время ${formatReminderExactTime(reminder)}` : undefined}
-          empty={!reminder}
-        />
-        <PlanningRow
-          testId="planning-task-row"
-          className={!currentData ? "planning-row--not-current" : ""}
-          label="Просроченные задачи"
-          title={overdueTask ? `${overdueCount} · ${overdueTask.title}` : taskTitle}
-          meta={taskMeta}
-          onClick={overdueTask ? () => onNavigate("/tasks") : undefined}
-          ariaLabel={overdueTask ? `${overdueCount} просроченных задач. ${overdueTask.title}. ${formatTaskDueLabel(overdueTask)}` : undefined}
-          empty={!overdueTask}
-        />
-        <PlanningRow
-          testId="planning-event-row"
-          className={!currentData ? "planning-row--not-current" : ""}
-          indicatorColor={eventColor}
-          indicatorTestId="planning-overview-calendar-marker"
-          label="Календарь"
-          title={eventTitle}
-          meta={event ? formatCalendarEventTime(event) : undefined}
-          time={eventDate ?? undefined}
-          onClick={event ? () => {
-            const dateTarget = calendarNavigationForDate(calendarLocalDateForEvent(event) ?? "");
-            onNavigate(dateTarget ?? "/calendar");
-          } : undefined}
-          ariaLabel={event ? `${event.title}. ${formatCalendarEventTime(event)}${eventDate ? ` · ${eventDate}` : ""}` : undefined}
-          empty={!event}
-        />
+        {displayItems.map((entry, index) => {
+          const kindOccurrence = displayItems.slice(0, index).filter((item) => item.kind === entry.kind).length + 1;
+          const suffix = kindOccurrence === 1 ? "" : `-${kindOccurrence}`;
+          const testId = `planning-${entry.kind === "calendar" ? "event" : entry.kind}-row${suffix}`;
+          const className = !currentData ? "planning-row--not-current" : "";
+          if (entry.kind === "reminder") {
+            const reminder = entry.item;
+            return (
+              <PlanningRow
+                key={`${entry.kind}-${index}`}
+                testId={testId}
+                className={className}
+                label="Напоминание"
+                title={reminder?.title ?? unavailableRowTitle(health, "Напоминаний нет")}
+                meta={reminder ? formatReminderDueLabel(reminder, planning.sourceStatus, now) : undefined}
+                time={reminder ? formatReminderExactTime(reminder) : undefined}
+                dateTime={reminder?.dueAtUtc}
+                onClick={reminder && planningRemindersRouteEnabled ? () => onNavigate("/reminders") : undefined}
+                ariaLabel={reminder ? `${reminder.title}. ${formatReminderDueLabel(reminder, planning.sourceStatus, now)}. Точное время ${formatReminderExactTime(reminder)}` : undefined}
+                empty={!reminder}
+              />
+            );
+          }
+          if (entry.kind === "task") {
+            const task = entry.item;
+            const taskTitle = task
+              ? entry.overdue ? `${overdueCount} · ${task.title}` : task.title
+              : unavailableRowTitle(health, "Нет просроченных задач");
+            return (
+              <PlanningRow
+                key={`${entry.kind}-${index}`}
+                testId={testId}
+                className={className}
+                label={entry.overdue ? "Просроченные задачи" : "Задача"}
+                title={taskTitle}
+                meta={task ? formatTaskDueLabel(task) : health.state === "current" || health.state === "degraded" ? overdueCount : undefined}
+                onClick={task ? () => onNavigate("/tasks") : undefined}
+                ariaLabel={task ? `${task.title}. ${formatTaskDueLabel(task)}` : undefined}
+                empty={!task}
+              />
+            );
+          }
+          const event = entry.item;
+          const eventDate = event ? formatCalendarEventDate(event) : null;
+          return (
+            <PlanningRow
+              key={`${entry.kind}-${index}`}
+              testId={testId}
+              className={className}
+              indicatorColor={event ? calendarEventColor(event, planning.providerStatuses, calendarDisplayPreferences?.overrides ?? []) : undefined}
+              indicatorTestId={entry.kind === "calendar" && kindOccurrence === 1
+                ? "planning-overview-calendar-marker"
+                : undefined}
+              label="Календарь"
+              title={event?.title ?? unavailableRowTitle(health, "Событий нет")}
+              meta={event ? formatCalendarEventTime(event) : undefined}
+              time={eventDate ?? undefined}
+              onClick={event ? () => {
+                const dateTarget = calendarNavigationForDate(calendarLocalDateForEvent(event) ?? "");
+                onNavigate(dateTarget ?? "/calendar");
+              } : undefined}
+              ariaLabel={event ? `${event.title}. ${formatCalendarEventTime(event)}${eventDate ? ` · ${eventDate}` : ""}` : undefined}
+              empty={!event}
+            />
+          );
+        })}
       </div>
     </section>
   );

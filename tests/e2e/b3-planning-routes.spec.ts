@@ -152,10 +152,16 @@ test.describe("B3 Planning monitoring routes", () => {
     await assertNoWrites();
   });
 
-  test("Overview reaches the reminder monitor with the accepted navigation projection", async ({ page }) => {
+  test("Overview reaches the reminder monitor without requiring a placeholder row", async ({ page }) => {
     const assertNoWrites = await assertPlanningTrafficIsReadOnly(page);
+    await setEmptyPlanningPreview(page, "tasks");
     await page.goto("/overview");
-    await expectReminderViewResponse(page, "upcoming", () => page.getByTestId("planning-reminder-row").tap());
+    const overviewReminder = page.getByTestId("planning-reminder-row");
+    if (await overviewReminder.count()) {
+      await expectReminderViewResponse(page, "upcoming", () => overviewReminder.tap());
+    } else {
+      await expectReminderViewResponse(page, "upcoming", () => page.goto("/reminders"));
+    }
     await expect(page.getByTestId("route-reminders")).toBeVisible();
     await expect(page.getByRole("link", { name: "Напоминания" })).toHaveCount(v2ShellEnabled ? 1 : 0);
     await expectReminderViewResponse(

@@ -36,7 +36,11 @@ const ids = {
   upcomingEarlierDayTimed: "00000000-0000-4000-8000-000000000031",
   upcomingLaterDayTimed: "00000000-0000-4000-8000-000000000032",
   upcomingTieEarlier: "00000000-0000-4000-8000-000000000033",
-  upcomingTieLater: "00000000-0000-4000-8000-000000000034"
+  upcomingTieLater: "00000000-0000-4000-8000-000000000034",
+  overviewTaskEarlier: "00000000-0000-4000-8000-000000000035",
+  overviewTaskLater: "00000000-0000-4000-8000-000000000036",
+  overviewEventEarlier: "00000000-0000-4000-8000-000000000037",
+  overviewEventLater: "00000000-0000-4000-8000-000000000038"
 } as const;
 
 const capabilities = {
@@ -233,6 +237,41 @@ export const emptyPlanningFixture: PlanningSnapshot = {
 
 export const planningFixtures = {
   healthy: planning(),
+  overviewDensity: planning({
+    reminders: {
+      upcoming: [reminder({ dueAtUtc: "2026-08-12T12:40:00Z" })],
+      overdue: [],
+      deliveryFailures: []
+    },
+    tasks: {
+      today: [],
+      overdue: [],
+      upcoming: [
+        task(ids.overviewTaskLater, "Поздняя задача", "normal", "2026-08-13", "16:00"),
+        task(ids.overviewTaskEarlier, "Ранняя задача", "high", "2026-08-13", "13:00")
+      ],
+      undated: [],
+      projects: []
+    },
+    calendar: {
+      today: [],
+      upcoming: [
+        calendarEvent({
+          id: ids.overviewEventLater,
+          title: "Позднее событие",
+          startAtUtc: "2026-08-14T16:00:00Z",
+          endAtUtc: "2026-08-14T17:00:00Z"
+        }),
+        calendarEvent({
+          id: ids.overviewEventEarlier,
+          title: "Раннее событие",
+          startAtUtc: "2026-08-13T11:00:00Z",
+          endAtUtc: "2026-08-13T12:00:00Z"
+        })
+      ],
+      conflicts: []
+    }
+  }),
   calendarWriterEnabled: planning({ calendarMutationsEnabled: true }),
   calendarWriterDisabled: planning({ calendarMutationsEnabled: false }),
   calendarWriterMetadataMissing: planning({ calendarMutationsEnabled: undefined }),
