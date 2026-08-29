@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Response, status
@@ -16,6 +18,10 @@ from .system_update import software_update_active
 RuntimeAction = Literal["hide", "shutdown", "apply_capabilities"]
 
 router = APIRouter(prefix="/api/v1/system/runtime", tags=["system"])
+
+_REPLACE_LOCK_TIMEOUT_SECONDS = 5.0
+_replace_locks = {}
+_replace_locks_guard = Lock()
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -60,14 +66,55 @@ class KioskPresenceRequest(BaseModel):
     pageId: str = Field(pattern=r"^[0-9a-f]{24}$")
 
 
+def _replace_lock_for(path: Path):
+    with _replace_locks_guard:
+        return _replace_locks.setdefault(path, Lock())
+
+
+def _atomic_replace(temporary: Path, path: Path) -> None:
+    # Windows can reject simultaneous replacements of the same destination
+    # even when every source is a different, closed file. Serialize only that
+    # short publication step per target, with a bounded wait; temp creation and
+    # JSON writes remain concurrent and private.
+    if os.name != "nt":
+        os.replace(temporary, path)
+        return
+    replace_lock = _replace_lock_for(path)
+    if not replace_lock.acquire(timeout=_REPLACE_LOCK_TIMEOUT_SECONDS):
+        raise OSError(f"timed out publishing runtime command: {path}")
+    try:
+        os.replace(temporary, path)
+    finally:
+        replace_lock.release()
+
+
 def _write_command(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        encoding="utf-8",
-    )
-    os.replace(temporary, path)
+    serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    temporary_path: Path | None = None
+    try:
+        # Keep the temporary file beside the target so os.replace remains an
+        # atomic publication on the same filesystem. delete=False is deliberate:
+        # the file is closed by the context manager before os.replace, including
+        # on Windows, and the finally path below owns its cleanup.
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(serialized)
+            temporary.flush()
+        _atomic_replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except OSError:
+                pass
 
 
 def _request_action(action: RuntimeAction, intent: str) -> dict:
