@@ -27,6 +27,9 @@ from .planning import (
     PlanningCalendarSourceCalendar,
     PlanningCalendarSourcesRefresh,
     PlanningConflict,
+    PlanningDomainHealth,
+    PlanningHealthEvidence,
+    PlanningHealthIssue,
     PlanningEventObjectEnvelope,
     PlanningCapabilities,
     PlanningObjectEnvelope,
@@ -115,6 +118,14 @@ PLANNING_FAILURE_SCAN_MAX_PAGES = 1
 PLANNING_RANGE_DAYS = 30
 PLANNING_EVENT_UPCOMING_DAYS = 7
 PLANNING_JITTER_RATIO = 0.10
+PLANNING_TRANSIENT_FAILURE_LIMIT = 2
+
+_PLANNING_REFRESH_DOMAIN_GROUPS: tuple[tuple[str, tuple[int, ...]], ...] = (
+    ("reminders", (0, 1, 2, 3, 4)),
+    ("tasks", (5, 6, 7, 8)),
+    ("calendar", (9, 10)),
+    ("projects", (11,)),
+)
 
 
 class PlanningConfigurationError(ValueError):
@@ -985,6 +996,23 @@ class PlanningAdapter:
         self._cache_loaded = False
         self._upstream_connected = False
         self._failure_count = 0
+        self._status_failure_count = 0
+        self._status_last_success_at: float | None = None
+        self._status_last_success_text: str | None = None
+        self._status_last_attempt_text: str | None = None
+        self._last_refresh_attempt_text: str | None = None
+        self._last_refresh_success_text: str | None = None
+        self._domain_failure_counts = {domain: 0 for domain, _ in _PLANNING_REFRESH_DOMAIN_GROUPS}
+        self._domain_last_success_at: dict[str, float | None] = {
+            domain: None for domain, _ in _PLANNING_REFRESH_DOMAIN_GROUPS
+        }
+        self._domain_last_success_text: dict[str, str | None] = {
+            domain: None for domain, _ in _PLANNING_REFRESH_DOMAIN_GROUPS
+        }
+        self._domain_last_attempt_text: dict[str, str | None] = {
+            domain: None for domain, _ in _PLANNING_REFRESH_DOMAIN_GROUPS
+        }
+        self._status_attempted_during_domain_recovery = False
         self._calendar_source_refresh_task: asyncio.Task[PlanningCalendarSourcesRefresh] | None = None
 
         if not self._enabled:
@@ -1039,7 +1067,7 @@ class PlanningAdapter:
         return bool(getattr(self._settings, "panel_planning_reminder_mutations_enabled", False))
 
     def reminder_mutation_allowed(self, action: Literal["create", "update", "complete", "cancel"]) -> bool:
-        if not self.reminder_mutations_enabled or self._last_status is None:
+        if not self.reminder_mutations_enabled or self._last_status is None or not self._domains_current:
             return False
         if _status_is_degraded(self._last_status):
             return False
@@ -1052,7 +1080,7 @@ class PlanningAdapter:
         return bool(getattr(self._settings, "panel_planning_task_mutations_enabled", False))
 
     def task_mutation_allowed(self, action: Literal["create", "update", "complete", "archive"]) -> bool:
-        if not self.task_mutations_enabled or self._last_status is None:
+        if not self.task_mutations_enabled or self._last_status is None or not self._domains_current:
             return False
         if _status_is_degraded(self._last_status):
             return False
@@ -1065,7 +1093,7 @@ class PlanningAdapter:
         return bool(getattr(self._settings, "panel_planning_calendar_mutations_enabled", False))
 
     def calendar_mutation_allowed(self, action: Literal["create", "update", "delete"]) -> bool:
-        if not self.calendar_mutations_enabled or self._last_status is None:
+        if not self.calendar_mutations_enabled or self._last_status is None or not self._domains_current:
             return False
         if _status_is_degraded(self._last_status):
             return False
@@ -1106,28 +1134,15 @@ class PlanningAdapter:
     async def refresh(self) -> bool:
         if not self._enabled:
             return False
+        self._status_attempted_during_domain_recovery = False
         domain_ok = await self.refresh_domains()
+        if self._status_attempted_during_domain_recovery:
+            return domain_ok
         if self._status_due() or (domain_ok and self._status_refresh_requested):
             try:
                 await self.refresh_status(force=True)
             except PlanningUpstreamError as exc:
                 self._record_failure("status", exc)
-                if self._projection is not None:
-                    source_status = (
-                        "degraded"
-                        if self._domains_current
-                        else self._failure_source_status()
-                    )
-                    await self._set_projection(
-                        self._projection.model_copy(
-                            update={
-                                "generatedAt": self._now_text(),
-                                "sourceStatus": source_status,
-                                "calendarMutationsEnabled": False,
-                            },
-                            deep=True,
-                        )
-                    )
                 domain_ok = False
         return domain_ok
 
@@ -1137,15 +1152,21 @@ class PlanningAdapter:
         if not force and not self._status_due():
             return True
         self._last_status_attempt_at = self._clock()
+        self._status_last_attempt_text = self._now_text()
         try:
             status = await self._client.status()
         except PlanningUpstreamError:
-            self._status_refresh_requested = False
+            self._status_failure_count += 1
+            self._status_refresh_requested = True
+            await self._publish_health_update()
             raise
         self._last_status = status
         self._last_status_at = self._clock()
+        self._status_failure_count = 0
+        self._status_last_success_at = self._clock()
+        self._status_last_success_text = status.lastSyncedAt
         self._status_refresh_requested = False
-        source_status = self._status_source_status(current=self._domains_current)
+        source_status = self._aggregate_source_status()
         current = self._projection or empty_planning_projection(
             generated_at=self._now_text(),
             source_status=source_status,
@@ -1153,9 +1174,10 @@ class PlanningAdapter:
         updates: dict[str, Any] = {
             "generatedAt": self._now_text(),
             "sourceStatus": source_status,
+            "health": self._health_evidence(),
             "reminderMutationsEnabled": self.reminder_mutations_enabled,
             "taskMutationsEnabled": self.task_mutations_enabled,
-            "calendarMutationsEnabled": self.calendar_mutations_enabled and source_status == "current",
+            "calendarMutationsEnabled": self.calendar_mutations_enabled and source_status == "current" and self._domains_current,
             "capabilities": PlanningCapabilities(**self._effective_capabilities()),
         }
         if status.sources is not None:
@@ -1264,6 +1286,28 @@ class PlanningAdapter:
             )
             errors = [result for result in results if isinstance(result, Exception)]
             success_count = len(results) - len(errors)
+            now_text = self._now_text(now)
+            had_prior_failure = bool(
+                self._failure_count
+                or self._status_failure_count
+                or self._status_refresh_requested
+                or any(self._domain_failure_counts.values())
+            )
+            domain_successes = {
+                domain: all(not isinstance(results[index], Exception) for index in indexes)
+                for domain, indexes in _PLANNING_REFRESH_DOMAIN_GROUPS
+            }
+            self._last_refresh_attempt_text = now_text
+            for domain, indexes in _PLANNING_REFRESH_DOMAIN_GROUPS:
+                self._domain_last_attempt_text[domain] = now_text
+                if domain_successes[domain]:
+                    self._domain_failure_counts[domain] = 0
+                    self._domain_last_success_at[domain] = self._clock()
+                    self._domain_last_success_text[domain] = self._max_synced_at(
+                        [results[index] for index in indexes]
+                    ) or now_text
+                else:
+                    self._domain_failure_counts[domain] += 1
             previous = self._last_good or self._projection
             upstream_sources = self._sources_from_results(results)
             mapped = self._mapped_domains(results, previous, upstream_sources)
@@ -1276,12 +1320,20 @@ class PlanningAdapter:
             if all_success:
                 self._failure_count = 0
                 self._last_success_at = self._clock()
+                self._last_refresh_success_text = self._max_synced_at(results) or now_text
                 self._domains_current = True
                 self._cache_loaded = False
-                source_status = self._status_source_status(current=True)
+                status_refresh_needed = had_prior_failure and callable(getattr(self._client, "status", None))
+                if status_refresh_needed:
+                    self._status_attempted_during_domain_recovery = True
+                    try:
+                        await self.refresh_status(force=True)
+                    except PlanningUpstreamError as exc:
+                        self._record_failure("status", exc)
+                source_status = self._aggregate_source_status()
                 projection = self._projection_from_domains(
                     mapped,
-                    generated_at=self._now_text(now),
+                    generated_at=now_text,
                     source_status=source_status,
                     last_synced_at=self._max_synced_at(results),
                     provider_statuses=provider_statuses,
@@ -1297,16 +1349,11 @@ class PlanningAdapter:
                 self._failure_count += 1
                 self._upstream_connected = False
                 self._domains_current = False
-                if success_count == 0:
-                    self._status_refresh_requested = True
-                source_status = (
-                    "degraded"
-                    if success_count > 0
-                    else self._failure_source_status()
-                )
+                self._status_refresh_requested = True
+                source_status = self._aggregate_source_status()
                 projection = self._projection_from_domains(
                     mapped,
-                    generated_at=self._now_text(now),
+                    generated_at=now_text,
                     source_status=source_status,
                     last_synced_at=(
                         self._max_synced_at(results)
@@ -1822,10 +1869,31 @@ class PlanningAdapter:
         self._last_good = cached.model_copy(deep=True)
         self._cache_loaded = True
         self._last_success_at = self._clock() - age if age != float("inf") else None
+        self._last_refresh_success_text = cached.health.lastSuccessfulAt or cached.lastSyncedAt
+        self._last_refresh_attempt_text = cached.health.lastAttemptedAt
+        cached_domains = {domain.domain: domain for domain in cached.health.domains}
+        for domain, _ in _PLANNING_REFRESH_DOMAIN_GROUPS:
+            domain_evidence = cached_domains.get(domain)
+            last_success_text = (
+                domain_evidence.lastSuccessfulAt
+                if domain_evidence is not None
+                else cached.lastSyncedAt
+            )
+            self._domain_last_success_text[domain] = last_success_text
+            self._domain_last_attempt_text[domain] = (
+                domain_evidence.lastAttemptedAt
+                if domain_evidence is not None
+                else cached.health.lastAttemptedAt
+            )
+            self._domain_last_success_at[domain] = (
+                self._clock() - age if last_success_text is not None and age != float("inf") else None
+            )
+            self._domain_failure_counts[domain] = 0
         self._projection = cached.model_copy(
             update={
                 "generatedAt": self._now_text(now),
                 "sourceStatus": self._cache_source_status(age),
+                "health": self._health_evidence(),
                 "calendarMutationsEnabled": False,
             },
             deep=True,
@@ -1927,15 +1995,10 @@ class PlanningAdapter:
                     calendars=[],
                 )
             ]
-        statuses: list[PlanningCalendarSource] = []
-        for source in previous.providerStatuses:
-            if source.status == "current":
-                source = source.model_copy(
-                    update={"status": "stale" if source.lastSyncedAt else "error"},
-                    deep=True,
-                )
-            statuses.append(source)
-        return statuses
+        # A failed fixed domain request is not proof that a configured calendar
+        # provider failed. Keep provider metadata authoritative and carry the
+        # known domain identity in health.issues instead.
+        return [source.model_copy(deep=True) for source in previous.providerStatuses]
 
     def _mapped_domains(
         self,
@@ -2184,9 +2247,10 @@ class PlanningAdapter:
             schemaVersion="planning.panel.v1",
             generatedAt=generated_at,
             sourceStatus=source_status,
+            health=self._health_evidence(),
             reminderMutationsEnabled=self.reminder_mutations_enabled,
             taskMutationsEnabled=self.task_mutations_enabled,
-            calendarMutationsEnabled=self.calendar_mutations_enabled and source_status == "current",
+            calendarMutationsEnabled=self.calendar_mutations_enabled and source_status == "current" and self._domains_current,
             lastSyncedAt=last_synced_at,
             staleAfter=stale_after,
             reminders=mapped["reminders"],
@@ -2340,33 +2404,143 @@ class PlanningAdapter:
             >= float(self._settings.panel_planning_status_refresh_seconds)
         )
 
+    async def _publish_health_update(self) -> None:
+        if self._projection is None:
+            return
+        source_status = self._aggregate_source_status()
+        await self._set_projection(
+            self._projection.model_copy(
+                update={
+                    "generatedAt": self._now_text(),
+                    "sourceStatus": source_status,
+                    "health": self._health_evidence(),
+                    "calendarMutationsEnabled": False,
+                },
+                deep=True,
+            )
+        )
+
     async def _set_projection(self, projection: PlanningProjection) -> None:
         self._projection = projection.model_copy(deep=True)
         if self._on_change is not None:
             await self._on_change()
 
     def _status_source_status(self, *, current: bool) -> PlanningSourceStatus:
-        if not current:
+        """Return the server-owned aggregate; the argument is retained for callers."""
+
+        if current:
+            if self._last_status is None or not _status_is_degraded(self._last_status):
+                return "current"
             return "degraded"
-        if self._last_status is None:
-            return "current"
-        if _status_is_degraded(self._last_status):
+        return self._aggregate_source_status()
+
+    def _domain_health(self) -> list[PlanningDomainHealth]:
+        now = self._clock()
+        result: list[PlanningDomainHealth] = []
+        for domain, _ in _PLANNING_REFRESH_DOMAIN_GROUPS:
+            last_success_at = self._domain_last_success_at[domain]
+            if last_success_at is None:
+                status = "unavailable"
+            else:
+                age = max(0.0, now - last_success_at)
+                if self._cache_loaded:
+                    status = (
+                        "unavailable"
+                        if age > self._settings.panel_planning_unavailable_after_seconds
+                        else "stale"
+                    )
+                elif age > self._settings.panel_planning_unavailable_after_seconds:
+                    status = "unavailable"
+                elif age > self._settings.panel_planning_stale_after_seconds:
+                    status = "stale"
+                elif self._domain_failure_counts[domain] >= PLANNING_TRANSIENT_FAILURE_LIMIT:
+                    status = "degraded"
+                elif self._domain_failure_counts[domain] > 0:
+                    status = "retrying"
+                else:
+                    status = "current"
+            result.append(
+                PlanningDomainHealth(
+                    domain=domain,
+                    status=status,
+                    consecutiveFailures=self._domain_failure_counts[domain],
+                    lastAttemptedAt=self._domain_last_attempt_text[domain],
+                    lastSuccessfulAt=self._domain_last_success_text[domain],
+                )
+            )
+        return result
+
+    def _status_health_issue(self) -> PlanningHealthIssue | None:
+        if self._last_status is not None and _status_is_degraded(self._last_status):
+            return PlanningHealthIssue(
+                source="planning-status",
+                status="degraded",
+                consecutiveFailures=0,
+                lastAttemptedAt=self._status_last_attempt_text,
+                lastSuccessfulAt=self._status_last_success_text,
+            )
+        if self._status_failure_count <= 0:
+            return None
+        last_success_at = self._status_last_success_at
+        if last_success_at is None:
+            status = (
+                "degraded"
+                if self._status_failure_count >= PLANNING_TRANSIENT_FAILURE_LIMIT
+                else "retrying"
+            )
+        else:
+            age = max(0.0, self._clock() - last_success_at)
+            if age > self._settings.panel_planning_unavailable_after_seconds:
+                status = "unavailable"
+            elif age > self._settings.panel_planning_stale_after_seconds:
+                status = "stale"
+            elif self._status_failure_count >= PLANNING_TRANSIENT_FAILURE_LIMIT:
+                status = "degraded"
+            else:
+                status = "retrying"
+        return PlanningHealthIssue(
+            source="planning-status",
+            status=status,
+            consecutiveFailures=self._status_failure_count,
+            lastAttemptedAt=self._status_last_attempt_text,
+            lastSuccessfulAt=self._status_last_success_text,
+        )
+
+    def _health_evidence(self) -> PlanningHealthEvidence:
+        domains = self._domain_health()
+        issues = [
+            PlanningHealthIssue(
+                source=domain.domain,
+                status=domain.status,
+                consecutiveFailures=domain.consecutiveFailures,
+                lastAttemptedAt=domain.lastAttemptedAt,
+                lastSuccessfulAt=domain.lastSuccessfulAt,
+            )
+            for domain in domains
+            if domain.status != "current"
+        ]
+        status_issue = self._status_health_issue()
+        if status_issue is not None:
+            issues.append(status_issue)
+        return PlanningHealthEvidence(
+            lastAttemptedAt=self._last_refresh_attempt_text,
+            lastSuccessfulAt=self._last_refresh_success_text,
+            consecutiveFailures=self._failure_count,
+            issues=issues,
+            domains=domains,
+        )
+
+    def _aggregate_source_status(self) -> PlanningSourceStatus:
+        domain_statuses = [domain.status for domain in self._domain_health()]
+        status_issue = self._status_health_issue()
+        issue_status = status_issue.status if status_issue is not None else None
+        if "unavailable" in domain_statuses or issue_status == "unavailable":
+            return "offline"
+        if "stale" in domain_statuses or issue_status == "stale":
+            return "stale"
+        if "degraded" in domain_statuses or issue_status == "degraded":
             return "degraded"
         return "current"
-
-    def _failure_source_status(self) -> PlanningSourceStatus:
-        if self._last_good is None:
-            return "offline"
-        if self._last_success_at is None:
-            return "stale"
-        age = max(0.0, self._clock() - self._last_success_at)
-        if self._cache_loaded:
-            return self._cache_source_status(age)
-        if age > self._settings.panel_planning_unavailable_after_seconds:
-            return "offline"
-        if age > self._settings.panel_planning_stale_after_seconds:
-            return "stale"
-        return "degraded"
 
     def _cache_source_status(self, age: float) -> PlanningSourceStatus:
         if age > self._settings.panel_planning_unavailable_after_seconds:

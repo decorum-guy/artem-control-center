@@ -109,6 +109,29 @@ describe("owner diagnostics problem model", () => {
     expect(currentProblemsForSnapshot(snapshot({ planning: providerError }))).toContainEqual(expect.objectContaining({ state: "error" }));
   });
 
+  it("uses the server-provided domain identity instead of generic Planning attribution", () => {
+    const planning = {
+      ...planningFixtures.healthy,
+      sourceStatus: "degraded" as const,
+      health: {
+        lastAttemptedAt: "2026-08-25T12:00:00Z",
+        lastSuccessfulAt: "2026-08-25T11:59:00Z",
+        consecutiveFailures: 2,
+        issues: [{
+          source: "tasks" as const,
+          status: "degraded" as const,
+          consecutiveFailures: 2,
+          lastAttemptedAt: "2026-08-25T12:00:00Z",
+          lastSuccessfulAt: "2026-08-25T11:59:00Z"
+        }],
+        domains: []
+      }
+    };
+    const problems = currentProblemsForSnapshot(snapshot({ planning }));
+    expect(problems).toContainEqual(expect.objectContaining({ id: "planning:tasks", subsystem: "Задачи", state: "degraded" }));
+    expect(problems).not.toContainEqual(expect.objectContaining({ id: "planning:source" }));
+  });
+
   it("keeps support text deterministic and excludes private fields from the formatter", () => {
     const first = diagnosticsSupportText(report({
       problems: [{

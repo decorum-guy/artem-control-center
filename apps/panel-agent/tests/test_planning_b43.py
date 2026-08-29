@@ -324,10 +324,11 @@ def test_b43_degraded_projection_and_status_fail_closed_calendar_writer(tmp_path
 
     degraded, status = asyncio.run(exercise())
     assert degraded is not None
-    assert degraded.sourceStatus == "degraded"
+    assert degraded.sourceStatus == "current"
+    assert degraded.health.issues[0].source == "reminders"
     assert degraded.calendarMutationsEnabled is False
     assert status is not None
-    assert status.sourceStatus == "degraded"
+    assert status.sourceStatus == "current"
     assert status.calendarMutationsEnabled is False
 
 

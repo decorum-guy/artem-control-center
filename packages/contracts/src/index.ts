@@ -427,6 +427,34 @@ export interface DiagnosticsReport {
 }
 
 export type PlanningSourceStatus = "current" | "stale" | "offline" | "degraded";
+export type PlanningHealthIssueSource = "reminders" | "tasks" | "calendar" | "projects" | "planning-status";
+export type PlanningHealthIssueStatus = "retrying" | "degraded" | "stale" | "unavailable";
+export type PlanningDomainHealthStatus = "current" | PlanningHealthIssueStatus;
+
+export interface PlanningHealthIssue {
+  source: PlanningHealthIssueSource;
+  status: PlanningHealthIssueStatus;
+  consecutiveFailures: number;
+  lastAttemptedAt: string | null;
+  lastSuccessfulAt: string | null;
+}
+
+export interface PlanningDomainHealth {
+  domain: Exclude<PlanningHealthIssueSource, "planning-status">;
+  status: PlanningDomainHealthStatus;
+  consecutiveFailures: number;
+  lastAttemptedAt: string | null;
+  lastSuccessfulAt: string | null;
+}
+
+/** Server-owned refresh evidence. `sourceStatus` remains the aggregate owner state. */
+export interface PlanningHealthEvidence {
+  lastAttemptedAt: string | null;
+  lastSuccessfulAt: string | null;
+  consecutiveFailures: number;
+  issues: PlanningHealthIssue[];
+  domains: PlanningDomainHealth[];
+}
 export type PlanningSource =
   | "alice"
   | "telegram"
@@ -617,6 +645,8 @@ export interface PlanningSnapshot {
   schemaVersion: "planning.panel.v1";
   generatedAt: string;
   sourceStatus: PlanningSourceStatus;
+  /** Additive server-owned refresh evidence; omitted only by older cached snapshots. */
+  health?: PlanningHealthEvidence;
   /** Server/deployment writer gate, distinct from profile permissions. */
   reminderMutationsEnabled?: boolean;
   /** Server/deployment task writer gate, distinct from profile permissions. */

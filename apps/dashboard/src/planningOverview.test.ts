@@ -8,6 +8,7 @@ import {
   formatReminderExactTime,
   formatTaskDueLabel,
   planningHealthPresentation,
+  planningDomainStatus,
   planningOverviewRowLimit,
   planningOverviewSummary,
   planningReferenceTime,
@@ -164,6 +165,28 @@ describe("Planning Overview selectors and presentation", () => {
     expect(planningHealthPresentation(planningFixtures.offlineWithLastGoodItems).label).toMatch(/недоступны/);
     expect(planningHealthPresentation(planningFixtures.offlineEmpty)).toMatchObject({ state: "offline", hasLastGoodData: false });
     expect(planningHealthPresentation(undefined)).toMatchObject({ state: "unavailable", label: "Планирование недоступно" });
+  });
+
+  it("keeps a recovered Calendar section current while another domain is retrying", () => {
+    const partial = {
+      ...planningFixtures.healthy,
+      sourceStatus: "current" as const,
+      health: {
+        lastAttemptedAt: "2026-08-12T12:00:00Z",
+        lastSuccessfulAt: "2026-08-12T11:59:00Z",
+        consecutiveFailures: 1,
+        issues: [{ source: "tasks" as const, status: "retrying" as const, consecutiveFailures: 1, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" }],
+        domains: [
+          { domain: "reminders" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "tasks" as const, status: "retrying" as const, consecutiveFailures: 1, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "calendar" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T12:00:00Z" },
+          { domain: "projects" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T12:00:00Z" }
+        ]
+      }
+    };
+    expect(planningDomainStatus(partial, "tasks")).toBe("retrying");
+    expect(planningDomainStatus(partial, "calendar")).toBe("current");
+    expect(planningReferenceTime(partial, new Date("2026-08-12T12:01:00Z"))?.toISOString()).toBe("2026-08-12T12:01:00.000Z");
   });
 
   it("deduplicates a repeated canonical object before selecting a row", () => {

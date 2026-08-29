@@ -1,5 +1,6 @@
 import type {
   PlanningCalendarEvent,
+  PlanningDomainHealthStatus,
   PlanningReminder,
   PlanningSnapshot,
   PlanningSourceStatus,
@@ -21,6 +22,23 @@ export interface PlanningHealthPresentation {
   state: PlanningHealthDisplayState;
   label: string | null;
   hasLastGoodData: boolean;
+}
+
+export type PlanningOverviewDomain = "reminders" | "tasks" | "calendar";
+
+/** Prefer server-owned per-domain freshness, with the legacy aggregate fallback. */
+export function planningDomainStatus(
+  snapshot: PlanningSnapshot,
+  domain: PlanningOverviewDomain
+): PlanningDomainHealthStatus {
+  const explicit = snapshot.health?.domains.find((entry) => entry.domain === domain);
+  if (explicit) return explicit.status;
+  switch (snapshot.sourceStatus) {
+    case "current": return "current";
+    case "degraded": return "degraded";
+    case "stale": return "stale";
+    case "offline": return "unavailable";
+  }
 }
 
 function compareStrings(left: string, right: string): number {
@@ -53,7 +71,8 @@ function validDate(value: Date): Date | null {
 
 /** Current data follows the live presentation clock; non-current data follows its canonical snapshot time. */
 export function planningReferenceTime(snapshot: PlanningSnapshot, liveNow: Date): Date | null {
-  if (snapshot.sourceStatus === "current") return validDate(liveNow);
+  const calendarStatus = planningDomainStatus(snapshot, "calendar");
+  if (calendarStatus === "current" || calendarStatus === "retrying") return validDate(liveNow);
   return parseTimestamp(snapshot.lastSyncedAt) ?? parseTimestamp(snapshot.generatedAt);
 }
 
