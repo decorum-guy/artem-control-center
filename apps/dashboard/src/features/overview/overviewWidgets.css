@@ -203,6 +203,10 @@
   gap: 8px;
 }
 
+.overview-rog-widget__actions.rog-g703-actions--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .overview-rog-widget__action button {
   width: 156px;
   min-height: 48px;

@@ -21,6 +21,7 @@ export type RogG703DeviceStatus =
 export type RogG703ActionStatus =
   | "requested"
   | "waking"
+  | "verifying"
   | "online"
   | "wake_timeout"
   | "sleeping"
@@ -107,8 +108,9 @@ export async function waitForRogG703Execution(
   correlationId: string,
   onProgress?: (execution: RogG703ActionExecution) => void
 ): Promise<RogG703ActionExecution> {
-  const deadline = Date.now() + 190_000;
-  while (Date.now() < deadline) {
+  // The Panel Agent owns the bounded verification window and publishes the
+  // terminal result. The browser only observes that server-owned state.
+  while (true) {
     const execution = await fetchRogG703Execution(correlationId);
     onProgress?.(execution);
     if (["online", "offline", "wake_timeout", "failed"].includes(execution.status)) {
@@ -116,5 +118,4 @@ export async function waitForRogG703Execution(
     }
     await new Promise((resolve) => window.setTimeout(resolve, 500));
   }
-  throw new Error("rog_g703_action_status_timeout");
 }

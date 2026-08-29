@@ -36,7 +36,10 @@ function RogG703PowerActionGroup({
   if (!actionIds.length) return null;
 
   return (
-    <div className={className} aria-label="Управление ASUS ROG G703GI">
+    <div
+      className={[className, actionIds.length === 1 ? "rog-g703-actions--single" : ""].filter(Boolean).join(" ")}
+      aria-label="Управление ASUS ROG G703GI"
+    >
       {actionIds.map((actionId) => {
         const pending = controller.pendingAction === actionId;
         const label = pending

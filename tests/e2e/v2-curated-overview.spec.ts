@@ -384,9 +384,23 @@ test.describe("PR4 curated Overview", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    await expect(page.getByTestId("overview-rog-g703")).toContainText("Не в сети");
-    await expect(page.getByTestId("overview-rog-g703-wake")).toHaveText("Включить");
-    await page.getByTestId("overview-rog-g703-wake").click();
+    const rog = page.getByTestId("overview-rog-g703");
+    const actionRegion = rog.locator(".overview-rog-widget__action");
+    const wake = page.getByTestId("overview-rog-g703-wake");
+    await expect(rog).toContainText("Не в сети");
+    await expect(wake).toHaveText("Включить");
+    const [actionRegionBox, wakeBox] = await Promise.all([
+      actionRegion.boundingBox(),
+      wake.boundingBox()
+    ]);
+    expect(actionRegionBox).not.toBeNull();
+    expect(wakeBox).not.toBeNull();
+    expect((wakeBox?.x ?? 0) + (wakeBox?.width ?? 0)).toBeCloseTo(
+      (actionRegionBox?.x ?? 0) + (actionRegionBox?.width ?? 0),
+      0
+    );
+    expect(wakeBox?.height).toBeGreaterThanOrEqual(48);
+    await wake.click();
     await expect.poll(() => postedActions.length).toBe(1);
     expect(postedActions).toEqual([{ actionId: "system.rog_g703.wake" }]);
     await expect(page.getByTestId("overview-rog-g703")).toContainText("В сети");

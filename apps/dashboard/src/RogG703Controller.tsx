@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RogG703Data, ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
@@ -30,7 +30,8 @@ export const rogG703StatusCopy: Record<RogG703DeviceStatus, { label: string; det
 
 const actionProgressCopy: Record<RogG703ActionExecution["status"], string> = {
   requested: "Запрос зарегистрирован",
-  waking: "Пакет пробуждения отправлен",
+  waking: "Пакет пробуждения отправлен — проверяем ASUS",
+  verifying: "Проверяем, появился ли ASUS в сети",
   online: "ASUS появился в сети",
   wake_timeout: "Не удалось разбудить ASUS",
   sleeping: "ASUS переходит в сон",
@@ -42,7 +43,7 @@ const actionProgressCopy: Record<RogG703ActionExecution["status"], string> = {
 function actionErrorCopy(error: string | null): string {
   switch (error) {
     case "wake_timeout":
-      return "Не удалось разбудить ASUS в заданное время.";
+      return "Не удалось подтвердить пробуждение ASUS в заданное время.";
     case "hibernate_timeout":
       return "ASUS остаётся доступен: переход в гибернацию не подтверждён.";
     case "sleep_timeout":
@@ -82,12 +83,13 @@ export interface RogG703ControllerState {
 export function useRogG703Controller(service: ServiceSnapshot): RogG703ControllerState {
   const { ensureCapability, explainAvailability } = useAccess();
   const { confirmAction, confirmationOpen } = useActionConfirmation();
-  const { showNotice } = useNoticeCenter();
+  const { showNotice, dismissNotice } = useNoticeCenter();
   const { guardMutation } = useInteractionLock();
   const [availability, setAvailability] = useState<AvailabilityMap | null>(null);
   const [apiAvailable, setApiAvailable] = useState(false);
   const [pendingAction, setPendingAction] = useState<RogG703ActionId | null>(null);
   const [transitionStatus, setTransitionStatus] = useState<RogG703DeviceStatus | null>(null);
+  const activeNoticeIdRef = useRef<string | null>(null);
 
   const serviceStatus = statusFromService(service);
   const displayStatus = transitionStatus ?? serviceStatus;
@@ -126,10 +128,18 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
     severity: "progress" | "success" | "warning" | "error",
     detail: string,
     correlationId?: string,
-    timeoutMs?: number
+    timeoutMs?: number,
+    phase: "progress" | "terminal" = "progress"
   ) => {
+    const noticeId = correlationId
+      ? `rog-g703.action.${phase}.${correlationId}`
+      : "rog-g703.action.unscoped";
+    if (activeNoticeIdRef.current && activeNoticeIdRef.current !== noticeId) {
+      dismissNotice(activeNoticeIdRef.current);
+    }
+    activeNoticeIdRef.current = noticeId;
     showNotice({
-      id: "rog-g703.action",
+      id: noticeId,
       correlationId,
       severity,
       title: "ASUS ROG G703GI",
@@ -137,7 +147,7 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
       timeoutMs,
       testId: "rog-g703-action-notice"
     });
-  }, [showNotice]);
+  }, [dismissNotice, showNotice]);
 
   const run = useCallback(async (actionId: RogG703ActionId) => {
     if (!guardMutation()) return;
@@ -179,22 +189,21 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
           ? "sleeping"
           : "hibernating"
     );
-    showActionNotice(
-      "progress",
-      actionId === ROG_G703_WAKE_ACTION
-        ? "Отправляем пакет пробуждения…"
-        : actionId === ROG_G703_SLEEP_ACTION
-          ? "Отправляем команду сна…"
-          : "Отправляем команду гибернации…"
-    );
-
+    let actionCorrelationId: string | undefined;
     try {
       const started = await startRogG703Action(actionId);
+      actionCorrelationId = started.correlationId;
+      showActionNotice(
+        "progress",
+        actionProgressCopy[started.status],
+        started.correlationId
+      );
       const finished = await waitForRogG703Execution(
         started.correlationId,
         (execution) => {
           const failed = execution.status === "failed" || execution.status === "wake_timeout";
           if (execution.status === "waking") setTransitionStatus("waking");
+          if (execution.status === "verifying") setTransitionStatus("waking");
           if (execution.status === "sleeping") setTransitionStatus("sleeping");
           if (execution.status === "hibernating") setTransitionStatus("hibernating");
           if (execution.status === "online") setTransitionStatus("online");
@@ -202,27 +211,30 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
           if (execution.status === "failed") {
             setTransitionStatus(actionId === ROG_G703_WAKE_ACTION ? "offline" : "online");
           }
-          showActionNotice(
-            failed ? "error" : execution.status === "online" || execution.status === "offline" ? "success" : "progress",
-            failed ? actionErrorCopy(execution.error) : actionProgressCopy[execution.status],
-            execution.correlationId.slice(0, 8),
-            failed ? 10_000 : undefined
-          );
+          if (!failed && execution.status !== "online" && execution.status !== "offline") {
+            showActionNotice(
+              "progress",
+              actionProgressCopy[execution.status],
+              execution.correlationId
+            );
+          }
         }
       );
       if (finished.status === "online" || finished.status === "offline") {
         showActionNotice(
           "success",
           actionProgressCopy[finished.status],
-          finished.correlationId.slice(0, 8),
-          8_000
+          finished.correlationId,
+          8_000,
+          "terminal"
         );
       } else {
         showActionNotice(
           "error",
           actionErrorCopy(finished.error),
-          finished.correlationId.slice(0, 8),
-          10_000
+          finished.correlationId,
+          10_000,
+          "terminal"
         );
       }
       await refresh();
@@ -230,8 +242,9 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
       showActionNotice(
         "error",
         error instanceof Error ? actionErrorCopy(error.message) : actionErrorCopy(null),
-        undefined,
-        10_000
+        actionCorrelationId,
+        10_000,
+        "terminal"
       );
     } finally {
       setPendingAction(null);
