@@ -4,6 +4,7 @@ import importlib
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +22,42 @@ def load_app(monkeypatch, command_path, *, enabled: bool):
     import panel_agent.main
 
     return importlib.reload(panel_agent.main)
+
+
+def gate_private_replacements(monkeypatch, module, barrier, sources=None):
+    """Release concurrent writers immediately before canonical publication."""
+    sources_lock = threading.Lock()
+    original_publish = getattr(module, "_atomic_replace", None)
+    if original_publish is not None:
+        def gated_publish(source, destination):
+            if sources is not None:
+                with sources_lock:
+                    sources.append(Path(source))
+            try:
+                barrier.wait(timeout=10)
+            except threading.BrokenBarrierError as error:
+                raise AssertionError("all concurrent writers must reach publication") from error
+            return original_publish(source, destination)
+
+        monkeypatch.setattr(module, "_atomic_replace", gated_publish)
+        return
+
+    # This compatibility path makes the regression fail deterministically when
+    # run against the old fixed-temp implementation, which has no publication
+    # helper to instrument.
+    original_replace = module.os.replace
+
+    def gated_replace(source, destination):
+        if sources is not None:
+            with sources_lock:
+                sources.append(Path(source))
+        try:
+            barrier.wait(timeout=10)
+        except threading.BrokenBarrierError as error:
+            raise AssertionError("all concurrent writers must reach publication") from error
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", gated_replace)
 
 
 def test_runtime_control_status_and_intent_gate(monkeypatch, tmp_path):
@@ -82,19 +119,7 @@ def test_write_command_uses_private_temps_for_deterministic_concurrent_writers(m
     ]
     replace_barrier = threading.Barrier(len(payloads))
     replace_sources = []
-    replace_sources_lock = threading.Lock()
-    real_replace = runtime_control.os.replace
-
-    def gated_replace(source, destination):
-        with replace_sources_lock:
-            replace_sources.append(source)
-        try:
-            replace_barrier.wait(timeout=10)
-        except threading.BrokenBarrierError as error:
-            raise AssertionError("all concurrent writers must reach publication") from error
-        return real_replace(source, destination)
-
-    monkeypatch.setattr(runtime_control.os, "replace", gated_replace)
+    gate_private_replacements(monkeypatch, runtime_control, replace_barrier, replace_sources)
     with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
         futures = [executor.submit(runtime_control._write_command, target, payload) for payload in payloads]
         for future in futures:
@@ -137,16 +162,7 @@ def test_kiosk_presence_endpoint_handles_deterministic_concurrent_writers(monkey
     page_ids = [f"{page_id:024x}" for page_id in range(1, 5)]
     presence_path = tmp_path / "kiosk-presence.json"
     replace_barrier = threading.Barrier(len(page_ids))
-    real_replace = runtime_control.os.replace
-
-    def gated_replace(source, destination):
-        try:
-            replace_barrier.wait(timeout=10)
-        except threading.BrokenBarrierError as error:
-            raise AssertionError("all endpoint writers must reach publication") from error
-        return real_replace(source, destination)
-
-    monkeypatch.setattr(runtime_control.os, "replace", gated_replace)
+    gate_private_replacements(monkeypatch, runtime_control, replace_barrier)
 
     def post_presence(page_id):
         with TestClient(module.app, raise_server_exceptions=False) as client:
