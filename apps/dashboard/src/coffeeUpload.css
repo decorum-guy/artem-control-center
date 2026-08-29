@@ -1,0 +1,32 @@
+.coffee-upload-page {
+  box-sizing: border-box;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: #f5eee4;
+  background: #171311;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.coffee-upload-page *, .coffee-upload-page *::before, .coffee-upload-page *::after { box-sizing: inherit; }
+.coffee-upload-card { width: min(100%, 420px); display: grid; gap: 18px; padding: 28px; border: 1px solid rgba(226, 177, 112, .28); border-radius: 24px; background: #241c18; box-shadow: 0 24px 70px rgba(0, 0, 0, .35); }
+.coffee-upload-kicker { margin: 0; color: #d9a768; font-size: 12px; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
+.coffee-upload-card h1 { margin: 0; font-size: clamp(30px, 8vw, 42px); line-height: 1; }
+.coffee-upload-description, .coffee-upload-success p { margin: 0; color: #cbbdb0; line-height: 1.5; }
+.coffee-upload-file-button, .coffee-upload-submit { min-height: 52px; display: grid; place-items: center; border-radius: 14px; padding: 12px 16px; font: inherit; font-weight: 750; cursor: pointer; }
+.coffee-upload-file-button { border: 1px solid #85603d; color: #f5eee4; background: #32251e; }
+.coffee-upload-file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.coffee-upload-file-button:focus-within { outline: 3px solid #e2b170; outline-offset: 3px; }
+.coffee-upload-submit { border: 1px solid #e2b170; color: #23180f; background: #e2b170; }
+.coffee-upload-submit:disabled { cursor: not-allowed; opacity: .45; }
+.coffee-upload-preview { width: 100%; max-height: 300px; border-radius: 14px; object-fit: contain; background: #130f0d; }
+.coffee-upload-file-name { overflow: hidden; margin: -8px 0 0; color: #a9988b; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.coffee-upload-error { margin: 0; color: #ffad9d; line-height: 1.45; }
+.coffee-upload-success { display: grid; justify-items: center; gap: 8px; padding: 18px 0 8px; text-align: center; }
+.coffee-upload-success__mark { display: grid; width: 64px; height: 64px; place-items: center; border-radius: 50%; color: #23180f; background: #e2b170; font-size: 34px; font-weight: 800; }
+
+@media (max-width: 420px) {
+  .coffee-upload-page { padding: 16px; align-items: start; padding-top: max(16px, 8svh); }
+  .coffee-upload-card { padding: 22px; border-radius: 20px; }
+}

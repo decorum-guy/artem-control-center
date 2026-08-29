@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 
 
 NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+MOBILE_UPLOAD_HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 IMMUTABLE_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
 BUILD_IDENTITY_NAME = "dashboard-build.json"
 BUILD_IDENTITY_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -89,6 +90,6 @@ def install_dashboard_routes(app: FastAPI, root: Path | None = None) -> bool:
         if first_segment in {"api", "health", "assets"} or Path(asset_path).suffix:
             raise HTTPException(status_code=404)
 
-        return FileResponse(index_path, headers=NO_STORE_HEADERS)
+        return FileResponse(index_path, headers=MOBILE_UPLOAD_HEADERS if asset_path == "coffee-upload" else NO_STORE_HEADERS)
 
     return True

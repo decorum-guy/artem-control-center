@@ -78,6 +78,10 @@ jobs:
         if: runner.os == 'Windows'
         run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary.py -q -k "test_api"
 
+      - name: Run focused Coffee Diary Windows QR and export gate
+        if: runner.os == 'Windows'
+        run: node scripts/python.mjs -m pytest apps/panel-agent/tests/test_coffee_diary_upload.py -q
+
       - name: Run full validation
         run: npm run check
 
@@ -92,6 +96,23 @@ jobs:
           VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
           VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
         run: npm run test:e2e -- tests/e2e/coffee-diary.spec.ts
+
+      - name: Run focused Coffee Diary Slice 2 QR browser gate
+        if: runner.os == 'Linux'
+        env:
+          PANEL_COFFEE_DIARY_PATH: .cache/coffee-diary-slice2-e2e.json
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+          COFFEE_DIARY_SLICE2_ARTIFACT_DIR: artifacts/coffee-diary-slice2-review
+        run: npm run test:e2e -- tests/e2e/coffee-diary-slice2.spec.ts
+
+      - name: Upload Coffee Diary Slice 2 review screenshot
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coffee-diary-slice2-review-${{ github.sha }}
+          path: artifacts/coffee-diary-slice2-review
+          if-no-files-found: error
 
       - name: Run focused B0 browser gate
         if: runner.os == 'Linux'

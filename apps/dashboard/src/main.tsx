@@ -7,6 +7,7 @@ import { ConnectivityActionsProvider } from "./ConnectivityActions";
 import { WeatherProvider } from "./Weather";
 import { WeatherAutoRefresh } from "./WeatherAutoRefresh";
 import { App } from "./App";
+import { CoffeeUploadPage } from "./CoffeeUploadPage";
 import { NoticeCenterProvider } from "./NoticeCenter";
 import { InteractionLockProvider } from "./InteractionLock";
 import { CalendarDisplayPreferencesProvider } from "./CalendarDisplayPreferences";
@@ -26,7 +27,9 @@ import "./features/home/homeV2.css";
 import "./features/services/servicesV2.css";
 import "./features/system/systemV2.css";
 
-createRoot(document.getElementById("root")!).render(
+const publicCoffeeUpload = window.location.pathname === "/coffee-upload";
+
+createRoot(document.getElementById("root")!).render(publicCoffeeUpload ? <CoffeeUploadPage /> : (
   <StrictMode>
     <KioskPresenceHeartbeat />
     <NoticeCenterProvider>
@@ -50,4 +53,4 @@ createRoot(document.getElementById("root")!).render(
       </InteractionLockProvider>
     </NoticeCenterProvider>
   </StrictMode>
-);
+));

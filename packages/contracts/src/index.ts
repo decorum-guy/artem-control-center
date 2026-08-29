@@ -251,6 +251,24 @@ export interface CoffeeDiaryExport {
   photos: CoffeeDiaryPhoto[];
 }
 
+export type CoffeeDiaryUploadSessionState = "created" | "uploading" | "uploaded" | "consumed" | "cancelled" | "expired";
+
+export interface CoffeeDiaryUploadSession {
+  sessionId: string;
+  state: CoffeeDiaryUploadSessionState;
+  expiresAt: string;
+  remainingSeconds: number;
+  uploadUrl?: string;
+  pendingAttachmentId: string | null;
+  photoId: string | null;
+}
+
+export interface CoffeeDiaryPhotoUploadResult {
+  state: "uploaded" | "consumed";
+  pendingAttachmentId: string | null;
+  photoId: string | null;
+}
+
 export interface KettleData {
   stage: KettleStage;
   entityId: "water_heater.chainik";

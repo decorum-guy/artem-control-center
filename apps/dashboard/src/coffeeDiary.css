@@ -53,6 +53,22 @@
 .coffee-diary-extraction__tools { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .coffee-diary-rating { color: var(--accent-strong); font-weight: 700; white-space: nowrap; }
 .coffee-diary-link-button { min-height: 48px; border: 0; padding: 10px 4px; color: var(--accent-strong); background: transparent; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.coffee-diary-photos { margin-top: 18px; padding: 18px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-secondary); }
+.coffee-diary-photos h3 { margin: 2px 0 0; font-size: 19px; }
+.coffee-diary-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-top: 14px; }
+.coffee-diary-photo-grid img { display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; object-fit: cover; background: var(--surface-primary); }
+.coffee-diary-photo-staging { display: grid; gap: 14px; padding: 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-secondary); }
+.coffee-diary-photo-staging__header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.coffee-diary-photo-staging__header strong, .coffee-diary-photo-staging__header p { margin: 0; }
+.coffee-diary-photo-staging__header p { margin-top: 4px; color: var(--text-muted); font-size: 12px; }
+.coffee-diary-staged-previews { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.coffee-diary-staged-previews img { display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 8px; object-fit: cover; }
+.coffee-diary-qr-body { display: grid; justify-items: center; gap: 12px; text-align: center; }
+.coffee-diary-qr { display: block; width: min(280px, 100%); height: auto; image-rendering: pixelated; background: #fff; }
+.coffee-diary-qr-placeholder { display: grid; width: min(280px, 100%); aspect-ratio: 1; place-items: center; color: var(--text-muted); background: var(--surface-secondary); }
+.coffee-diary-qr-expiry { margin: 0; color: var(--accent-strong); font-weight: 750; font-variant-numeric: tabular-nums; }
+.coffee-diary-qr-state { margin: 0; color: var(--text-secondary); }
+.coffee-diary-photo-upload-dialog { width: min(460px, calc(100vw - 24px)); }
 
 .coffee-diary-form { display: grid; gap: 18px; min-width: 0; }
 .coffee-diary-form__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
@@ -98,4 +114,5 @@
   .coffee-diary-bean-list__items, .coffee-diary-form__grid, .coffee-diary-metadata { grid-template-columns: 1fr; }
   .coffee-diary-form__field--wide { grid-column: auto; }
   .coffee-diary-recipe__field { grid-template-columns: 1fr; }
+  .coffee-diary-photo-staging__header { align-items: stretch; flex-direction: column; }
 }
