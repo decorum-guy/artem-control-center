@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import type { PlanningCalendarEvent, PlanningCalendarSourceCalendar, PlanningProviderFreshnessStatus, PlanningReminder, PlanningSnapshot, PlanningTask } from "@artem/contracts";
+import type { PlanningCalendarEvent, PlanningCalendarSourceCalendar, PlanningDomainHealthStatus, PlanningHealthIssue, PlanningProviderFreshnessStatus, PlanningReminder, PlanningSnapshot, PlanningTask } from "@artem/contracts";
 import type { ShellNavigationTarget } from "./Shell";
 import { Sheet } from "./Sheet";
 import { calendarLocalDateForEvent, calendarNavigationForDate, type CalendarNavigationTarget } from "./calendarNavigation";
@@ -11,6 +11,7 @@ import {
   formatReminderExactTime,
   formatTaskDueLabel,
   planningHealthPresentation,
+  planningDomainStatus,
   planningOverviewRowLimit,
   planningOverviewSummary,
   type PlanningOverviewItem
@@ -71,6 +72,7 @@ function PlanningRow({
   ariaLabel,
   empty = false,
   className = "",
+  dataState = "current",
   indicatorColor,
   indicatorTestId
 }: {
@@ -84,6 +86,7 @@ function PlanningRow({
   ariaLabel?: string;
   empty?: boolean;
   className?: string;
+  dataState?: PlanningDomainHealthStatus;
   indicatorColor?: string;
   indicatorTestId?: string;
 }) {
@@ -118,6 +121,7 @@ function PlanningRow({
       <button
         className={`planning-row planning-row--interactive ${className}`.trim()}
         data-testid={testId}
+        data-planning-state={dataState}
         type="button"
         aria-label={ariaLabel}
         onClick={onClick}
@@ -129,15 +133,23 @@ function PlanningRow({
   }
 
   return (
-    <div className={`planning-row ${className}`.trim()} data-testid={testId}>
+    <div className={`planning-row ${className}`.trim()} data-testid={testId} data-planning-state={dataState}>
       {indicator}
       {content}
     </div>
   );
 }
 
-function unavailableRowTitle(health: ReturnType<typeof planningHealthPresentation>, emptyTitle: string): string {
-  return health.state === "offline" || health.state === "stale" ? "Данные недоступны" : emptyTitle;
+function unavailableRowTitle(
+  health: ReturnType<typeof planningHealthPresentation>,
+  emptyTitle: string,
+  domainStatus?: PlanningDomainHealthStatus
+): string {
+  return domainStatus === "unavailable"
+    || domainStatus === "stale"
+    || (!domainStatus && (health.state === "offline" || health.state === "stale"))
+    ? "Данные недоступны"
+    : emptyTitle;
 }
 
 type PlanningHealthProblem = {
@@ -150,6 +162,23 @@ type PlanningHealthProblem = {
 
 const MAX_HEALTH_PROVIDERS = 3;
 const MAX_HEALTH_CALENDARS = 2;
+
+const healthIssueLabels: Record<PlanningHealthIssue["source"], string> = {
+  reminders: "Напоминания",
+  tasks: "Задачи",
+  calendar: "Календарь",
+  projects: "Проекты",
+  "planning-status": "Планирование"
+};
+
+function ownerFacingHealthIssue(status: PlanningHealthIssue["status"]): string | null {
+  switch (status) {
+    case "degraded": return "Не удалось обновить данные";
+    case "stale": return "Данные могут быть устаревшими";
+    case "unavailable": return "Данные недоступны";
+    case "retrying": return null;
+  }
+}
 
 function ownerFacingFreshness(status: PlanningProviderFreshnessStatus): string | null {
   switch (status) {
@@ -175,7 +204,16 @@ function abnormalCalendars(calendars: PlanningCalendarSourceCalendar[]): Array<{
 }
 
 function planningHealthProblems(planning: PlanningSnapshot): PlanningHealthProblem[] {
-  return planning.providerStatuses
+  const issueProblems = (planning.health?.issues ?? [])
+    .filter((issue) => issue.status !== "retrying")
+    .map((issue) => ({
+      provider: issue.source,
+      kind: "native" as const,
+      providerLabel: healthIssueLabels[issue.source],
+      providerStatus: ownerFacingHealthIssue(issue.status),
+      calendars: []
+    }));
+  const providerProblems = planning.providerStatuses
     .filter((provider) => provider.configured)
     .flatMap((provider) => {
       const providerStatus = ownerFacingFreshness(provider.status);
@@ -183,8 +221,8 @@ function planningHealthProblems(planning: PlanningSnapshot): PlanningHealthProbl
       return providerStatus || calendars.length > 0
         ? [{ provider: provider.provider, kind: provider.kind, providerLabel: provider.label, providerStatus, calendars }]
         : [];
-    })
-    .slice(0, MAX_HEALTH_PROVIDERS);
+    });
+  return [...issueProblems, ...providerProblems].slice(0, MAX_HEALTH_PROVIDERS);
 }
 
 function planningHealthDetail(health: ReturnType<typeof planningHealthPresentation>): { title: string; description: string; detail: string } {
@@ -219,7 +257,7 @@ function PlanningHealthAction({
   const detail = planningHealthDetail(health);
   const problems = planning ? planningHealthProblems(planning) : [];
   const sourceCouldNotBeDetermined = Boolean(planning) && problems.length === 0;
-  const canOpenCalendar = problems.some((problem) => problem.kind === "external" && problem.provider === "icloud");
+  const canOpenCalendar = problems.some((problem) => problem.provider === "calendar" || (problem.kind === "external" && problem.provider === "icloud"));
   return (
     <>
       <button
@@ -307,7 +345,6 @@ export function PlanningOverviewCard({
     );
   }
 
-  const currentData = planning.sourceStatus === "current";
   const displayItems = displayItemsForSummary(summary.overviewItems, planningOverviewRowLimit(sizeVariant));
   const overdueCount = formatOverdueTaskCount(summary.overdueTaskCount);
 
@@ -334,7 +371,12 @@ export function PlanningOverviewCard({
           const kindOccurrence = displayItems.slice(0, index).filter((item) => item.kind === entry.kind).length + 1;
           const suffix = kindOccurrence === 1 ? "" : `-${kindOccurrence}`;
           const testId = `planning-${entry.kind === "calendar" ? "event" : entry.kind}-row${suffix}`;
-          const className = !currentData ? "planning-row--not-current" : "";
+          const domain = entry.kind === "calendar" ? "calendar" : entry.kind === "task" ? "tasks" : "reminders";
+          const rowState = planningDomainStatus(planning, domain);
+          const className = rowState !== "current" && rowState !== "retrying" ? "planning-row--not-current" : "";
+          const rowSourceStatus = rowState === "retrying" || rowState === "current"
+            ? "current"
+            : rowState === "unavailable" ? "offline" : rowState;
           if (entry.kind === "reminder") {
             const reminder = entry.item;
             return (
@@ -342,13 +384,14 @@ export function PlanningOverviewCard({
                 key={`${entry.kind}-${index}`}
                 testId={testId}
                 className={className}
+                dataState={rowState}
                 label="Напоминание"
-                title={reminder?.title ?? unavailableRowTitle(health, "Напоминаний нет")}
-                meta={reminder ? formatReminderDueLabel(reminder, planning.sourceStatus, now) : undefined}
+                title={reminder && rowState !== "unavailable" ? reminder.title : unavailableRowTitle(health, "Напоминаний нет", rowState)}
+                meta={reminder ? formatReminderDueLabel(reminder, rowSourceStatus, now) : undefined}
                 time={reminder ? formatReminderExactTime(reminder) : undefined}
                 dateTime={reminder?.dueAtUtc}
-                onClick={reminder && planningRemindersRouteEnabled ? () => onNavigate("/reminders") : undefined}
-                ariaLabel={reminder ? `${reminder.title}. ${formatReminderDueLabel(reminder, planning.sourceStatus, now)}. Точное время ${formatReminderExactTime(reminder)}` : undefined}
+                onClick={reminder && rowState !== "unavailable" && planningRemindersRouteEnabled ? () => onNavigate("/reminders") : undefined}
+                ariaLabel={reminder ? `${reminder.title}. ${formatReminderDueLabel(reminder, rowSourceStatus, now)}. Точное время ${formatReminderExactTime(reminder)}` : undefined}
                 empty={!reminder}
               />
             );
@@ -356,17 +399,19 @@ export function PlanningOverviewCard({
           if (entry.kind === "task") {
             const task = entry.item;
             const taskTitle = task
+              && rowState !== "unavailable"
               ? entry.overdue ? `${overdueCount} · ${task.title}` : task.title
-              : unavailableRowTitle(health, "Нет просроченных задач");
+              : unavailableRowTitle(health, "Нет просроченных задач", rowState);
             return (
               <PlanningRow
                 key={`${entry.kind}-${index}`}
                 testId={testId}
                 className={className}
+                dataState={rowState}
                 label={entry.overdue ? "Просроченные задачи" : "Задача"}
                 title={taskTitle}
-                meta={task ? formatTaskDueLabel(task) : health.state === "current" || health.state === "degraded" ? overdueCount : undefined}
-                onClick={task ? () => onNavigate("/tasks") : undefined}
+                meta={task && rowState !== "unavailable" ? formatTaskDueLabel(task) : health.state === "current" || health.state === "degraded" ? overdueCount : undefined}
+                onClick={task && rowState !== "unavailable" ? () => onNavigate("/tasks") : undefined}
                 ariaLabel={task ? `${task.title}. ${formatTaskDueLabel(task)}` : undefined}
                 empty={!task}
               />
@@ -379,15 +424,16 @@ export function PlanningOverviewCard({
               key={`${entry.kind}-${index}`}
               testId={testId}
               className={className}
+              dataState={rowState}
               indicatorColor={event ? calendarEventColor(event, planning.providerStatuses, calendarDisplayPreferences?.overrides ?? []) : undefined}
               indicatorTestId={entry.kind === "calendar" && kindOccurrence === 1
                 ? "planning-overview-calendar-marker"
                 : undefined}
               label="Календарь"
-              title={event?.title ?? unavailableRowTitle(health, "Событий нет")}
+              title={event && rowState !== "unavailable" ? event.title : unavailableRowTitle(health, "Событий нет", rowState)}
               meta={event ? formatCalendarEventTime(event) : undefined}
               time={eventDate ?? undefined}
-              onClick={event ? () => {
+              onClick={event && rowState !== "unavailable" ? () => {
                 const dateTarget = calendarNavigationForDate(calendarLocalDateForEvent(event) ?? "");
                 onNavigate(dateTarget ?? "/calendar");
               } : undefined}

@@ -293,6 +293,33 @@ test.describe("B2 Planning Overview", () => {
     }
   });
 
+  test("uses server-owned domain evidence in the Planning problem details", async ({ page }) => {
+    const planning = {
+      ...planningFixtures.healthy,
+      sourceStatus: "degraded" as const,
+      health: {
+        lastAttemptedAt: "2026-08-25T12:00:00Z",
+        lastSuccessfulAt: "2026-08-25T11:59:00Z",
+        consecutiveFailures: 2,
+        issues: [{
+          source: "tasks" as const,
+          status: "degraded" as const,
+          consecutiveFailures: 2,
+          lastAttemptedAt: "2026-08-25T12:00:00Z",
+          lastSuccessfulAt: "2026-08-25T11:59:00Z"
+        }],
+        domains: []
+      }
+    };
+    await mockPlanning(page, planning);
+    await page.goto("/overview?theme=day");
+    await page.getByTestId("planning-overview-health-action").click();
+    const details = page.getByTestId("planning-overview-health-details");
+    await expect(details).toContainText("Задачи");
+    await expect(details).toContainText("Не удалось обновить данные");
+    await expect(details).not.toContainText("конкретный источник определить не удалось");
+  });
+
   test("long Russian titles remain inert, clamped, and separated from metadata", async ({ page }) => {
     await mockPlanning(page, planningFixtures.longRussianTitles);
     await page.goto("/overview?theme=day");

@@ -2,6 +2,7 @@ import type {
   DashboardSnapshot,
   DiagnosticsProblem,
   DiagnosticsProblemState,
+  PlanningHealthIssue,
   ServiceSnapshot
 } from "@artem/contracts";
 import type { StatusTone } from "./ShellPrimitives";
@@ -18,6 +19,25 @@ const serviceLabels: Record<string, string> = {
   rog_g703gi: "ROG",
   "panel-runtime": "Control Center runtime"
 };
+
+const planningIssueLabels: Record<PlanningHealthIssue["source"], string> = {
+  reminders: "Напоминания",
+  tasks: "Задачи",
+  calendar: "Календарь",
+  projects: "Проекты",
+  "planning-status": "Planning"
+};
+
+function diagnosticsStateForPlanningIssue(
+  status: PlanningHealthIssue["status"]
+): Extract<DiagnosticsProblemState, "offline" | "degraded" | "stale"> | null {
+  switch (status) {
+    case "unavailable": return "offline";
+    case "degraded":
+    case "stale": return status;
+    case "retrying": return null;
+  }
+}
 
 function stateForHealth(service: ServiceSnapshot): Extract<DiagnosticsProblemState, "offline" | "degraded" | "stale"> {
   return service.health === "offline" || service.health === "stale" ? service.health : "degraded";
@@ -72,13 +92,27 @@ export function currentProblemsForSnapshot(
   }
 
   const planning = snapshot.planning;
-  if (planning && planning.sourceStatus !== "current") {
+  const planningIssues = planning?.health?.issues ?? [];
+  const ownerPlanningIssues = planningIssues.filter((issue) => diagnosticsStateForPlanningIssue(issue.status) !== null);
+  if (planning && planning.sourceStatus !== "current" && ownerPlanningIssues.length === 0) {
     problems.push(problem(
       "planning:source",
       "Planning",
       planning.sourceStatus,
       snapshot.generatedAt,
       planning.lastSyncedAt
+    ));
+  }
+  for (const issue of planningIssues) {
+    const state = diagnosticsStateForPlanningIssue(issue.status);
+    if (state === null) continue;
+    const subsystem = planningIssueLabels[issue.source];
+    problems.push(problem(
+      `planning:${issue.source}`,
+      subsystem,
+      state,
+      snapshot.generatedAt,
+      issue.lastSuccessfulAt
     ));
   }
   for (const provider of planning?.providerStatuses ?? []) {

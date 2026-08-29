@@ -188,6 +188,8 @@ _TECHNICAL_FIELDS = {
     "lastSuccessfulRestAt",
     "lastTransportConnectedAt",
     "lastTransportFailureAt",
+    "lastAttemptedAt",
+    "lastSuccessfulAt",
     "lastSyncedAt",
     "staleAfter",
     "providerLastSyncAt",

@@ -131,6 +131,23 @@ def _provider_problem_state(status: str) -> str | None:
     return None
 
 
+_PLANNING_ISSUE_LABELS = {
+    "reminders": "Напоминания",
+    "tasks": "Задачи",
+    "calendar": "Календарь",
+    "projects": "Проекты",
+    "planning-status": "Planning",
+}
+
+
+def _planning_issue_state(status: str) -> str | None:
+    return {
+        "degraded": "degraded",
+        "stale": "stale",
+        "unavailable": "offline",
+    }.get(status)
+
+
 def _problem_from_service(
     service,
     *,
@@ -182,7 +199,11 @@ def _problems_for_snapshot(
 
     planning = snapshot.planning
     if planning is not None:
-        if planning.sourceStatus != "current":
+        planning_issues = [
+            issue for issue in planning.health.issues
+            if _planning_issue_state(issue.status) is not None
+        ]
+        if planning.sourceStatus != "current" and not planning_issues:
             problem_id = "planning:source"
             first_observed.setdefault(problem_id, observed_at)
             state = planning.sourceStatus
@@ -198,6 +219,26 @@ def _problems_for_snapshot(
                 lastHealthyAt=_safe_timestamp(planning.lastSyncedAt),
                 freshness=planning.lastSyncedAt,
                 correlationCode=f"planning_source_{state}",
+            )
+        for issue in planning_issues:
+            state = _planning_issue_state(issue.status)
+            if state is None:
+                continue
+            problem_id = f"planning:{issue.source}"
+            first_observed.setdefault(problem_id, observed_at)
+            label = _PLANNING_ISSUE_LABELS[issue.source]
+            result[problem_id] = DiagnosticsProblem(
+                id=problem_id,
+                subsystem=label,
+                severity=_severity(state),
+                state=state,
+                current=True,
+                summary=_problem_summary(label, state),
+                firstObservedAt=first_observed[problem_id],
+                lastObservedAt=observed_at,
+                lastHealthyAt=_safe_timestamp(issue.lastSuccessfulAt),
+                freshness=_safe_timestamp(issue.lastSuccessfulAt),
+                correlationCode=f"planning_{issue.source}_{state}",
             )
         for provider in planning.providerStatuses:
             provider_state = _provider_problem_state(provider.status)
@@ -224,6 +265,7 @@ def _problems_for_snapshot(
         if (
             problem_id.startswith("service:")
             or problem_id == "planning:source"
+            or problem_id.startswith("planning:")
             or problem_id.startswith("calendar-provider:")
         ) and problem_id not in result:
             first_observed.pop(problem_id, None)

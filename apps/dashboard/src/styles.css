@@ -816,6 +816,16 @@ p { color: var(--text-secondary); }
 .planning-card--offline .planning-row__meta,
 .planning-card--stale .planning-row__meta time,
 .planning-card--offline .planning-row__meta time { color: var(--stale); }
+.planning-row[data-planning-state="current"] .planning-row__meta,
+.planning-row[data-planning-state="current"] .planning-row__meta time,
+.planning-row[data-planning-state="retrying"] .planning-row__meta,
+.planning-row[data-planning-state="retrying"] .planning-row__meta time { color: var(--text-secondary); }
+.planning-row[data-planning-state="degraded"] .planning-row__meta,
+.planning-row[data-planning-state="degraded"] .planning-row__meta time { color: var(--warning); }
+.planning-row[data-planning-state="stale"] .planning-row__meta,
+.planning-row[data-planning-state="stale"] .planning-row__meta time,
+.planning-row[data-planning-state="unavailable"] .planning-row__meta,
+.planning-row[data-planning-state="unavailable"] .planning-row__meta time { color: var(--stale); }
 .planning-card--unavailable .planning-card__rows { display: none; }
 
 .coffee-panel {

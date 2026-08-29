@@ -22,6 +22,9 @@ PLANNING_PANEL_SCHEMA = "planning.panel.v1"
 PLANNING_OPERATIONS_SCHEMA = "planning.operations.v1"
 
 PlanningSourceStatus = Literal["current", "stale", "offline", "degraded"]
+PlanningHealthIssueSource = Literal["reminders", "tasks", "calendar", "projects", "planning-status"]
+PlanningHealthIssueStatus = Literal["retrying", "degraded", "stale", "unavailable"]
+PlanningDomainHealthStatus = Literal["current", "retrying", "degraded", "stale", "unavailable"]
 PlanningProviderFreshnessStatus = Literal["current", "stale", "error", "not_configured", "disabled"]
 PlanningSource = Literal[
     "alice",
@@ -865,6 +868,42 @@ class PlanningCalendarSource(StrictPlanningModel):
 PlanningProviderStatus = PlanningCalendarSource
 
 
+class PlanningHealthIssue(StrictPlanningModel):
+    """Bounded browser-safe attribution for an aggregate health issue."""
+
+    source: PlanningHealthIssueSource
+    status: PlanningHealthIssueStatus
+    consecutiveFailures: StrictInt = Field(ge=0)
+    lastAttemptedAt: StrictStr | None = None
+    lastSuccessfulAt: StrictStr | None = None
+
+    _timestamps = _timestamp_fields("lastAttemptedAt", "lastSuccessfulAt")
+
+
+class PlanningDomainHealth(StrictPlanningModel):
+    """Per-domain freshness so retained sections do not inherit one global label."""
+
+    domain: Literal["reminders", "tasks", "calendar", "projects"]
+    status: PlanningDomainHealthStatus
+    consecutiveFailures: StrictInt = Field(ge=0)
+    lastAttemptedAt: StrictStr | None = None
+    lastSuccessfulAt: StrictStr | None = None
+
+    _timestamps = _timestamp_fields("lastAttemptedAt", "lastSuccessfulAt")
+
+
+class PlanningHealthEvidence(StrictPlanningModel):
+    """Server-owned refresh evidence; it is never selected by the browser."""
+
+    lastAttemptedAt: StrictStr | None = None
+    lastSuccessfulAt: StrictStr | None = None
+    consecutiveFailures: StrictInt = Field(default=0, ge=0)
+    issues: list[PlanningHealthIssue] = Field(default_factory=list, max_length=8)
+    domains: list[PlanningDomainHealth] = Field(default_factory=list, max_length=4)
+
+    _timestamps = _timestamp_fields("lastAttemptedAt", "lastSuccessfulAt")
+
+
 class PlanningReminderLists(StrictPlanningModel):
     upcoming: list[ReminderProjection] = Field(max_length=20)
     overdue: list[ReminderProjection] = Field(max_length=20)
@@ -889,6 +928,7 @@ class PlanningProjection(StrictPlanningModel):
     schemaVersion: Literal["planning.panel.v1"]
     generatedAt: StrictStr
     sourceStatus: PlanningSourceStatus
+    health: PlanningHealthEvidence = Field(default_factory=PlanningHealthEvidence)
     reminderMutationsEnabled: StrictBool = False
     taskMutationsEnabled: StrictBool = False
     calendarMutationsEnabled: StrictBool = False
@@ -907,6 +947,7 @@ class PlanningStatusProjection(StrictPlanningModel):
     schemaVersion: Literal["planning.panel.v1"]
     generatedAt: StrictStr
     sourceStatus: PlanningSourceStatus
+    health: PlanningHealthEvidence = Field(default_factory=PlanningHealthEvidence)
     reminderMutationsEnabled: StrictBool = False
     taskMutationsEnabled: StrictBool = False
     calendarMutationsEnabled: StrictBool = False
@@ -1061,6 +1102,7 @@ def status_projection(projection: PlanningProjection) -> PlanningStatusProjectio
         schemaVersion=projection.schemaVersion,
         generatedAt=projection.generatedAt,
         sourceStatus=projection.sourceStatus,
+        health=projection.health,
         reminderMutationsEnabled=projection.reminderMutationsEnabled,
         taskMutationsEnabled=projection.taskMutationsEnabled,
         calendarMutationsEnabled=projection.calendarMutationsEnabled and projection.sourceStatus == "current",

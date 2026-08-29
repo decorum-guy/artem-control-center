@@ -265,7 +265,8 @@ def test_partial_refresh_uses_fresh_sources_even_when_reminders_fail(tmp_path):
     result, projection = asyncio.run(exercise())
     assert result is False
     assert projection is not None
-    assert projection.sourceStatus == "degraded"
+    assert projection.sourceStatus == "offline"
+    assert projection.health.issues[0].source == "reminders"
     assert {source.provider: source.status for source in projection.providerStatuses} == {
         "local": "current",
         "icloud": "current",
@@ -313,10 +314,11 @@ def test_total_failure_degrades_cached_sources_and_successful_refresh_recovers(t
 
     first, failed, recovered = asyncio.run(exercise())
     assert first is not None and failed is not None and recovered is not None
-    assert failed.sourceStatus != "current"
+    assert failed.sourceStatus == "current"
     assert failed.tasks.today
     assert failed.calendar.today
-    assert all(source.status != "current" for source in failed.providerStatuses)
+    assert all(source.status == "current" for source in failed.providerStatuses)
+    assert any(issue.source == "tasks" for issue in failed.health.issues)
     assert {source.provider: source.status for source in recovered.providerStatuses} == {
         "local": "current",
         "icloud": "current",
@@ -340,7 +342,8 @@ def test_old_alice_partial_refresh_degrades_previous_sources_without_fabricating
     assert result is False
     assert projection is not None
     assert projection.calendar.today
-    assert all(source.status != "current" for source in projection.providerStatuses)
+    assert all(source.status == "current" for source in projection.providerStatuses)
+    assert any(issue.source == "reminders" for issue in projection.health.issues)
 
 
 def test_disabled_not_configured_sentinel_is_not_browser_configured(tmp_path):

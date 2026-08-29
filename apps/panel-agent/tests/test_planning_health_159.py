@@ -1,0 +1,276 @@
+from __future__ import annotations
+
+import asyncio
+import copy
+from datetime import datetime, timezone
+
+import httpx
+
+from panel_agent.planning import (
+    EventListEnvelope,
+    PlanningStatusProjection,
+    ProjectListEnvelope,
+    ReminderListEnvelope,
+    StatusEnvelope,
+    TaskListEnvelope,
+)
+from panel_agent.planning_adapter import PlanningAdapter, PlanningUpstreamError, _validate_envelope
+from panel_agent.planning_fixtures import fixture_payload
+from panel_agent.settings import IntegrationSettings
+
+
+REFERENCE_TIME = datetime(2026, 8, 12, 9, 0, tzinfo=timezone.utc)
+
+
+def settings(tmp_path) -> IntegrationSettings:
+    return IntegrationSettings(
+        panel_planning_enabled=True,
+        panel_planning_base_url="http://fixture.test",
+        panel_planning_internal_secret="internal",
+        panel_planning_secret="planning",
+        panel_planning_refresh_seconds=10,
+        panel_planning_status_refresh_seconds=300,
+        panel_planning_stale_after_seconds=90,
+        panel_planning_unavailable_after_seconds=300,
+        panel_planning_max_backoff_seconds=60,
+        panel_planning_cache_path=str(tmp_path / "planning-cache.json"),
+        panel_planning_timezone="Europe/Moscow",
+    )
+
+
+class SelectiveRefreshClient:
+    """Fixed-route fixture client with deterministic per-domain failures."""
+
+    def __init__(self) -> None:
+        self.failures: set[str] = set()
+        self.status_degraded = False
+        self.status_calls = 0
+
+    def _list(self, path: str, model, domain: str, values: dict[str, object]):
+        if domain in self.failures:
+            raise PlanningUpstreamError(f"synthetic_{domain}_failure")
+        payload = copy.deepcopy(fixture_payload(path=path, scenario="healthy", query=httpx.QueryParams({
+            key: str(value) for key, value in values.items() if value is not None
+        })))
+        assert payload is not None
+        return _validate_envelope(model, payload)
+
+    async def reminders(self, **values):
+        return self._list("/internal/planning/v1/reminders", ReminderListEnvelope, "reminders", values)
+
+    async def tasks(self, **values):
+        return self._list("/internal/planning/v1/tasks", TaskListEnvelope, "tasks", values)
+
+    async def events(self, **values):
+        return self._list("/internal/planning/v1/events", EventListEnvelope, "calendar", values)
+
+    async def projects(self, **values):
+        return self._list("/internal/planning/v1/projects", ProjectListEnvelope, "projects", values)
+
+    async def status(self):
+        self.status_calls += 1
+        scenario = "degraded" if self.status_degraded else "healthy"
+        payload = copy.deepcopy(fixture_payload(
+            path="/internal/planning/v1/status",
+            scenario=scenario,
+        ))
+        assert payload is not None
+        return _validate_envelope(StatusEnvelope, payload)
+
+    async def close(self):
+        return None
+
+
+def make_adapter(tmp_path, client: SelectiveRefreshClient, monotonic: list[float]) -> PlanningAdapter:
+    return PlanningAdapter(
+        settings(tmp_path),
+        client=client,
+        monotonic_clock=lambda: monotonic[0],
+        wall_clock=lambda: REFERENCE_TIME,
+    )
+
+
+def test_single_transient_domain_failure_recovers_without_owner_incident(tmp_path):
+    client = SelectiveRefreshClient()
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        await adapter.start()
+        client.failures = {"tasks"}
+        monotonic[0] = 1
+        assert await adapter.refresh_domains() is False
+        transient = adapter.projection
+        client.failures.clear()
+        monotonic[0] = 2
+        assert await adapter.refresh_domains() is True
+        recovered = adapter.projection
+        await adapter.close()
+        return transient, recovered
+
+    transient, recovered = asyncio.run(exercise())
+    assert transient is not None and recovered is not None
+    assert transient.sourceStatus == "current"
+    assert transient.health.domains[1].domain == "tasks"
+    assert transient.health.domains[1].status == "retrying"
+    assert transient.health.issues[0].source == "tasks"
+    assert transient.health.issues[0].consecutiveFailures == 1
+    assert all(source.status == "current" for source in transient.providerStatuses)
+    assert recovered.sourceStatus == "current"
+    assert recovered.health.issues == []
+    assert all(domain.status == "current" for domain in recovered.health.domains)
+
+
+def test_repeated_failures_become_degraded_before_unavailable(tmp_path):
+    client = SelectiveRefreshClient()
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        await adapter.start()
+        client.failures = {"tasks"}
+        monotonic[0] = 1
+        await adapter.refresh_domains()
+        monotonic[0] = 2
+        await adapter.refresh_domains()
+        degraded = adapter.projection
+        client.failures.clear()
+        monotonic[0] = 3
+        await adapter.refresh_domains()
+        recovered = adapter.projection
+        await adapter.close()
+        return degraded, recovered
+
+    degraded, recovered = asyncio.run(exercise())
+    assert degraded is not None and recovered is not None
+    assert degraded.sourceStatus == "degraded"
+    task_issue = next(issue for issue in degraded.health.issues if issue.source == "tasks")
+    assert task_issue.status == "degraded"
+    assert task_issue.consecutiveFailures == 2
+    assert degraded.health.domains[2].status == "current"
+    assert degraded.calendar.today
+    assert recovered.sourceStatus == "current"
+    assert recovered.health.issues == []
+
+
+def test_data_age_crosses_stale_then_unavailable_boundaries(tmp_path):
+    client = SelectiveRefreshClient()
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        await adapter.start()
+        client.failures = {"tasks"}
+        monotonic[0] = 91
+        await adapter.refresh_domains()
+        stale = adapter.projection
+        monotonic[0] = 301
+        await adapter.refresh_domains()
+        offline = adapter.projection
+        await adapter.close()
+        return stale, offline
+
+    stale, offline = asyncio.run(exercise())
+    assert stale is not None and offline is not None
+    assert stale.sourceStatus == "stale"
+    assert next(issue for issue in stale.health.issues if issue.source == "tasks").status == "stale"
+    assert offline.sourceStatus == "offline"
+    assert next(issue for issue in offline.health.issues if issue.source == "tasks").status == "unavailable"
+
+
+def test_recovery_confirms_status_before_slow_cadence_can_latch_degraded(tmp_path):
+    client = SelectiveRefreshClient()
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        client.status_degraded = True
+        await adapter.start()
+        assert adapter.projection.sourceStatus == "degraded"
+        client.status_degraded = False
+        client.failures = {"tasks"}
+        monotonic[0] = 1
+        await adapter.refresh_domains()
+        client.failures.clear()
+        monotonic[0] = 2
+        await adapter.refresh_domains()
+        recovered = adapter.projection
+        await adapter.close()
+        return recovered
+
+    recovered = asyncio.run(exercise())
+    assert recovered is not None
+    assert client.status_calls == 2
+    assert recovered.sourceStatus == "current"
+    assert recovered.health.issues == []
+
+
+def test_partial_failure_keeps_calendar_current_and_attributes_failed_domain(tmp_path):
+    client = SelectiveRefreshClient()
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        await adapter.start()
+        client.failures = {"tasks"}
+        monotonic[0] = 1
+        await adapter.refresh_domains()
+        partial = adapter.projection
+        await adapter.close()
+        return partial
+
+    partial = asyncio.run(exercise())
+    assert partial is not None
+    assert partial.sourceStatus == "current"
+    assert partial.calendar.today
+    assert partial.health.domains[1].status == "retrying"
+    assert partial.health.domains[2].status == "current"
+    assert [issue.source for issue in partial.health.issues] == ["tasks"]
+
+
+def test_temporary_full_disconnect_does_not_poison_last_good_projection(tmp_path):
+    client = SelectiveRefreshClient()
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        await adapter.start()
+        client.failures = {"reminders", "tasks", "calendar", "projects"}
+        monotonic[0] = 1
+        await adapter.refresh_domains()
+        disconnected = adapter.projection
+        client.failures.clear()
+        monotonic[0] = 2
+        await adapter.refresh_domains()
+        recovered = adapter.projection
+        await adapter.close()
+        return disconnected, recovered
+
+    disconnected, recovered = asyncio.run(exercise())
+    assert disconnected is not None and recovered is not None
+    assert disconnected.sourceStatus == "current"
+    assert all(domain.status == "retrying" for domain in disconnected.health.domains)
+    assert disconnected.calendar.today
+    assert recovered.sourceStatus == "current"
+    assert recovered.health.issues == []
+
+
+def test_status_projection_carries_server_owned_health_without_private_fields(tmp_path):
+    client = SelectiveRefreshClient()
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise() -> PlanningStatusProjection:
+        await adapter.start()
+        client.failures = {"reminders"}
+        monotonic[0] = 1
+        await adapter.refresh_domains()
+        status = adapter.read_status()
+        await adapter.close()
+        return status
+
+    status = asyncio.run(exercise())
+    assert status.health.issues[0].source == "reminders"
+    serialized = status.model_dump_json()
+    assert "internal" not in serialized
+    assert "sourceType" not in serialized
