@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
+import pytest
 from fastapi.testclient import TestClient
+
+from panel_agent import runtime_control
 
 
 def load_app(monkeypatch, command_path, *, enabled: bool):
@@ -67,6 +72,100 @@ def test_kiosk_presence_writes_only_bounded_local_heartbeat(monkeypatch, tmp_pat
         json={"pageId": "not-bounded", "extra": True},
     )
     assert malformed.status_code == 422
+
+
+def test_write_command_uses_private_temps_for_deterministic_concurrent_writers(monkeypatch, tmp_path):
+    target = tmp_path / "kiosk-presence.json"
+    payloads = [
+        {"schemaVersion": 1, "writer": writer, "value": f"payload-{writer}"}
+        for writer in range(4)
+    ]
+    replace_barrier = threading.Barrier(len(payloads))
+    replace_sources = []
+    replace_sources_lock = threading.Lock()
+    real_replace = runtime_control.os.replace
+
+    def gated_replace(source, destination):
+        with replace_sources_lock:
+            replace_sources.append(source)
+        try:
+            replace_barrier.wait(timeout=10)
+        except threading.BrokenBarrierError as error:
+            raise AssertionError("all concurrent writers must reach publication") from error
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(runtime_control.os, "replace", gated_replace)
+    with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
+        futures = [executor.submit(runtime_control._write_command, target, payload) for payload in payloads]
+        for future in futures:
+            future.result()
+
+    assert len(replace_sources) == len(payloads)
+    assert len({str(source) for source in replace_sources}) == len(payloads)
+    assert json.loads(target.read_text(encoding="utf-8")) in payloads
+    assert not list(tmp_path.glob(f".{target.name}.*.tmp"))
+
+
+def test_write_command_failure_preserves_canonical_and_cleans_only_own_temp(monkeypatch, tmp_path):
+    target = tmp_path / "runtime-command.json"
+    existing = {"schemaVersion": 1, "action": "hide", "requestedAt": "before"}
+    target.write_text(json.dumps(existing), encoding="utf-8")
+    unrelated_temp = tmp_path / "runtime-command.json.tmp"
+    unrelated_temp.write_text("unrelated", encoding="utf-8")
+    replacement = {"schemaVersion": 1, "action": "shutdown", "requestedAt": "after"}
+    observed = {}
+
+    def failing_replace(source, destination):
+        observed["source"] = source
+        observed["destination"] = destination
+        raise OSError("forced publication failure")
+
+    monkeypatch.setattr(runtime_control.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="forced publication failure"):
+        runtime_control._write_command(target, replacement)
+
+    assert observed["destination"] == target
+    assert not observed["source"].exists()
+    assert json.loads(target.read_text(encoding="utf-8")) == existing
+    assert unrelated_temp.read_text(encoding="utf-8") == "unrelated"
+    assert not list(tmp_path.glob(f".{target.name}.*.tmp"))
+
+
+def test_kiosk_presence_endpoint_handles_deterministic_concurrent_writers(monkeypatch, tmp_path):
+    command_path = tmp_path / "runtime-command.json"
+    module = load_app(monkeypatch, command_path, enabled=True)
+    page_ids = [f"{page_id:024x}" for page_id in range(1, 5)]
+    presence_path = tmp_path / "kiosk-presence.json"
+    replace_barrier = threading.Barrier(len(page_ids))
+    real_replace = runtime_control.os.replace
+
+    def gated_replace(source, destination):
+        try:
+            replace_barrier.wait(timeout=10)
+        except threading.BrokenBarrierError as error:
+            raise AssertionError("all endpoint writers must reach publication") from error
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(runtime_control.os, "replace", gated_replace)
+
+    def post_presence(page_id):
+        with TestClient(module.app, raise_server_exceptions=False) as client:
+            return client.post(
+                "/api/v1/system/runtime/kiosk-presence",
+                headers={"x-panel-intent": "kiosk-presence"},
+                json={"pageId": page_id},
+            )
+
+    with ThreadPoolExecutor(max_workers=len(page_ids)) as executor:
+        responses = list(executor.map(post_presence, page_ids))
+
+    assert [response.status_code for response in responses] == [204] * len(page_ids)
+    heartbeat = json.loads(presence_path.read_text(encoding="utf-8"))
+    assert heartbeat["schemaVersion"] == 1
+    assert heartbeat["pageId"] in page_ids
+    assert isinstance(heartbeat["observedAt"], str)
+    assert set(heartbeat) == {"schemaVersion", "pageId", "observedAt"}
+    assert not list(tmp_path.glob(f".{presence_path.name}.*.tmp"))
 
 
 def test_runtime_control_writes_only_narrow_commands(monkeypatch, tmp_path):
