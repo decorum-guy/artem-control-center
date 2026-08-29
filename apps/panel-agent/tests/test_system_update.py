@@ -484,3 +484,188 @@ def test_owner_status_whitelists_result_and_never_exposes_local_fields(monkeypat
     assert "SECRET" not in serialized
     assert "stderr" not in serialized
     assert "environment" not in serialized
+
+
+def test_apply_persists_bounded_transaction_identity_for_reload(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(), profile="full")
+    response = client.post(
+        "/api/v1/system/update/apply",
+        headers={"x-panel-intent": "panel-update"},
+        json={"expectedCurrentHead": CURRENT, "expectedTargetHead": TARGET},
+    )
+    assert response.status_code == 202
+
+    recovered = make_service(tmp_path, FakeGit())
+    state = recovered.owner_state()
+    assert state["status"] == "updating"
+    assert state["currentHead"] == CURRENT
+    assert state["targetHead"] == TARGET
+    assert len(state["requestId"]) == 24
+    assert all(character in "0123456789abcdef" for character in state["requestId"])
+    assert "ownerPid" not in json.dumps(state)
+
+    duplicate = client.post(
+        "/api/v1/system/update/apply",
+        headers={"x-panel-intent": "panel-update"},
+        json={"expectedCurrentHead": CURRENT, "expectedTargetHead": TARGET},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "update_in_progress"
+
+
+def test_update_check_does_not_overwrite_active_transaction(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(), profile="full")
+    applied = client.post(
+        "/api/v1/system/update/apply",
+        headers={"x-panel-intent": "panel-update"},
+        json={"expectedCurrentHead": CURRENT, "expectedTargetHead": TARGET},
+    )
+    assert applied.status_code == 202
+    before = json.loads(service.state_path.read_text(encoding="utf-8"))
+
+    checked = client.post(
+        "/api/v1/system/update/check",
+        headers={"x-panel-intent": "panel-update"},
+    )
+    assert checked.status_code == 200
+    assert checked.json()["reason"] == "update_in_progress"
+    after = json.loads(service.state_path.read_text(encoding="utf-8"))
+    assert after == before
+
+
+def test_status_uses_server_owned_dead_owner_evidence(monkeypatch, tmp_path):
+    client, service = make_client(
+        monkeypatch,
+        tmp_path,
+        FakeGit(),
+        profile="full",
+        owner_alive=lambda _pid, _request_id: False,
+    )
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "updating",
+            "requestId": REQUEST,
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+    write_update_lock(
+        service.lock_path,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        owner_pid=4242,
+    )
+
+    response = client.get("/api/v1/system/update/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schemaVersion"] == 1
+    assert payload["status"] == "failed"
+    assert payload["requestId"] == REQUEST
+    assert payload["currentHead"] == CURRENT
+    assert payload["targetHead"] == TARGET
+    assert payload["result"] == "updater_stale"
+
+
+def test_terminal_state_retains_target_and_served_revision_but_not_arbitrary_fields(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "success",
+            "requestId": REQUEST,
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "servedRevision": TARGET,
+            "updatedAt": "2026-08-26T00:00:00+00:00",
+            "result": "updated",
+            "ownerPid": 4242,
+            "command": "powershell.exe -File update-production.ps1",
+        }),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/v1/system/update/status")
+    assert response.status_code == 200
+    assert response.json() == {
+        "schemaVersion": 1,
+        "status": "success",
+        "updatedAt": "2026-08-26T00:00:00+00:00",
+        "requestId": REQUEST,
+        "currentHead": CURRENT,
+        "targetHead": TARGET,
+        "servedRevision": TARGET,
+        "result": "updated",
+    }
+    assert "ownerPid" not in response.text
+    assert "command" not in response.text
+
+
+def test_terminal_rollback_failure_is_not_reclassified_as_stale(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "failed",
+            "requestId": REQUEST,
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": "rollback_failed",
+        }),
+        encoding="utf-8",
+    )
+    service.runtime_root.joinpath("update-transaction.json").write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "incomplete",
+            "phase": "rollback",
+            "previousHead": CURRENT,
+            "targetHead": TARGET,
+            "requestId": REQUEST,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "failed"
+    assert payload["result"] == "rollback_failed"
+    assert payload["phase"] == "rollback"
+
+
+def test_terminal_success_wins_during_updater_lock_cleanup(monkeypatch, tmp_path):
+    client, service = make_client(
+        monkeypatch,
+        tmp_path,
+        FakeGit(),
+        owner_alive=lambda _pid, _request_id: True,
+    )
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "success",
+            "requestId": REQUEST,
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "servedRevision": TARGET,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": "updated",
+        }),
+        encoding="utf-8",
+    )
+    write_update_lock(
+        service.lock_path,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        owner_pid=4242,
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "success"
+    assert payload["result"] == "updated"

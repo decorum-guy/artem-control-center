@@ -1,0 +1,125 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { observePanelUpdate, type UpdateOwnerState, type UpdateObserverEvent } from "./runtimeUpdateObserver";
+
+const CURRENT = "a".repeat(40);
+const TARGET = "b".repeat(40);
+
+function updating(): UpdateOwnerState {
+  return {
+    schemaVersion: 1,
+    status: "updating",
+    currentHead: CURRENT,
+    targetHead: TARGET,
+    phase: "building"
+  };
+}
+
+function success(): UpdateOwnerState {
+  return {
+    ...updating(),
+    status: "success",
+    result: "updated",
+    phase: "verifying",
+    servedRevision: TARGET
+  };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("server-owned panel update observer", () => {
+  it("keeps an active update alive beyond the old 60-second browser window", async () => {
+    vi.useFakeTimers();
+    const events: UpdateObserverEvent[] = [];
+    let statusCalls = 0;
+    const stop = observePanelUpdate({
+      fetchStatus: async () => {
+        statusCalls += 1;
+        return updating();
+      },
+      fetchBuild: async () => ({
+        schemaVersion: "dashboard-build.v1",
+        revision: TARGET,
+        profile: "accepted-v2",
+        buildId: `${TARGET}:accepted-v2`
+      }),
+      onEvent: (event) => events.push(event)
+    });
+
+    await vi.advanceTimersByTimeAsync(250 + (750 * 81));
+
+    expect(statusCalls).toBeGreaterThan(80);
+    expect(events.every((event) => event.type === "active")).toBe(true);
+    expect(events.some((event) => event.type === "failure")).toBe(false);
+    stop();
+  });
+
+  it("enters reconnecting on a temporary runtime disappearance and succeeds after the target returns", async () => {
+    vi.useFakeTimers();
+    const events: UpdateObserverEvent[] = [];
+    let statusCalls = 0;
+    const stop = observePanelUpdate({
+      fetchStatus: async () => {
+        statusCalls += 1;
+        if (statusCalls === 1) throw new Error("runtime disappeared");
+        if (statusCalls === 2) return updating();
+        return success();
+      },
+      fetchBuild: async () => ({
+        schemaVersion: "dashboard-build.v1",
+        revision: TARGET,
+        profile: "accepted-v2",
+        buildId: `${TARGET}:accepted-v2`
+      }),
+      onEvent: (event) => events.push(event)
+    });
+
+    await vi.advanceTimersByTimeAsync(250 + 750 + 750);
+
+    expect(events.map((event) => event.type)).toEqual(["reconnecting", "active", "success"]);
+    stop();
+  });
+
+  it("does not claim success when the returned runtime serves the wrong revision", async () => {
+    vi.useFakeTimers();
+    const events: UpdateObserverEvent[] = [];
+    const stop = observePanelUpdate({
+      fetchStatus: async () => success(),
+      fetchBuild: async () => ({
+        schemaVersion: "dashboard-build.v1",
+        revision: CURRENT,
+        profile: "accepted-v2",
+        buildId: `${CURRENT}:accepted-v2`
+      }),
+      onEvent: (event) => events.push(event)
+    });
+
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(events).toEqual([{ type: "failure", state: success(), reason: "served_mismatch" }]);
+    stop();
+  });
+
+  it("keeps an authoritative terminal failure visible", async () => {
+    vi.useFakeTimers();
+    const events: UpdateObserverEvent[] = [];
+    const failed: UpdateOwnerState = {
+      ...updating(),
+      status: "failed",
+      result: "rollback_restored"
+    };
+    const stop = observePanelUpdate({
+      fetchStatus: async () => failed,
+      fetchBuild: async () => {
+        throw new Error("must not verify a failed update");
+      },
+      onEvent: (event) => events.push(event)
+    });
+
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(events).toEqual([{ type: "failure", state: failed, reason: "authoritative" }]);
+    stop();
+  });
+});

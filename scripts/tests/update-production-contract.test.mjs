@@ -58,6 +58,13 @@ test("production failures cannot be accepted from a command exit code alone", ()
   assert.match(updater, /Assert-ArtemProductionBuildIdentity[\s\S]*Assert-ArtemServedProductionBuildIdentity/);
 });
 
+test("terminal update state records the verified served target for dashboard recovery", () => {
+  assert.match(updater, /function Write-ArtemUpdateState/);
+  assert.match(updater, /servedRevision/);
+  assert.match(updater, /Status "success" -Result "updated" -ServedRevision \$targetHead/);
+  assert.match(updater, /Status "success" -Result "up_to_date" -ServedRevision \$targetHead/);
+});
+
 test("the updater keeps the protected process and repository boundaries", () => {
   assert.doesNotMatch(updater, /git(?:\.exe)?\s+clean/);
   assert.match(updater, /git\.exe[\s\S]*?merge[\s\S]*?--ff-only[\s\S]*?\$targetHead/);

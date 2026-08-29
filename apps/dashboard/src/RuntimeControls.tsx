@@ -1,7 +1,15 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AccessSettingsPanel, useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { useInteractionLock } from "./InteractionLock";
+import {
+  isActiveUpdateState,
+  observePanelUpdate,
+  resolvePanelUpdateState,
+  type ProductionBuildIdentity,
+  type UpdateOwnerState,
+  type UpdateObserverEvent
+} from "./runtimeUpdateObserver";
 import {
   clearRuntimeShutdownPending,
   markRuntimeShutdownPending
@@ -11,7 +19,7 @@ import "./RuntimeControls.css";
 type RuntimeAction = "hide" | "shutdown";
 export type RuntimeAvailability = "loading" | "available" | "unavailable";
 
-type UpdateDialogState = "closed" | "checking" | "ready" | "applying" | "error";
+type UpdateDialogState = "closed" | "checking" | "ready" | "applying" | "reconnecting" | "error";
 
 interface PanelUpdateCheck {
   schemaVersion: "panel-update.v1";
@@ -21,12 +29,6 @@ interface PanelUpdateCheck {
   updateAllowed: boolean;
   status: "update_available" | "up_to_date" | "blocked";
   reason: string | null;
-}
-
-interface PanelUpdateOwnerState {
-  schemaVersion: 1;
-  status: "idle" | "checking" | "updating" | "success" | "failed";
-  result?: string;
 }
 
 export interface RuntimeStatus {
@@ -46,7 +48,6 @@ const updateReasonCopy: Record<string, string> = {
 };
 
 const UPDATE_STATUS_POLL_MS = 750;
-const UPDATE_STATUS_MAX_POLLS = 80;
 
 function updateFailureCopy(result?: string): string {
   if (result === "rollback_restored") {
@@ -55,11 +56,53 @@ function updateFailureCopy(result?: string): string {
   if (result === "rollback_failed") {
     return "Обновление завершилось ошибкой. Нужна проверка установки.";
   }
+  if (result === "updater_stale") {
+    return "Обновление остановилось без подтверждённого результата. Нужна проверка установки.";
+  }
   return "Обновление не завершено. Повторите попытку или проверьте установку панели.";
 }
 
 function shortSha(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
+}
+
+async function fetchUpdateStatus(): Promise<UpdateOwnerState> {
+  const response = await fetch("/api/v1/system/update/status", { cache: "no-store" });
+  if (!response.ok) {
+    const error = new Error(`Update status failed: ${response.status}`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+  return response.json() as Promise<UpdateOwnerState>;
+}
+
+async function fetchProductionBuild(): Promise<ProductionBuildIdentity> {
+  const response = await fetch("/api/v1/system/production-build", { cache: "no-store" });
+  if (!response.ok) throw new Error(`Production build identity failed: ${response.status}`);
+  const identity = await response.json() as Partial<ProductionBuildIdentity>;
+  if (
+    identity.schemaVersion !== "dashboard-build.v1"
+    || typeof identity.revision !== "string"
+    || !/^[0-9a-f]{40}$/.test(identity.revision)
+    || identity.profile !== "accepted-v2"
+    || identity.buildId !== `${identity.revision}:accepted-v2`
+  ) {
+    throw new Error("production_build_identity_invalid");
+  }
+  return identity as ProductionBuildIdentity;
+}
+
+function updateCheckFromOwnerState(state: UpdateOwnerState): PanelUpdateCheck | null {
+  if (!state.currentHead || !state.targetHead) return null;
+  return {
+    schemaVersion: "panel-update.v1",
+    currentHead: state.currentHead,
+    targetHead: state.targetHead,
+    updateAvailable: state.currentHead !== state.targetHead,
+    updateAllowed: false,
+    status: state.currentHead === state.targetHead ? "up_to_date" : "update_available",
+    reason: "update_in_progress"
+  };
 }
 
 export function useRuntimeStatus(): {
@@ -125,22 +168,86 @@ export function RuntimeControls({
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateAccepted, setUpdateAccepted] = useState(false);
 
+  const handleUpdateObserverEvent = useCallback((event: UpdateObserverEvent) => {
+    if (event.type === "active") {
+      setUpdateCheck((current) => current ?? updateCheckFromOwnerState(event.state));
+      setUpdateAccepted(true);
+      setUpdateDialog("applying");
+      setUpdateMessage("Обновление выполняется… Панель откроется снова после завершения.");
+      return;
+    }
+    if (event.type === "reconnecting") {
+      setUpdateDialog("reconnecting");
+      setUpdateMessage("Обновление выполняется. Переподключаемся к панели…");
+      return;
+    }
+    if (event.type === "waiting") {
+      setUpdateMessage("Ожидаем подтверждённое состояние обновления…");
+      return;
+    }
+    setUpdateAccepted(false);
+    if (event.type === "failure") {
+      setUpdateDialog("error");
+      setUpdateMessage(
+        event.reason === "served_mismatch"
+          ? "Обновление завершилось, но панель обслуживает другую версию. Нужна проверка установки."
+          : updateFailureCopy(event.state.result)
+      );
+      return;
+    }
+    setUpdateDialog("closed");
+    setUpdateCheck(null);
+    setUpdateMessage(null);
+    setNotice(
+      event.state.result === "up_to_date"
+        ? "Установлена последняя версия панели."
+        : "Обновление панели завершено."
+    );
+  }, []);
+
   useEffect(() => {
     let active = true;
-    void fetch("/api/v1/system/update/status", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        return response.json() as Promise<PanelUpdateOwnerState>;
-      })
-      .then((state) => {
-        if (!active || !state) return;
-        if (state.status === "failed" && state.result === "rollback_restored") {
-          setNotice("Последнее обновление не установлено. Предыдущая версия восстановлена.");
-        } else if (state.status === "failed") {
-          setNotice("Последнее обновление завершилось ошибкой. Нужна проверка установки.");
+    void fetchUpdateStatus()
+      .then(async (state) => {
+        if (!active) return;
+        if (isActiveUpdateState(state)) {
+          setUpdateCheck(updateCheckFromOwnerState(state));
+          setUpdateAccepted(true);
+          setUpdateDialog("applying");
+          setUpdateMessage("Обновление выполняется… Панель откроется снова после завершения.");
+          return;
+        }
+        const event = await resolvePanelUpdateState(state, fetchProductionBuild);
+        if (!active) return;
+        if (event.type === "failure") {
+          setNotice(
+            event.reason === "served_mismatch"
+              ? "Последнее обновление обслуживает другую версию. Нужна проверка установки."
+              : updateFailureCopy(event.state.result)
+          );
+          return;
+        }
+        if (event.type === "success") {
+          setNotice(
+            state.result === "up_to_date"
+              ? "Установлена последняя версия панели."
+              : "Обновление панели завершено."
+          );
         }
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (!active) return;
+        const status = error instanceof Error && "status" in error && typeof error.status === "number"
+          ? error.status
+          : null;
+        // A disabled update endpoint is a normal non-production state. A
+        // connection/5xx failure may instead mean that the runtime is between
+        // updater restarts, so keep observing until the server answers.
+        if (status !== null && status < 500) return;
+        setUpdateAccepted(true);
+        setUpdateDialog("reconnecting");
+        setUpdateMessage("Проверяем состояние обновления. Переподключаемся к панели…");
+      });
     return () => { active = false; };
   }, []);
 
@@ -154,75 +261,15 @@ export function RuntimeControls({
   }, [locked, updateDialog]);
 
   useEffect(() => {
-    if (!updateAccepted || updateDialog !== "applying") return;
+    if (!updateAccepted || !["applying", "reconnecting"].includes(updateDialog)) return;
 
-    let disposed = false;
-    let pollCount = 0;
-    let timer: number | null = null;
-    let controller: AbortController | null = null;
-
-    const schedule = () => {
-      if (!disposed) timer = window.setTimeout(() => void poll(), UPDATE_STATUS_POLL_MS);
-    };
-
-    const poll = async () => {
-      if (disposed) return;
-      pollCount += 1;
-      controller = new AbortController();
-      try {
-        const response = await fetch("/api/v1/system/update/status", {
-          cache: "no-store",
-          signal: controller.signal
-        });
-        if (!response.ok) throw new Error("update_status_failed");
-        const state = await response.json() as PanelUpdateOwnerState;
-        if (disposed) return;
-
-        if (state.status === "failed") {
-          setUpdateAccepted(false);
-          setUpdateDialog("error");
-          setUpdateMessage(updateFailureCopy(state.result));
-          return;
-        }
-        if (state.status === "success") {
-          setUpdateAccepted(false);
-          setUpdateDialog("closed");
-          setUpdateCheck(null);
-          setUpdateMessage(null);
-          setNotice(
-            state.result === "up_to_date"
-              ? "Установлена последняя версия панели."
-              : "Обновление панели завершено."
-          );
-          return;
-        }
-        if (state.status === "checking" || state.status === "updating") {
-          setUpdateMessage("Обновление выполняется… Панель откроется снова после завершения.");
-        }
-      } catch (error) {
-        if (disposed || (error instanceof DOMException && error.name === "AbortError")) return;
-        // Runtime disappearance is the normal update path: the kiosk should close
-        // and the updated runtime will reopen it. Stop polling this old page rather
-        // than waiting for the complete multi-minute updater transaction here.
-        return;
-      }
-
-      if (pollCount >= UPDATE_STATUS_MAX_POLLS) {
-        setUpdateAccepted(false);
-        setUpdateDialog("error");
-        setUpdateMessage("Обновление выполняется дольше обычного. Проверьте состояние панели.");
-        return;
-      }
-      schedule();
-    };
-
-    timer = window.setTimeout(() => void poll(), 250);
-    return () => {
-      disposed = true;
-      if (timer !== null) window.clearTimeout(timer);
-      controller?.abort();
-    };
-  }, [updateAccepted, updateDialog]);
+    return observePanelUpdate({
+      fetchStatus: fetchUpdateStatus,
+      fetchBuild: fetchProductionBuild,
+      pollMs: UPDATE_STATUS_POLL_MS,
+      onEvent: handleUpdateObserverEvent
+    });
+  }, [handleUpdateObserverEvent, updateAccepted, updateDialog]);
 
   async function runAction(action: RuntimeAction) {
     if (!guardMutation()) return;
@@ -325,6 +372,7 @@ export function RuntimeControls({
     setUpdateAccepted(false);
     setUpdateDialog("applying");
     setUpdateMessage("Запускаем обновление…");
+    let responseReceived = false;
     try {
       const response = await fetch("/api/v1/system/update/apply", {
         method: "POST",
@@ -337,6 +385,7 @@ export function RuntimeControls({
           expectedTargetHead: updateCheck.targetHead
         })
       });
+      responseReceived = true;
       if (response.status === 409) {
         const payload = await response.json().catch(() => ({})) as { detail?: string };
         if (payload.detail === "update_target_changed") {
@@ -349,6 +398,14 @@ export function RuntimeControls({
       setUpdateAccepted(true);
       setUpdateMessage("Запускаем обновление… Панель откроется снова после завершения.");
     } catch {
+      if (!responseReceived) {
+        // A lost response does not prove that the server rejected the update.
+        // Rejoin the durable observer and let the update lease/state decide.
+        setUpdateAccepted(true);
+        setUpdateDialog("reconnecting");
+        setUpdateMessage("Обновление запускается. Переподключаемся к панели…");
+        return;
+      }
       setUpdateAccepted(false);
       setUpdateDialog("error");
       setUpdateMessage("Не удалось запустить обновление. Панель не была изменена.");
@@ -412,7 +469,11 @@ export function RuntimeControls({
               </div>
             </div>
             <p id="runtime-update-description" className="action-confirmation__description">
-              {updateDialog === "checking" ? "Проверяем обновления…" : "Проверенная версия будет установлена только после вашего подтверждения."}
+              {updateDialog === "checking"
+                ? "Проверяем обновления…"
+                : ["applying", "reconnecting"].includes(updateDialog)
+                  ? "Обновление выполняется. Можно закрыть это окно — отмена не прерывает обновление."
+                  : "Проверенная версия будет установлена только после вашего подтверждения."}
             </p>
 
             {updateCheck && (
