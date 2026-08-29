@@ -187,6 +187,12 @@ export function RuntimeControls({
       setUpdateMessage("Обновление выполняется. Переподключаемся к панели…");
       return;
     }
+    if (event.type === "idle") {
+      setUpdateAccepted(false);
+      setUpdateDialog("error");
+      setUpdateMessage("Обновление не было запущено. Проверьте состояние панели и повторите попытку.");
+      return;
+    }
     setUpdateAccepted(false);
     if (event.type === "failure") {
       setUpdateDialog("error");
@@ -209,48 +215,59 @@ export function RuntimeControls({
 
   useEffect(() => {
     let active = true;
-    void fetchUpdateStatus()
-      .then(async (state) => {
-        if (!active) return;
-        if (isActiveUpdateState(state)) {
-          setUpdateCheck(updateCheckFromOwnerState(state));
-          setUpdateAccepted(true);
-          setUpdateDialog("applying");
-          setUpdateMessage("Обновление выполняется… Панель откроется снова после завершения.");
-          return;
-        }
-        const event = await resolvePanelUpdateState(state, fetchProductionBuild);
-        if (!active) return;
-        if (event.type === "failure") {
-          setNotice(
-            event.reason === "served_mismatch" || event.reason === "served_unverified"
-              ? updateObserverFailureCopy(event.reason)
-              : updateFailureCopy(event.state.result)
-          );
-          return;
-        }
-        if (event.type === "success") {
-          setNotice(
-            state.result === "up_to_date"
-              ? "Установлена последняя версия панели."
-              : "Обновление панели завершено."
-          );
-        }
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        const status = error instanceof Error && "status" in error && typeof error.status === "number"
-          ? error.status
-          : null;
-        // A disabled update endpoint is a normal non-production state. A
-        // connection/5xx failure may instead mean that the runtime is between
-        // updater restarts, so keep observing until the server answers.
-        if (status !== null && status < 500) return;
-        setUpdateAccepted(true);
-        setUpdateDialog("reconnecting");
-        setUpdateMessage("Проверяем состояние обновления. Переподключаемся к панели…");
-      });
-    return () => { active = false; };
+    let retryTimer: number | null = null;
+
+    const discover = (allowPassiveRetry: boolean) => {
+      void fetchUpdateStatus()
+        .then(async (state) => {
+          if (!active) return;
+          if (isActiveUpdateState(state)) {
+            setUpdateCheck(updateCheckFromOwnerState(state));
+            setUpdateAccepted(true);
+            setUpdateDialog("applying");
+            setUpdateMessage("Обновление выполняется… Панель откроется снова после завершения.");
+            return;
+          }
+          const event = await resolvePanelUpdateState(state, fetchProductionBuild);
+          if (!active) return;
+          if (event.type === "idle") return;
+          if (event.type === "failure") {
+            setNotice(
+              event.reason === "served_mismatch" || event.reason === "served_unverified"
+                ? updateObserverFailureCopy(event.reason)
+                : updateFailureCopy(event.state.result)
+            );
+            return;
+          }
+          if (event.type === "success") {
+            setNotice(
+              state.result === "up_to_date"
+                ? "Установлена последняя версия панели."
+                : "Обновление панели завершено."
+            );
+          }
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          const status = error instanceof Error && "status" in error && typeof error.status === "number"
+            ? error.status
+            : null;
+          // Passive discovery must not imply that an update exists. A single
+          // silent retry can recover an active transaction during startup,
+          // while a second failure leaves the normal controls untouched.
+          if (!allowPassiveRetry || (status !== null && status < 500)) return;
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            discover(false);
+          }, UPDATE_STATUS_POLL_MS);
+        });
+    };
+
+    discover(true);
+    return () => {
+      active = false;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
   }, []);
 
   useEffect(() => {

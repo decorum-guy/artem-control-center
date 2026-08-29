@@ -123,12 +123,16 @@ describe("server-owned panel update observer", () => {
     stop();
   });
 
-  it("treats an authoritative idle response as owner attention after a lost apply", async () => {
+  it("returns a neutral idle event and terminates the active observer", async () => {
     vi.useFakeTimers();
     const events: UpdateObserverEvent[] = [];
+    let statusCalls = 0;
     const state: UpdateOwnerState = { schemaVersion: 1, status: "idle" };
     const stop = observePanelUpdate({
-      fetchStatus: async () => state,
+      fetchStatus: async () => {
+        statusCalls += 1;
+        return state;
+      },
       fetchBuild: async () => {
         throw new Error("must not verify an idle state");
       },
@@ -137,7 +141,9 @@ describe("server-owned panel update observer", () => {
 
     await vi.advanceTimersByTimeAsync(250);
 
-    expect(events).toEqual([{ type: "failure", state, reason: "authoritative" }]);
+    expect(events).toEqual([{ type: "idle", state }]);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(statusCalls).toBe(1);
     stop();
   });
 

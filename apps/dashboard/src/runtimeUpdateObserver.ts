@@ -50,6 +50,7 @@ export interface ProductionBuildIdentity {
 
 export type UpdateObserverEvent =
   | { type: "active"; state: UpdateOwnerState }
+  | { type: "idle"; state: UpdateOwnerState }
   | { type: "reconnecting" }
   | { type: "success"; state: UpdateOwnerState }
   | {
@@ -89,10 +90,10 @@ export async function resolvePanelUpdateState(
     }
     return { type: "success", state };
   }
-  // Once the server is reachable, an idle state is authoritative evidence
-  // that no accepted update transaction remains. Do not keep an uncertain
-  // apply dialog active forever when the request was never accepted.
-  return { type: "failure", state, reason: "authoritative" };
+  // Idle is neutral during passive startup. An active observer can interpret
+  // this event as a not-accepted apply, but ordinary startup must not report a
+  // failed update when the owner never requested one.
+  return { type: "idle", state };
 }
 
 type TimerHandle = ReturnType<typeof setTimeout>;
@@ -136,7 +137,7 @@ export function observePanelUpdate({
       const event = await resolvePanelUpdateState(state, fetchBuild);
       if (disposed) return;
       onEvent(event);
-      if (event.type === "success" || event.type === "failure") return;
+      if (event.type === "success" || event.type === "failure" || event.type === "idle") return;
       schedule(pollMs);
     } catch {
       if (disposed) return;
