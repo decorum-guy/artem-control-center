@@ -187,10 +187,6 @@ export function RuntimeControls({
       setUpdateMessage("Обновление выполняется. Переподключаемся к панели…");
       return;
     }
-    if (event.type === "waiting") {
-      setUpdateMessage("Ожидаем подтверждённое состояние обновления…");
-      return;
-    }
     setUpdateAccepted(false);
     if (event.type === "failure") {
       setUpdateDialog("error");

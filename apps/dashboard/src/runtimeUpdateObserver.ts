@@ -50,7 +50,6 @@ export interface ProductionBuildIdentity {
 
 export type UpdateObserverEvent =
   | { type: "active"; state: UpdateOwnerState }
-  | { type: "waiting"; state: UpdateOwnerState }
   | { type: "reconnecting" }
   | { type: "success"; state: UpdateOwnerState }
   | {
@@ -90,7 +89,10 @@ export async function resolvePanelUpdateState(
     }
     return { type: "success", state };
   }
-  return { type: "waiting", state };
+  // Once the server is reachable, an idle state is authoritative evidence
+  // that no accepted update transaction remains. Do not keep an uncertain
+  // apply dialog active forever when the request was never accepted.
+  return { type: "failure", state, reason: "authoritative" };
 }
 
 type TimerHandle = ReturnType<typeof setTimeout>;
