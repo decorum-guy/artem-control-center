@@ -88,11 +88,17 @@ function rogService(status: RogStatus) {
   };
 }
 
-async function mockRogG703(page: Page, options: { requireElevation?: boolean } = {}) {
+async function mockRogG703(page: Page, options: {
+  requireElevation?: boolean;
+  wakeProgressPolls?: number;
+  wakeTerminal?: "online" | "wake_timeout";
+} = {}) {
   const requireElevation = options.requireElevation ?? false;
+  const wakeProgressPolls = options.wakeProgressPolls ?? 1;
+  const wakeTerminal = options.wakeTerminal ?? "online";
   let status: RogStatus = "offline";
   let elevated = false;
-  const executionId = "rog-execution-1";
+  let executionId = "rog-execution-0";
   let activeAction: RogAction | null = null;
   let polls = 0;
   const requestBodies: Record<string, unknown>[] = [];
@@ -184,6 +190,7 @@ async function mockRogG703(page: Page, options: { requireElevation?: boolean } =
       requestBodies.push(body);
       expect(Object.keys(body)).toEqual(["actionId"]);
       activeAction = body.actionId as RogAction;
+      executionId = `rog-execution-${requestBodies.length}`;
       polls = 0;
       status = activeAction.endsWith("wake") ? "waking" : activeAction.endsWith("sleep") ? "sleeping" : "hibernating";
       await new Promise((resolve) => setTimeout(resolve, 120));
@@ -208,8 +215,9 @@ async function mockRogG703(page: Page, options: { requireElevation?: boolean } =
     if (url.pathname.endsWith(`/${executionId}`)) {
       polls += 1;
       const transition = activeAction?.endsWith("wake") ? "waking" : activeAction?.endsWith("sleep") ? "sleeping" : "hibernating";
-      const terminal = activeAction?.endsWith("wake") ? "online" : "offline";
-      if (polls > 1) status = terminal;
+      const terminal = activeAction?.endsWith("wake") ? wakeTerminal : "offline";
+      const terminalReached = polls > (activeAction?.endsWith("wake") ? wakeProgressPolls : 1);
+      if (terminalReached) status = terminal === "online" ? "online" : "offline";
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -218,16 +226,18 @@ async function mockRogG703(page: Page, options: { requireElevation?: boolean } =
           correlationId: executionId,
           targetId: "rog_g703gi",
           actionId: activeAction,
-          status: polls > 1 ? terminal : transition,
+          status: terminalReached ? terminal : transition,
           requestedAt: "2026-08-12T20:00:00Z",
           updatedAt: "2026-08-12T20:00:01Z",
-          finishedAt: polls > 1 ? "2026-08-12T20:00:02Z" : null,
-          result: polls > 1
+          finishedAt: terminalReached ? "2026-08-12T20:00:02Z" : null,
+          result: terminalReached
             ? activeAction?.endsWith("wake")
-              ? { packetsSent: 3, onlineConfirmed: true }
+              ? wakeTerminal === "online"
+                ? { packetsSent: 3, onlineConfirmed: true }
+                : { packetsSent: 3, onlineConfirmed: false }
               : { offlineConfirmed: true }
             : null,
-          error: null
+          error: terminal === "wake_timeout" ? "wake_timeout" : null
         })
       });
       return;
@@ -235,7 +245,11 @@ async function mockRogG703(page: Page, options: { requireElevation?: boolean } =
     await route.continue();
   });
 
-  return { getRequestBodies: () => requestBodies };
+  return {
+    getRequestBodies: () => requestBodies,
+    getExecutionPolls: () => polls,
+    setOffline: () => { status = "offline"; }
+  };
 }
 
 test("feature-off System route is explicit and does not expose ASUS controls", async ({ page }) => {
@@ -314,6 +328,46 @@ test("touch-first ROG flow verifies wake, distinct Sleep/S4 hibernate and safe a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.getByTestId("global-notice-stack")).toBeVisible();
   await expect(page.getByTestId("rog-g703-action-notice")).toHaveCount(1);
+});
+
+test("keeps one Wake notice per server event across unchanged polls and admits a new event", async ({ page }) => {
+  const api = await mockRogG703(page, { wakeProgressPolls: 8 });
+  await page.goto("/system");
+
+  await page.getByTestId("rog-g703-wake").tap();
+  const notice = page.getByTestId("rog-g703-action-notice");
+  await expect(notice).toContainText("Пакет пробуждения");
+  const progressId = await notice.getAttribute("data-notice-id");
+  await notice.getByRole("button", { name: "Закрыть уведомление" }).click();
+  await expect.poll(() => api.getExecutionPolls(), { timeout: 5_000 }).toBeGreaterThan(6);
+  await expect(notice).toHaveCount(0);
+  await expect(notice).toContainText("ASUS появился в сети");
+  const terminalId = await notice.getAttribute("data-notice-id");
+  expect(terminalId).not.toBe(progressId);
+  await notice.getByRole("button", { name: "Закрыть уведомление" }).click();
+  await expect(notice).toHaveCount(0);
+
+  api.setOffline();
+  await page.reload();
+  await page.getByTestId("rog-g703-wake").tap();
+  await expect(notice).toContainText("Пакет пробуждения");
+  const secondActionProgressId = await notice.getAttribute("data-notice-id");
+  expect(secondActionProgressId).not.toBe(progressId);
+});
+
+test("shows one truthful failure notice when Wake verification expires", async ({ page }) => {
+  const api = await mockRogG703(page, { wakeProgressPolls: 2, wakeTerminal: "wake_timeout" });
+  await page.goto("/system");
+
+  await page.getByTestId("rog-g703-wake").tap();
+  const notice = page.getByTestId("rog-g703-action-notice");
+  await expect(notice).toContainText("Не удалось подтвердить пробуждение ASUS");
+  await expect(notice).toHaveCount(1);
+  const failureId = await notice.getAttribute("data-notice-id");
+  await notice.getByRole("button", { name: "Закрыть уведомление" }).click();
+  await expect(notice).toHaveCount(0);
+  await expect.poll(() => api.getExecutionPolls(), { timeout: 5_000 }).toBeGreaterThan(2);
+  expect(failureId).toContain("terminal");
 });
 
 test("elevation-required ROG action reaches the existing PIN flow before POST", async ({ page }) => {

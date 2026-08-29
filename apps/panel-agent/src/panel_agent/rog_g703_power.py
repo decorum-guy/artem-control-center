@@ -6,6 +6,7 @@ import ipaddress
 import json
 import re
 import socket
+import time
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
@@ -40,6 +41,7 @@ RogDeviceStatus = Literal[
 RogActionStatus = Literal[
     "requested",
     "waking",
+    "verifying",
     "online",
     "wake_timeout",
     "sleeping",
@@ -237,9 +239,13 @@ class RogG703Device:
         settings: IntegrationSettings,
         *,
         companion: RogCompanion | None = None,
+        clock: Callable[[], float] | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self.settings = settings
         self.companion = companion or HttpRogCompanion(settings)
+        self._clock = clock or time.monotonic
+        self._sleep = sleep or asyncio.sleep
         self.status: RogDeviceStatus = "offline"
         self.last_error: str | None = None
         self.observed_at = _iso()
@@ -311,24 +317,27 @@ class RogG703Device:
             await self._on_change()
 
     async def wait_until_online(self, timeout_seconds: int) -> bool:
-        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        deadline = self._clock() + timeout_seconds
         delay = 0.25
-        while asyncio.get_running_loop().time() < deadline:
+        while self._clock() < deadline:
             try:
                 if await self.companion.health():
                     await self.set_status("online")
                     return True
             except Exception:
                 pass
-            await asyncio.sleep(delay)
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                break
+            await self._sleep(min(delay, remaining))
             delay = min(2.0, delay * 2)
         await self.set_status("offline", error="wake_timeout")
         return False
 
     async def wait_until_offline(self, timeout_seconds: int) -> bool:
-        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        deadline = self._clock() + timeout_seconds
         delay = 0.25
-        while asyncio.get_running_loop().time() < deadline:
+        while self._clock() < deadline:
             try:
                 if not await self.companion.health():
                     await self.set_status("offline")
@@ -340,7 +349,10 @@ class RogG703Device:
             except (ConnectionError, OSError, TimeoutError):
                 await self.set_status("offline")
                 return True
-            await asyncio.sleep(delay)
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                break
+            await self._sleep(min(delay, remaining))
             delay = min(2.0, delay * 2)
         return False
 
@@ -606,6 +618,11 @@ class RogG703ActionExecutor:
 
         self.cooldowns[ROG_G703_WAKE_ACTION] = _now() + timedelta(
             seconds=self.settings.rog_g703_wol_cooldown_seconds
+        )
+        self._update(
+            correlation_id,
+            "verifying",
+            result={"packetsSent": packets_sent},
         )
         online = await self.device.wait_until_online(
             self.settings.rog_g703_health_timeout_seconds

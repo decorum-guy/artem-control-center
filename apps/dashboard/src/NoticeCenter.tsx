@@ -56,6 +56,8 @@ const defaultTimeoutBySeverity: Partial<Record<NoticeSeverity, number>> = {
   error: 12_000
 };
 
+export const MAX_DISMISSED_CORRELATED_NOTICE_KEYS = 100;
+
 const severityLabel: Record<NoticeSeverity, string> = {
   info: "Информация",
   progress: "Выполняется",
@@ -75,6 +77,39 @@ export function noticeIdentityMatches(
   );
 }
 
+/**
+ * Returns the stable dismissal key for an operation notice. Correlated
+ * operation notices are event-scoped; uncorrelated notices remain ephemeral
+ * so existing category-level notices can represent a later event again.
+ */
+export function noticeDismissalKey(
+  input: Pick<NoticeInput, "id" | "correlationId">
+): string | undefined {
+  return input.correlationId
+    ? `notice:${input.id}:correlation:${input.correlationId}`
+    : undefined;
+}
+
+export function isNoticeDismissed(
+  input: Pick<NoticeInput, "id" | "correlationId">,
+  dismissedKeys: ReadonlySet<string>
+): boolean {
+  const key = noticeDismissalKey(input);
+  return key !== undefined && dismissedKeys.has(key);
+}
+
+/** Retain only the most recently inserted correlated dismissal identities. */
+export function rememberDismissedNoticeKey(dismissedKeys: Set<string>, key: string): void {
+  if (dismissedKeys.has(key)) return;
+
+  dismissedKeys.add(key);
+  while (dismissedKeys.size > MAX_DISMISSED_CORRELATED_NOTICE_KEYS) {
+    const oldestKey = dismissedKeys.values().next().value;
+    if (oldestKey === undefined) return;
+    dismissedKeys.delete(oldestKey);
+  }
+}
+
 export function noticeExpiresAt(input: NoticeInput, now = Date.now()): number | undefined {
   if (input.expiresAt !== undefined) return input.expiresAt;
   if (input.timeoutMs !== undefined) return now + input.timeoutMs;
@@ -85,9 +120,11 @@ export function noticeExpiresAt(input: NoticeInput, now = Date.now()): number | 
 export function NoticeCenterProvider({ children }: { children: ReactNode }) {
   const [notices, setNotices] = useState<NoticeRecord[]>([]);
   const sequenceRef = useRef(0);
+  const dismissedKeysRef = useRef<Set<string>>(new Set());
 
   const showNotice = useCallback((input: NoticeInput) => {
     setNotices((current) => {
+      if (isNoticeDismissed(input, dismissedKeysRef.current)) return current;
       const existing = current.find((notice) => noticeIdentityMatches(notice, input));
       const next: NoticeRecord = {
         ...input,
@@ -99,7 +136,12 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const dismissNotice = useCallback((id: string) => {
-    setNotices((current) => current.filter((notice) => notice.id !== id));
+    setNotices((current) => {
+      const dismissed = current.find((notice) => notice.id === id);
+      const key = dismissed && noticeDismissalKey(dismissed);
+      if (key) rememberDismissedNoticeKey(dismissedKeysRef.current, key);
+      return current.filter((notice) => notice.id !== id);
+    });
   }, []);
 
   useEffect(() => {

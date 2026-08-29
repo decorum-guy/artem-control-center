@@ -76,6 +76,20 @@ class FakeCompanion:
         self.health_values = [False]
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.delays: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, delay: float) -> None:
+        self.delays.append(delay)
+        self.now += delay
+        await asyncio.sleep(0)
+
+
 async def wait_terminal(executor: RogG703ActionExecutor, correlation_id: str):
     for _ in range(200):
         current = executor.get(correlation_id)
@@ -147,11 +161,13 @@ def test_action_request_has_no_browser_target_or_command_fields() -> None:
 def test_wol_send_success_does_not_claim_online_without_companion_health(tmp_path) -> None:
     async def scenario() -> None:
         companion = FakeCompanion([False])
-        device = RogG703Device(rog_settings(), companion=companion)
+        clock = FakeClock()
+        settings = rog_settings(rog_g703_health_timeout_seconds=2)
+        device = RogG703Device(settings, companion=companion, clock=clock, sleep=clock.sleep)
         access = AccessPolicyStore(tmp_path / "policy.json")
         access.set_profile("standard")
         executor = RogG703ActionExecutor(
-            rog_settings(),
+            settings,
             access,
             device=device,
             wol_sender=lambda: 3,
@@ -163,6 +179,9 @@ def test_wol_send_success_does_not_claim_online_without_companion_health(tmp_pat
         assert finished.status == "wake_timeout"
         assert finished.result == {"packetsSent": 3, "onlineConfirmed": False}
         assert device.status == "offline"
+        assert clock.now == 2
+        assert clock.delays
+        assert max(clock.delays) <= 2
 
     asyncio.run(scenario())
 
@@ -189,6 +208,107 @@ def test_health_appearance_confirms_online_and_cooldown_blocks_burst(tmp_path) -
         assert finished.result == {"packetsSent": 3, "onlineConfirmed": True}
         assert calls == 1
         assert executor.availability(ROG_G703_WAKE_ACTION)["availability"] == "cooldown"
+        assert executor.availability(ROG_G703_SLEEP_ACTION)["availability"] == "allowed"
+
+    asyncio.run(scenario())
+
+
+def test_wake_publishes_server_owned_verification_state_before_confirming_reachability(tmp_path) -> None:
+    async def scenario() -> None:
+        health_started = asyncio.Event()
+        release_health = asyncio.Event()
+
+        class DelayedCompanion(FakeCompanion):
+            async def health(self) -> bool:
+                self.health_calls += 1
+                if self.health_calls == 1:
+                    health_started.set()
+                    await release_health.wait()
+                return True
+
+        settings = rog_settings()
+        companion = DelayedCompanion([True])
+        device = RogG703Device(settings, companion=companion)
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_profile("standard")
+        executor = RogG703ActionExecutor(settings, access, device=device, wol_sender=lambda: 3)
+
+        started = await executor.start(RogG703ActionRequest(actionId=ROG_G703_WAKE_ACTION))
+        await asyncio.wait_for(health_started.wait(), timeout=0.5)
+        verifying = executor.get(started.correlationId)
+        assert verifying.status == "verifying"
+        assert verifying.result == {"packetsSent": 3}
+        assert device.status == "waking"
+
+        release_health.set()
+        finished = await wait_terminal(executor, started.correlationId)
+        assert finished.status == "online"
+        assert finished.result == {"packetsSent": 3, "onlineConfirmed": True}
+        assert device.status == "online"
+
+    asyncio.run(scenario())
+
+
+def test_wake_dispatch_failure_is_immediate_and_keeps_health_offline(tmp_path) -> None:
+    async def scenario() -> None:
+        settings = rog_settings()
+        companion = FakeCompanion([False])
+        device = RogG703Device(settings, companion=companion)
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_profile("standard")
+
+        def fail_send() -> int:
+            raise OSError("socket unavailable")
+
+        executor = RogG703ActionExecutor(settings, access, device=device, wol_sender=fail_send)
+        started = await executor.start(RogG703ActionRequest(actionId=ROG_G703_WAKE_ACTION))
+        finished = await wait_terminal(executor, started.correlationId)
+
+        assert finished.status == "failed"
+        assert finished.error == "wol_send_failed"
+        assert finished.result is None
+        assert companion.health_calls == 0
+        assert device.status == "offline"
+
+    asyncio.run(scenario())
+
+
+def test_overlapping_wake_does_not_start_a_second_verification_loop(tmp_path) -> None:
+    async def scenario() -> None:
+        health_started = asyncio.Event()
+        release_health = asyncio.Event()
+
+        class DelayedCompanion(FakeCompanion):
+            async def health(self) -> bool:
+                self.health_calls += 1
+                health_started.set()
+                await release_health.wait()
+                return True
+
+        settings = rog_settings()
+        companion = DelayedCompanion([True])
+        device = RogG703Device(settings, companion=companion)
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_profile("standard")
+        sends = 0
+
+        def send() -> int:
+            nonlocal sends
+            sends += 1
+            return 3
+
+        executor = RogG703ActionExecutor(settings, access, device=device, wol_sender=send)
+        started = await executor.start(RogG703ActionRequest(actionId=ROG_G703_WAKE_ACTION))
+        await asyncio.wait_for(health_started.wait(), timeout=0.5)
+        with pytest.raises(Exception) as error:
+            await executor.start(RogG703ActionRequest(actionId=ROG_G703_WAKE_ACTION))
+        assert getattr(error.value, "status_code", None) == 409
+        assert sends == 1
+
+        release_health.set()
+        finished = await wait_terminal(executor, started.correlationId)
+        assert finished.status == "online"
+        assert companion.health_calls == 1
 
     asyncio.run(scenario())
 
