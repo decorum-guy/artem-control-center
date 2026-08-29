@@ -56,6 +56,8 @@ const defaultTimeoutBySeverity: Partial<Record<NoticeSeverity, number>> = {
   error: 12_000
 };
 
+export const MAX_DISMISSED_CORRELATED_NOTICE_KEYS = 100;
+
 const severityLabel: Record<NoticeSeverity, string> = {
   info: "Информация",
   progress: "Выполняется",
@@ -96,6 +98,18 @@ export function isNoticeDismissed(
   return key !== undefined && dismissedKeys.has(key);
 }
 
+/** Retain only the most recently inserted correlated dismissal identities. */
+export function rememberDismissedNoticeKey(dismissedKeys: Set<string>, key: string): void {
+  if (dismissedKeys.has(key)) return;
+
+  dismissedKeys.add(key);
+  while (dismissedKeys.size > MAX_DISMISSED_CORRELATED_NOTICE_KEYS) {
+    const oldestKey = dismissedKeys.values().next().value;
+    if (oldestKey === undefined) return;
+    dismissedKeys.delete(oldestKey);
+  }
+}
+
 export function noticeExpiresAt(input: NoticeInput, now = Date.now()): number | undefined {
   if (input.expiresAt !== undefined) return input.expiresAt;
   if (input.timeoutMs !== undefined) return now + input.timeoutMs;
@@ -125,7 +139,7 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
     setNotices((current) => {
       const dismissed = current.find((notice) => notice.id === id);
       const key = dismissed && noticeDismissalKey(dismissed);
-      if (key) dismissedKeysRef.current.add(key);
+      if (key) rememberDismissedNoticeKey(dismissedKeysRef.current, key);
       return current.filter((notice) => notice.id !== id);
     });
   }, []);
