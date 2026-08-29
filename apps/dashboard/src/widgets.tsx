@@ -20,6 +20,8 @@ const healthLabels = {
   stale: "Данные устарели"
 } as const;
 
+type CoffeeOverviewTransitionPhase = "idle" | "moving" | "revealing";
+
 export function HealthMark({
   health,
   compact = false,
@@ -90,7 +92,8 @@ export function CoffeeWidget({
   onAction,
   actionPending = false,
   interactive = true,
-  appearanceConfig
+  appearanceConfig,
+  overviewSizeVariant
 }: {
   service: ServiceSnapshot;
   generatedAt: string;
@@ -100,13 +103,74 @@ export function CoffeeWidget({
   actionPending?: boolean;
   interactive?: boolean;
   appearanceConfig?: CoffeeAppearanceConfig;
+  overviewSizeVariant?: "compact" | "standard" | "large";
 }) {
   const data = service.data as unknown as CoffeeData;
   const [presentationTime, setPresentationTime] = useState(() => Date.parse(generatedAt));
+  const [overviewTransition, setOverviewTransition] = useState<CoffeeOverviewTransitionPhase>("idle");
+  const [reducedMotion, setReducedMotion] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
   const clockAnchor = useRef({
     snapshotTime: Date.parse(generatedAt),
     wallTime: Date.now()
   });
+  const previousMachineState = useRef(data.machine.state);
+  const latestMachineState = useRef(data.machine.state);
+  const latestMachineAvailable = useRef(data.machine.available);
+  const latestMachineStale = useRef(data.machine.stale);
+  const overviewTransitionTimer = useRef<number | null>(null);
+  latestMachineState.current = data.machine.state;
+  latestMachineAvailable.current = data.machine.available;
+  latestMachineStale.current = data.machine.stale;
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => () => {
+    if (overviewTransitionTimer.current !== null) window.clearTimeout(overviewTransitionTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const currentState = data.machine.state;
+    const previousState = previousMachineState.current;
+    previousMachineState.current = currentState;
+
+    const clearTransition = () => {
+      if (overviewTransitionTimer.current !== null) {
+        window.clearTimeout(overviewTransitionTimer.current);
+        overviewTransitionTimer.current = null;
+      }
+      setOverviewTransition("idle");
+    };
+    const confirmedTurningOn = currentState === "turning_on" || currentState === "on";
+    const confirmedAvailable = data.machine.available && !data.machine.stale;
+
+    if (variant !== "overview" || reducedMotion) {
+      clearTransition();
+      return;
+    }
+    if (previousState === "off" && confirmedTurningOn && confirmedAvailable) {
+      if (overviewTransitionTimer.current !== null) window.clearTimeout(overviewTransitionTimer.current);
+      setOverviewTransition("moving");
+      overviewTransitionTimer.current = window.setTimeout(() => {
+        overviewTransitionTimer.current = null;
+        const latestState = latestMachineState.current;
+        if ((latestState === "turning_on" || latestState === "on") && latestMachineAvailable.current && !latestMachineStale.current) {
+          setOverviewTransition("revealing");
+        } else {
+          setOverviewTransition("idle");
+        }
+      }, 360);
+      return;
+    }
+    if (!confirmedTurningOn || !confirmedAvailable) clearTransition();
+  }, [data.machine.available, data.machine.stale, data.machine.state, reducedMotion, variant]);
   const clockEnabled =
     data.machine.state === "on" &&
     data.machine.available &&
@@ -143,6 +207,9 @@ export function CoffeeWidget({
   const duration = formatDuration(view.runningSeconds);
   const remaining = formatDuration(view.remainingSeconds);
   const warming = view.stage === "warming" && view.progress !== null;
+  const progressVisible = variant === "overview"
+    ? (warming || view.stage === "ready") && view.progress !== null && overviewTransition !== "moving"
+    : warming;
   const activeAction = service.actions.find((action) =>
     view.stage === "off" ? action.id.endsWith("turn_on") : action.id.endsWith("turn_off")
   );
@@ -158,7 +225,8 @@ export function CoffeeWidget({
       minute: "2-digit"
     })}`;
   }
-  const showsPolicyNote = data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable";
+  const showsPolicyNote = data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable"
+    || (view.progress === null && (view.stage === "running" || view.stage === "running_too_long"));
   const overviewCopyDensity = warming || stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
     ? "dense"
     : "spacious";
@@ -211,13 +279,19 @@ export function CoffeeWidget({
 
   return (
     <article
-      className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} coffee-panel--density-${requestedDensity} coffee-panel--image-x-${appearance.imageXStep + 3} coffee-panel--image-y-${appearance.imageYStep + 2} ${view.warning ? "surface--warning" : ""}`}
+      className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} coffee-panel--density-${requestedDensity} coffee-panel--image-x-${appearance.imageXStep + 3} coffee-panel--image-y-${appearance.imageYStep + 2}${overviewTransition === "idle" ? "" : ` coffee-panel--transition-${overviewTransition}`} ${view.warning ? "surface--warning" : ""}`}
       data-testid="widget-coffee-machine"
       data-stage={view.stage}
+      data-canonical-state={data.machine.state}
+      data-transition={overviewTransition}
+      data-progress-tone={view.progressTone ?? "unknown"}
+      data-progress-visible={progressVisible}
       data-overview-copy-density={variant === "overview" ? requestedDensity : undefined}
+      data-overview-size-variant={variant === "overview" ? overviewSizeVariant ?? "standard" : undefined}
       data-image-scale={imageScale}
       data-image-x={appearance.imageXStep}
       data-image-y={appearance.imageYStep}
+      style={{ "--cc-coffee-progress-color": view.progressColor ?? "var(--cc-accent-strong)" } as CSSProperties}
     >
       <div className="coffee-panel__copy">
         <div className="coffee-panel__heading">
@@ -228,21 +302,21 @@ export function CoffeeWidget({
           <HealthMark health={service.health} compact healthyLabel="Онлайн" />
         </div>
 
-        <div className="coffee-panel__state" aria-live="polite">
+        <div className={`coffee-panel__state ${view.stage === "ready" ? "coffee-panel__state--ready" : ""}`} aria-live="polite">
           <strong>{view.label}</strong>
           <span>{stateDetail}</span>
         </div>
 
-        {warming && (
-          <div className="coffee-progress" aria-label={`Разогрев ${view.progressText}`}>
+        {progressVisible && (
+          <div className="coffee-progress" data-testid="coffee-progress" aria-label={`Разогрев ${view.progressText}`}>
             <div className="coffee-progress__track">
-              <span style={{ width: `${view.progress! * 100}%` }} />
+              <span style={{ width: `${view.progress! * 100}%`, backgroundColor: "var(--cc-coffee-progress-color)" }} />
             </div>
             <output>{view.progressText}</output>
           </div>
         )}
 
-        {(data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable") && (
+        {showsPolicyNote && (
           <p className={`coffee-policy-note ${data.timingPolicy.stale ? "coffee-policy-note--stale" : ""}`}>
             {view.timingMessage}
           </p>
@@ -252,6 +326,7 @@ export function CoffeeWidget({
           <button
             className="primary-action"
             type="button"
+            data-coffee-action={view.stage === "off" ? "off-primary" : "on-quiet"}
             disabled={!interactive || !activeAction.enabled || !onAction || actionPending}
             onClick={() => onAction?.(service, activeAction.id)}
           >

@@ -4,6 +4,7 @@ import path from "node:path";
 
 const overviewV2Enabled = process.env.VITE_OVERVIEW_V2_ENABLED === "true";
 const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
+const overviewEditorEnabled = process.env.VITE_OVERVIEW_EDITOR_ENABLED === "true";
 
 async function waitForGrid(page: Page) {
   await expect(page.getByTestId("overview-grid")).toBeVisible();
@@ -43,6 +44,15 @@ test.describe("Overview V2 safe grid foundation", () => {
     await waitForGrid(page);
     await expect(page.locator(".product-shell")).toBeVisible();
     await expect(page.getByTestId("v2-shell")).toHaveCount(0);
+  });
+
+  test("build-disabled Overview editor gate is visible and truthful", async ({ page }) => {
+    test.skip(!overviewV2Enabled || overviewEditorEnabled, "Run with Overview V2 on and the editor build gate off.");
+    await page.goto("/overview");
+    await expect(page.getByTestId("overview-configure")).toBeDisabled();
+    await expect(page.getByTestId("overview-toolbar")).toHaveAttribute("data-configure-gate", "build-disabled");
+    await expect(page.locator("#overview-configure-note")).toHaveText("Редактор выключен в этой сборке.");
+    await expect(page.locator("#overview-configure-note")).toBeVisible();
   });
 
   test("renders the canonical 12-column fixture with exact grid units", async ({ page }) => {

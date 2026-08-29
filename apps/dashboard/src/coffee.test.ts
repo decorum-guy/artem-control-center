@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CoffeeData } from "@artem/contracts";
-import { coffeePresentation } from "./coffee";
+import { coffeePresentation, coffeeProgressColor, coffeeProgressTone } from "./coffee";
 
 const base: CoffeeData = {
   machine: {
@@ -49,6 +49,42 @@ describe("coffee presentation", () => {
       .toBe("45%");
     expect(coffeePresentation(twentyMinutes, "2026-07-29T12:00:00Z").progressText)
       .toBe("29%");
+  });
+
+  it("changes the semantic progress color across early, middle, late, and ready bands", () => {
+    const samples = [
+      [0.1, "cool-blue"],
+      [0.5, "transition-teal"],
+      [0.9, "ready-green"],
+      [1, "ready-green"]
+    ] as const;
+    const colors = samples.map(([progress, tone]) => {
+      expect(coffeeProgressTone(progress)).toBe(tone);
+      return coffeeProgressColor(progress);
+    });
+    expect(new Set(colors).size).toBe(4);
+    expect(colors[0]).toContain("79 146 192");
+    expect(colors[2]).toContain("93 167 132");
+    expect(colors[3]).toBe("rgb(95 170 125)");
+  });
+
+  it("keeps the canonical lifecycle truthful for pending, warming, ready, and unavailable states", () => {
+    const timed = {
+      ...base,
+      timingPolicy: {
+        ...base.timingPolicy,
+        warmupDurationSeconds: 1000,
+        longRunningThresholdSeconds: 3600,
+        sourceAvailable: true
+      }
+    };
+    expect(coffeePresentation({ ...timed, machine: { ...timed.machine, state: "off" } }, "2026-07-29T12:00:00Z").stage).toBe("off");
+    expect(coffeePresentation({ ...timed, machine: { ...timed.machine, state: "turning_on" } }, "2026-07-29T12:00:00Z").stage).toBe("turning_on");
+    expect(coffeePresentation(timed, "2026-07-29T12:08:00Z").stage).toBe("warming");
+    expect(coffeePresentation(timed, "2026-07-29T12:15:00Z").stage).toBe("ready");
+    expect(coffeePresentation({ ...timed, machine: { ...timed.machine, state: "turning_off" } }, "2026-07-29T12:00:00Z").stage).toBe("turning_off");
+    expect(coffeePresentation({ ...timed, machine: { ...timed.machine, state: "unavailable", available: false } }, "2026-07-29T12:08:00Z").progress).toBeNull();
+    expect(coffeePresentation({ ...timed, machine: { ...timed.machine, state: "on", stale: true } }, "2026-07-29T12:08:00Z").stage).toBe("stale");
   });
 
   it("uses policy long-running threshold without calling it physical overheating", () => {

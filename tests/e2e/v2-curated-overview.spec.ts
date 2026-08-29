@@ -10,10 +10,13 @@ type RogStatus = "online" | "offline" | "waking" | "sleeping" | "hibernating" | 
 type RogAction = "system.rog_g703.wake" | "system.rog_g703.sleep" | "system.rog_g703.hibernate";
 type ConnectivityFixture = "available" | "pending" | "unavailable";
 type HomeFixture = "one" | "two";
+type CoffeeFixtureOverride = "off" | "turning-on" | "warming" | "warming-early" | "warming-mid" | "warming-late" | null;
 
 let rogStatus: RogStatus = "online";
 let longRussian = false;
 let homeFixture: HomeFixture = "one";
+let coffeeFixtureOverride: CoffeeFixtureOverride = null;
+let coffeeTimingUnavailable = false;
 const postedActions: Array<{ actionId?: string }> = [];
 
 function rogService(status: RogStatus) {
@@ -97,6 +100,39 @@ async function installCuratedMocks(page: Page) {
       snapshot.planning.reminders.upcoming = snapshot.planning.reminders.upcoming.map((item) => ({ ...item, title: longTitle }));
       snapshot.planning.tasks.overdue = snapshot.planning.tasks.overdue.map((item) => ({ ...item, title: longTitle }));
       snapshot.planning.calendar.today = snapshot.planning.calendar.today.map((item) => ({ ...item, title: longTitle }));
+    }
+    if (coffeeFixtureOverride) {
+      const coffee = snapshot.services.find((service) => service.id === "coffee-machine");
+      const coffeeData = coffee?.data as { machine?: Record<string, unknown>; timingPolicy?: Record<string, unknown> } | undefined;
+      if (coffee && coffeeData?.machine) {
+        const warmingAt = {
+          warming: "2026-07-29T11:54:09Z",
+          "warming-early": "2026-07-29T11:58:42Z",
+          "warming-mid": "2026-07-29T11:53:30Z",
+          "warming-late": "2026-07-29T11:48:18Z"
+        } as const;
+        const isTurningOn = coffeeFixtureOverride === "turning-on";
+        const isWarming = coffeeFixtureOverride !== "off" && !isTurningOn;
+        coffeeData.machine.state = isTurningOn ? "turning_on" : isWarming ? "on" : "off";
+        coffeeData.machine.available = true;
+        coffeeData.machine.stale = false;
+        const warmingFixture = isWarming ? coffeeFixtureOverride : null;
+        coffeeData.machine.turnedOnAt = warmingFixture ? warmingAt[warmingFixture] : null;
+      }
+    }
+    if (coffeeTimingUnavailable) {
+      const coffee = snapshot.services.find((service) => service.id === "coffee-machine");
+      const coffeeData = coffee?.data as { machine?: Record<string, unknown>; timingPolicy?: Record<string, unknown> } | undefined;
+      if (coffeeData?.machine && coffeeData.timingPolicy) {
+        coffeeData.machine.state = "on";
+        coffeeData.machine.available = true;
+        coffeeData.machine.stale = false;
+        coffeeData.machine.turnedOnAt = "2026-07-29T11:54:09Z";
+        coffeeData.timingPolicy.warmupDurationSeconds = null;
+        coffeeData.timingPolicy.longRunningThresholdSeconds = null;
+        coffeeData.timingPolicy.sourceAvailable = true;
+        coffeeData.timingPolicy.stale = false;
+      }
     }
     await route.fulfill({
       response,
@@ -270,6 +306,8 @@ test.describe("PR4 curated Overview", () => {
     rogStatus = "online";
     longRussian = false;
     homeFixture = "one";
+    coffeeFixtureOverride = null;
+    coffeeTimingUnavailable = false;
     postedActions.length = 0;
     await installCuratedMocks(page);
     await installRogMocks(page);
@@ -331,8 +369,7 @@ test.describe("PR4 curated Overview", () => {
       rog.getByTestId("overview-rog-g703-hibernate"),
       page.getByTestId("widget-coffee-machine").getByRole("button"),
       page.getByTestId("overview-home-device-kettle"),
-      page.getByTestId("planning-reminder-row"),
-      page.getByTestId("planning-task-row")
+      page.getByTestId("planning-overview-card").locator(".planning-row").first()
     ]) {
       const box = await control.boundingBox();
       expect(box?.width).toBeGreaterThanOrEqual(48);
@@ -501,7 +538,7 @@ test.describe("PR4 curated Overview", () => {
       expect(layout.scrollHeight).toBeLessThanOrEqual(layout.clientHeight);
     }
 
-    const metadata = page.getByTestId("planning-reminder-row").locator(".planning-row__meta");
+    const metadata = page.getByTestId("planning-overview-card").locator(".planning-row__meta").first();
     await expect(metadata).toHaveCSS("font-size", "13px");
     await expect(metadata).toHaveCSS("line-height", "18px");
   });
@@ -535,9 +572,9 @@ test.describe("PR4 curated Overview", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    for (const rowId of ["planning-reminder-row", "planning-task-row", "planning-event-row"]) {
-      const row = page.getByTestId(rowId);
-      const title = row.locator(".planning-row__title");
+    const titles = page.getByTestId("planning-overview-card").locator(".planning-row__title");
+    for (let index = 0; index < await titles.count(); index += 1) {
+      const title = titles.nth(index);
       const layout = await title.evaluate((element) => ({
         clientHeight: element.clientHeight,
         overflow: getComputedStyle(element).overflow,
@@ -567,9 +604,9 @@ test.describe("PR4 curated Overview", () => {
 
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    await expect(page.getByTestId("planning-reminder-row")).toBeVisible();
-    await expect(page.getByTestId("planning-task-row")).toBeVisible();
-    await expect(page.getByTestId("planning-event-row")).toBeVisible();
+    const planning = page.getByTestId("planning-overview-card");
+    await expect(planning).toHaveAttribute("data-visible-item-count", "3");
+    await expect(planning.locator(".planning-row")).toHaveCount(3);
     await expect(page.getByTestId("overview-home-device-kettle")).toContainText("Чайник");
     await expect(page.getByTestId("overview-health-widget")).toContainText("требуют внимания");
     await expectNoOverflow(page);
@@ -585,28 +622,21 @@ test.describe("PR4 curated Overview", () => {
     const online = coffee.locator(".coffee-panel__heading .health-mark");
     const marker = coffee.locator(".coffee-state-marker");
     const spaciousImageBox = await image.boundingBox();
-    const spaciousAssetBox = await asset.boundingBox();
     const onlineBox = await online.boundingBox();
     const markerBox = await marker.boundingBox();
     expect(await coffee.getAttribute("data-overview-copy-density")).toBe("spacious");
-    expect(spaciousImageBox?.width).toBeGreaterThan(112);
-    expect(spaciousImageBox?.width).toBeLessThanOrEqual(140);
-    expect(spaciousImageBox?.height).toBeLessThanOrEqual(204);
-    expect(Math.abs(
-      (spaciousImageBox!.x + spaciousImageBox!.width / 2) - (spaciousAssetBox!.x + spaciousAssetBox!.width / 2)
-    )).toBeLessThanOrEqual(1);
+    expect(spaciousImageBox?.width).toBeGreaterThan(136);
+    expect(spaciousImageBox?.width).toBeLessThanOrEqual(164);
+    expect(spaciousImageBox?.height).toBeLessThanOrEqual(240);
     expect(await online).toContainText("Онлайн");
     expect(await online).not.toContainText("Работает");
-    expect(Math.abs(
-      (spaciousImageBox!.x + spaciousImageBox!.width / 2) - (onlineBox!.x + onlineBox!.width / 2)
-    )).toBeLessThanOrEqual(4);
-    expect(Math.abs(
-      (markerBox!.x + markerBox!.width / 2) - (onlineBox!.x + onlineBox!.width / 2)
-    )).toBeLessThanOrEqual(4);
-    expect(spaciousImageBox!.y).toBeGreaterThanOrEqual(onlineBox!.y + onlineBox!.height + 4);
+    expect(spaciousImageBox!.x).toBeGreaterThanOrEqual((onlineBox?.x ?? 0) + (onlineBox?.width ?? 0));
     const imageToMarkerGap = markerBox!.y - (spaciousImageBox!.y + spaciousImageBox!.height);
     expect(imageToMarkerGap).toBeGreaterThanOrEqual(0);
     expect(imageToMarkerGap).toBeLessThanOrEqual(4);
+    const coffeeBox = await coffee.boundingBox();
+    expect(markerBox!.x).toBeGreaterThanOrEqual(coffeeBox!.x);
+    expect(markerBox!.x + markerBox!.width).toBeLessThanOrEqual(coffeeBox!.x + coffeeBox!.width);
     await expect(coffee).toContainText("Источник: Home Assistant");
     await expect(asset).toHaveCSS("border-left-width", "0px");
     expect(await asset.evaluate((element) => getComputedStyle(element).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
@@ -661,6 +691,180 @@ test.describe("PR4 curated Overview", () => {
     await expectNoOverflow(page);
   });
 
+  test("renders canonical Coffee states, semantic progress colors, and quiet ON action", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const cases = [
+      ["coffee-off", "off", "unknown", false],
+      ["coffee-turning-on", "turning_on", "unknown", false],
+      ["coffee-warming", "warming", "transition-teal", true],
+      ["coffee-ready", "ready", "ready-green", true],
+      ["coffee-running", "running", "unknown", false],
+      ["coffee-stale", "stale", "unknown", false],
+      ["coffee-turning-off", "turning_off", "unknown", false],
+      ["ha-offline-policy-available", "unavailable", "unknown", false]
+    ] as const;
+
+    for (const [scenario, stage, tone, hasProgress] of cases) {
+      await page.goto(`/overview?scenario=${scenario}&theme=night`);
+      await waitForOverview(page);
+      const coffee = page.getByTestId("widget-coffee-machine");
+      await expect(coffee).toHaveAttribute("data-stage", stage);
+      await expect(coffee).toHaveAttribute("data-progress-tone", tone);
+      await expect(coffee.getByRole("button")).toHaveAttribute(
+        "data-coffee-action",
+        stage === "off" ? "off-primary" : "on-quiet"
+      );
+      await expect(coffee.getByRole("button")).toHaveCSS(
+        "background-color",
+        stage === "off" ? /rgb/ : /rgba\(0, 0, 0, 0\)|transparent/
+      );
+      await expect(coffee.getByRole("button")).toHaveCSS("min-height", "56px");
+      if (hasProgress) await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
+      else await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+      if (stage === "ready") {
+        await expect(coffee.locator(".coffee-panel__state strong")).toHaveText("Готова");
+        await expect(coffee.locator(".coffee-panel__state strong")).toHaveCSS("font-size", "32px");
+      }
+      await expectNoOverflow(page);
+    }
+  });
+
+  test("shows truthful degraded timing copy when canonical progress is unavailable", async ({ page }) => {
+    coffeeTimingUnavailable = true;
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/overview?theme=night");
+    await waitForOverview(page);
+    const coffee = page.getByTestId("widget-coffee-machine");
+    await expect(coffee).toHaveAttribute("data-stage", "running");
+    await expect(coffee).toHaveAttribute("data-progress-tone", "unknown");
+    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    await expect(coffee).toContainText("Параметры разогрева временно недоступны");
+  });
+
+  test("animates only an observed OFF to confirmed heating transition and settles truthfully", async ({ page }) => {
+    await page.addInitScript(() => {
+      type Handler = (event: Event) => void;
+      const sources: Array<{ handlers: Map<string, Handler[]>; close: () => void }> = [];
+      class FakeEventSource {
+        handlers = new Map<string, Handler[]>();
+        constructor() { sources.push(this); }
+        addEventListener(type: string, handler: Handler) {
+          this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler]);
+        }
+        close() {}
+      }
+      Object.defineProperty(window, "EventSource", { configurable: true, value: FakeEventSource });
+      (window as unknown as { emitSnapshot: () => void }).emitSnapshot = () => {
+        for (const source of sources) {
+          for (const handler of source.handlers.get("snapshot") ?? []) handler(new MessageEvent("snapshot", { data: "{}" }));
+        }
+      };
+    });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    coffeeFixtureOverride = "off";
+    await page.goto("/overview?theme=night");
+    await waitForOverview(page);
+    const coffee = page.getByTestId("widget-coffee-machine");
+    await expect(coffee).toHaveAttribute("data-transition", "idle");
+    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    const adjacentBefore = await item(page, "fixture.health").boundingBox();
+
+    coffeeFixtureOverride = "warming";
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await expect(coffee).toHaveAttribute("data-canonical-state", "on");
+    await expect(coffee).toHaveAttribute("data-transition", "moving");
+    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    const adjacentDuring = await item(page, "fixture.health").boundingBox();
+    expect(adjacentDuring?.x).toBeCloseTo(adjacentBefore?.x ?? Number.NaN, 1);
+    expect(adjacentDuring?.y).toBeCloseTo(adjacentBefore?.y ?? Number.NaN, 1);
+    await page.waitForTimeout(420);
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
+    await expect(coffee.getByTestId("coffee-progress")).toContainText("45%");
+    const adjacentSettled = await item(page, "fixture.health").boundingBox();
+    expect(adjacentSettled?.x).toBeCloseTo(adjacentBefore?.x ?? Number.NaN, 1);
+    expect(adjacentSettled?.y).toBeCloseTo(adjacentBefore?.y ?? Number.NaN, 1);
+
+    coffeeFixtureOverride = "off";
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await expect(coffee).toHaveAttribute("data-canonical-state", "off");
+    await expect(coffee).toHaveAttribute("data-transition", "idle");
+    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    await expectNoOverflow(page);
+
+    coffeeFixtureOverride = null;
+    await page.goto("/overview?scenario=coffee-warming&theme=night");
+    await waitForOverview(page);
+    await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-transition", "idle");
+    await expect(page.getByTestId("widget-coffee-machine").getByTestId("coffee-progress")).toBeVisible();
+  });
+
+  test("holds the settled composition through a slow canonical turning_on state", async ({ page }) => {
+    await page.addInitScript(() => {
+      type Handler = (event: Event) => void;
+      const sources: Array<{ handlers: Map<string, Handler[]> }> = [];
+      class FakeEventSource {
+        handlers = new Map<string, Handler[]>();
+        constructor() { sources.push(this); }
+        addEventListener(type: string, handler: Handler) {
+          this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler]);
+        }
+        close() {}
+      }
+      Object.defineProperty(window, "EventSource", { configurable: true, value: FakeEventSource });
+      (window as unknown as { emitSnapshot: () => void }).emitSnapshot = () => {
+        for (const source of sources) {
+          for (const handler of source.handlers.get("snapshot") ?? []) handler(new MessageEvent("snapshot", { data: "{}" }));
+        }
+      };
+    });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    coffeeFixtureOverride = "off";
+    await page.goto("/overview?theme=night");
+    await waitForOverview(page);
+    const coffee = page.getByTestId("widget-coffee-machine");
+    const visual = coffee.locator(".coffee-asset__visual");
+    const resting = await visual.boundingBox();
+    expect(resting).not.toBeNull();
+
+    coffeeFixtureOverride = "turning-on";
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await expect(coffee).toHaveAttribute("data-canonical-state", "turning_on");
+    await expect(coffee).toHaveAttribute("data-transition", "moving");
+    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    await page.waitForTimeout(420);
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    await page.waitForTimeout(320);
+    const settled = await visual.boundingBox();
+    expect(settled?.x).toBeGreaterThan((resting?.x ?? Number.NaN) + 5);
+    expect(settled?.width).toBeLessThan((resting?.width ?? Number.NaN) - 2);
+    const settledTransform = await visual.evaluate((element) => getComputedStyle(element).transform);
+
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await page.waitForTimeout(80);
+    await expect(coffee).toHaveAttribute("data-canonical-state", "turning_on");
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    expect(await visual.evaluate((element) => getComputedStyle(element).transform)).toBe(settledTransform);
+
+    coffeeFixtureOverride = "warming";
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await expect(coffee).toHaveAttribute("data-canonical-state", "on");
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
+  });
+
+  test("reduced motion renders the confirmed Coffee composition immediately", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/overview?scenario=coffee-warming&theme=night&motion=reduced");
+    await waitForOverview(page);
+    const coffee = page.getByTestId("widget-coffee-machine");
+    await expect(coffee).toHaveAttribute("data-transition", "idle");
+    await expect(coffee).toHaveAttribute("data-progress-visible", "true");
+    const transitionDuration = await coffee.locator(".coffee-asset__visual").evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration));
+    expect(transitionDuration).toBeLessThanOrEqual(0.01);
+    await expectNoOverflow(page);
+  });
+
   test("captures the curated review pack", async ({ page }, testInfo) => {
     const artifactDir = process.env.V2_OVERVIEW_CURATED_ARTIFACT_DIR ?? testInfo.outputPath("v2-overview-curated-review");
     await mkdir(artifactDir, { recursive: true });
@@ -674,8 +878,23 @@ test.describe("PR4 curated Overview", () => {
     rogStatus = "online";
     await setConnectivityFixture(page, "unavailable");
     homeFixture = "one";
+    coffeeFixtureOverride = "off";
     await page.goto("/overview?theme=night");
     await capture("overview-curated-night.png");
+
+    for (const [state, name] of [
+      ["warming-early", "overview-coffee-warming-early.png"],
+      ["warming-mid", "overview-coffee-warming-mid.png"],
+      ["warming-late", "overview-coffee-warming-late.png"]
+    ] as const) {
+      coffeeFixtureOverride = state;
+      await page.goto("/overview?theme=night");
+      await capture(name);
+    }
+
+    coffeeFixtureOverride = null;
+    await page.goto("/overview?scenario=coffee-ready&theme=night");
+    await capture("overview-coffee-ready.png");
 
     await page.goto("/overview?theme=day");
     await capture("overview-curated-day.png");
@@ -691,6 +910,9 @@ test.describe("PR4 curated Overview", () => {
     rogStatus = "online";
     await page.goto("/overview?scenario=coffee-warming&theme=night");
     await capture("overview-coffee-warming.png");
+
+    await page.goto("/overview?scenario=coffee-warming&theme=night&motion=reduced");
+    await capture("overview-coffee-warming-reduced-motion.png");
 
     await page.goto("/overview?scenario=ha-degraded&theme=night");
     await capture("overview-degraded.png");

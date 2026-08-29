@@ -22,6 +22,10 @@ function findRogService(services: readonly ServiceSnapshot[]): ServiceSnapshot |
   return services.find((service) => service.id === "rog_g703gi" || service.dataContract === "system.rog-g703.v1") ?? null;
 }
 
+function overviewSizeVariant(sizeVariant: OverviewProjectionItem["sizeVariant"]): "compact" | "standard" | "large" {
+  return sizeVariant === "compact" || sizeVariant === "large" ? sizeVariant : "standard";
+}
+
 function OverviewRuntimeUnavailable({
   title,
   detail,
@@ -74,6 +78,7 @@ function renderCoffee(item: OverviewProjectionItem, runtime: OverviewRuntimeCont
       actionPending={runtime.coffeeActionPending}
       interactive={!runtime.editMode}
       appearanceConfig={coffeeAppearanceConfig(item.item)}
+      overviewSizeVariant={overviewSizeVariant(item.sizeVariant)}
     />
   );
 }
@@ -84,6 +89,7 @@ function renderPlanning(item: OverviewProjectionItem, runtime: OverviewRuntimeCo
       planning={runtime.snapshot.planning}
       onNavigate={runtime.onNavigate}
       density={planningDensityFor(item.item)}
+      sizeVariant={overviewSizeVariant(item.sizeVariant)}
     />
   );
 }
