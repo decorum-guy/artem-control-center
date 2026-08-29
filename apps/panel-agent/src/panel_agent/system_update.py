@@ -34,6 +34,20 @@ SAFE_OWNER_RESULTS = frozenset({
     "served_artifact_mismatch",
     "restart_failed",
     "repair_required",
+    "updater_stale",
+})
+UPDATE_PHASES = frozenset({
+    "started",
+    "stopping",
+    "checkout",
+    "handoff",
+    "target-authoritative",
+    "validating",
+    "building",
+    "artifact-ready",
+    "restarting",
+    "verifying",
+    "rollback",
 })
 
 
@@ -55,6 +69,42 @@ def _parse_time(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _safe_timestamp(value: object) -> str | None:
+    parsed = _parse_time(value)
+    if parsed is None or parsed > _utc_now():
+        return None
+    return parsed.isoformat()
+
+
+def _safe_revision(value: object) -> str | None:
+    if not isinstance(value, str) or SHA_PATTERN.fullmatch(value) is None:
+        return None
+    return value
+
+
+def _safe_request_id(value: object) -> str | None:
+    if not isinstance(value, str) or REQUEST_ID_PATTERN.fullmatch(value) is None:
+        return None
+    return value
+
+
+def _recent_update_transaction(transaction: dict | None) -> bool:
+    """Return whether a valid transaction heartbeat is within the handoff grace.
+
+    This is deliberately separate from the updater-process lease. It covers a
+    short atomic publication/read gap while still giving the server a bounded,
+    owner-controlled stale result when both the process lease and its recent
+    transaction heartbeat have disappeared.
+    """
+    if not transaction:
+        return False
+    updated = _parse_time(transaction.get("updatedAt"))
+    if updated is None:
+        return False
+    now = _utc_now()
+    return updated <= now and now - updated <= UPDATE_HANDOFF_MAX_AGE
 
 
 def _read_json(path: Path) -> dict | None:
@@ -343,27 +393,146 @@ class PanelUpdateService:
         return UpdatePreflight(current_head, target_head, True, True, "update_available")
 
     def _write_state(self, state: str, **fields: object) -> None:
-        _atomic_write_json(
-            self.state_path,
-            {"schemaVersion": 1, "status": state, "updatedAt": _iso_now(), **fields},
-        )
+        payload = {
+            "schemaVersion": 1,
+            "status": state,
+            "updatedAt": _iso_now(),
+        }
+        field_names = {
+            "request_id": "requestId",
+            "current_head": "currentHead",
+            "target_head": "targetHead",
+            "started_at": "startedAt",
+            "phase": "phase",
+            "served_revision": "servedRevision",
+        }
+        for name, output_name in field_names.items():
+            if name in fields and fields[name] is not None:
+                payload[output_name] = fields[name]
+        _atomic_write_json(self.state_path, payload)
 
     def owner_state(self) -> dict:
-        payload = _read_json(self.state_path)
-        if not payload or payload.get("schemaVersion") != 1:
-            return {"schemaVersion": 1, "status": "idle"}
-        safe_status = payload.get("status")
-        if safe_status not in {"idle", "checking", "updating", "success", "failed"}:
-            return {"schemaVersion": 1, "status": "idle"}
-        result = {
-            "schemaVersion": 1,
-            "status": safe_status,
-            "updatedAt": payload.get("updatedAt"),
-        }
-        safe_result = payload.get("result")
+        payload = _read_json(self.state_path) or {}
+        state_status = payload.get("status") if payload.get("schemaVersion") == 1 else None
+        if state_status not in {"idle", "checking", "updating", "success", "failed"}:
+            state_status = "idle"
+
+        transaction = _read_json(self.runtime_root / "update-transaction.json")
+        transaction_valid = bool(
+            transaction
+            and transaction.get("schemaVersion") == 1
+            and transaction.get("status") == "incomplete"
+            and transaction.get("phase") in UPDATE_PHASES
+            and _safe_revision(transaction.get("previousHead"))
+            and _safe_revision(transaction.get("targetHead"))
+            and _safe_request_id(transaction.get("requestId"))
+            and _safe_timestamp(transaction.get("updatedAt"))
+        )
+        lock_payload = _read_json(self.lock_path)
+        lock_active = _update_lock_active(
+            lock_payload,
+            owner_alive=self._update_owner_alive,
+        )
+        transaction_active = transaction_valid and _recent_update_transaction(transaction)
+
+        # The lease and transaction are the server-owned liveness evidence. A
+        # browser cannot keep an update alive, and a stale active state must not
+        # remain indefinitely visible after its owner has disappeared.
+        active_state = state_status in {"checking", "updating"}
+        transaction_needs_owner = transaction_valid and state_status not in {"success", "failed"}
+        if (active_state or transaction_needs_owner) and not (lock_active or transaction_active):
+            effective_target = (
+                _safe_revision(payload.get("targetHead"))
+                or (_safe_revision(transaction.get("targetHead")) if transaction_valid else None)
+                or _safe_revision(lock_payload.get("expectedTargetHead") if lock_payload else None)
+            )
+            effective_current = (
+                _safe_revision(payload.get("currentHead"))
+                or (_safe_revision(transaction.get("previousHead")) if transaction_valid else None)
+                or _safe_revision(lock_payload.get("expectedCurrentHead") if lock_payload else None)
+            )
+            return self._owner_state_payload(
+                status="failed",
+                payload=payload,
+                transaction=transaction if transaction_valid else None,
+                current_head=effective_current,
+                target_head=effective_target,
+                lock_request_id=_safe_request_id(lock_payload.get("requestId") if lock_payload else None),
+                lock_updated_at=_safe_timestamp(lock_payload.get("updatedAt") if lock_payload else None),
+                result="updater_stale",
+            )
+
+        if state_status in {"success", "failed"}:
+            # The canonical updater records its terminal result immediately
+            # before its finally block removes the lock. Preserve that
+            # authoritative result across the short overlap.
+            status = state_status
+        elif lock_active or transaction_active:
+            status = state_status if active_state else "updating"
+        else:
+            status = state_status
+        return self._owner_state_payload(
+            status=status,
+            payload=payload,
+            transaction=transaction if transaction_valid else None,
+            current_head=_safe_revision(payload.get("currentHead"))
+            or (_safe_revision(transaction.get("previousHead")) if transaction_valid else None)
+            or _safe_revision(lock_payload.get("expectedCurrentHead") if lock_payload else None),
+            target_head=_safe_revision(payload.get("targetHead"))
+            or (_safe_revision(transaction.get("targetHead")) if transaction_valid else None)
+            or _safe_revision(lock_payload.get("expectedTargetHead") if lock_payload else None),
+            lock_request_id=_safe_request_id(lock_payload.get("requestId") if lock_payload else None),
+            lock_updated_at=_safe_timestamp(lock_payload.get("updatedAt") if lock_payload else None),
+        )
+
+    @staticmethod
+    def _owner_state_payload(
+        *,
+        status: str,
+        payload: dict,
+        transaction: dict | None,
+        current_head: str | None,
+        target_head: str | None,
+        lock_request_id: str | None,
+        lock_updated_at: str | None,
+        result: str | None = None,
+    ) -> dict:
+        output = {"schemaVersion": 1, "status": status}
+        updated_at = _safe_timestamp(payload.get("updatedAt"))
+        if updated_at is None and transaction is not None:
+            updated_at = _safe_timestamp(transaction.get("updatedAt"))
+        if updated_at is None:
+            updated_at = lock_updated_at
+        if updated_at is not None:
+            output["updatedAt"] = updated_at
+
+        started_at = _safe_timestamp(payload.get("startedAt"))
+        if started_at is not None:
+            output["startedAt"] = started_at
+        request_id = _safe_request_id(payload.get("requestId"))
+        if request_id is None and transaction is not None:
+            request_id = _safe_request_id(transaction.get("requestId"))
+        if request_id is None:
+            request_id = lock_request_id
+        if request_id is not None:
+            output["requestId"] = request_id
+        phase = payload.get("phase")
+        if phase not in UPDATE_PHASES and transaction is not None:
+            phase = transaction.get("phase")
+        if phase in UPDATE_PHASES:
+            output["phase"] = phase
+        if current_head is not None:
+            output["currentHead"] = current_head
+        if target_head is not None:
+            output["targetHead"] = target_head
+        served_revision = _safe_revision(payload.get("servedRevision"))
+        if served_revision is not None:
+            output["servedRevision"] = served_revision
+
+        safe_result = result or payload.get("result")
         if isinstance(safe_result, str) and safe_result in SAFE_OWNER_RESULTS:
-            result["result"] = safe_result
-        return result
+            output["result"] = safe_result
+        return output
 
     def _clear_stale_lock(self) -> None:
         payload = _read_json(self.lock_path)
@@ -446,7 +615,13 @@ class PanelUpdateService:
             if preflight.status == "repair_required":
                 command["repair"] = True
             _atomic_write_json(self.command_path, command)
-            self._write_state("updating")
+            self._write_state(
+                "updating",
+                request_id=request_id,
+                current_head=expected_current,
+                target_head=expected_target,
+                started_at=_iso_now(),
+            )
             return {"accepted": True, "status": "updating"}
         except Exception:
             self._release_lock(request_id)
@@ -477,15 +652,12 @@ def build_system_update_router(
     ) -> dict:
         _require_intent(x_panel_intent)
         current = require_service()
-        current._write_state("checking")
         try:
             result = current.preflight()
         except Exception as exc:
             # The UI receives only a fixed owner-safe failure, never git stderr,
             # a local path, environment values, or arbitrary exception text.
-            current._write_state("idle")
             raise HTTPException(status_code=503, detail="update_check_failed") from exc
-        current._write_state("idle")
         response.headers["Cache-Control"] = "no-store"
         return result.as_dict()
 

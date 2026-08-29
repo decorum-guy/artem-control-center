@@ -120,14 +120,39 @@ function Write-ArtemUpdateState {
     param(
         [Parameter(Mandatory)]$Paths,
         [Parameter(Mandatory)][ValidateSet("idle", "checking", "updating", "success", "failed")][string]$Status,
-        [string]$Result
+        [string]$Result,
+        [string]$CurrentHead,
+        [string]$TargetHead,
+        [string]$RequestId,
+        [string]$Phase,
+        [string]$StartedAt,
+        [string]$ServedRevision
     )
+    $lock = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+    $transaction = Get-ArtemJsonPayload -Path $Paths.UpdateTransactionState
+    $previousState = Get-ArtemJsonPayload -Path $Paths.UpdateState
+    if (-not $RequestId -and $null -ne $lock) { $RequestId = [string]$lock.requestId }
+    if (-not $RequestId -and $null -ne $transaction) { $RequestId = [string]$transaction.requestId }
+    if (-not $CurrentHead -and $null -ne $lock) { $CurrentHead = [string]$lock.expectedCurrentHead }
+    if (-not $CurrentHead -and $null -ne $transaction) { $CurrentHead = [string]$transaction.previousHead }
+    if (-not $TargetHead -and $null -ne $lock) { $TargetHead = [string]$lock.expectedTargetHead }
+    if (-not $TargetHead -and $null -ne $transaction) { $TargetHead = [string]$transaction.targetHead }
+    if (-not $Phase -and $null -ne $transaction) { $Phase = [string]$transaction.phase }
+    if (-not $StartedAt -and $null -ne $previousState) { $StartedAt = [string]$previousState.startedAt }
     $payload = @{
         schemaVersion = 1
         status = $Status
         updatedAt = [DateTime]::UtcNow.ToString("o")
     }
     if ($Result) { $payload.result = $Result }
+    if ($CurrentHead -match '^[0-9a-f]{40}$') { $payload.currentHead = $CurrentHead.ToLowerInvariant() }
+    if ($TargetHead -match '^[0-9a-f]{40}$') { $payload.targetHead = $TargetHead.ToLowerInvariant() }
+    if ($RequestId -match '^[0-9a-f]{24}$') { $payload.requestId = $RequestId.ToLowerInvariant() }
+    if ($Phase -in @("started", "stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying", "rollback")) {
+        $payload.phase = $Phase
+    }
+    if ($StartedAt) { $payload.startedAt = $StartedAt }
+    if ($ServedRevision -match '^[0-9a-f]{40}$') { $payload.servedRevision = $ServedRevision.ToLowerInvariant() }
     Write-ArtemUpdateJson -Path $Paths.UpdateState -Payload $payload
 }
 
@@ -634,7 +659,7 @@ try {
                 -ExpectedBuildRevision $targetHead | Out-Null
             Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Set-Content -LiteralPath $paths.LastKnownGood -Value $currentHead -Encoding ASCII
-            Write-ArtemUpdateState -Paths $paths -Status "success" -Result "up_to_date"
+            Write-ArtemUpdateState -Paths $paths -Status "success" -Result "up_to_date" -ServedRevision $targetHead
             Write-Host "Artem Control Center is already up to date and serving $currentHead"
             return
         }
@@ -786,7 +811,7 @@ try {
         Remove-ArtemUpdateTransaction -Paths $paths
         Remove-Item -LiteralPath $paths.RollbackDashboard -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $buildRoot -Recurse -Force -ErrorAction SilentlyContinue
-        Write-ArtemUpdateState -Paths $paths -Status "success" -Result "updated"
+        Write-ArtemUpdateState -Paths $paths -Status "success" -Result "updated" -ServedRevision $targetHead
         if (-not $kioskConfirmed) {
             Write-Warning "Production dashboard is verified, but kiosk presence remains unconfirmed"
         }

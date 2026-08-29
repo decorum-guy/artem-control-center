@@ -110,3 +110,14 @@ test("canonical Windows launcher enables the separately classified update gate",
   assert.match(source, /Get-ArtemSoftwareUpdateLock/);
   assert.match(source, /-not\s+\$UpdateRequestId/);
 });
+
+test("dashboard observes the durable update transaction without a browser timeout", () => {
+  const controls = readFileSync(resolve("apps/dashboard/src/RuntimeControls.tsx"), "utf8");
+  const observer = readFileSync(resolve("apps/dashboard/src/runtimeUpdateObserver.ts"), "utf8");
+  assert.doesNotMatch(controls, /UPDATE_STATUS_MAX_POLLS/);
+  assert.match(controls, /observePanelUpdate/);
+  assert.match(controls, /api\/v1\/system\/production-build/);
+  assert.match(controls, /Переподключаемся к панели/);
+  assert.match(observer, /no browser elapsed-time deadline/);
+  assert.match(observer, /event\.type === "success" \|\| event\.type === "failure"/);
+});

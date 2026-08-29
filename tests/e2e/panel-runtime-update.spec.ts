@@ -21,6 +21,15 @@ type UpdateOwnerState = {
   schemaVersion: 1;
   status: "idle" | "checking" | "updating" | "success" | "failed";
   result?: string;
+  currentHead?: string;
+  targetHead?: string;
+};
+
+type ProductionBuild = {
+  schemaVersion: "dashboard-build.v1";
+  revision: string;
+  profile: "accepted-v2";
+  buildId: string;
 };
 
 function available(target = TARGET): UpdateCheck {
@@ -78,6 +87,14 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
   let hideCount = 0;
   let lastApplyBody: Record<string, unknown> | null = null;
   let applyConflictOnce = false;
+  let applyResponsesLost = 0;
+  let statusFailures = 0;
+  let productionBuild: ProductionBuild = {
+    schemaVersion: "dashboard-build.v1",
+    revision: TARGET,
+    profile: "accepted-v2",
+    buildId: `${TARGET}:accepted-v2`
+  };
 
   await page.route("**/api/v1/access", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
@@ -102,6 +119,11 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
     }
     if (path === "/api/v1/system/update/status" && request.method() === "GET") {
       statusCount += 1;
+      if (statusFailures > 0) {
+        statusFailures -= 1;
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "runtime_unavailable" }) });
+        return;
+      }
       const payload = statusQueue.length
         ? statusQueue.shift()!
         : { schemaVersion: 1 as const, status: "idle" as const };
@@ -110,6 +132,10 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
         contentType: "application/json",
         body: JSON.stringify(payload)
       });
+      return;
+    }
+    if (path === "/api/v1/system/production-build" && request.method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(productionBuild) });
       return;
     }
     if (path === "/api/v1/system/update/check" && request.method() === "POST") {
@@ -122,6 +148,11 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
     if (path === "/api/v1/system/update/apply" && request.method() === "POST") {
       applyCount += 1;
       lastApplyBody = request.postDataJSON() as Record<string, unknown>;
+      if (applyResponsesLost > 0) {
+        applyResponsesLost -= 1;
+        await route.abort("failed");
+        return;
+      }
       if (applyConflictOnce) {
         applyConflictOnce = false;
         await route.fulfill({
@@ -160,6 +191,9 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
     setCheck: (next: UpdateCheck) => { nextCheck = next; checkQueue = []; },
     queueChecks: (...checks: UpdateCheck[]) => { checkQueue = [...checks]; },
     queueStatuses: (...states: UpdateOwnerState[]) => { statusQueue = [...states]; },
+    failNextStatus: () => { statusFailures += 1; },
+    loseNextApplyResponse: () => { applyResponsesLost += 1; },
+    setProductionBuild: (next: ProductionBuild) => { productionBuild = next; },
     setCheckDelay: (milliseconds: number) => { checkDelayMs = milliseconds; },
     conflictNextApply: () => { applyConflictOnce = true; },
     getCheckCount: () => checkCount,
@@ -198,6 +232,28 @@ async function closeUpdateDialog(page: Page) {
 
 test.describe("Control Center runtime update UX", () => {
   test.skip(!v2Enabled || !lockEnabled, "Run with V2 shell and touch lock enabled.");
+
+  test("ordinary initial idle status stays neutral and leaves update available", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+
+    await expect(page.getByTestId("runtime-update-dialog")).toHaveCount(0);
+    await expect(zone).not.toContainText("Обновление не завершено");
+    await expect(zone.getByRole("button", { name: "Обновить панель" })).toBeEnabled();
+    expect(api.getStatusCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  test("passive status failure retries silently and stays neutral when server is idle", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    api.failNextStatus();
+    const zone = await openSystem(page);
+
+    await expect.poll(api.getStatusCount).toBe(2);
+    await expect(page.getByTestId("runtime-update-dialog")).toHaveCount(0);
+    await expect(zone).not.toContainText("Переподключаемся к панели");
+    await expect(zone).not.toContainText("Обновление не завершено");
+    await expect(zone.getByRole("button", { name: "Обновить панель" })).toBeEnabled();
+  });
 
   test("1280x720 runtime zone fits three touch-safe controls without horizontal overflow", async ({ page }) => {
     await installRuntimeFixtures(page);
@@ -286,6 +342,98 @@ test.describe("Control Center runtime update UX", () => {
     await expect.poll(api.getApplyCount).toBe(1);
     expect(api.getLastApplyBody()).toEqual({ expectedCurrentHead: CURRENT, expectedTargetHead: TARGET });
     await expect(dialog).toContainText(/Запускаем обновление|Обновление выполняется/);
+  });
+
+  test("lost apply response followed by idle stops without claiming an update failure", async ({ page }) => {
+    await page.clock.install();
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    api.loseNextApplyResponse();
+
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+    await expect(dialog).toContainText("Переподключаемся к панели");
+    await page.clock.runFor(250);
+
+    await expect(dialog).toContainText("Обновление не было запущено");
+    const statusCountAfterIdle = api.getStatusCount();
+    await page.clock.runFor(5_000);
+    expect(api.getStatusCount()).toBe(statusCountAfterIdle);
+    await expect(dialog).not.toContainText("Обновление выполняется…");
+    await expect(dialog.getByRole("button", { name: "Отмена" })).toBeEnabled();
+  });
+
+  test("active update remains active beyond the old 60-second equivalent", async ({ page }) => {
+    await page.clock.install();
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    const active = { schemaVersion: 1 as const, status: "updating" as const, currentHead: CURRENT, targetHead: TARGET };
+    const terminal = { ...active, status: "success" as const, result: "updated" };
+    api.queueStatuses(...Array.from({ length: 80 }, () => active), terminal);
+
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+    await page.clock.runFor(62_000);
+
+    await expect(dialog).toHaveCount(0);
+    await expect(zone).toContainText("Обновление панели завершено.");
+    await expect(zone).not.toContainText("дольше обычного");
+    expect(api.getStatusCount()).toBeGreaterThan(80);
+  });
+
+  test("temporary runtime disappearance reconnects and verifies the served target", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    const active = { schemaVersion: 1 as const, status: "updating" as const, currentHead: CURRENT, targetHead: TARGET };
+    api.queueStatuses(active, { ...active, status: "success" as const, result: "updated" });
+    api.failNextStatus();
+
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+    await expect(dialog).toContainText("Переподключаемся к панели");
+    await expect(dialog).toHaveCount(0);
+    await expect(zone).toContainText("Обновление панели завершено.");
+  });
+
+  test("a new dashboard instance recovers active transaction truth after reload", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    const active = { schemaVersion: 1 as const, status: "updating" as const, currentHead: CURRENT, targetHead: TARGET };
+    api.queueStatuses(...Array.from({ length: 10 }, () => active));
+
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+    await expect.poll(api.getApplyCount).toBe(1);
+    await page.reload();
+
+    const recoveredDialog = page.getByTestId("runtime-update-dialog");
+    await expect(recoveredDialog).toBeVisible();
+    await expect(recoveredDialog).toContainText("Обновление выполняется");
+    await expect(recoveredDialog).toContainText("После обновления");
+    await expect(recoveredDialog).toContainText("def45678");
+  });
+
+  test("returned wrong target build remains an actionable mismatch", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    const active = { schemaVersion: 1 as const, status: "updating" as const, currentHead: CURRENT, targetHead: TARGET };
+    api.queueStatuses({ ...active, status: "success" as const, result: "updated" });
+    api.setProductionBuild({
+      schemaVersion: "dashboard-build.v1",
+      revision: CURRENT,
+      profile: "accepted-v2",
+      buildId: `${CURRENT}:accepted-v2`
+    });
+
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+    await expect(dialog).toContainText("обслуживает другую версию");
+    await expect(dialog.getByRole("button", { name: "Отмена" })).toBeEnabled();
   });
 
   test("accepted apply that later fails becomes actionable and polling is cleaned up", async ({ page }) => {
