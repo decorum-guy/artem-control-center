@@ -60,7 +60,9 @@
 }
 
 .runtime-update-dialog {
-  width: min(560px, calc(100vw - 40px));
+  width: min(960px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 28px;
 }
 
 .runtime-update-versions {
@@ -100,6 +102,84 @@
   line-height: 1.45;
 }
 
+.runtime-update-progress {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 16px;
+  background: var(--surface-inline);
+}
+
+.runtime-update-progress__summary {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.runtime-update-progress__summary span,
+.runtime-update-activity > span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.runtime-update-progress__summary strong {
+  display: block;
+}
+
+.runtime-update-progress__summary > strong {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 1.55rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.runtime-update-progress__track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 20%, var(--surface));
+}
+
+.runtime-update-progress__track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.runtime-update-activity {
+  min-width: 0;
+}
+
+.runtime-update-activity ol {
+  display: grid;
+  gap: 7px;
+  max-height: 190px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 8px 0 24px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.runtime-update-activity li::marker {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.runtime-update-dialog .action-confirmation__actions button {
+  min-height: 56px;
+}
+
 @media (max-width: 760px) {
   .runtime-control-actions {
     width: 100%;
@@ -112,5 +192,9 @@
 
   .runtime-update-versions {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-update-dialog {
+    padding: 20px;
   }
 }

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { observePanelUpdate, type UpdateOwnerState, type UpdateObserverEvent } from "./runtimeUpdateObserver";
+import {
+  observePanelUpdate,
+  updateActivityCopy,
+  updateProgressPercent,
+  type UpdateOwnerState,
+  type UpdateObserverEvent
+} from "./runtimeUpdateObserver";
 
 const CURRENT = "a".repeat(40);
 const TARGET = "b".repeat(40);
@@ -29,6 +35,15 @@ afterEach(() => {
 });
 
 describe("server-owned panel update observer", () => {
+  it("uses bounded server progress and fixed activity copy", () => {
+    expect(updateProgressPercent({ schemaVersion: 1, status: "updating", phase: "building", progressPercent: 66 })).toBe(66);
+    expect(updateProgressPercent({ schemaVersion: 1, status: "updating", phase: "building", progressPercent: 101 })).toBe(66);
+    expect(updateProgressPercent({ schemaVersion: 1, status: "updating", phase: "rollback" })).toBe(60);
+    expect(updateActivityCopy("building")).toBe("Собираем панель");
+    expect(updateActivityCopy("C:\\private\\repo")).toBeNull();
+    expect(updateActivityCopy("constructor")).toBeNull();
+  });
+
   it("keeps an active update alive beyond the old 60-second browser window", async () => {
     vi.useFakeTimers();
     const events: UpdateObserverEvent[] = [];

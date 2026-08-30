@@ -3,11 +3,15 @@ import { AccessSettingsPanel, useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { useInteractionLock } from "./InteractionLock";
 import {
+  UPDATE_ACTIVITY_COPY,
   isActiveUpdateState,
   observePanelUpdate,
   resolvePanelUpdateState,
+  updateProgressPercent,
   type ProductionBuildIdentity,
+  type UpdateActivityEvent,
   type UpdateOwnerState,
+  type UpdateOwnerResult,
   type UpdateObserverEvent
 } from "./runtimeUpdateObserver";
 import {
@@ -49,15 +53,27 @@ const updateReasonCopy: Record<string, string> = {
 
 const UPDATE_STATUS_POLL_MS = 750;
 
+type UpdateFailureResult = Exclude<UpdateOwnerResult, "updated" | "up_to_date">;
+
+const updateFailureReasonCopy: Record<UpdateFailureResult, string> = {
+  rollback_restored: "Обновление не установлено. Предыдущая версия восстановлена.",
+  rollback_failed: "Обновление завершилось ошибкой. Нужна проверка установки.",
+  pre_update_failed: "Не удалось подготовить обновление.",
+  invalid_update_command: "Команда обновления недействительна.",
+  updater_unavailable: "Служба обновления недоступна.",
+  capability_apply_active: "Обновление остановлено: сейчас применяется конфигурация панели.",
+  update_lock_mismatch: "Обновление потеряло подтверждённое состояние операции.",
+  build_failed: "Не удалось проверить или собрать новую версию.",
+  artifact_assertion_failed: "Новая сборка не прошла проверку.",
+  served_artifact_mismatch: "После перезапуска запущена не та версия панели.",
+  restart_failed: "Не удалось перезапустить Control Center после обновления.",
+  repair_required: "Требуется восстановление установленной версии панели.",
+  updater_stale: "Обновление остановилось без подтверждённого результата. Нужна проверка установки."
+};
+
 function updateFailureCopy(result?: string): string {
-  if (result === "rollback_restored") {
-    return "Обновление не установлено. Предыдущая версия восстановлена.";
-  }
-  if (result === "rollback_failed") {
-    return "Обновление завершилось ошибкой. Нужна проверка установки.";
-  }
-  if (result === "updater_stale") {
-    return "Обновление остановилось без подтверждённого результата. Нужна проверка установки.";
+  if (typeof result === "string" && Object.prototype.hasOwnProperty.call(updateFailureReasonCopy, result)) {
+    return updateFailureReasonCopy[result as UpdateFailureResult];
   }
   return "Обновление не завершено. Повторите попытку или проверьте установку панели.";
 }
@@ -109,6 +125,30 @@ function updateCheckFromOwnerState(state: UpdateOwnerState): PanelUpdateCheck | 
     status: state.currentHead === state.targetHead ? "up_to_date" : "update_available",
     reason: "update_in_progress"
   };
+}
+
+function safeActivityEvents(events: UpdateActivityEvent[] | undefined): UpdateActivityEvent[] {
+  if (!Array.isArray(events)) return [];
+  return events
+    .slice(-32)
+    .filter((event): event is UpdateActivityEvent => {
+      return Boolean(
+        event
+        && typeof event === "object"
+        && typeof event.code === "string"
+        && Object.prototype.hasOwnProperty.call(UPDATE_ACTIVITY_COPY, event.code)
+      );
+    });
+}
+
+function progressPhaseCopy(state: UpdateOwnerState | null, dialog: UpdateDialogState): string {
+  if (dialog === "reconnecting") return "Переподключаемся к панели";
+  if (state?.phase && Object.prototype.hasOwnProperty.call(UPDATE_ACTIVITY_COPY, state.phase)) {
+    return UPDATE_ACTIVITY_COPY[state.phase];
+  }
+  if (state?.status === "success") return "Проверяем результат";
+  if (state?.status === "failed") return "Обновление остановлено";
+  return "Ожидаем состояние обновления";
 }
 
 export function useRuntimeStatus(): {
@@ -171,11 +211,13 @@ export function RuntimeControls({
   const [notice, setNotice] = useState<string | null>(null);
   const [updateDialog, setUpdateDialog] = useState<UpdateDialogState>("closed");
   const [updateCheck, setUpdateCheck] = useState<PanelUpdateCheck | null>(null);
+  const [updateOwnerState, setUpdateOwnerState] = useState<UpdateOwnerState | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateAccepted, setUpdateAccepted] = useState(false);
 
   const handleUpdateObserverEvent = useCallback((event: UpdateObserverEvent) => {
     if (event.type === "active") {
+      setUpdateOwnerState(event.state);
       setUpdateCheck((current) => current ?? updateCheckFromOwnerState(event.state));
       setUpdateAccepted(true);
       setUpdateDialog("applying");
@@ -188,6 +230,7 @@ export function RuntimeControls({
       return;
     }
     if (event.type === "idle") {
+      setUpdateOwnerState(event.state);
       setUpdateAccepted(false);
       setUpdateDialog("error");
       setUpdateMessage("Обновление не было запущено. Проверьте состояние панели и повторите попытку.");
@@ -195,6 +238,7 @@ export function RuntimeControls({
     }
     setUpdateAccepted(false);
     if (event.type === "failure") {
+      setUpdateOwnerState(event.state);
       setUpdateDialog("error");
       setUpdateMessage(
         event.reason === "served_mismatch" || event.reason === "served_unverified"
@@ -203,6 +247,7 @@ export function RuntimeControls({
       );
       return;
     }
+    setUpdateOwnerState(event.state);
     setUpdateDialog("closed");
     setUpdateCheck(null);
     setUpdateMessage(null);
@@ -222,6 +267,7 @@ export function RuntimeControls({
         .then(async (state) => {
           if (!active) return;
           if (isActiveUpdateState(state)) {
+            setUpdateOwnerState(state);
             setUpdateCheck(updateCheckFromOwnerState(state));
             setUpdateAccepted(true);
             setUpdateDialog("applying");
@@ -275,6 +321,7 @@ export function RuntimeControls({
       setUpdateAccepted(false);
       setUpdateDialog("closed");
       setUpdateCheck(null);
+      setUpdateOwnerState(null);
       setUpdateMessage(null);
     }
   }, [locked, updateDialog]);
@@ -348,6 +395,7 @@ export function RuntimeControls({
     setUpdateAccepted(false);
     setUpdateDialog("checking");
     setUpdateCheck(null);
+    setUpdateOwnerState(null);
     setUpdateMessage(null);
     try {
       const response = await fetch("/api/v1/system/update/check", {
@@ -390,6 +438,7 @@ export function RuntimeControls({
 
     setUpdateAccepted(false);
     setUpdateDialog("applying");
+    setUpdateOwnerState(null);
     setUpdateMessage("Запускаем обновление…");
     let responseReceived = false;
     try {
@@ -441,6 +490,9 @@ export function RuntimeControls({
     && updateCheck.targetHead
     && fullAccess
   );
+  const updateProgress = updateProgressPercent(updateOwnerState);
+  const updateActivity = safeActivityEvents(updateOwnerState?.events);
+  const showUpdateProgress = ["applying", "reconnecting", "error"].includes(updateDialog) || updateOwnerState !== null;
 
   return (
     <>
@@ -507,6 +559,38 @@ export function RuntimeControls({
               <p className="runtime-update-message">Для установки включите Полный доступ.</p>
             )}
 
+            {showUpdateProgress && (
+              <div className="runtime-update-progress" data-testid="runtime-update-progress">
+                <div className="runtime-update-progress__summary">
+                  <div>
+                    <span>Состояние обновления</span>
+                    <strong data-testid="runtime-update-phase">{progressPhaseCopy(updateOwnerState, updateDialog)}</strong>
+                  </div>
+                  <strong data-testid="runtime-update-percent">{updateProgress}%</strong>
+                </div>
+                <div
+                  className="runtime-update-progress__track"
+                  role="progressbar"
+                  aria-label="Прогресс обновления"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={updateProgress}
+                >
+                  <span style={{ width: `${updateProgress}%` }} />
+                </div>
+                <div className="runtime-update-activity" aria-label="Активность обновления">
+                  <span>Активность</span>
+                  <ol data-testid="runtime-update-activity">
+                    {updateActivity.length > 0
+                      ? updateActivity.map((event, index) => (
+                        <li key={`${event.code}-${index}`}>{UPDATE_ACTIVITY_COPY[event.code]}</li>
+                      ))
+                      : <li>Ожидаем подтверждённую фазу обновления</li>}
+                  </ol>
+                </div>
+              </div>
+            )}
+
             <div className="action-confirmation__actions">
               <button
                 type="button"
@@ -516,6 +600,7 @@ export function RuntimeControls({
                   setUpdateAccepted(false);
                   setUpdateDialog("closed");
                   setUpdateCheck(null);
+                  setUpdateOwnerState(null);
                   setUpdateMessage(null);
                 }}
               >

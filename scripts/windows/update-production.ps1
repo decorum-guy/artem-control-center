@@ -95,6 +95,22 @@ function Invoke-IsolatedValidation {
     }
 }
 
+$ArtemUpdateActivityMax = 32
+$ArtemUpdateActivityCodes = @(
+    "started",
+    "stopping",
+    "checkout",
+    "handoff",
+    "target-authoritative",
+    "validating",
+    "building",
+    "artifact-ready",
+    "restarting",
+    "verifying",
+    "rollback",
+    "completed"
+)
+
 function Write-ArtemUpdateJson {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -105,7 +121,14 @@ function Write-ArtemUpdateJson {
     [IO.File]::WriteAllText($temporary, $json, [Text.Encoding]::ASCII)
     try {
         if (Test-Path -LiteralPath $Path) {
-            [IO.File]::Replace($temporary, $Path, $null)
+            # PowerShell 5.1 can bind an untyped $null as its NullString
+            # wrapper. File.Replace accepts a real CLR null backup path, not
+            # that wrapper, so pass the runtime's actual null value explicitly.
+            [IO.File]::Replace(
+                $temporary,
+                $Path,
+                [System.Management.Automation.Language.NullString]::Value
+            )
         }
         else {
             [IO.File]::Move($temporary, $Path)
@@ -114,6 +137,42 @@ function Write-ArtemUpdateJson {
     finally {
         Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Get-ArtemUpdateActivityHistory {
+    param([object]$Value)
+    $history = @()
+    foreach ($entry in @($Value)) {
+        if ($null -eq $entry) { continue }
+        $code = [string]$entry.code
+        if ($ArtemUpdateActivityCodes -notcontains $code) { continue }
+        if ($history.Count -gt 0 -and [string]$history[$history.Count - 1].code -eq $code) {
+            continue
+        }
+        $history += [pscustomobject]@{ code = $code }
+    }
+    if ($history.Count -gt $ArtemUpdateActivityMax) {
+        $history = @($history | Select-Object -Last $ArtemUpdateActivityMax)
+    }
+    return @($history)
+}
+
+function Add-ArtemUpdateActivity {
+    param(
+        [object]$Existing,
+        [Parameter(Mandatory)][string]$Code
+    )
+    $history = @(Get-ArtemUpdateActivityHistory -Value $Existing)
+    if ($ArtemUpdateActivityCodes -notcontains $Code) {
+        return $history
+    }
+    if ($history.Count -eq 0 -or [string]$history[$history.Count - 1].code -ne $Code) {
+        $history += [pscustomobject]@{ code = $Code }
+    }
+    if ($history.Count -gt $ArtemUpdateActivityMax) {
+        $history = @($history | Select-Object -Last $ArtemUpdateActivityMax)
+    }
+    return @($history)
 }
 
 function Write-ArtemUpdateState {
@@ -138,6 +197,7 @@ function Write-ArtemUpdateState {
     if (-not $TargetHead -and $null -ne $lock) { $TargetHead = [string]$lock.expectedTargetHead }
     if (-not $TargetHead -and $null -ne $transaction) { $TargetHead = [string]$transaction.targetHead }
     if (-not $Phase -and $null -ne $transaction) { $Phase = [string]$transaction.phase }
+    if (-not $Phase -and $null -ne $previousState) { $Phase = [string]$previousState.phase }
     if (-not $StartedAt -and $null -ne $previousState) { $StartedAt = [string]$previousState.startedAt }
     $payload = @{
         schemaVersion = 1
@@ -153,6 +213,19 @@ function Write-ArtemUpdateState {
     }
     if ($StartedAt) { $payload.startedAt = $StartedAt }
     if ($ServedRevision -match '^[0-9a-f]{40}$') { $payload.servedRevision = $ServedRevision.ToLowerInvariant() }
+    $history = if ($null -ne $previousState) {
+        Get-ArtemUpdateActivityHistory -Value $previousState.events
+    }
+    else {
+        @()
+    }
+    if ($Phase -in $ArtemUpdateActivityCodes) {
+        $history = Add-ArtemUpdateActivity -Existing $history -Code $Phase
+    }
+    if ($Status -eq "success") {
+        $history = Add-ArtemUpdateActivity -Existing $history -Code "completed"
+    }
+    $payload.events = @($history | Select-Object -Last $ArtemUpdateActivityMax)
     Write-ArtemUpdateJson -Path $Paths.UpdateState -Payload $payload
 }
 
@@ -296,6 +369,7 @@ function Write-ArtemUpdateTransaction {
         requestId = $LockRequestId.ToLowerInvariant()
         updatedAt = [DateTime]::UtcNow.ToString("o")
     }
+    Write-ArtemUpdateState -Paths $Paths -Status "updating" -Phase $Phase
 }
 
 function Get-ArtemUpdateTransaction {

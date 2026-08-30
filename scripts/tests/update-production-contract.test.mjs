@@ -71,3 +71,64 @@ test("the updater keeps the protected process and repository boundaries", () => 
   assert.match(updater, /Stop-ArtemRuntime\s+-Paths\s+\$paths\s+-Manual\s+\$false/);
   assert.doesNotMatch(updater, /CommandLine\s+-like\s+['\"]\*--kiosk/);
 });
+
+test("Windows PowerShell atomic state publication passes a true CLR null backup path", () => {
+  assert.match(updater, /\[System\.Management\.Automation\.Language\.NullString\]::Value/);
+  assert.doesNotMatch(updater, /\[IO\.File\]::Replace\([\s\S]{0,160},\s*\$null\)/);
+
+  const productionScripts = readFileSync(resolve(root, "scripts/windows/test-production-scripts.ps1"), "utf8");
+  assert.match(updater, /\$ArtemUpdateActivityCodes\s*=\s*@\(/);
+  assert.match(updater, /ArtemUpdateActivityCodes\s+-notcontains/);
+  assert.doesNotMatch(updater, /[А-Яа-яЁё]/);
+  assert.doesNotMatch(productionScripts, /[А-Яа-яЁё]/);
+  for (const functionName of [
+    "Write-ArtemUpdateJson",
+    "Write-ArtemUpdateState",
+    "New-ArtemUpdateLock",
+    "Claim-ArtemUpdateLock",
+    "Refresh-ArtemUpdateLock",
+    "Write-ArtemUpdateTransaction"
+  ]) {
+    assert.match(productionScripts, new RegExp(functionName));
+  }
+  assert.match(productionScripts, /first write must publish by Move/i);
+  assert.match(productionScripts, /second must publish by File\.Replace/i);
+});
+
+test("dashboard failure reasons are exhaustive over the bounded owner result union", () => {
+  const controls = readFileSync(resolve(root, "apps/dashboard/src/RuntimeControls.tsx"), "utf8");
+  assert.match(controls, /type UpdateFailureResult = Exclude<UpdateOwnerResult, "updated" \| "up_to_date">/);
+  for (const result of [
+    "rollback_restored",
+    "rollback_failed",
+    "pre_update_failed",
+    "invalid_update_command",
+    "updater_unavailable",
+    "capability_apply_active",
+    "update_lock_mismatch",
+    "build_failed",
+    "artifact_assertion_failed",
+    "served_artifact_mismatch",
+    "restart_failed",
+    "repair_required",
+    "updater_stale"
+  ]) {
+    assert.match(controls, new RegExp(`^  ${result}:`, "m"));
+  }
+  assert.match(controls, /Обновление не завершено\. Повторите попытку или проверьте установку панели\./);
+});
+
+test("owner-safe update progress is server-owned and rollback remains a distinct phase", () => {
+  const systemUpdate = readFileSync(resolve(root, "apps/panel-agent/src/panel_agent/system_update.py"), "utf8");
+  const observer = readFileSync(resolve(root, "apps/dashboard/src/runtimeUpdateObserver.ts"), "utf8");
+  const controls = readFileSync(resolve(root, "apps/dashboard/src/RuntimeControls.tsx"), "utf8");
+  assert.match(systemUpdate, /UPDATE_ACTIVITY_MAX\s*=\s*32/);
+  assert.match(systemUpdate, /UPDATE_PHASE_PROGRESS/);
+  assert.match(systemUpdate, /progressPercent/);
+  assert.match(systemUpdate, /served_verified/);
+  assert.match(observer, /UPDATE_ACTIVITY_COPY/);
+  assert.match(observer, /no browser elapsed-time deadline/);
+  assert.match(controls, /runtime-update-activity/);
+  assert.match(controls, /runtime-update-progress/);
+  assert.match(controls, /Object\.prototype\.hasOwnProperty/);
+});
