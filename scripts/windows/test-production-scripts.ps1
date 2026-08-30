@@ -369,20 +369,20 @@ try {
     # entrypoint. This keeps the regression on the exact Windows code that
     # publishes update-lock, update-state and update-transaction files.
     $ArtemUpdateActivityMax = 32
-    $ArtemUpdateActivityLabels = @{
-        started = "Проверяем обновление"
-        stopping = "Останавливаем текущую панель"
-        checkout = "Получаем новую версию"
-        handoff = "Передаём управление новой версии обновлятора"
-        "target-authoritative" = "Получаем новую версию"
-        validating = "Проверяем проект"
-        building = "Собираем панель"
-        "artifact-ready" = "Готовим новую сборку"
-        restarting = "Перезапускаем Control Center"
-        verifying = "Проверяем запущенную версию"
-        rollback = "Восстанавливаем предыдущую версию"
-        completed = "Обновление завершено"
-    }
+    $ArtemUpdateActivityCodes = @(
+        "started",
+        "stopping",
+        "checkout",
+        "handoff",
+        "target-authoritative",
+        "validating",
+        "building",
+        "artifact-ready",
+        "restarting",
+        "verifying",
+        "rollback",
+        "completed"
+    )
     $updaterPath = Join-Path $PSScriptRoot "update-production.ps1"
     $updaterTokens = $null
     $updaterErrors = $null

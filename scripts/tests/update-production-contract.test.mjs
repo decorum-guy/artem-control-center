@@ -77,6 +77,10 @@ test("Windows PowerShell atomic state publication passes a true CLR null backup 
   assert.doesNotMatch(updater, /\[IO\.File\]::Replace\([\s\S]{0,160},\s*\$null\)/);
 
   const productionScripts = readFileSync(resolve(root, "scripts/windows/test-production-scripts.ps1"), "utf8");
+  assert.match(updater, /\$ArtemUpdateActivityCodes\s*=\s*@\(/);
+  assert.match(updater, /ArtemUpdateActivityCodes\s+-notcontains/);
+  assert.doesNotMatch(updater, /[А-Яа-яЁё]/);
+  assert.doesNotMatch(productionScripts, /[А-Яа-яЁё]/);
   for (const functionName of [
     "Write-ArtemUpdateJson",
     "Write-ArtemUpdateState",
@@ -89,6 +93,29 @@ test("Windows PowerShell atomic state publication passes a true CLR null backup 
   }
   assert.match(productionScripts, /first write must publish by Move/i);
   assert.match(productionScripts, /second must publish by File\.Replace/i);
+});
+
+test("dashboard failure reasons are exhaustive over the bounded owner result union", () => {
+  const controls = readFileSync(resolve(root, "apps/dashboard/src/RuntimeControls.tsx"), "utf8");
+  assert.match(controls, /type UpdateFailureResult = Exclude<UpdateOwnerResult, "updated" \| "up_to_date">/);
+  for (const result of [
+    "rollback_restored",
+    "rollback_failed",
+    "pre_update_failed",
+    "invalid_update_command",
+    "updater_unavailable",
+    "capability_apply_active",
+    "update_lock_mismatch",
+    "build_failed",
+    "artifact_assertion_failed",
+    "served_artifact_mismatch",
+    "restart_failed",
+    "repair_required",
+    "updater_stale"
+  ]) {
+    assert.match(controls, new RegExp(`^  ${result}:`, "m"));
+  }
+  assert.match(controls, /Обновление не завершено\. Повторите попытку или проверьте установку панели\./);
 });
 
 test("owner-safe update progress is server-owned and rollback remains a distinct phase", () => {

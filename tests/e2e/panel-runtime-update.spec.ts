@@ -507,7 +507,7 @@ test.describe("Control Center runtime update UX", () => {
     await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
 
     await expect.poll(api.getApplyCount).toBe(1);
-    await expect(dialog).toContainText("Обновление не завершено");
+    await expect(dialog).toContainText("Служба обновления недоступна.");
     await expect(dialog).not.toContainText("Запускаем…");
     await expect(dialog.getByRole("button", { name: "Отмена" })).toBeEnabled();
     expect(await dialog.textContent()).not.toMatch(/stderr|fatal:|C:\\|\/home\/|update-production\.ps1/i);
@@ -516,6 +516,40 @@ test.describe("Control Center runtime update UX", () => {
     await closeUpdateDialog(page);
     await page.waitForTimeout(1_000);
     expect(api.getStatusCount()).toBe(statusCountBeforeClose);
+  });
+
+  test("bounded terminal results show fixed owner-safe failure reasons", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    const cases = [
+      ["build_failed", "Не удалось проверить или собрать новую версию."],
+      ["restart_failed", "Не удалось перезапустить Control Center после обновления."],
+      ["artifact_assertion_failed", "Новая сборка не прошла проверку."],
+      ["updater_unavailable", "Служба обновления недоступна."],
+      ["rollback_restored", "Предыдущая версия восстановлена."],
+      ["rollback_failed", "Нужна проверка установки."],
+      ["updater_stale", "Обновление остановилось без подтверждённого результата."],
+      ["pre_update_failed", "Не удалось подготовить обновление."],
+      ["invalid_update_command", "Команда обновления недействительна."],
+      ["capability_apply_active", "сейчас применяется конфигурация панели"],
+      ["update_lock_mismatch", "потеряло подтверждённое состояние операции"],
+      ["served_artifact_mismatch", "запущена не та версия панели"],
+      ["repair_required", "Требуется восстановление установленной версии панели."],
+      ["not-a-real-result", "Обновление не завершено. Повторите попытку или проверьте установку панели."]
+    ] as const;
+
+    for (const [result, copy] of cases) {
+      api.queueStatuses(
+        { schemaVersion: 1, status: "updating", currentHead: CURRENT, targetHead: TARGET, phase: "building" },
+        { schemaVersion: 1, status: "failed", result, currentHead: CURRENT, targetHead: TARGET, phase: "building" }
+      );
+      await zone.getByRole("button", { name: "Обновить панель" }).click();
+      const dialog = page.getByTestId("runtime-update-dialog");
+      await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+      await expect(dialog).toContainText(copy);
+      expect(await dialog.textContent()).not.toMatch(/C:\\|\/home\/|stderr|git|update-production\.ps1|fake-secret-token/i);
+      await closeUpdateDialog(page);
+    }
   });
 
   test("changed target conflict rechecks instead of silently applying the new target", async ({ page }) => {

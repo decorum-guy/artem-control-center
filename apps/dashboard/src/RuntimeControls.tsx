@@ -11,6 +11,7 @@ import {
   type ProductionBuildIdentity,
   type UpdateActivityEvent,
   type UpdateOwnerState,
+  type UpdateOwnerResult,
   type UpdateObserverEvent
 } from "./runtimeUpdateObserver";
 import {
@@ -52,15 +53,27 @@ const updateReasonCopy: Record<string, string> = {
 
 const UPDATE_STATUS_POLL_MS = 750;
 
+type UpdateFailureResult = Exclude<UpdateOwnerResult, "updated" | "up_to_date">;
+
+const updateFailureReasonCopy: Record<UpdateFailureResult, string> = {
+  rollback_restored: "Обновление не установлено. Предыдущая версия восстановлена.",
+  rollback_failed: "Обновление завершилось ошибкой. Нужна проверка установки.",
+  pre_update_failed: "Не удалось подготовить обновление.",
+  invalid_update_command: "Команда обновления недействительна.",
+  updater_unavailable: "Служба обновления недоступна.",
+  capability_apply_active: "Обновление остановлено: сейчас применяется конфигурация панели.",
+  update_lock_mismatch: "Обновление потеряло подтверждённое состояние операции.",
+  build_failed: "Не удалось проверить или собрать новую версию.",
+  artifact_assertion_failed: "Новая сборка не прошла проверку.",
+  served_artifact_mismatch: "После перезапуска запущена не та версия панели.",
+  restart_failed: "Не удалось перезапустить Control Center после обновления.",
+  repair_required: "Требуется восстановление установленной версии панели.",
+  updater_stale: "Обновление остановилось без подтверждённого результата. Нужна проверка установки."
+};
+
 function updateFailureCopy(result?: string): string {
-  if (result === "rollback_restored") {
-    return "Обновление не установлено. Предыдущая версия восстановлена.";
-  }
-  if (result === "rollback_failed") {
-    return "Обновление завершилось ошибкой. Нужна проверка установки.";
-  }
-  if (result === "updater_stale") {
-    return "Обновление остановилось без подтверждённого результата. Нужна проверка установки.";
+  if (typeof result === "string" && Object.prototype.hasOwnProperty.call(updateFailureReasonCopy, result)) {
+    return updateFailureReasonCopy[result as UpdateFailureResult];
   }
   return "Обновление не завершено. Повторите попытку или проверьте установку панели.";
 }

@@ -96,20 +96,20 @@ function Invoke-IsolatedValidation {
 }
 
 $ArtemUpdateActivityMax = 32
-$ArtemUpdateActivityLabels = @{
-    started = "Проверяем обновление"
-    stopping = "Останавливаем текущую панель"
-    checkout = "Получаем новую версию"
-    handoff = "Передаём управление новой версии обновлятора"
-    "target-authoritative" = "Получаем новую версию"
-    validating = "Проверяем проект"
-    building = "Собираем панель"
-    "artifact-ready" = "Готовим новую сборку"
-    restarting = "Перезапускаем Control Center"
-    verifying = "Проверяем запущенную версию"
-    rollback = "Восстанавливаем предыдущую версию"
-    completed = "Обновление завершено"
-}
+$ArtemUpdateActivityCodes = @(
+    "started",
+    "stopping",
+    "checkout",
+    "handoff",
+    "target-authoritative",
+    "validating",
+    "building",
+    "artifact-ready",
+    "restarting",
+    "verifying",
+    "rollback",
+    "completed"
+)
 
 function Write-ArtemUpdateJson {
     param(
@@ -145,7 +145,7 @@ function Get-ArtemUpdateActivityHistory {
     foreach ($entry in @($Value)) {
         if ($null -eq $entry) { continue }
         $code = [string]$entry.code
-        if (-not $ArtemUpdateActivityLabels.ContainsKey($code)) { continue }
+        if ($ArtemUpdateActivityCodes -notcontains $code) { continue }
         if ($history.Count -gt 0 -and [string]$history[$history.Count - 1].code -eq $code) {
             continue
         }
@@ -163,7 +163,7 @@ function Add-ArtemUpdateActivity {
         [Parameter(Mandatory)][string]$Code
     )
     $history = @(Get-ArtemUpdateActivityHistory -Value $Existing)
-    if (-not $ArtemUpdateActivityLabels.ContainsKey($Code)) {
+    if ($ArtemUpdateActivityCodes -notcontains $Code) {
         return $history
     }
     if ($history.Count -eq 0 -or [string]$history[$history.Count - 1].code -ne $Code) {
@@ -219,7 +219,7 @@ function Write-ArtemUpdateState {
     else {
         @()
     }
-    if ($Phase -in $ArtemUpdateActivityLabels.Keys) {
+    if ($Phase -in $ArtemUpdateActivityCodes) {
         $history = Add-ArtemUpdateActivity -Existing $history -Code $Phase
     }
     if ($Status -eq "success") {
