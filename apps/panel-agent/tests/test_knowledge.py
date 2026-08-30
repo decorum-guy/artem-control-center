@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import panel_agent.knowledge as knowledge_module
 
 from panel_agent.knowledge import (
     COFFEE_GUIDE_DOCUMENT_ID,
@@ -198,6 +200,67 @@ def test_symlink_to_runtime_env_never_returns_fake_secret(tmp_path):
     assert result.status == "unavailable"
     assert fake_token not in result.model_dump_json(by_alias=True)
     assert str(tmp_path) not in result.model_dump_json(by_alias=True)
+
+
+def test_no_o_nofollow_open_object_race_is_unavailable(tmp_path, monkeypatch):
+    """An outside object substituted after lstat must not be read.
+
+    Returning a descriptor for runtime.env models the Windows no-O_NOFOLLOW
+    path after the validated pathname has been replaced by a reparse target.
+    It keeps the regression deterministic and does not require symlink
+    privileges in CI.
+    """
+
+    root = knowledge_root(tmp_path)
+    guide = root / COFFEE_GUIDE_FILENAME
+    write_guide(root, b"SAFE")
+    fake_token = "SECRET_TOCTOU_155A"
+    runtime_env = tmp_path / "runtime.env"
+    runtime_env.write_text(fake_token, encoding="utf-8")
+
+    outside_fd = os.open(str(runtime_env), os.O_RDONLY)
+    try:
+        monkeypatch.delattr(knowledge_module.os, "O_NOFOLLOW", raising=False)
+
+        def swapped_open(path, flags):
+            assert path == str(guide)
+            return os.dup(outside_fd)
+
+        monkeypatch.setattr(knowledge_module.os, "open", swapped_open)
+        result = KnowledgeReader(root).read_coffee_guide()
+    finally:
+        os.close(outside_fd)
+
+    assert result.status == "unavailable"
+    assert result.content is None
+    assert fake_token not in result.model_dump_json(by_alias=True)
+
+
+def test_path_swap_to_runtime_env_between_validation_and_open_is_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    root = knowledge_root(tmp_path)
+    guide = root / COFFEE_GUIDE_FILENAME
+    write_guide(root, b"SAFE")
+    fake_token = "SECRET_SYMLINK_TOCTOU_155A"
+    runtime_env = tmp_path / "runtime.env"
+    runtime_env.write_text(fake_token, encoding="utf-8")
+
+    original_open = knowledge_module.os.open
+    monkeypatch.delattr(knowledge_module.os, "O_NOFOLLOW", raising=False)
+
+    def swap_before_open(path, flags):
+        guide.unlink()
+        make_symlink(guide, runtime_env)
+        return original_open(path, flags)
+
+    monkeypatch.setattr(knowledge_module.os, "open", swap_before_open)
+    result = KnowledgeReader(root).read_coffee_guide()
+
+    assert result.status == "unavailable"
+    assert result.content is None
+    assert fake_token not in result.model_dump_json(by_alias=True)
 
 
 def test_fixed_reader_has_no_arbitrary_path_or_filename_api(tmp_path):

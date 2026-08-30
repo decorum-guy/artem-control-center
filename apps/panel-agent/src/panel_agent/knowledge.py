@@ -96,6 +96,8 @@ class KnowledgeReader:
         # intermediate links in a trusted root.
         if stat.S_ISLNK(document_lstat.st_mode) or not stat.S_ISREG(document_lstat.st_mode):
             return self._unavailable()
+        if self._file_identity(document_lstat) is None:
+            return self._unavailable()
         try:
             resolved_document = document_path.resolve(strict=True)
             resolved_document.relative_to(resolved_root)
@@ -111,11 +113,20 @@ class KnowledgeReader:
             with os.fdopen(file_descriptor, "rb") as handle:
                 file_descriptor = None
                 metadata = os.fstat(handle.fileno())
-                if not stat.S_ISREG(metadata.st_mode):
+                if not self._same_regular_file(document_lstat, metadata):
+                    return self._unavailable()
+                try:
+                    post_open_lstat = os.lstat(document_path)
+                except OSError:
+                    return self._unavailable()
+                if not self._same_regular_file(document_lstat, post_open_lstat):
                     return self._unavailable()
                 raw_content = handle.read(MAX_DOCUMENT_BYTES + 1)
         except FileNotFoundError:
-            return self._missing()
+            # The fixed path existed during validation but disappeared before
+            # open. Treat that check/open race as unavailable; a later request
+            # will perform a fresh validation and can report missing normally.
+            return self._unavailable()
         except (OSError, ValueError):
             return self._unavailable()
         finally:
@@ -141,6 +152,37 @@ class KnowledgeReader:
             byte_size=len(raw_content),
             modified_at=self._modified_at(metadata.st_mtime),
         )
+
+    @staticmethod
+    def _file_identity(metadata: os.stat_result) -> tuple[int, int] | None:
+        """Return the cross-platform identity fields for a validated file.
+
+        Python exposes the device and file-index/inode pair as ``st_dev`` and
+        ``st_ino`` on supported POSIX and Windows runtimes. If either field is
+        unavailable or unusable, the safe result is to reject the read rather
+        than treat a pathname as an object binding.
+        """
+
+        try:
+            device = int(metadata.st_dev)
+            inode = int(metadata.st_ino)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if device <= 0 or inode <= 0:
+            return None
+        return device, inode
+
+    @classmethod
+    def _same_regular_file(
+        cls,
+        expected: os.stat_result,
+        actual: os.stat_result,
+    ) -> bool:
+        if not stat.S_ISREG(expected.st_mode) or not stat.S_ISREG(actual.st_mode):
+            return False
+        expected_identity = cls._file_identity(expected)
+        actual_identity = cls._file_identity(actual)
+        return expected_identity is not None and expected_identity == actual_identity
 
     @staticmethod
     def _modified_at(timestamp: float) -> str | None:
