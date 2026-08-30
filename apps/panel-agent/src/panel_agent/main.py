@@ -108,6 +108,7 @@ from .coffee_delayed_start import (
     CoffeeDelayedStartError,
     CoffeeDelayedStartScheduler,
 )
+from .knowledge import KnowledgeReader, build_knowledge_router
 
 
 def configured_mode() -> PanelMode:
@@ -147,6 +148,7 @@ interface_copy_store = InterfaceCopySettingsStore.from_environment(
 coffee_diary_store = CoffeeDiaryStore.from_environment(writes_enabled=True)
 coffee_photo_storage = PhotoStorage(cleanup_staged=True)
 coffee_upload_registry = PhotoUploadRegistry(coffee_photo_storage)
+knowledge_reader = KnowledgeReader()
 
 
 @asynccontextmanager
@@ -202,6 +204,7 @@ app.include_router(
         calendar_read_observer=diagnostics_collector.observe_calendar_read,
     )
 )
+app.include_router(build_knowledge_router(knowledge_reader))
 fixture_services: List[ServiceSnapshot] = []
 revision = 1
 fixture_coffee_state_override: str | None = None

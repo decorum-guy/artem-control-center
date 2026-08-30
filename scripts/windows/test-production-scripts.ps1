@@ -1,5 +1,7 @@
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "runtime-common.ps1")
+
 $files = Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.ps1" -File |
     Where-Object { $_.Name -ne "test-production-scripts.ps1" }
 
@@ -25,6 +27,9 @@ $temporary = Join-Path `
 $rolloutRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
     ("artem-avalar-rollout-{0}" -f [guid]::NewGuid())
+$knowledgeContractRoot = Join-Path `
+    ([IO.Path]::GetTempPath()) `
+    ("artem-knowledge-contract-{0}" -f [guid]::NewGuid())
 $previousLocalAppData = $env:LOCALAPPDATA
 
 try {
@@ -227,6 +232,75 @@ try {
         throw "Deterministic kiosk watcher regression must exist beside the watcher policy"
     }
 
+    if ($runtimeCommonText -notmatch 'Knowledge\s*=\s*Join-Path \$runtimeRoot "knowledge"') {
+        throw "Runtime path contract must expose the knowledge directory beneath RuntimeRoot"
+    }
+
+    # Exercise the knowledge path and initialization contract against an
+    # isolated LOCALAPPDATA. Initialization may create the directory, but it
+    # must never own or rewrite the owner-maintained file.
+    $env:LOCALAPPDATA = $knowledgeContractRoot
+    $knowledgePaths = Get-ArtemRuntimePaths
+    $expectedKnowledgeRuntimeRoot = Join-Path $knowledgeContractRoot "ArtemControlCenter"
+    $expectedKnowledgeRoot = Join-Path $expectedKnowledgeRuntimeRoot "knowledge"
+    if ($knowledgePaths.RuntimeRoot -ne $expectedKnowledgeRuntimeRoot) {
+        throw "RuntimeRoot no longer follows %LOCALAPPDATA%\\ArtemControlCenter"
+    }
+    if ($knowledgePaths.Knowledge -ne $expectedKnowledgeRoot) {
+        throw "Knowledge path is not beneath RuntimeRoot"
+    }
+    $repoRootFull = [IO.Path]::GetFullPath($knowledgePaths.RepoRoot)
+    $knowledgeRootFull = [IO.Path]::GetFullPath($knowledgePaths.Knowledge)
+    if ($knowledgeRootFull.StartsWith(
+            $repoRootFull + [IO.Path]::DirectorySeparatorChar,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+        throw "Knowledge path must remain outside RepoRoot"
+    }
+
+    Initialize-ArtemRuntimeDirectories -Paths $knowledgePaths
+    if (-not (Test-Path -LiteralPath $knowledgePaths.Knowledge -PathType Container)) {
+        throw "Runtime initialization did not create the knowledge directory"
+    }
+    $knowledgeFixture = Join-Path $knowledgePaths.Knowledge "coffee-guide.md"
+    [IO.File]::WriteAllBytes(
+        $knowledgeFixture,
+        [Text.Encoding]::UTF8.GetBytes("# deterministic fixture`n")
+    )
+    $knowledgeBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes($knowledgeFixture))
+    Initialize-ArtemRuntimeDirectories -Paths $knowledgePaths
+    $knowledgeAfter = [Convert]::ToBase64String([IO.File]::ReadAllBytes($knowledgeFixture))
+    if ($knowledgeBefore -ne $knowledgeAfter) {
+        throw "Runtime directory initialization overwrote coffee-guide.md"
+    }
+
+    # The real production promotion helper only owns generated dashboard
+    # paths. Prove that a promotion leaves the knowledge fixture untouched and
+    # keep a source guard for both promotion and updater/rollback ownership.
+    $promotionRoot = Join-Path $knowledgeContractRoot "promotion"
+    $promotionDashboard = Join-Path $promotionRoot "dashboard"
+    $promotionStaged = Join-Path $promotionRoot "staged"
+    New-Item -ItemType Directory -Force -Path $promotionDashboard, $promotionStaged | Out-Null
+    Set-Content -LiteralPath (Join-Path $promotionDashboard "index.html") -Value "old" -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $promotionStaged "index.html") -Value "new" -Encoding UTF8
+    $promotionPaths = [pscustomobject]@{
+        DashboardDist = $promotionDashboard
+        RollbackDashboard = Join-Path $promotionRoot "rollback"
+    }
+    Promote-ArtemProductionBuild -Paths $promotionPaths -StagedDashboard $promotionStaged
+    if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($knowledgeFixture)) -ne $knowledgeBefore) {
+        throw "Production dashboard promotion changed coffee-guide.md"
+    }
+    $promotionFunction = $runtimeCommonText.Substring(
+        $runtimeCommonText.IndexOf("function Promote-ArtemProductionBuild")
+    )
+    if ($promotionFunction -match '\$Paths\.Knowledge') {
+        throw "Dashboard promotion must not own Knowledge"
+    }
+    if ($updaterText -match '(?im)(?:Move|Remove)-Item[^\r\n]*\$paths\.Knowledge') {
+        throw "Updater and rollback must not own Knowledge"
+    }
+
     # Exercise the real AVALAR runtime.env updater against an isolated LOCALAPPDATA.
     $env:LOCALAPPDATA = $rolloutRoot
     $runtimeRoot = Join-Path $rolloutRoot "ArtemControlCenter"
@@ -283,6 +357,7 @@ finally {
     $env:LOCALAPPDATA = $previousLocalAppData
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $rolloutRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $knowledgeContractRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime ACLs, visible kiosk/open recovery, exact-target updater, Scheduled Task SID and AVALAR rollout configuration."
+Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime ACLs, knowledge path/init/promotion isolation, visible kiosk/open recovery, exact-target updater, Scheduled Task SID and AVALAR rollout configuration."

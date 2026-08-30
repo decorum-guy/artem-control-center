@@ -12,6 +12,7 @@ function Get-ArtemRuntimePaths {
     [pscustomobject]@{
         RepoRoot = $repoRoot
         RuntimeRoot = $runtimeRoot
+        Knowledge = Join-Path $runtimeRoot "knowledge"
         Logs = Join-Path $runtimeRoot "logs"
         RuntimeEnv = Join-Path $runtimeRoot "runtime.env"
         State = Join-Path $runtimeRoot "runtime-state.json"
@@ -44,6 +45,7 @@ function Get-ArtemRuntimePaths {
 function Initialize-ArtemRuntimeDirectories {
     param([Parameter(Mandatory)]$Paths)
     New-Item -ItemType Directory -Force -Path $Paths.RuntimeRoot | Out-Null
+    New-Item -ItemType Directory -Force -Path $Paths.Knowledge | Out-Null
     New-Item -ItemType Directory -Force -Path $Paths.Logs | Out-Null
     New-Item -ItemType Directory -Force -Path $Paths.EdgeProfile | Out-Null
 }
