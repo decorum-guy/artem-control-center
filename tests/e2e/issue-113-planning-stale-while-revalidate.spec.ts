@@ -432,6 +432,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect.poll(() => tasks.requests).toBeGreaterThanOrEqual(2);
     await expect(page.getByText("Старая задача 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
     tasks.release.resolve();
     await expect(page.getByText("Новая задача 1")).toBeVisible();
 
@@ -454,6 +455,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await page.getByRole("button", { name: "Ещё" }).click();
     await expect(page.getByText("Новая задача 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
     nextPage.resolve();
     await expect(page.getByText("Задача страницы 2")).toBeVisible();
   });
@@ -486,6 +488,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect.poll(() => reminders.requests).toBeGreaterThanOrEqual(2);
     await expect(page.getByText("Старое напоминание 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
     reminders.release.resolve();
     await expect(page.getByText("Новое напоминание 1")).toBeVisible();
 
@@ -514,6 +517,7 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await page.getByRole("button", { name: "Ещё" }).click();
     await expect(page.getByText("Новое напоминание 1")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-loading")).toBeVisible();
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
     nextPage.resolve();
     await expect(page.getByText("Напоминание страницы 2")).toBeVisible();
   });

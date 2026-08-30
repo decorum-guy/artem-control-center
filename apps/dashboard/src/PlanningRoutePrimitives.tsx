@@ -48,6 +48,7 @@ export function PlanningRouteFrame({
   lastSyncedAt,
   sources,
   error,
+  loading = false,
   hasConfirmedContent = false,
   refreshing = false,
   suppressRefreshWithConfirmedContent = false,
@@ -64,6 +65,8 @@ export function PlanningRouteFrame({
   lastSyncedAt: string | null;
   sources?: PlanningCalendarSource[];
   error?: PlanningReadError | null;
+  /** A started target read is neutral; absence of an envelope is not an outage. */
+  loading?: boolean;
   hasConfirmedContent?: boolean;
   refreshing?: boolean;
   /** Calendar uses a delayed fixed overlay; other Planning routes retain their established in-flow cue. */
@@ -97,6 +100,7 @@ export function PlanningRouteFrame({
         sourceStatus={sourceStatus}
         lastSyncedAt={lastSyncedAt}
         error={error}
+        loading={loading}
         hasConfirmedContent={hasConfirmedContent}
         refreshing={refreshing}
         suppressRefreshWithConfirmedContent={suppressRefreshWithConfirmedContent}
@@ -154,6 +158,7 @@ export function PlanningRouteHealth({
   sourceStatus,
   lastSyncedAt,
   error,
+  loading = false,
   hasConfirmedContent = false,
   refreshing = false,
   suppressRefreshWithConfirmedContent = false,
@@ -163,6 +168,7 @@ export function PlanningRouteHealth({
   sourceStatus: PlanningSourceStatus | "unavailable";
   lastSyncedAt: string | null;
   error?: PlanningReadError | null;
+  loading?: boolean;
   hasConfirmedContent?: boolean;
   refreshing?: boolean;
   suppressRefreshWithConfirmedContent?: boolean;
@@ -170,9 +176,9 @@ export function PlanningRouteHealth({
   onRetry?: () => void;
 }) {
   const errorUnavailable = Boolean(error && error.status === 503);
-  const rawWarning = preview ? null : errorUnavailable ? "unavailable" : error ? "error" : sourceStatus === "current" ? null : sourceStatus;
+  const rawWarning = loading || preview ? null : errorUnavailable ? "unavailable" : error ? "error" : sourceStatus === "current" ? null : sourceStatus;
   const visibleWarning = useOwnerWarningDwell(rawWarning);
-  const warningVisibleImmediately = preview || !hasConfirmedContent;
+  const warningVisibleImmediately = !loading && (preview || !hasConfirmedContent);
   const warning = warningVisibleImmediately ? rawWarning : visibleWarning;
   const visibleError = Boolean(error) && (warningVisibleImmediately || visibleWarning !== null);
   const state = visibleError

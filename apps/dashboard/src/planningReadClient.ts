@@ -1497,6 +1497,39 @@ export interface PlanningReadState<T> {
   error: PlanningReadError | null;
 }
 
+/** Per-route-reader bound: route data must never outlive its mounted owner. */
+export const MAX_PLANNING_READ_QUERY_CACHE_ENTRIES = 8;
+
+/**
+ * Small insertion-recency LRU for one usePlanningRead instance. A Map gives us
+ * deterministic oldest-first eviction while keeping route data private to the
+ * mounted component that confirmed it.
+ */
+export class PlanningReadQueryCache<T> {
+  private readonly entries = new Map<string, PlanningReadEnvelope<T>>();
+
+  get(queryKey: string): PlanningReadEnvelope<T> | null {
+    const value = this.entries.get(queryKey);
+    if (!value) return null;
+    this.entries.delete(queryKey);
+    this.entries.set(queryKey, value);
+    return value;
+  }
+
+  set(queryKey: string, value: PlanningReadEnvelope<T>): void {
+    this.entries.delete(queryKey);
+    this.entries.set(queryKey, value);
+    if (this.entries.size > MAX_PLANNING_READ_QUERY_CACHE_ENTRIES) {
+      const oldestQueryKey = this.entries.keys().next().value;
+      if (oldestQueryKey) this.entries.delete(oldestQueryKey);
+    }
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+}
+
 interface PlanningReadInternalState<T> extends PlanningReadState<T> {
   queryKey: string;
   refreshKey: string;
@@ -1517,6 +1550,7 @@ export function usePlanningRead<T>(
   const readerRef = useRef(reader);
   readerRef.current = reader;
   const generationRef = useRef(0);
+  const cacheRef = useRef(new PlanningReadQueryCache<T>());
   const [state, setState] = useState<PlanningReadInternalState<T>>({
     queryKey,
     refreshKey,
@@ -1535,22 +1569,25 @@ export function usePlanningRead<T>(
     }
     const controller = new AbortController();
     const activeReader = readerRef.current;
+    const cachedTarget = cacheRef.current.get(queryKey);
     setState((previous) => {
       const sameQuery = previous.queryKey === queryKey;
-      const hasData = sameQuery && previous.data !== null;
+      const data = sameQuery ? previous.data ?? cachedTarget : cachedTarget;
+      const hasData = data !== null;
       return {
         queryKey,
         refreshKey,
         loading: !hasData,
         refreshing: hasData,
-        data: sameQuery ? previous.data : null,
+        data,
         error: null
       };
     });
     void activeReader(controller.signal)
       .then((data) => {
         setState((previous) => {
-          if (generationRef.current !== generation || previous.queryKey !== queryKey) return previous;
+          if (generationRef.current !== generation || controller.signal.aborted || previous.queryKey !== queryKey) return previous;
+          cacheRef.current.set(queryKey, data);
           return { queryKey, refreshKey, loading: false, refreshing: false, data, error: null };
         });
       })
@@ -1566,7 +1603,7 @@ export function usePlanningRead<T>(
             refreshKey,
             loading: false,
             refreshing: false,
-            data: previous.data,
+            data: previous.data ?? cacheRef.current.get(queryKey),
             error
           };
         });
@@ -1576,12 +1613,19 @@ export function usePlanningRead<T>(
     };
   }, [enabled, queryKey, refreshKey]);
 
-  if (!enabled || state.queryKey !== queryKey) {
-    return { loading: enabled, refreshing: false, data: null, error: null };
+  if (!enabled) {
+    return { loading: false, refreshing: false, data: null, error: null };
+  }
+  if (state.queryKey !== queryKey) {
+    const cachedTarget = cacheRef.current.get(queryKey);
+    return cachedTarget
+      ? { loading: false, refreshing: true, data: cachedTarget, error: null }
+      : { loading: true, refreshing: false, data: null, error: null };
   }
   if (state.refreshKey !== refreshKey) {
-    const hasData = state.data !== null;
-    return { loading: !hasData, refreshing: hasData, data: hasData ? state.data : null, error: null };
+    const data = state.data ?? cacheRef.current.get(queryKey);
+    const hasData = data !== null;
+    return { loading: !hasData, refreshing: hasData, data, error: null };
   }
   return {
     loading: state.loading,

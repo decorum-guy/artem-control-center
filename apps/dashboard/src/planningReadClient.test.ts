@@ -3,7 +3,10 @@ import {
   mutatePlanningEvent,
   mutatePlanningReminder,
   mutatePlanningTask,
+  MAX_PLANNING_READ_QUERY_CACHE_ENTRIES,
   PlanningMutationError,
+  type PlanningReadEnvelope,
+  PlanningReadQueryCache,
   PlanningReadError,
   planningReadParsers,
   previewPlanningReminder,
@@ -129,6 +132,37 @@ const nativePhaseBSource = {
 afterEach(() => vi.restoreAllMocks());
 
 describe("fixed Planning read client", () => {
+  it("keeps successful target envelopes in a bounded deterministic LRU", () => {
+    const cache = new PlanningReadQueryCache<{ title: string }>();
+    const entry = (title: string) => envelope({ items: [{ ...task, title }] }) as unknown as PlanningReadEnvelope<{ title: string }>;
+
+    for (let index = 0; index < MAX_PLANNING_READ_QUERY_CACHE_ENTRIES; index += 1) {
+      cache.set(`query-${index}`, entry(`Query ${index}`));
+    }
+    expect(cache.size).toBe(MAX_PLANNING_READ_QUERY_CACHE_ENTRIES);
+
+    // Reading an entry makes it recent, so the next insertion evicts query-1.
+    expect(cache.get("query-0")?.items[0].title).toBe("Query 0");
+    cache.set("query-8", entry("Query 8"));
+    expect(cache.size).toBe(MAX_PLANNING_READ_QUERY_CACHE_ENTRIES);
+    expect(cache.get("query-1")).toBeNull();
+    expect(cache.get("query-0")?.items[0].title).toBe("Query 0");
+    expect(cache.get("query-8")?.items[0].title).toBe("Query 8");
+  });
+
+  it("replaces a successful target cache entry and refreshes its recency", () => {
+    const cache = new PlanningReadQueryCache<{ title: string }>();
+    const entry = (title: string) => envelope({ items: [{ ...task, title }] }) as unknown as PlanningReadEnvelope<{ title: string }>;
+    for (let index = 0; index < MAX_PLANNING_READ_QUERY_CACHE_ENTRIES; index += 1) {
+      cache.set(`query-${index}`, entry(`Query ${index}`));
+    }
+    cache.set("query-0", entry("Refreshed query 0"));
+    cache.set("query-8", entry("Query 8"));
+
+    expect(cache.get("query-0")?.items[0].title).toBe("Refreshed query 0");
+    expect(cache.get("query-1")).toBeNull();
+  });
+
   it("forwards the real Calendar view alongside the bounded UTC range", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       ...envelope({ domain: "calendar_event", items: [calendarEvent] }),
