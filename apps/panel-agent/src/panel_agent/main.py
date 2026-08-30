@@ -157,7 +157,11 @@ async def lifespan(_: FastAPI):
     elif SETTINGS.panel_planning_enabled:
         await runtime.start_planning()
         await snapshot_publisher.rebuild()
-    scheduler_started = MODE in {"production", "integration_test"}
+    # Integration tests construct concurrent TestClients around this imported
+    # app.  The production scheduler is process-owned, while direct scheduler
+    # tests cover recovery and due execution with injected clocks; avoid
+    # sharing one background task across independent test event loops.
+    scheduler_started = MODE == "production"
     if scheduler_started:
         await coffee_delayed_start_scheduler.start()
     try:
