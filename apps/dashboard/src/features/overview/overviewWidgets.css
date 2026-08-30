@@ -327,6 +327,51 @@
   font-weight: var(--cc-type-control-weight);
 }
 
+.coffee-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.coffee-action-row--compact {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, .85fr);
+}
+
+.coffee-action-row--wide {
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.25fr);
+}
+
+.coffee-action-row > button {
+  min-width: 0;
+  min-height: 56px;
+  width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.coffee-delayed-start-action {
+  border: 1px solid var(--cc-accent);
+  border-radius: var(--cc-radius-control);
+  color: var(--cc-accent-strong);
+  background: var(--cc-surface-2);
+  font-size: var(--cc-type-control-size);
+  font-weight: var(--cc-type-control-weight);
+  line-height: var(--cc-type-control-line);
+}
+
+.coffee-delayed-start-action:hover:not(:disabled),
+.coffee-delayed-start-action:focus-visible {
+  background: var(--cc-selected-bg);
+}
+
+.coffee-delayed-start-action:disabled {
+  border-color: var(--cc-border);
+  color: var(--cc-text-disabled);
+  background: var(--cc-surface-2);
+}
+
 .coffee-panel--overview .coffee-authority {
   margin: 8px 0 0;
   color: var(--cc-text-secondary);
@@ -348,6 +393,7 @@
   padding: 0 8px 8px;
   border-left: 0;
   background: transparent;
+  pointer-events: none;
 }
 
 /* Keep the warming activity source-owned by the rendered image. Scaling the
@@ -537,6 +583,10 @@
 .coffee-panel--overview .primary-action {
   min-width: 144px;
   min-height: 56px;
+}
+
+.coffee-panel--overview .coffee-action-row .primary-action {
+  min-width: 0;
 }
 .coffee-panel--overview:not(.coffee-panel--off) .primary-action {
   border-color: var(--cc-border);

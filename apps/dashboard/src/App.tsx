@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
-import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
+import type { CoffeeDelayedStartRecord, DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import {
   HomePage,
   OverviewPage,
@@ -18,7 +18,8 @@ import { reconcileLayout, resolveManifest } from "./registry";
 import { ProductShell, type ShellNavigationTarget, type ShellRoutePath } from "./Shell";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { CoffeeWidget, GenericServiceWidget } from "./widgets";
-import { executeCoffeeAction } from "./coffeeApi";
+import { cancelCoffeeDelayedStart, createCoffeeDelayedStart, executeCoffeeAction, getCoffeeDelayedStart } from "./coffeeApi";
+import { CoffeeDelayedStartDialog } from "./CoffeeDelayedStartDialog";
 import { SnapshotCoordinator } from "./snapshotStream";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { ConnectivityRecoverySurface } from "./ConnectivityActions";
@@ -94,6 +95,12 @@ export function App() {
   const [kiosk, setKiosk] = useState(false);
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
   const [coffeeActionPending, setCoffeeActionPending] = useState(false);
+  const [coffeeDelayedStart, setCoffeeDelayedStart] = useState<CoffeeDelayedStartRecord | null>(null);
+  const [coffeeDelayedStartCanReplace, setCoffeeDelayedStartCanReplace] = useState(false);
+  const [coffeeDelayedStartWritesEnabled, setCoffeeDelayedStartWritesEnabled] = useState(false);
+  const [coffeeDelayedStartConfirming, setCoffeeDelayedStartConfirming] = useState(false);
+  const [coffeeDelayedStartPending, setCoffeeDelayedStartPending] = useState(false);
+  const [coffeeDelayedStartDialogOpen, setCoffeeDelayedStartDialogOpen] = useState(false);
   const snapshotCoordinator = useRef<SnapshotCoordinator | null>(null);
 
   useEffect(() => {
@@ -120,6 +127,38 @@ export function App() {
     () => snapshotCoordinator.current?.refreshAfterCurrent() ?? Promise.resolve(false),
     []
   );
+
+  const refreshCoffeeDelayedStart = useCallback(async () => {
+    try {
+      const result = await getCoffeeDelayedStart();
+      setCoffeeDelayedStart(result.schedule);
+      setCoffeeDelayedStartWritesEnabled(result.writesEnabled);
+      setCoffeeDelayedStartCanReplace(
+        result.writesEnabled
+        && result.available
+        && result.schedule?.status !== "executing"
+      );
+      return result.schedule;
+    } catch {
+      // A failed read-back must not leave a stale confirmed countdown on screen.
+      setCoffeeDelayedStart(null);
+      setCoffeeDelayedStartCanReplace(false);
+      setCoffeeDelayedStartWritesEnabled(false);
+      return null;
+    }
+  }, []);
+
+  const hasSnapshot = snapshot !== null;
+  useEffect(() => {
+    if (!hasSnapshot) return;
+    void refreshCoffeeDelayedStart();
+    const timer = window.setInterval(() => void refreshCoffeeDelayedStart(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [hasSnapshot, refreshCoffeeDelayedStart, scenario]);
+
+  useEffect(() => {
+    if (snapshot) void refreshCoffeeDelayedStart();
+  }, [refreshCoffeeDelayedStart, snapshot]);
 
   useEffect(() => {
     const onPopState = () => setRoute(routeFromLocation());
@@ -199,6 +238,7 @@ export function App() {
         detail: "Проверяем новое состояние…"
       });
       const reconciled = await reconcileSnapshot();
+      await refreshCoffeeDelayedStart();
       showNotice({
         id: "coffee.action",
         severity: reconciled ? "success" : "warning",
@@ -218,6 +258,104 @@ export function App() {
       });
     } finally {
       setCoffeeActionPending(false);
+    }
+  }
+
+  function openCoffeeDelayedStart(): void {
+    if (!guardMutation()) {
+      showNotice({
+        id: "coffee.delayed-start.locked",
+        severity: "warning",
+        title: "Панель заблокирована",
+        detail: "Удерживайте замок для разблокировки управления.",
+        timeoutMs: 6_000
+      });
+      return;
+    }
+    setCoffeeDelayedStartDialogOpen(true);
+  }
+
+  async function saveCoffeeDelayedStart(delayMinutes: number): Promise<void> {
+    if (!guardMutation() || coffeeDelayedStartPending || coffeeDelayedStartConfirming || confirmationOpen) return;
+    setCoffeeDelayedStartConfirming(true);
+    try {
+      const confirmation = await confirmAction("home.coffee.turn_on", {
+        target: `Кофемашина · запуск через ${delayMinutes} мин`
+      });
+      if (!confirmation.confirmed || !guardMutation()) return;
+      setCoffeeDelayedStartPending(true);
+      const result = await createCoffeeDelayedStart(delayMinutes, crypto.randomUUID());
+      setCoffeeDelayedStart(result.schedule);
+      setCoffeeDelayedStartWritesEnabled(result.writesEnabled);
+      setCoffeeDelayedStartCanReplace(
+        result.writesEnabled
+        && result.available
+        && result.schedule?.status !== "executing"
+      );
+      await reconcileSnapshot();
+      if (result.schedule?.status === "pending" || result.schedule?.status === "executing") {
+        showNotice({
+          id: "coffee.delayed-start",
+          severity: "success",
+          title: "Запуск запланирован",
+          detail: `Кофемашина включится в ${new Date(result.schedule.dueAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}.`,
+          timeoutMs: 6_000
+        });
+      } else {
+        showNotice({
+          id: "coffee.delayed-start",
+          severity: "warning",
+          title: "Состояние запуска требует проверки",
+          detail: "Panel Agent вернул терминальный результат; отсчёт не запущен.",
+          timeoutMs: 10_000
+        });
+      }
+    } catch (error) {
+      await refreshCoffeeDelayedStart();
+      throw error;
+    } finally {
+      setCoffeeDelayedStartPending(false);
+      setCoffeeDelayedStartConfirming(false);
+    }
+  }
+
+  async function cancelCoffeeDelayedStartSchedule(): Promise<void> {
+    if (!guardMutation() || coffeeDelayedStartPending) return;
+    setCoffeeDelayedStartPending(true);
+    try {
+      const result = await cancelCoffeeDelayedStart();
+      setCoffeeDelayedStart(result.schedule);
+      await reconcileSnapshot();
+      if (!result.schedule || result.schedule.status === "cancelled") {
+        showNotice({
+          id: "coffee.delayed-start",
+          severity: "success",
+          title: "Запуск отменён",
+          detail: "Панель получила подтверждение отложенного запуска.",
+          timeoutMs: 6_000
+        });
+      } else if (result.schedule.status === "executing") {
+        showNotice({
+          id: "coffee.delayed-start",
+          severity: "warning",
+          title: "Запуск уже выполняется",
+          detail: "Отмена больше недоступна; проверяем состояние кофемашины.",
+          timeoutMs: 10_000
+        });
+      } else {
+        showNotice({
+          id: "coffee.delayed-start",
+          severity: "warning",
+          title: "Состояние запуска требует проверки",
+          detail: "Panel Agent вернул терминальный результат; отсчёт не запущен.",
+          timeoutMs: 10_000
+        });
+      }
+    } catch (error) {
+      await refreshCoffeeDelayedStart();
+      throw error;
+    } finally {
+      setCoffeeDelayedStartPending(false);
     }
   }
 
@@ -342,6 +480,9 @@ export function App() {
                 onNavigate={navigate}
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
+                coffeeDelayedStart={coffeeDelayedStart}
+                coffeeDelayedStartPending={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
+                onCoffeeDelayedStart={openCoffeeDelayedStart}
               />
             ) : (
               <OverviewPage
@@ -349,6 +490,9 @@ export function App() {
                 onNavigate={navigate}
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
+                coffeeDelayedStart={coffeeDelayedStart}
+                coffeeDelayedStartPending={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
+                onCoffeeDelayedStart={openCoffeeDelayedStart}
               />
             )
           )}
@@ -359,6 +503,9 @@ export function App() {
                 snapshot={snapshot}
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
+                coffeeDelayedStart={coffeeDelayedStart}
+                coffeeDelayedStartPending={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
+                onCoffeeDelayedStart={openCoffeeDelayedStart}
               />
             ) : (
               <HomePage
@@ -366,6 +513,9 @@ export function App() {
                 onNavigate={navigate}
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
+                coffeeDelayedStart={coffeeDelayedStart}
+                coffeeDelayedStartPending={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
+                onCoffeeDelayedStart={openCoffeeDelayedStart}
               />
             )
           )}
@@ -402,6 +552,17 @@ export function App() {
             <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}
         </ProductShell>
+      )}
+      {coffeeDelayedStartDialogOpen && (
+        <CoffeeDelayedStartDialog
+          schedule={coffeeDelayedStart}
+          saving={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
+          canReplace={coffeeDelayedStartCanReplace}
+          writesEnabled={coffeeDelayedStartWritesEnabled}
+          onCreate={saveCoffeeDelayedStart}
+          onCancel={cancelCoffeeDelayedStartSchedule}
+          onClose={() => setCoffeeDelayedStartDialogOpen(false)}
+        />
       )}
       <GlobalNoticeRegion />
       <B0NoticeFixture />

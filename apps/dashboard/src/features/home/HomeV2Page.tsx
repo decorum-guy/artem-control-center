@@ -1,4 +1,4 @@
-import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
+import type { CoffeeDelayedStartRecord, DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import { ErrorBoundary } from "../../ErrorBoundary";
 import { Icon } from "../../icons";
 import { resolveManifest } from "../../registry";
@@ -16,11 +16,17 @@ import {
 export function HomeV2Page({
   snapshot,
   onCoffeeAction,
-  coffeeActionPending
+  coffeeActionPending,
+  coffeeDelayedStart,
+  coffeeDelayedStartPending,
+  onCoffeeDelayedStart
 }: {
   snapshot: DashboardSnapshot;
   onCoffeeAction: (service: ServiceSnapshot, actionId: string) => void;
   coffeeActionPending: boolean;
+  coffeeDelayedStart?: CoffeeDelayedStartRecord | null;
+  coffeeDelayedStartPending?: boolean;
+  onCoffeeDelayedStart?: () => void;
 }) {
   const { copy } = useInterfaceCopy();
   const selection = selectHomePrimaryDevices(snapshot.services);
@@ -58,6 +64,9 @@ export function HomeV2Page({
               variant="home-v2"
               onAction={onCoffeeAction}
               actionPending={coffeeActionPending}
+              delayedStart={coffeeDelayedStart}
+              delayedStartPending={coffeeDelayedStartPending}
+              onDelayedStart={onCoffeeDelayedStart}
             />
           </ErrorBoundary>
         )}

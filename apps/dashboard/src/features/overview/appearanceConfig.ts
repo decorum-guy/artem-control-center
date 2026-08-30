@@ -155,6 +155,7 @@ export interface CoffeeAppearanceConfig {
   imageXStep: number;
   imageYStep: number;
   composition: "auto" | "compact" | "spacious";
+  buttonLayout: "compact" | "balanced" | "wide";
   showStateMarker: boolean;
   showAuthority: boolean;
   showImage: boolean;
@@ -167,6 +168,7 @@ export function coffeeAppearanceConfig(item: OverviewLayoutItem): CoffeeAppearan
     imageXStep: value.imageXStep as number,
     imageYStep: value.imageYStep as number,
     composition: value.composition as CoffeeAppearanceConfig["composition"],
+    buttonLayout: value.buttonLayout as CoffeeAppearanceConfig["buttonLayout"],
     showStateMarker: value.showStateMarker as boolean,
     showAuthority: value.showAuthority as boolean,
     showImage: value.showImage as boolean
@@ -226,7 +228,7 @@ export function appearanceControlSection(widgetType: string, control: Appearance
 export function appearanceControlsForPresentation(widgetType: string): readonly AppearanceControl[] {
   const controls = appearanceControlsFor(widgetType);
   if (widgetType !== "home.coffee-machine") return controls;
-  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "composition", "showStateMarker", "showAuthority"];
+  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "composition", "buttonLayout", "showStateMarker", "showAuthority"];
   return [...controls].sort((left, right) => order.indexOf(left.key) - order.indexOf(right.key));
 }
 

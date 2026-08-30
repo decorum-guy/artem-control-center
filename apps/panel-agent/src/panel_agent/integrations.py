@@ -23,6 +23,9 @@ class IntegrationRuntime:
     ) -> None:
         self.settings = settings
         self.home_assistant = HomeAssistantAdapter(settings, panel_mode=mode)
+        self._snapshot_callback: Callable[[], Awaitable[None]] | None = None
+        self._coffee_schedule_callback: Callable[[], Awaitable[None]] | None = None
+        self.home_assistant.set_on_change(self._on_home_assistant_change)
         self.alice_control = AliceControlClient(settings)
         self.avalar_ssh = AvalarSshDetailsAdapter(settings)
         self.http = HttpIntegrationAdapter(
@@ -50,10 +53,22 @@ class IntegrationRuntime:
         self,
         callback: Callable[[], Awaitable[None]] | None,
     ) -> None:
-        self.home_assistant.set_on_change(callback)
+        self._snapshot_callback = callback
         self.http.set_on_change(callback)
         self.planning.set_on_change(callback)
         self.rog_g703.set_on_change(callback)
+
+    def set_coffee_schedule_callback(
+        self,
+        callback: Callable[[], Awaitable[None]] | None,
+    ) -> None:
+        self._coffee_schedule_callback = callback
+
+    async def _on_home_assistant_change(self) -> None:
+        if self._snapshot_callback is not None:
+            await self._snapshot_callback()
+        if self._coffee_schedule_callback is not None:
+            await self._coffee_schedule_callback()
 
     async def start(self) -> None:
         await self.home_assistant.start()

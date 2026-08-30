@@ -234,6 +234,15 @@ jobs:
           path: artifacts/v2-overview-curated-review
           if-no-files-found: error
 
+      - name: "Run focused #79B delayed Coffee start gate"
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+        run: npm run test:e2e -- tests/e2e/overview-coffee-delayed-start.spec.ts
+
       - name: Run focused PR5 Overview editor gate
         if: runner.os == 'Linux'
         env:

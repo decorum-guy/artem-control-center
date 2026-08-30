@@ -76,6 +76,9 @@ function renderCoffee(item: OverviewProjectionItem, runtime: OverviewRuntimeCont
       variant="overview"
       onAction={runtime.editMode ? undefined : runtime.onCoffeeAction}
       actionPending={runtime.coffeeActionPending}
+      delayedStart={runtime.coffeeDelayedStart}
+      delayedStartPending={runtime.coffeeDelayedStartPending}
+      onDelayedStart={runtime.editMode ? undefined : runtime.onCoffeeDelayedStart}
       interactive={!runtime.editMode}
       appearanceConfig={coffeeAppearanceConfig(item.item)}
       overviewSizeVariant={overviewSizeVariant(item.sizeVariant)}

@@ -30,6 +30,7 @@ describe("bounded Overview appearance schema", () => {
       imageXStep: 0,
       imageYStep: 0,
       composition: "auto",
+      buttonLayout: "balanced",
       showStateMarker: true,
       showAuthority: true,
       showImage: true
@@ -55,6 +56,15 @@ describe("bounded Overview appearance schema", () => {
     expect(validateAppearanceConfig("home.coffee-machine", { composition: "spacious" }, true).valid).toBe(true);
   });
 
+  it("accepts only the bounded Coffee action-row layout enum", () => {
+    for (const buttonLayout of ["compact", "balanced", "wide"]) {
+      expect(validateAppearanceConfig("home.coffee-machine", { buttonLayout }, true).valid).toBe(true);
+    }
+    expect(validateAppearanceConfig("home.coffee-machine", { buttonLayout: "1fr 2fr" }, true).valid).toBe(false);
+    expect(validateAppearanceConfig("home.coffee-machine", { buttonLayout: "wide-ish" }, true).valid).toBe(false);
+    expect(validateAppearanceConfig("home.coffee-machine", {}).value.buttonLayout).toBe("balanced");
+  });
+
   it("keeps schemas source-owned and conservative for unsupported widgets", () => {
     expect(appearanceControlsFor("system.rog-g703-operational")).toEqual([]);
     expect(appearanceControlsFor("system.health-summary")).toEqual([]);
@@ -71,6 +81,7 @@ describe("bounded Overview appearance schema", () => {
       "imageXStep",
       "imageYStep",
       "composition",
+      "buttonLayout",
       "showStateMarker",
       "showAuthority",
       "showImage"

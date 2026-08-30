@@ -346,6 +346,7 @@ test.describe("PR4 curated Overview", () => {
     const rogFreshness = await rog.locator(".overview-rog-widget__freshness").boundingBox();
     const rogSleep = await rog.getByTestId("overview-rog-g703-sleep").boundingBox();
     const rogHibernate = await rog.getByTestId("overview-rog-g703-hibernate").boundingBox();
+    const coffeeDelayedAction = page.getByTestId("widget-coffee-machine").getByTestId("coffee-delayed-start-action");
     expect(rogBox).not.toBeNull();
     for (const child of [rogIdentity, rogStatus, rogFreshness]) {
       expect(child).not.toBeNull();
@@ -367,7 +368,8 @@ test.describe("PR4 curated Overview", () => {
       page.getByTestId("overview-configure"),
       rog.getByTestId("overview-rog-g703-sleep"),
       rog.getByTestId("overview-rog-g703-hibernate"),
-      page.getByTestId("widget-coffee-machine").getByRole("button"),
+      page.getByTestId("widget-coffee-machine").locator("[data-coffee-action]"),
+      coffeeDelayedAction,
       page.getByTestId("overview-home-device-kettle"),
       page.getByTestId("planning-overview-card").locator(".planning-row").first()
     ]) {
@@ -724,15 +726,17 @@ test.describe("PR4 curated Overview", () => {
       const coffee = page.getByTestId("widget-coffee-machine");
       await expect(coffee).toHaveAttribute("data-stage", stage);
       await expect(coffee).toHaveAttribute("data-progress-tone", tone);
-      await expect(coffee.getByRole("button")).toHaveAttribute(
+      const immediateAction = coffee.locator("[data-coffee-action]");
+      await expect(immediateAction).toHaveCount(1);
+      await expect(immediateAction).toHaveAttribute(
         "data-coffee-action",
         stage === "off" ? "off-primary" : "on-quiet"
       );
-      await expect(coffee.getByRole("button")).toHaveCSS(
+      await expect(immediateAction).toHaveCSS(
         "background-color",
         stage === "off" ? /rgb/ : /rgba\(0, 0, 0, 0\)|transparent/
       );
-      await expect(coffee.getByRole("button")).toHaveCSS("min-height", "56px");
+      await expect(immediateAction).toHaveCSS("min-height", "56px");
       if (hasProgress) await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
       else await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
       if (stage === "ready") {

@@ -1,4 +1,5 @@
 import type {
+  CoffeeDelayedStartRecord,
   DashboardSnapshot,
   InterfaceCopyPageKey,
   ServiceGroup,
@@ -28,6 +29,9 @@ interface PageProps {
   onNavigate: (target: ShellNavigationTarget) => void;
   onCoffeeAction?: (service: ServiceSnapshot, actionId: string) => void;
   coffeeActionPending?: boolean;
+  coffeeDelayedStart?: CoffeeDelayedStartRecord | null;
+  coffeeDelayedStartPending?: boolean;
+  onCoffeeDelayedStart?: () => void;
 }
 
 function PageHeading({
@@ -53,7 +57,7 @@ function findManifestService(
   return service ? { service, manifest: resolveManifest(service) } : null;
 }
 
-export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActionPending }: PageProps) {
+export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActionPending, coffeeDelayedStart, coffeeDelayedStartPending, onCoffeeDelayedStart }: PageProps) {
   const ordered = servicesByPriority(snapshot.services);
   const coffee = findManifestService(ordered, "home.coffee-machine");
   const homeAuthority = ordered.find(
@@ -88,6 +92,9 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
                 manifest={coffee.manifest}
                 onAction={onCoffeeAction}
                 actionPending={coffeeActionPending}
+                delayedStart={coffeeDelayedStart}
+                delayedStartPending={coffeeDelayedStartPending}
+                onDelayedStart={onCoffeeDelayedStart}
               />
             </ErrorBoundary>
           ) : (
@@ -196,7 +203,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
   );
 }
 
-export function HomePage({ snapshot, onCoffeeAction, coffeeActionPending }: PageProps) {
+export function HomePage({ snapshot, onCoffeeAction, coffeeActionPending, coffeeDelayedStart, coffeeDelayedStartPending, onCoffeeDelayedStart }: PageProps) {
   const ordered = servicesByPriority(snapshot.services);
   const coffee = findManifestService(ordered, "home.coffee-machine");
   const homeDevices = ordered.filter(
@@ -233,6 +240,9 @@ export function HomePage({ snapshot, onCoffeeAction, coffeeActionPending }: Page
               variant="home"
               onAction={onCoffeeAction}
               actionPending={coffeeActionPending}
+              delayedStart={coffeeDelayedStart}
+              delayedStartPending={coffeeDelayedStartPending}
+              onDelayedStart={onCoffeeDelayedStart}
             />
           </ErrorBoundary>
         )}

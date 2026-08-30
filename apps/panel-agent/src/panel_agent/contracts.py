@@ -566,6 +566,45 @@ class CoffeeActionResponse(BaseModel):
     observedAt: Optional[str]
 
 
+CoffeeDelayedStartStatus = Literal[
+    "pending",
+    "executing",
+    "succeeded",
+    "failed",
+    "cancelled",
+]
+
+
+class CoffeeDelayedStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    delayMinutes: int = Field(ge=1, le=120)
+    requestId: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
+
+
+class CoffeeDelayedStartRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Literal["coffee.delayed-start.v1"]
+    scheduleId: str = Field(min_length=1, max_length=80)
+    requestId: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
+    delayMinutes: int = Field(ge=1, le=120)
+    status: CoffeeDelayedStartStatus
+    dueAt: str
+    createdAt: str
+    updatedAt: str
+    failureCode: Optional[str] = Field(default=None, max_length=120)
+
+
+class CoffeeDelayedStartResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: Literal[1] = 1
+    schedule: Optional[CoffeeDelayedStartRecord]
+    available: bool
+    writesEnabled: bool
+
+
 _CALENDAR_DISPLAY_ID = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
 _CALENDAR_DISPLAY_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 

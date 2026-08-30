@@ -1,19 +1,9 @@
 export const PIN_MIN_LENGTH = 4;
 export const PIN_MAX_LENGTH = 12;
 
-export type PinKey =
-  | "0"
-  | "1"
-  | "2"
-  | "3"
-  | "4"
-  | "5"
-  | "6"
-  | "7"
-  | "8"
-  | "9"
-  | "backspace"
-  | "clear";
+import type { NumericKey } from "./numericKeypadShared";
+
+export type PinKey = Exclude<NumericKey, "." | ",">;
 
 export function normalizePin(value: string): string {
   return value.replace(/\D/g, "").slice(0, PIN_MAX_LENGTH);
