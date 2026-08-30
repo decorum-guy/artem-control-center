@@ -401,6 +401,8 @@ test("executing schedule is visible but not cancellable or replaceable", async (
   await page.getByTestId("coffee-delayed-start-action").tap();
   const dialog = page.getByTestId("coffee-delayed-start-dialog");
   await expect(dialog).toContainText("Запуск выполняется");
+  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveText("Проверить запуск");
+  await expect(page.getByTestId("coffee-delayed-start-action")).not.toHaveText("Изменить запуск");
   await expect(dialog.getByRole("button", { name: "Отменить запуск" })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "+5 мин" })).toBeDisabled();
   await expect(dialog.getByRole("button", { name: "Запланировать своё время" })).toBeDisabled();

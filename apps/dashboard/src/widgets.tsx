@@ -380,7 +380,13 @@ export function CoffeeWidget({
                 disabled={!interactive || delayedStartPending}
                 onClick={onDelayedStart}
               >
-                {delayedStartPending ? "Сохраняем…" : activeDelayedStart ? "Изменить запуск" : "Отложить"}
+                {delayedStartPending
+                  ? "Сохраняем…"
+                  : activeDelayedStart?.status === "executing"
+                    ? "Проверить запуск"
+                    : activeDelayedStart
+                      ? "Изменить запуск"
+                      : "Отложить"}
               </button>
             )}
           </div>
