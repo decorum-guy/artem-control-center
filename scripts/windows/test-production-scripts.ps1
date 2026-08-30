@@ -1,5 +1,7 @@
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "runtime-common.ps1")
+
 $files = Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.ps1" -File |
     Where-Object { $_.Name -ne "test-production-scripts.ps1" }
 
