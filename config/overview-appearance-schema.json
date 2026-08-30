@@ -7,6 +7,7 @@
         "imageXStep": 0,
         "imageYStep": 0,
         "composition": "auto",
+        "buttonLayout": "balanced",
         "showStateMarker": true,
         "showAuthority": true,
         "showImage": true
@@ -52,6 +53,18 @@
           ],
           "defaultValue": "auto",
           "label": "Композиция",
+          "section": "Композиция"
+        },
+        {
+          "key": "buttonLayout",
+          "control": "enum",
+          "values": [
+            { "value": "compact", "label": "Компактные" },
+            { "value": "balanced", "label": "Сбалансированные" },
+            { "value": "wide", "label": "Широкая кнопка" }
+          ],
+          "defaultValue": "balanced",
+          "label": "Ряд действий",
           "section": "Композиция"
         },
         {

@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
-import type { DashboardSnapshot, OverviewLayoutDocument, ServiceSnapshot } from "@artem/contracts";
+import type { CoffeeDelayedStartRecord, DashboardSnapshot, OverviewLayoutDocument, ServiceSnapshot } from "@artem/contracts";
 import type { ShellNavigationTarget } from "../../Shell";
 import { useNoticeCenter } from "../../NoticeCenter";
 import { DashboardGrid } from "./DashboardGrid";
@@ -19,12 +19,18 @@ export function OverviewV2Page({
   snapshot,
   onNavigate,
   onCoffeeAction,
-  coffeeActionPending
+  coffeeActionPending,
+  coffeeDelayedStart,
+  coffeeDelayedStartPending,
+  onCoffeeDelayedStart
 }: {
   snapshot: DashboardSnapshot;
   onNavigate: (target: ShellNavigationTarget) => void;
   onCoffeeAction: (service: ServiceSnapshot, actionId: string) => void;
   coffeeActionPending: boolean;
+  coffeeDelayedStart: CoffeeDelayedStartRecord | null;
+  coffeeDelayedStartPending: boolean;
+  onCoffeeDelayedStart: () => void;
 }): ReactNode {
   const { copy } = useInterfaceCopy();
   const fixtureMode = overviewFixtureModeFromLocation();
@@ -106,6 +112,9 @@ export function OverviewV2Page({
     onNavigate: editMode ? (() => undefined) : onNavigate,
     onCoffeeAction: editMode ? (() => undefined) : onCoffeeAction,
     coffeeActionPending,
+    coffeeDelayedStart,
+    coffeeDelayedStartPending,
+    onCoffeeDelayedStart,
     editMode
   };
 

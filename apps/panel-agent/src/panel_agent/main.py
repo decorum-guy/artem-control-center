@@ -18,6 +18,9 @@ from .alice_control import AliceControlError
 from .contracts import (
     CoffeeActionRequest,
     CoffeeActionResponse,
+    CoffeeDelayedStartRecord,
+    CoffeeDelayedStartRequest,
+    CoffeeDelayedStartResponse,
     CoffeeNotificationPatch,
     CoffeeNotificationSettings,
     CoffeeTimingPatch,
@@ -101,6 +104,10 @@ from .coffee_diary_upload import (
     UploadResolution,
     normalize_image,
 )
+from .coffee_delayed_start import (
+    CoffeeDelayedStartError,
+    CoffeeDelayedStartScheduler,
+)
 
 
 def configured_mode() -> PanelMode:
@@ -150,9 +157,14 @@ async def lifespan(_: FastAPI):
     elif SETTINGS.panel_planning_enabled:
         await runtime.start_planning()
         await snapshot_publisher.rebuild()
+    scheduler_started = MODE in {"production", "integration_test"}
+    if scheduler_started:
+        await coffee_delayed_start_scheduler.start()
     try:
         yield
     finally:
+        if scheduler_started:
+            await coffee_delayed_start_scheduler.close()
         await snapshot_publisher.close()
         await runtime.close()
 
@@ -189,6 +201,7 @@ app.include_router(
 fixture_services: List[ServiceSnapshot] = []
 revision = 1
 fixture_coffee_state_override: str | None = None
+fixture_current_scenario = "ha-healthy"
 fixture_timing = {
     "schemaVersion": 1,
     "source": "home-assistant",
@@ -275,6 +288,7 @@ async def snapshot(
     response: Response,
     scenario: str = Query(default="ha-healthy"),
 ) -> DashboardSnapshot:
+    global fixture_current_scenario
     response.headers["Cache-Control"] = "no-store"
     if MODE in {"fixtures", "integration_test"}:
         document = load_fixture_document()
@@ -282,6 +296,7 @@ async def snapshot(
             services = services_for_scenario(scenario)
         except KeyError:
             raise HTTPException(status_code=404, detail="Unknown fixture scenario")
+        fixture_current_scenario = scenario
         services.extend(fixture_services)
         for service in services:
             if service.id == "coffee-machine":
@@ -1309,6 +1324,135 @@ async def patch_coffee_timing_settings(
     )
 
 
+def _fixture_coffee_machine_state() -> str | None:
+    try:
+        service = next(
+            item
+            for item in services_for_scenario(fixture_current_scenario)
+            if item.id == "coffee-machine"
+        )
+    except (KeyError, StopIteration):
+        return None
+    machine = service.data.get("machine", {})
+    state = machine.get("state") if isinstance(machine, dict) else None
+    return fixture_coffee_state_override if fixture_coffee_state_override in {"on", "off"} else state
+
+
+def _coffee_machine_state() -> str | None:
+    if MODE in {"fixtures", "integration_test"}:
+        return _fixture_coffee_machine_state()
+    return runtime.home_assistant.coffee_confirmation().get("state")
+
+
+def _coffee_schedule_authority_available() -> bool:
+    if not _write_allowed(SETTINGS.coffee_actions_enabled):
+        return False
+    if MODE in {"fixtures", "integration_test"}:
+        try:
+            service = next(
+                item
+                for item in services_for_scenario(fixture_current_scenario)
+                if item.id == "coffee-machine"
+            )
+        except (KeyError, StopIteration):
+            return False
+        machine = service.data.get("machine", {})
+        return bool(
+            isinstance(machine, dict)
+            and machine.get("available") is True
+            and machine.get("stale") is False
+            and _coffee_machine_state() == "off"
+        )
+    return runtime.home_assistant.coffee_action_allowed("turn_on")
+
+
+async def _execute_fixed_coffee_turn_on(request_id: str) -> dict:
+    """Execute the exact verified turn-on path shared by manual and due control."""
+    global fixture_coffee_state_override, revision
+    if not _coffee_schedule_authority_available():
+        raise CoffeeDelayedStartError("coffee_action_unavailable")
+    if MODE in {"fixtures", "integration_test"}:
+        fixture_coffee_state_override = "on"
+        revision += 1
+        return {
+            "schemaVersion": 1,
+            "authority": "home-assistant",
+            "action": "turn_on",
+            "requestId": request_id,
+            "confirmedState": "on",
+            "alreadyInState": False,
+            "observedAt": "2026-07-29T16:05:00Z",
+        }
+    try:
+        result = await runtime.alice_control.coffee_action(
+            {"action": "turn_on", "requestId": request_id}
+        )
+        await runtime.home_assistant.fetch_initial_snapshot()
+    except AliceControlError as exc:
+        raise CoffeeDelayedStartError(exc.code) from exc
+    except Exception as exc:
+        raise CoffeeDelayedStartError("home_assistant_confirmation_failed") from exc
+    if runtime.home_assistant.coffee_confirmation()["state"] != "on":
+        raise CoffeeDelayedStartError("home_assistant_confirmation_failed")
+    await snapshot_publisher.rebuild()
+    return result
+
+
+def _coffee_delayed_start_response() -> CoffeeDelayedStartResponse:
+    record = coffee_delayed_start_scheduler.read()
+    return CoffeeDelayedStartResponse(
+        schedule=CoffeeDelayedStartRecord.model_validate(record) if record else None,
+        available=_coffee_schedule_authority_available(),
+        writesEnabled=_write_allowed(SETTINGS.coffee_actions_enabled),
+    )
+
+
+@app.get(
+    "/api/v1/actions/home/coffee/delayed-start",
+    response_model=CoffeeDelayedStartResponse,
+)
+async def get_coffee_delayed_start(response: Response) -> CoffeeDelayedStartResponse:
+    await coffee_delayed_start_scheduler.reconcile()
+    response.headers["Cache-Control"] = "no-store"
+    return _coffee_delayed_start_response()
+
+
+@app.post(
+    "/api/v1/actions/home/coffee/delayed-start",
+    response_model=CoffeeDelayedStartResponse,
+)
+async def create_coffee_delayed_start(
+    payload: CoffeeDelayedStartRequest,
+    response: Response,
+) -> CoffeeDelayedStartResponse:
+    _require_write(SETTINGS.coffee_actions_enabled)
+    try:
+        await coffee_delayed_start_scheduler.create_or_replace(
+            payload.delayMinutes,
+            payload.requestId,
+        )
+    except CoffeeDelayedStartError as exc:
+        raise HTTPException(status_code=403, detail=exc.code)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="coffee_delayed_start_unavailable") from exc
+    response.headers["Cache-Control"] = "no-store"
+    return _coffee_delayed_start_response()
+
+
+@app.delete(
+    "/api/v1/actions/home/coffee/delayed-start",
+    response_model=CoffeeDelayedStartResponse,
+)
+async def cancel_coffee_delayed_start(response: Response) -> CoffeeDelayedStartResponse:
+    _require_write(SETTINGS.coffee_actions_enabled)
+    try:
+        await coffee_delayed_start_scheduler.cancel()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="coffee_delayed_start_unavailable") from exc
+    response.headers["Cache-Control"] = "no-store"
+    return _coffee_delayed_start_response()
+
+
 @app.get(
     "/api/v1/settings/notifications/coffee",
     response_model=CoffeeNotificationSettings,
@@ -1422,7 +1566,14 @@ async def coffee_action(
 ) -> CoffeeActionResponse:
     global fixture_coffee_state_override, revision
     _require_write(SETTINGS.coffee_actions_enabled)
-    if MODE in {"fixtures", "integration_test"}:
+    if action.action == "turn_on":
+        try:
+            result = await _execute_fixed_coffee_turn_on(action.requestId)
+        except CoffeeDelayedStartError as exc:
+            status_code = 403 if exc.code == "coffee_action_unavailable" else 503
+            raise HTTPException(status_code=status_code, detail=exc.code) from exc
+        await coffee_delayed_start_scheduler.reconcile()
+    elif MODE in {"fixtures", "integration_test"}:
         fixture_coffee_state_override = (
             "on" if action.action == "turn_on" else "off"
         )
@@ -1450,6 +1601,7 @@ async def coffee_action(
         if runtime.home_assistant.coffee_confirmation()["state"] != expected:
             raise HTTPException(status_code=503, detail="home_assistant_confirmation_failed")
         await snapshot_publisher.rebuild()
+        await coffee_delayed_start_scheduler.reconcile()
     response.headers["Cache-Control"] = "no-store"
     return CoffeeActionResponse(**result)
 
@@ -1510,3 +1662,12 @@ def _apply_fixture_notification_patch(payload: dict) -> None:
         channels = update.get("channels")
         if isinstance(channels, dict):
             target["channels"].update(channels)
+
+
+coffee_delayed_start_scheduler = CoffeeDelayedStartScheduler(
+    SETTINGS.coffee_delayed_start_path,
+    can_schedule=_coffee_schedule_authority_available,
+    execute_turn_on=_execute_fixed_coffee_turn_on,
+    machine_state=_coffee_machine_state,
+)
+runtime.set_coffee_schedule_callback(coffee_delayed_start_scheduler.reconcile)

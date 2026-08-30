@@ -173,6 +173,28 @@ export interface CoffeeTimingPolicy {
 export interface CoffeeData {
   machine: CoffeeMachineState;
   timingPolicy: CoffeeTimingPolicy;
+  delayedStart?: CoffeeDelayedStartRecord | null;
+}
+
+export type CoffeeDelayedStartStatus = "pending" | "executing" | "succeeded" | "failed" | "cancelled";
+
+export interface CoffeeDelayedStartRecord {
+  schemaVersion: "coffee.delayed-start.v1";
+  scheduleId: string;
+  requestId: string;
+  delayMinutes: number;
+  status: CoffeeDelayedStartStatus;
+  dueAt: string;
+  createdAt: string;
+  updatedAt: string;
+  failureCode: string | null;
+}
+
+export interface CoffeeDelayedStartResponse {
+  schemaVersion: 1;
+  schedule: CoffeeDelayedStartRecord | null;
+  available: boolean;
+  writesEnabled: boolean;
 }
 
 export type CoffeeDiaryPreferredDrink = "espresso" | "milk" | "universal";

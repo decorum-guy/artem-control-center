@@ -62,6 +62,7 @@ class IntegrationSettings:
     coffee_timing_writes_enabled: bool = False
     coffee_notification_writes_enabled: bool = False
     coffee_actions_enabled: bool = False
+    coffee_delayed_start_path: str = ".cache/coffee-delayed-start.json"
     overview_layout_writes_enabled: bool = False
     overview_layout_path: str = ".cache/overview-layout.json"
     calendar_display_color_writes_enabled: bool = False
@@ -260,6 +261,10 @@ class IntegrationSettings:
                 "PANEL_COFFEE_ACTIONS_ENABLED",
                 False,
             ),
+            coffee_delayed_start_path=os.getenv(
+                "PANEL_COFFEE_DELAYED_START_PATH",
+                ".cache/coffee-delayed-start.json",
+            ).strip(),
             overview_layout_writes_enabled=_bool_env(
                 "PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED",
                 False,

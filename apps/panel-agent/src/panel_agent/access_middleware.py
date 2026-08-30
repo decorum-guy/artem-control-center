@@ -19,6 +19,8 @@ _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
     ("PATCH", "/api/v1/settings/capabilities"): "settings.capabilities.manage",
     ("POST", "/api/v1/system/runtime/apply-capabilities"): "settings.capabilities.manage",
     ("POST", "/api/v1/actions/home/coffee"): "home.coffee.control",
+    ("POST", "/api/v1/actions/home/coffee/delayed-start"): "home.coffee.control",
+    ("DELETE", "/api/v1/actions/home/coffee/delayed-start"): "home.coffee.control",
 }
 
 _PLANNING_REMINDERS_PREFIX = "/api/v1/planning/reminders/"

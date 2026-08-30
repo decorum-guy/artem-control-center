@@ -24,6 +24,7 @@ import {
   isValidPin,
   type PinKey
 } from "./pinKeypad";
+import { NumericKeypadButtons } from "./NumericKeypad";
 import { useInteractionLock } from "./InteractionLock";
 import "./AccessControls.css";
 
@@ -43,13 +44,6 @@ interface AccessContextValue {
   explainAvailability: (availability: string) => string;
 }
 
-interface PinKeyDefinition {
-  key: PinKey;
-  label: string;
-  ariaLabel: string;
-  utility?: boolean;
-}
-
 const AccessContext = createContext<AccessContextValue | null>(null);
 
 const availabilityCopy: Record<string, string> = {
@@ -63,21 +57,6 @@ const availabilityCopy: Record<string, string> = {
   cooldown: "Повторный запуск временно ограничен",
   precondition_failed: "Предварительная проверка не пройдена"
 };
-
-const pinKeys: PinKeyDefinition[] = [
-  { key: "1", label: "1", ariaLabel: "1" },
-  { key: "2", label: "2", ariaLabel: "2" },
-  { key: "3", label: "3", ariaLabel: "3" },
-  { key: "4", label: "4", ariaLabel: "4" },
-  { key: "5", label: "5", ariaLabel: "5" },
-  { key: "6", label: "6", ariaLabel: "6" },
-  { key: "7", label: "7", ariaLabel: "7" },
-  { key: "8", label: "8", ariaLabel: "8" },
-  { key: "9", label: "9", ariaLabel: "9" },
-  { key: "backspace", label: "←", ariaLabel: "Удалить последнюю цифру", utility: true },
-  { key: "0", label: "0", ariaLabel: "0" },
-  { key: "clear", label: "C", ariaLabel: "Очистить PIN", utility: true }
-];
 
 function pinErrorCopy(error: unknown): string {
   const code = error instanceof Error ? error.message : "invalid_pin";
@@ -336,20 +315,21 @@ export function AccessProvider({ children }: { children: ReactNode }) {
                 </div>
               </div>
 
-              <div className="pin-keypad" aria-label="Цифровая клавиатура PIN">
-                {pinKeys.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    className={item.utility ? "pin-key pin-key--utility" : "pin-key"}
-                    aria-label={item.ariaLabel}
-                    disabled={pinBusy || (item.key === "backspace" && pin.length === 0) || (item.key === "clear" && pin.length === 0)}
-                    onClick={() => updatePin(item.key)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
+              <NumericKeypadButtons
+                decimal={false}
+                clearLabel="C"
+                clearAriaLabel="Очистить PIN"
+                backspaceAriaLabel="Удалить последнюю цифру"
+                digitAriaLabel={(key) => key}
+                className="pin-keypad"
+                ariaLabel="Цифровая клавиатура PIN"
+                buttonClassName="pin-key"
+                utilityButtonClassName="pin-key pin-key--utility"
+                isKeyDisabled={(key) => pinBusy || (key === "backspace" && pin.length === 0) || (key === "clear" && pin.length === 0)}
+                onKey={(key) => {
+                  if (key !== "." && key !== ",") updatePin(key);
+                }}
+              />
 
               {pinError && <span className="pin-error" role="alert">{pinError}</span>}
               <div className="pin-modal-actions">

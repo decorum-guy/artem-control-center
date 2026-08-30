@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type {
   CoffeeData,
+  CoffeeDelayedStartRecord,
   KettleData,
   ServiceSnapshot,
   WidgetManifest
@@ -51,6 +52,21 @@ function formatDuration(seconds: number | null): string | null {
   return remainder ? `${hours} ч ${remainder} мин` : `${hours} ч`;
 }
 
+function formatDelayedRemaining(dueAt: string, now: number): string {
+  const due = Date.parse(dueAt);
+  if (!Number.isFinite(due)) return "время уточняется";
+  const seconds = Math.ceil((due - now) / 1000);
+  if (seconds <= 0) return "время наступило";
+  return `${Math.max(1, Math.ceil(seconds / 60))} мин`;
+}
+
+function formatDelayedTarget(dueAt: string): string {
+  const date = new Date(dueAt);
+  return Number.isNaN(date.getTime())
+    ? "время уточняется"
+    : date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
+
 function CoffeeAsset({
   manifest,
   scale
@@ -91,6 +107,9 @@ export function CoffeeWidget({
   variant = "featured",
   onAction,
   actionPending = false,
+  delayedStart = null,
+  delayedStartPending = false,
+  onDelayedStart,
   interactive = true,
   appearanceConfig,
   overviewSizeVariant
@@ -101,6 +120,9 @@ export function CoffeeWidget({
   variant?: "featured" | "home" | "home-v2" | "gallery" | "overview";
   onAction?: (service: ServiceSnapshot, actionId: string) => void;
   actionPending?: boolean;
+  delayedStart?: CoffeeDelayedStartRecord | null;
+  delayedStartPending?: boolean;
+  onDelayedStart?: () => void;
   interactive?: boolean;
   appearanceConfig?: CoffeeAppearanceConfig;
   overviewSizeVariant?: "compact" | "standard" | "large";
@@ -120,6 +142,17 @@ export function CoffeeWidget({
   const latestMachineAvailable = useRef(data.machine.available);
   const latestMachineStale = useRef(data.machine.stale);
   const overviewTransitionTimer = useRef<number | null>(null);
+  const clockEnabled =
+    data.machine.state === "on" &&
+    data.machine.available &&
+    !data.machine.stale &&
+    !data.timingPolicy.stale &&
+    data.timingPolicy.warmupDurationSeconds !== null &&
+    data.timingPolicy.longRunningThresholdSeconds !== null;
+  const activeDelayedStart = delayedStart?.status === "pending" || delayedStart?.status === "executing"
+    ? delayedStart
+    : null;
+  const presentationClockEnabled = clockEnabled || Boolean(activeDelayedStart);
   latestMachineState.current = data.machine.state;
   latestMachineAvailable.current = data.machine.available;
   latestMachineStale.current = data.machine.stale;
@@ -171,14 +204,6 @@ export function CoffeeWidget({
     }
     if (!confirmedTurningOn || !confirmedAvailable) clearTransition();
   }, [data.machine.available, data.machine.stale, data.machine.state, reducedMotion, variant]);
-  const clockEnabled =
-    data.machine.state === "on" &&
-    data.machine.available &&
-    !data.machine.stale &&
-    !data.timingPolicy.stale &&
-    data.timingPolicy.warmupDurationSeconds !== null &&
-    data.timingPolicy.longRunningThresholdSeconds !== null;
-
   useEffect(() => {
     const next = Date.parse(generatedAt);
     const snapshotTime = Number.isFinite(next) ? next : Date.now();
@@ -187,7 +212,7 @@ export function CoffeeWidget({
   }, [generatedAt, data.machine.turnedOnAt]);
 
   useEffect(() => {
-    if (!clockEnabled) return;
+    if (!presentationClockEnabled) return;
     const timer = window.setInterval(
       () => {
         const anchor = clockAnchor.current;
@@ -198,7 +223,7 @@ export function CoffeeWidget({
       1_000
     );
     return () => window.clearInterval(timer);
-  }, [clockEnabled]);
+  }, [presentationClockEnabled]);
 
   const view = coffeePresentation(
     data,
@@ -213,13 +238,17 @@ export function CoffeeWidget({
   const activeAction = service.actions.find((action) =>
     view.stage === "off" ? action.id.endsWith("turn_on") : action.id.endsWith("turn_off")
   );
-
   let stateDetail = service.summary;
   if (warming && remaining) stateDetail = `Осталось примерно ${remaining}`;
   if (view.stage === "ready" && duration) stateDetail = `Работает ${duration} · можно готовить кофе`;
   if (view.stage === "running" && duration) stateDetail = `Работает ${duration}`;
   if (view.stage === "running_too_long" && duration) stateDetail = `Включена уже ${duration}`;
-  if (view.stage === "off" && data.machine.entityLastChangedAt) {
+  if (view.stage === "off" && activeDelayedStart) {
+    const remaining = formatDelayedRemaining(activeDelayedStart.dueAt, presentationTime);
+    stateDetail = remaining === "время наступило"
+      ? "Время запуска наступило · проверяем состояние"
+      : `Включится через ${remaining} · в ${formatDelayedTarget(activeDelayedStart.dueAt)}`;
+  } else if (view.stage === "off" && data.machine.entityLastChangedAt) {
     stateDetail = `Последнее изменение ${new Date(data.machine.entityLastChangedAt).toLocaleTimeString("ru-RU", {
       hour: "2-digit",
       minute: "2-digit"
@@ -237,7 +266,8 @@ export function CoffeeWidget({
     composition: "auto",
     showStateMarker: true,
     showAuthority: true,
-    showImage: true
+    showImage: true,
+    buttonLayout: "balanced"
   };
   const requestedDensity = appearance.composition === "compact"
     ? "dense"
@@ -323,15 +353,31 @@ export function CoffeeWidget({
         )}
 
         {activeAction && (
-          <button
-            className="primary-action"
-            type="button"
-            data-coffee-action={view.stage === "off" ? "off-primary" : "on-quiet"}
-            disabled={!interactive || !activeAction.enabled || !onAction || actionPending}
-            onClick={() => onAction?.(service, activeAction.id)}
+          <div
+            className={`coffee-action-row coffee-action-row--${appearance.buttonLayout}`}
+            data-button-layout={appearance.buttonLayout}
           >
-            {actionPending ? "Подтверждаем…" : activeAction.title}
-          </button>
+            <button
+              className="primary-action"
+              type="button"
+              data-coffee-action={view.stage === "off" ? "off-primary" : "on-quiet"}
+              disabled={!interactive || !activeAction.enabled || !onAction || actionPending}
+              onClick={() => onAction?.(service, activeAction.id)}
+            >
+              {actionPending ? "Подтверждаем…" : activeAction.title}
+            </button>
+            {view.stage === "off" && onDelayedStart && (
+              <button
+                type="button"
+                className="coffee-delayed-start-action"
+                data-testid="coffee-delayed-start-action"
+                disabled={!interactive || !activeAction.enabled || delayedStartPending}
+                onClick={onDelayedStart}
+              >
+                {delayedStartPending ? "Сохраняем…" : activeDelayedStart ? "Изменить запуск" : "Отложить"}
+              </button>
+            )}
+          </div>
         )}
         {activeAction && !activeAction.enabled && (
           <span className="action-hint">Управление отключено политикой панели.</span>

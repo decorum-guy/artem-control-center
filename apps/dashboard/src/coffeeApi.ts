@@ -1,8 +1,17 @@
 import type {
+  CoffeeDelayedStartResponse,
   CoffeeActionResponse,
   CoffeeNotificationSettings,
   CoffeeTimingSettings
 } from "@artem/contracts";
+
+export const COFFEE_DELAY_MIN_MINUTES = 1;
+export const COFFEE_DELAY_MAX_MINUTES = 120;
+
+export function isCoffeeDelayMinutes(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) &&
+    value >= COFFEE_DELAY_MIN_MINUTES && value <= COFFEE_DELAY_MAX_MINUTES;
+}
 
 export class CoffeeApiError extends Error {
   constructor(
@@ -75,4 +84,22 @@ export function executeCoffeeAction(
     method: "POST",
     body: JSON.stringify({ action, requestId })
   });
+}
+
+export function getCoffeeDelayedStart(): Promise<CoffeeDelayedStartResponse> {
+  return requestJson("/api/v1/actions/home/coffee/delayed-start", { cache: "no-store" });
+}
+
+export function createCoffeeDelayedStart(
+  delayMinutes: number,
+  requestId: string
+): Promise<CoffeeDelayedStartResponse> {
+  return requestJson("/api/v1/actions/home/coffee/delayed-start", {
+    method: "POST",
+    body: JSON.stringify({ delayMinutes, requestId })
+  });
+}
+
+export function cancelCoffeeDelayedStart(): Promise<CoffeeDelayedStartResponse> {
+  return requestJson("/api/v1/actions/home/coffee/delayed-start", { method: "DELETE" });
 }
