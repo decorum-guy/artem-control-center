@@ -1317,6 +1317,10 @@ class PlanningAdapter:
                 if all_success or upstream_sources is not None
                 else self._failure_provider_statuses(previous)
             )
+            # A list/domain envelope is the newest authority for provider
+            # freshness in this refresh batch.  Fallback provider statuses
+            # copied from a prior projection cannot establish freshness.
+            fresh_provider_statuses = provider_statuses if upstream_sources is not None else None
             if all_success:
                 self._failure_count = 0
                 self._last_success_at = self._clock()
@@ -1330,7 +1334,9 @@ class PlanningAdapter:
                         await self.refresh_status(force=True)
                     except PlanningUpstreamError as exc:
                         self._record_failure("status", exc)
-                source_status = self._aggregate_source_status()
+                source_status = self._aggregate_source_status(
+                    provider_statuses=fresh_provider_statuses,
+                )
                 projection = self._projection_from_domains(
                     mapped,
                     generated_at=now_text,
@@ -1350,7 +1356,9 @@ class PlanningAdapter:
                 self._upstream_connected = False
                 self._domains_current = False
                 self._status_refresh_requested = True
-                source_status = self._aggregate_source_status()
+                source_status = self._aggregate_source_status(
+                    provider_statuses=fresh_provider_statuses,
+                )
                 projection = self._projection_from_domains(
                     mapped,
                     generated_at=now_text,
@@ -1930,6 +1938,7 @@ class PlanningAdapter:
                     provider="local",
                     label="Local Planning",
                     status="current",
+                    errorCode=None,
                     configured=True,
                     lastSyncedAt=None,
                     observedAt=observed,
@@ -1955,6 +1964,7 @@ class PlanningAdapter:
                         color=calendar.color,
                         enabled=calendar.enabled,
                         status=calendar.status,
+                        errorCode=calendar.errorCode,
                         lastSyncedAt=calendar.lastSyncedAt,
                         observedAt=calendar.observedAt,
                     )
@@ -1966,6 +1976,7 @@ class PlanningAdapter:
                     provider=source.provider,
                     label=_browser_source_label(source),
                     status=source.status,
+                    errorCode=source.errorCode,
                     configured=(
                         source.status != "not_configured"
                         and source.accountId != "not-configured"
@@ -1989,6 +2000,7 @@ class PlanningAdapter:
                     provider="local",
                     label="Local Planning",
                     status="error",
+                    errorCode=None,
                     configured=True,
                     lastSyncedAt=None,
                     observedAt=self._now_text(self._wall_now()),
@@ -2471,7 +2483,7 @@ class PlanningAdapter:
         return result
 
     def _status_health_issue(self) -> PlanningHealthIssue | None:
-        if self._last_status is not None and _status_is_degraded(self._last_status):
+        if self._last_status is not None and _status_operationally_degraded(self._last_status):
             return PlanningHealthIssue(
                 source="planning-status",
                 status="degraded",
@@ -2530,15 +2542,24 @@ class PlanningAdapter:
             domains=domains,
         )
 
-    def _aggregate_source_status(self) -> PlanningSourceStatus:
+    def _aggregate_source_status(
+        self,
+        *,
+        provider_statuses: list[PlanningCalendarSource] | None = None,
+    ) -> PlanningSourceStatus:
         domain_statuses = [domain.status for domain in self._domain_health()]
         status_issue = self._status_health_issue()
         issue_status = status_issue.status if status_issue is not None else None
+        provider_problem = (
+            _provider_statuses_have_problem(provider_statuses)
+            if provider_statuses is not None
+            else self._last_status is not None and _provider_health_problem(self._last_status)
+        )
         if "unavailable" in domain_statuses or issue_status == "unavailable":
             return "offline"
         if "stale" in domain_statuses or issue_status == "stale":
             return "stale"
-        if "degraded" in domain_statuses or issue_status == "degraded":
+        if "degraded" in domain_statuses or issue_status == "degraded" or provider_problem:
             return "degraded"
         return "current"
 
@@ -2619,6 +2640,10 @@ class PlanningAdapter:
 
 
 def _status_is_degraded(status: StatusEnvelope) -> bool:
+    return _status_operationally_degraded(status) or _provider_health_problem(status)
+
+
+def _status_operationally_degraded(status: StatusEnvelope) -> bool:
     if status.storageStatus != "available":
         return True
     health = status.planningHealth
@@ -2630,7 +2655,16 @@ def _status_is_degraded(status: StatusEnvelope) -> bool:
         return True
     if health.incidents:
         return True
-    return health.providerStatus not in {"not_configured", "local_only"}
+    return False
+
+
+def _provider_health_problem(status: StatusEnvelope) -> bool:
+    health = status.planningHealth
+    return health is not None and health.providerStatus in {"stale", "error"}
+
+
+def _provider_statuses_have_problem(provider_statuses: list[PlanningCalendarSource]) -> bool:
+    return any(source.status in {"stale", "error"} for source in provider_statuses)
 
 
 def _bounded_unique(items: list[Any]) -> list[Any]:

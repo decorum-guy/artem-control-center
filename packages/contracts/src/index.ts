@@ -627,6 +627,8 @@ export interface PlanningCalendarSourceCalendar {
   color: string | null;
   enabled: boolean;
   status: PlanningProviderFreshnessStatus;
+  /** Latest sanitized provider-attempt category; absent only in older snapshots. */
+  errorCode?: string | null;
   lastSyncedAt: string | null;
   observedAt: string | null;
 }
@@ -638,6 +640,8 @@ export interface PlanningProviderStatus {
   provider: "local" | "icloud";
   label: string;
   status: PlanningProviderFreshnessStatus;
+  /** Latest sanitized provider-attempt category; absent only in older snapshots. */
+  errorCode?: string | null;
   configured: boolean;
   lastSyncedAt: string | null;
   observedAt: string | null;

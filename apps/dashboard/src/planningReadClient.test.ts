@@ -185,7 +185,31 @@ describe("fixed Planning read client", () => {
       "calendar_event",
       (value) => value
     );
-    expect(parsed.sources).toEqual([nativePhaseBSource, phaseBSource]);
+    expect(parsed.sources).toMatchObject([nativePhaseBSource, phaseBSource]);
+    expect(parsed.sources?.[0].errorCode).toBeNull();
+    expect(parsed.sources?.[1].errorCode).toBeNull();
+    expect(parsed.sources?.[1].calendars[0].errorCode).toBeNull();
+  });
+
+  it("preserves only optional bounded provider error codes across browser-safe source metadata", () => {
+    const sources = [{
+      ...phaseBSource,
+      errorCode: "provider_connection_reset",
+      calendars: [{ ...phaseBSource.calendars[0], errorCode: "provider_connection_reset" }]
+    }];
+    const parsed = planningReadParsers.parsePlanningSources(sources);
+    expect(parsed[0].errorCode).toBe("provider_connection_reset");
+    expect(parsed[0].calendars[0].errorCode).toBe("provider_connection_reset");
+    expect(planningReadParsers.parsePlanningSources([phaseBSource])[0].errorCode).toBeNull();
+
+    for (const raw of [
+      "https://calendar.example.invalid/private",
+      "FAKE_SECRET_159A3",
+      "RAW_EXCEPTION_159A3"
+    ]) {
+      expect(() => planningReadParsers.parsePlanningSources([{ ...phaseBSource, errorCode: raw }]))
+        .toThrowError(PlanningReadError);
+    }
   });
 
   it("rejects an explicit null sources value instead of weakening the contract", () => {
@@ -220,7 +244,9 @@ describe("fixed Planning read client", () => {
       staleAfter: "2026-08-12T09:05:00Z",
       sources
     });
-    expect(parsed.sources?.[1]).toEqual(phaseBSource);
+    expect(parsed.sources?.[1]).toMatchObject(phaseBSource);
+    expect(parsed.sources?.[1].errorCode).toBeNull();
+    expect(parsed.sources?.[1].calendars[0].errorCode).toBeNull();
 
     const taskReadback = planningReadParsers.parseTaskObjectEnvelope({
       ...eventObjectEnvelope(task),

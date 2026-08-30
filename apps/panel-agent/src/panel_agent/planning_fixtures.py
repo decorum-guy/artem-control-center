@@ -809,8 +809,7 @@ def _status(scenario: str) -> dict[str, Any]:
                 "local_management": True,
             },
         },
-        "planningHealth": (
-            {
+        "planningHealth": {
                 "schemaVersion": "planning.operations.v1",
                 "observedAt": FIXTURE_TIMESTAMP,
                 "planningSchemaVersion": 4,
@@ -832,8 +831,9 @@ def _status(scenario: str) -> dict[str, Any]:
                 "lastSuccessfulRestoreVerificationAt": FIXTURE_TIMESTAMP,
                 "lastBackupAgeSeconds": 0,
                 "lastRestoreVerificationStatus": "ok",
-                "providerStatus": "degraded" if degraded else "not_configured",
+                "providerStatus": "not_configured",
                 "providerLastSyncAt": None,
+                "providerErrorCode": None,
                 "capabilityMetadata": {
                     "tasks": {
                         "read": True,
@@ -867,10 +867,7 @@ def _status(scenario: str) -> dict[str, Any]:
                     if degraded
                     else []
                 ),
-            }
-            if degraded
-            else None
-        ),
+        },
     }
 
 

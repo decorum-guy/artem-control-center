@@ -23,6 +23,7 @@ from panel_agent.planning import (
 from panel_agent.planning_adapter import (
     PlanningAdapter,
     PlanningReadUnavailable,
+    PlanningUpstreamError,
     _validate_envelope,
 )
 from panel_agent.planning_fixtures import FIXTURE_STALE_AFTER, FIXTURE_TIMESTAMP, fixture_payload
@@ -179,6 +180,50 @@ def test_old_and_new_alice_sources_are_strictly_accepted_across_list_status_and_
         _validate_envelope(model, object_payload)
 
 
+@pytest.mark.parametrize("provider_error_code", [None, "provider_dns_failed"])
+def test_current_alice_health_contract_accepts_only_bounded_provider_error_codes(provider_error_code):
+    payload = _payload("/internal/planning/v1/status")
+    health = payload["planningHealth"]
+    assert isinstance(health, dict)
+    health.update(
+        {
+            "providerStatus": "current",
+            "providerLastSyncAt": FIXTURE_TIMESTAMP,
+            "providerErrorCode": provider_error_code,
+        }
+    )
+    parsed = _validate_envelope(StatusEnvelope, payload)
+    assert parsed.planningHealth is not None
+    assert parsed.planningHealth.providerStatus == "current"
+    assert parsed.planningHealth.providerErrorCode == provider_error_code
+
+
+@pytest.mark.parametrize(
+    "provider_error_code",
+    [
+        "https://calendar.example.invalid/private",
+        "FAKE_SECRET_159A3",
+        "RAW_EXCEPTION_159A3",
+    ],
+)
+def test_health_contract_rejects_raw_provider_error_text(provider_error_code):
+    payload = _payload("/internal/planning/v1/status")
+    health = payload["planningHealth"]
+    assert isinstance(health, dict)
+    health["providerErrorCode"] = provider_error_code
+    with pytest.raises(PlanningUpstreamError, match="contract_mismatch"):
+        _validate_envelope(StatusEnvelope, payload)
+
+
+def test_health_contract_remains_strict_for_unknown_fields():
+    payload = _payload("/internal/planning/v1/status")
+    health = payload["planningHealth"]
+    assert isinstance(health, dict)
+    health["unexpectedUpstreamField"] = "rejected"
+    with pytest.raises(PlanningUpstreamError, match="contract_mismatch"):
+        _validate_envelope(StatusEnvelope, payload)
+
+
 @pytest.mark.parametrize(
     "mutator",
     [
@@ -216,6 +261,8 @@ def test_canonical_event_join_is_safe_and_same_name_calendars_remain_distinct(tm
     assert len({calendar.label for calendar in external.calendars}) == 2
     assert all(calendar.label.startswith("<script>alert(1)</script> · #") for calendar in external.calendars)
     assert external.calendars[1].color == "#4477AA"
+    assert external.errorCode == "provider_timeout"
+    assert {calendar.errorCode for calendar in external.calendars} == {"provider_timeout"}
 
     event_payload = copy.deepcopy(_payload("/internal/planning/v1/events")["items"][0])
     event_payload.update(
@@ -241,15 +288,52 @@ def test_canonical_event_join_is_safe_and_same_name_calendars_remain_distinct(tm
         )
 
 
-def test_external_freshness_does_not_replace_global_planning_status(tmp_path):
-    adapter = PlanningAdapter(_settings(tmp_path))
-    projected = adapter._project_sources([UpstreamPlanningSource.model_validate(source) for source in _sources()])
+def test_fresh_external_provider_metadata_degrades_global_planning_status(tmp_path):
+    client = _RefreshClient(sources=_source_batch(external_status="stale"))
+    adapter = PlanningAdapter(_settings(tmp_path), client=client)
+
+    async def exercise():
+        assert await adapter.refresh_domains() is True
+        projection = adapter.projection
+        await adapter.close()
+        return projection
+
+    projection = asyncio.run(exercise())
+    assert projection is not None
+    assert projection.sourceStatus == "degraded"
+    icloud = next(source for source in projection.providerStatuses if source.provider == "icloud")
+    assert icloud.status == "stale"
+    assert icloud.errorCode == "provider_timeout"
+    assert all(issue.source != "planning-status" for issue in projection.health.issues)
+
+
+def test_current_provider_attempt_error_survives_browser_safe_projection(tmp_path):
+    sources = _sources()
+    external = sources[1]
+    external["status"] = "current"
+    external["errorCode"] = "provider_connection_reset"
+    calendars = external["calendars"]
+    assert isinstance(calendars, list)
+    for calendar in calendars:
+        assert isinstance(calendar, dict)
+        calendar["status"] = "current"
+        calendar["errorCode"] = "provider_connection_reset"
+
+    projected = PlanningAdapter(_settings(tmp_path))._project_sources([
+        UpstreamPlanningSource.model_validate(source) for source in sources
+    ])
     projection = empty_planning_projection(
         generated_at=FIXTURE_TIMESTAMP,
         source_status="current",
     ).model_copy(update={"providerStatuses": projected}, deep=True)
+    provider = projection.providerStatuses[1]
+    serialized = json.dumps(projection.model_dump())
     assert projection.sourceStatus == "current"
-    assert projection.providerStatuses[1].status == "stale"
+    assert provider.status == "current"
+    assert provider.errorCode == "provider_connection_reset"
+    assert {calendar.errorCode for calendar in provider.calendars} == {"provider_connection_reset"}
+    assert "account_opaque" not in serialized
+    assert "icloud-work" not in serialized
 
 
 def test_partial_refresh_uses_fresh_sources_even_when_reminders_fail(tmp_path):
