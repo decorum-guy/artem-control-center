@@ -739,6 +739,7 @@ export function TasksPage({ snapshot, onNavigate }: PlanningRouteProps) {
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       error={routeRead.error}
+      loading={routeRead.loading}
       hasConfirmedContent={Boolean(routeRead.data)}
       refreshing={routeRead.refreshing}
       preview={preview}
@@ -1526,6 +1527,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       sources={sources}
       error={routeRead.error}
+      loading={routeRead.loading}
       hasConfirmedContent={Boolean(routeRead.data)}
       refreshing={routeRead.refreshing}
       suppressRefreshWithConfirmedContent
@@ -2244,6 +2246,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       sourceStatus={envelope?.sourceStatus ?? "unavailable"}
       lastSyncedAt={envelope?.lastSyncedAt ?? null}
       error={routeRead.error}
+      loading={routeRead.loading}
       hasConfirmedContent={Boolean(routeRead.data)}
       refreshing={routeRead.refreshing}
       preview={preview}
