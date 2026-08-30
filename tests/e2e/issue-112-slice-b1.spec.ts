@@ -575,6 +575,26 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     await expect(details).not.toContainText("Local Planning");
   });
 
+  test("current iCloud attempt error remains diagnostic-only in the Overview", async ({ page }) => {
+    const state = { revision: 1, status: "current" };
+    await installSse(page);
+    await installPlanningSnapshot(page, () => state, (planning) => {
+      planning.providerStatuses = [
+        providerStatus({
+          label: "iCloud",
+          provider: "icloud",
+          status: "current",
+          errorCode: "provider_connection_reset",
+          calendars: [{ ...calendarStatus("Работа", "current"), errorCode: "provider_connection_reset" }]
+        }),
+        providerStatus({ label: "Local Planning", provider: "local", status: "current" })
+      ];
+    });
+    await page.goto("/overview");
+    await expect(page.getByTestId("planning-overview-health-action")).toHaveCount(0);
+    await expect(page.getByTestId("planning-overview-card")).not.toContainText("Есть проблемы");
+  });
+
   test("all-day Overview events preserve their canonical date and invalid Calendar dates safely fall back to today", async ({ page }) => {
     const state = { revision: 1, status: "current" };
     const allDayEvent = calendarEvent("00000000-0000-4000-8000-000000002202", {

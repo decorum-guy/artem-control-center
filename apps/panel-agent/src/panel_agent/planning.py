@@ -536,8 +536,9 @@ class UpstreamPlanningHealth(StrictPlanningModel):
     lastSuccessfulRestoreVerificationAt: StrictStr | None = None
     lastBackupAgeSeconds: StrictInt | None = Field(default=None, ge=0)
     lastRestoreVerificationStatus: StrictStr = Field(min_length=1, max_length=64)
-    providerStatus: StrictStr = Field(min_length=1, max_length=64)
+    providerStatus: PlanningProviderFreshnessStatus
     providerLastSyncAt: StrictStr | None = None
+    providerErrorCode: StrictStr | None = Field(default=None, max_length=128)
     capabilityMetadata: UpstreamCapabilityMetadata
     applicationVersion: StrictStr = Field(min_length=1, max_length=256)
     applicationCommit: StrictStr = Field(min_length=1, max_length=256)
@@ -550,6 +551,7 @@ class UpstreamPlanningHealth(StrictPlanningModel):
         "lastSuccessfulRestoreVerificationAt",
         "providerLastSyncAt",
     )
+    _provider_error = field_validator("providerErrorCode")(validate_error_code)
 
 
 class StatusEnvelope(StrictPlanningModel):
@@ -833,11 +835,13 @@ class PlanningCalendarSourceCalendar(StrictPlanningModel):
     color: StrictStr | None = Field(default=None, max_length=9)
     enabled: StrictBool
     status: PlanningProviderFreshnessStatus
+    errorCode: StrictStr | None = Field(default=None, max_length=128)
     lastSyncedAt: StrictStr | None = None
     observedAt: StrictStr | None = None
 
     _identity = field_validator("id")(validate_opaque_identity)
     _timestamps = _timestamp_fields("lastSyncedAt", "observedAt")
+    _error = field_validator("errorCode")(validate_error_code)
 
     @field_validator("color")
     @classmethod
@@ -853,6 +857,7 @@ class PlanningCalendarSource(StrictPlanningModel):
     provider: Literal["local", "icloud"]
     label: StrictStr = Field(min_length=1, max_length=128)
     status: PlanningProviderFreshnessStatus
+    errorCode: StrictStr | None = Field(default=None, max_length=128)
     configured: StrictBool
     lastSyncedAt: StrictStr | None = None
     observedAt: StrictStr | None = None
@@ -860,6 +865,7 @@ class PlanningCalendarSource(StrictPlanningModel):
 
     _identity = field_validator("id")(validate_opaque_identity)
     _timestamps = _timestamp_fields("lastSyncedAt", "observedAt")
+    _error = field_validator("errorCode")(validate_error_code)
 
 
 # Compatibility name for callers that imported the pre-Phase-B class. The JSON

@@ -178,10 +178,15 @@ function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
+function exactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+  label: string,
+  optional: readonly string[] = []
+): void {
   const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+  const allowed = new Set([...expected, ...optional]);
+  if (expected.some((key) => !Object.prototype.hasOwnProperty.call(value, key)) || actual.some((key) => !allowed.has(key))) {
     throw new PlanningReadError(`${label} contains unexpected fields`, "contract");
   }
 }
@@ -299,7 +304,8 @@ function parsePlanningSourceCalendar(value: unknown, index: number): PlanningCal
   exactKeys(
     calendar,
     ["id", "label", "color", "enabled", "status", "lastSyncedAt", "observedAt"],
-    `planning.sources[${index}].calendar`
+    `planning.sources[${index}].calendar`,
+    ["errorCode"]
   );
   const color = calendar.color === null
     ? null
@@ -313,6 +319,9 @@ function parsePlanningSourceCalendar(value: unknown, index: number): PlanningCal
     color,
     enabled: booleanValue(calendar.enabled, `planning.sources[${index}].calendar.enabled`),
     status: enumValue(calendar.status, providerFreshnessValues, `planning.sources[${index}].calendar.status`),
+    errorCode: Object.prototype.hasOwnProperty.call(calendar, "errorCode")
+      ? nullableErrorCode(calendar.errorCode, `planning.sources[${index}].calendar.errorCode`)
+      : null,
     lastSyncedAt: nullableTimestamp(calendar.lastSyncedAt, `planning.sources[${index}].calendar.lastSyncedAt`),
     observedAt: nullableTimestamp(calendar.observedAt, `planning.sources[${index}].calendar.observedAt`)
   };
@@ -323,7 +332,8 @@ function parsePlanningSource(value: unknown, index: number): PlanningCalendarSou
   exactKeys(
     source,
     ["id", "kind", "provider", "label", "status", "configured", "lastSyncedAt", "observedAt", "calendars"],
-    `planning.sources[${index}]`
+    `planning.sources[${index}]`,
+    ["errorCode"]
   );
   if (!Array.isArray(source.calendars) || source.calendars.length > 32) {
     throw new PlanningReadError(`planning.sources[${index}].calendars is invalid`, "contract");
@@ -336,6 +346,9 @@ function parsePlanningSource(value: unknown, index: number): PlanningCalendarSou
     provider,
     label: stringValue(source.label, `planning.sources[${index}].label`, 1, 128),
     status: enumValue(source.status, providerFreshnessValues, `planning.sources[${index}].status`),
+    errorCode: Object.prototype.hasOwnProperty.call(source, "errorCode")
+      ? nullableErrorCode(source.errorCode, `planning.sources[${index}].errorCode`)
+      : null,
     configured: booleanValue(source.configured, `planning.sources[${index}].configured`),
     lastSyncedAt: nullableTimestamp(source.lastSyncedAt, `planning.sources[${index}].lastSyncedAt`),
     observedAt: nullableTimestamp(source.observedAt, `planning.sources[${index}].observedAt`),

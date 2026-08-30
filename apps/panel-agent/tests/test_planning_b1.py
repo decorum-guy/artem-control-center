@@ -197,6 +197,7 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
         "provider": "local",
         "label": "Local Planning",
         "status": "current",
+        "errorCode": None,
         "configured": True,
         "lastSyncedAt": None,
         "observedAt": "2026-08-12T09:00:00Z",
