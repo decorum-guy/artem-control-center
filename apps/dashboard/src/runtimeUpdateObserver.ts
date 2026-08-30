@@ -28,6 +28,12 @@ export type UpdateOwnerResult =
   | "repair_required"
   | "updater_stale";
 
+export type UpdateActivityCode = UpdateOwnerPhase | "completed";
+
+export interface UpdateActivityEvent {
+  code: UpdateActivityCode;
+}
+
 export interface UpdateOwnerState {
   schemaVersion: 1;
   status: UpdateOwnerStatus;
@@ -39,6 +45,53 @@ export interface UpdateOwnerState {
   startedAt?: string;
   updatedAt?: string;
   servedRevision?: string;
+  progressPercent?: number;
+  events?: UpdateActivityEvent[];
+}
+
+export const UPDATE_ACTIVITY_COPY: Record<UpdateActivityCode, string> = {
+  started: "Проверяем обновление",
+  stopping: "Останавливаем текущую панель",
+  checkout: "Получаем новую версию",
+  handoff: "Передаём управление новой версии обновлятора",
+  "target-authoritative": "Получаем новую версию",
+  validating: "Проверяем проект",
+  building: "Собираем панель",
+  "artifact-ready": "Готовим новую сборку",
+  restarting: "Перезапускаем Control Center",
+  verifying: "Проверяем запущенную версию",
+  rollback: "Восстанавливаем предыдущую версию",
+  completed: "Обновление завершено"
+};
+
+const UPDATE_PHASE_PROGRESS: Record<UpdateOwnerPhase, number> = {
+  started: 5,
+  stopping: 12,
+  checkout: 24,
+  handoff: 30,
+  "target-authoritative": 36,
+  validating: 50,
+  building: 66,
+  "artifact-ready": 76,
+  restarting: 86,
+  verifying: 95,
+  rollback: 60
+};
+
+export function updateProgressPercent(state: UpdateOwnerState | null): number {
+  if (!state) return 0;
+  const progressPercent = state.progressPercent;
+  if (typeof progressPercent === "number" && Number.isInteger(progressPercent) && progressPercent >= 0 && progressPercent <= 100) {
+    return progressPercent;
+  }
+  if (state.status === "success") return 95;
+  return state.phase ? UPDATE_PHASE_PROGRESS[state.phase] : 0;
+}
+
+export function updateActivityCopy(code: string): string | null {
+  return Object.prototype.hasOwnProperty.call(UPDATE_ACTIVITY_COPY, code)
+    ? UPDATE_ACTIVITY_COPY[code as UpdateActivityCode]
+    : null;
 }
 
 export interface ProductionBuildIdentity {

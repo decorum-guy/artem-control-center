@@ -479,6 +479,8 @@ def test_owner_status_whitelists_result_and_never_exposes_local_fields(monkeypat
         "schemaVersion": 1,
         "status": "failed",
         "updatedAt": "2026-08-26T00:00:00+00:00",
+        "events": [],
+        "progressPercent": 0,
     }
     serialized = response.text
     assert "SECRET" not in serialized
@@ -672,9 +674,81 @@ def test_terminal_state_retains_target_and_served_revision_but_not_arbitrary_fie
         "targetHead": TARGET,
         "servedRevision": TARGET,
         "result": "updated",
+        "events": [],
+        "progressPercent": 95,
     }
     assert "ownerPid" not in response.text
     assert "command" not in response.text
+
+
+def test_status_returns_only_bounded_activity_codes_and_phase_progress(monkeypatch, tmp_path):
+    client, service = make_client(
+        monkeypatch,
+        tmp_path,
+        FakeGit(),
+        owner_alive=lambda _pid, _request_id: False,
+    )
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "updating",
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "phase": "building",
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "events": [
+                *({"code": "building"} for _ in range(40)),
+                {"code": "SECRET=C:/private/repo"},
+                {"code": "verifying"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "updating"
+    assert payload["phase"] == "building"
+    assert payload["progressPercent"] == 66
+    assert payload["events"] == [{"code": "building"}, {"code": "verifying"}]
+    assert "SECRET" not in json.dumps(payload)
+    assert "private" not in json.dumps(payload)
+
+
+def test_success_reaches_100_only_after_accepted_v2_artifact_is_verified(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.dashboard_dist.mkdir(parents=True, exist_ok=True)
+    service.dashboard_dist.joinpath("dashboard-build.json").write_text(
+        json.dumps({
+            "schemaVersion": "dashboard-build.v1",
+            "revision": TARGET,
+            "profile": "accepted-v2",
+            "buildId": f"{TARGET}:accepted-v2",
+        }),
+        encoding="utf-8",
+    )
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "success",
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "servedRevision": TARGET,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": "updated",
+            "events": [{"code": "verifying"}, {"code": "completed"}],
+        }),
+        encoding="utf-8",
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["progressPercent"] == 100
+    assert payload["events"] == [{"code": "verifying"}, {"code": "completed"}]
 
 
 def test_terminal_rollback_failure_is_not_reclassified_as_stale(monkeypatch, tmp_path):

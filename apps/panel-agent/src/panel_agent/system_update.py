@@ -49,6 +49,37 @@ UPDATE_PHASES = frozenset({
     "verifying",
     "rollback",
 })
+UPDATE_ACTIVITY_MAX = 32
+UPDATE_ACTIVITY_CODES = frozenset((*UPDATE_PHASES, "completed"))
+UPDATE_ACTIVITY_COPY = {
+    "started": "Проверяем обновление",
+    "stopping": "Останавливаем текущую панель",
+    "checkout": "Получаем новую версию",
+    "handoff": "Передаём управление новой версии обновлятора",
+    "target-authoritative": "Получаем новую версию",
+    "validating": "Проверяем проект",
+    "building": "Собираем панель",
+    "artifact-ready": "Готовим новую сборку",
+    "restarting": "Перезапускаем Control Center",
+    "verifying": "Проверяем запущенную версию",
+    "rollback": "Восстанавливаем предыдущую версию",
+    "completed": "Обновление завершено",
+}
+UPDATE_PHASE_PROGRESS = {
+    "started": 5,
+    "stopping": 12,
+    "checkout": 24,
+    "handoff": 30,
+    "target-authoritative": 36,
+    "validating": 50,
+    "building": 66,
+    "artifact-ready": 76,
+    "restarting": 86,
+    "verifying": 95,
+    # Rollback is deliberately visible as its own phase rather than being
+    # presented as forward progress toward a successful update.
+    "rollback": 60,
+}
 
 
 def _utc_now() -> datetime:
@@ -88,6 +119,23 @@ def _safe_request_id(value: object) -> str | None:
     if not isinstance(value, str) or REQUEST_ID_PATTERN.fullmatch(value) is None:
         return None
     return value
+
+
+def _safe_activity_events(value: object) -> list[dict[str, str]]:
+    """Return only the fixed, owner-safe activity vocabulary."""
+    if not isinstance(value, list):
+        return []
+    events: list[dict[str, str]] = []
+    for item in value[-UPDATE_ACTIVITY_MAX:]:
+        if not isinstance(item, dict):
+            continue
+        code = item.get("code")
+        if not isinstance(code, str) or code not in UPDATE_ACTIVITY_CODES:
+            continue
+        if events and events[-1]["code"] == code:
+            continue
+        events.append({"code": code})
+    return events[-UPDATE_ACTIVITY_MAX:]
 
 
 def _recent_update_transaction(transaction: dict | None) -> bool:
@@ -485,8 +533,8 @@ class PanelUpdateService:
             lock_updated_at=_safe_timestamp(lock_payload.get("updatedAt") if lock_payload else None),
         )
 
-    @staticmethod
     def _owner_state_payload(
+        self,
         *,
         status: str,
         payload: dict,
@@ -517,8 +565,12 @@ class PanelUpdateService:
         if request_id is not None:
             output["requestId"] = request_id
         phase = payload.get("phase")
-        if phase not in UPDATE_PHASES and transaction is not None:
+        if not isinstance(phase, str) or phase not in UPDATE_PHASES:
+            phase = None
+        if phase is None and transaction is not None:
             phase = transaction.get("phase")
+        if not isinstance(phase, str) or phase not in UPDATE_PHASES:
+            phase = None
         if phase in UPDATE_PHASES:
             output["phase"] = phase
         if current_head is not None:
@@ -532,6 +584,20 @@ class PanelUpdateService:
         safe_result = result or payload.get("result")
         if isinstance(safe_result, str) and safe_result in SAFE_OWNER_RESULTS:
             output["result"] = safe_result
+        output["events"] = _safe_activity_events(payload.get("events"))
+
+        progress = UPDATE_PHASE_PROGRESS.get(phase, 0)
+        if status == "success":
+            served_revision = output.get("servedRevision")
+            target_revision = output.get("targetHead")
+            served_verified = bool(
+                safe_result in {"updated", "up_to_date"}
+                and isinstance(target_revision, str)
+                and served_revision == target_revision
+                and self._production_artifact_matches_revision(target_revision)
+            )
+            progress = 100 if served_verified else 95
+        output["progressPercent"] = progress
         return output
 
     def _clear_stale_lock(self) -> None:

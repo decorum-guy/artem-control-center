@@ -360,4 +360,132 @@ finally {
     Remove-Item -LiteralPath $knowledgeContractRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime ACLs, knowledge path/init/promotion isolation, visible kiosk/open recovery, exact-target updater, Scheduled Task SID and AVALAR rollout configuration."
+$stateRegressionRoot = Join-Path `
+    ([IO.Path]::GetTempPath()) `
+    ("artem-update-state-write-{0}" -f [guid]::NewGuid())
+$stateRegressionPaths = $null
+try {
+    # Load the production function bodies without executing the updater's main
+    # entrypoint. This keeps the regression on the exact Windows code that
+    # publishes update-lock, update-state and update-transaction files.
+    $ArtemUpdateActivityMax = 32
+    $ArtemUpdateActivityLabels = @{
+        started = "Проверяем обновление"
+        stopping = "Останавливаем текущую панель"
+        checkout = "Получаем новую версию"
+        handoff = "Передаём управление новой версии обновлятора"
+        "target-authoritative" = "Получаем новую версию"
+        validating = "Проверяем проект"
+        building = "Собираем панель"
+        "artifact-ready" = "Готовим новую сборку"
+        restarting = "Перезапускаем Control Center"
+        verifying = "Проверяем запущенную версию"
+        rollback = "Восстанавливаем предыдущую версию"
+        completed = "Обновление завершено"
+    }
+    $updaterPath = Join-Path $PSScriptRoot "update-production.ps1"
+    $updaterTokens = $null
+    $updaterErrors = $null
+    $updaterAst = [System.Management.Automation.Language.Parser]::ParseFile(
+        $updaterPath,
+        [ref]$updaterTokens,
+        [ref]$updaterErrors
+    )
+    if ($updaterErrors.Count -gt 0) {
+        throw "Updater AST parsing failed during state-write regression"
+    }
+    foreach ($functionName in @(
+        "Write-ArtemUpdateJson",
+        "Get-ArtemUpdateActivityHistory",
+        "Add-ArtemUpdateActivity",
+        "Write-ArtemUpdateState",
+        "New-ArtemUpdateLock",
+        "Claim-ArtemUpdateLock",
+        "Refresh-ArtemUpdateLock",
+        "Write-ArtemUpdateTransaction"
+    )) {
+        $functionAst = $updaterAst.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq $functionName
+        }, $true)
+        if ($null -eq $functionAst) {
+            throw "Production updater function was not found: $functionName"
+        }
+        . ([scriptblock]::Create($functionAst.Extent.Text))
+    }
+
+    New-Item -ItemType Directory -Force -Path $stateRegressionRoot | Out-Null
+    $stateRegressionPaths = [pscustomobject]@{
+        RuntimeRoot = $stateRegressionRoot
+        UpdateLock = Join-Path $stateRegressionRoot "update-lock.json"
+        UpdateState = Join-Path $stateRegressionRoot "update-state.json"
+        UpdateTransactionState = Join-Path $stateRegressionRoot "update-transaction.json"
+    }
+    $currentHead = "a" * 40
+    $targetHead = "b" * 40
+    $requestId = "0" * 24
+    $directWritePath = Join-Path $stateRegressionRoot "direct.json"
+
+    # The first write must publish by Move because the destination is absent;
+    # the second must publish by File.Replace because it already exists.
+    Write-ArtemUpdateJson -Path $directWritePath -Payload @{ value = "first" }
+    Write-ArtemUpdateJson -Path $directWritePath -Payload @{ value = "second" }
+    $directPayload = Get-ArtemJsonPayload -Path $directWritePath
+    if ($null -eq $directPayload -or $directPayload.value -ne "second") {
+        throw "Windows 5.1 atomic JSON second-write regression failed"
+    }
+
+    New-ArtemUpdateLock `
+        -Paths $stateRegressionPaths `
+        -LockRequestId $requestId `
+        -Current $currentHead `
+        -Target $targetHead
+    Claim-ArtemUpdateLock `
+        -Paths $stateRegressionPaths `
+        -LockRequestId $requestId `
+        -Current $currentHead `
+        -Target $targetHead
+    Refresh-ArtemUpdateLock -Paths $stateRegressionPaths -LockRequestId $requestId
+    Write-ArtemUpdateState -Paths $stateRegressionPaths -Status "checking"
+    Write-ArtemUpdateTransaction `
+        -Paths $stateRegressionPaths `
+        -Phase "started" `
+        -PreviousHead $currentHead `
+        -TargetHead $targetHead `
+        -LockRequestId $requestId
+    Write-ArtemUpdateTransaction `
+        -Paths $stateRegressionPaths `
+        -Phase "building" `
+        -PreviousHead $currentHead `
+        -TargetHead $targetHead `
+        -LockRequestId $requestId
+    Write-ArtemUpdateState `
+        -Paths $stateRegressionPaths `
+        -Status "success" `
+        -Result "updated" `
+        -CurrentHead $currentHead `
+        -TargetHead $targetHead `
+        -RequestId $requestId `
+        -ServedRevision $targetHead
+
+    $statePayload = Get-ArtemJsonPayload -Path $stateRegressionPaths.UpdateState
+    $transactionPayload = Get-ArtemJsonPayload -Path $stateRegressionPaths.UpdateTransactionState
+    if ($null -eq $statePayload -or $statePayload.status -ne "success") {
+        throw "Update state writer did not publish a terminal state"
+    }
+    if ($null -eq $transactionPayload -or $transactionPayload.phase -ne "building") {
+        throw "Update transaction writer did not replace the existing destination"
+    }
+    if ($statePayload.events.Count -gt $ArtemUpdateActivityMax) {
+        throw "Update activity history exceeded its bounded limit"
+    }
+    if ($statePayload.events[-1].code -ne "completed") {
+        throw "Terminal update state did not retain the completed activity event"
+    }
+}
+finally {
+    Remove-Item -LiteralPath $stateRegressionRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "Validated $($files.Count) Windows PowerShell scripts, runtime ACLs, knowledge path/init/promotion isolation, visible kiosk/open recovery, exact-target updater, Scheduled Task SID, AVALAR rollout configuration and Windows 5.1 atomic update state writes."

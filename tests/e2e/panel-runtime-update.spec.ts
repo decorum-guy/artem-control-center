@@ -23,6 +23,9 @@ type UpdateOwnerState = {
   result?: string;
   currentHead?: string;
   targetHead?: string;
+  phase?: string;
+  progressPercent?: number;
+  events?: Array<{ code: string }>;
 };
 
 type ProductionBuild = {
@@ -342,6 +345,60 @@ test.describe("Control Center runtime update UX", () => {
     await expect.poll(api.getApplyCount).toBe(1);
     expect(api.getLastApplyBody()).toEqual({ expectedCurrentHead: CURRENT, expectedTargetHead: TARGET });
     await expect(dialog).toContainText(/Запускаем обновление|Обновление выполняется/);
+  });
+
+  test("active progress view exposes only fixed activity and bounded approximate progress", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    api.queueStatuses({
+      schemaVersion: 1,
+      status: "updating",
+      currentHead: CURRENT,
+      targetHead: TARGET,
+      phase: "building",
+      progressPercent: 66,
+      events: [
+        { code: "started" },
+        { code: "building" },
+        { code: "SECRET=C:/private/repo" }
+      ]
+    });
+
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+
+    const progress = dialog.getByTestId("runtime-update-progress");
+    await expect(progress).toBeVisible();
+    await expect(progress.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "66");
+    await expect(progress).toContainText("Собираем панель");
+    await expect(progress).toContainText("Проверяем обновление");
+    await expect(progress).not.toContainText("SECRET");
+    await expect(progress).not.toContainText("C:/private/repo");
+  });
+
+  test("rollback remains distinct from reconnecting and reports the restored version", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    api.queueStatuses({
+      schemaVersion: 1,
+      status: "failed",
+      result: "rollback_restored",
+      currentHead: CURRENT,
+      targetHead: TARGET,
+      phase: "rollback",
+      progressPercent: 60,
+      events: [{ code: "rollback" }]
+    });
+
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+
+    await expect(dialog).toContainText("Восстанавливаем предыдущую версию");
+    await expect(dialog).toContainText("Предыдущая версия восстановлена");
+    await expect(dialog.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "60");
+    await expect(dialog).not.toContainText("Переподключаемся к панели");
   });
 
   test("lost apply response followed by idle stops without claiming an update failure", async ({ page }) => {
