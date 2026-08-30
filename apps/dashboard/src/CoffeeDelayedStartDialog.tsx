@@ -11,6 +11,10 @@ function activeSchedule(schedule: CoffeeDelayedStartRecord | null): boolean {
   return schedule?.status === "pending" || schedule?.status === "executing";
 }
 
+function pendingSchedule(schedule: CoffeeDelayedStartRecord | null): boolean {
+  return schedule?.status === "pending";
+}
+
 function errorCopy(error: unknown): string {
   const code = error instanceof Error ? error.message : "coffee_delayed_start_unavailable";
   if (code === "coffee_delayed_start_delay_invalid") return "Укажите от 1 до 120 минут целым числом.";
@@ -22,12 +26,16 @@ function errorCopy(error: unknown): string {
 export function CoffeeDelayedStartDialog({
   schedule,
   saving,
+  canReplace,
+  writesEnabled,
   onCreate,
   onCancel,
   onClose
 }: {
   schedule: CoffeeDelayedStartRecord | null;
   saving: boolean;
+  canReplace: boolean;
+  writesEnabled: boolean;
   onCreate: (delayMinutes: number) => Promise<void>;
   onCancel: () => Promise<void>;
   onClose: () => void;
@@ -36,6 +44,7 @@ export function CoffeeDelayedStartDialog({
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const hasActiveSchedule = activeSchedule(schedule);
+  const canCancel = pendingSchedule(schedule) && writesEnabled;
 
   useEffect(() => {
     if (!hasActiveSchedule) return;
@@ -45,6 +54,10 @@ export function CoffeeDelayedStartDialog({
 
   async function submit(delayMinutes: number): Promise<void> {
     if (saving) return;
+    if (!canReplace) {
+      setError("Новый запуск нельзя подтвердить, пока состояние кофемашины не подтверждено.");
+      return;
+    }
     if (!isCoffeeDelayMinutes(delayMinutes)) {
       setError("Укажите от 1 до 120 минут целым числом.");
       return;
@@ -79,17 +92,38 @@ export function CoffeeDelayedStartDialog({
       testId="coffee-delayed-start-dialog"
       canClose={() => !saving}
       onClose={onClose}
-      footer={hasActiveSchedule ? (
-        <button type="button" className="coffee-delay-dialog__cancel" disabled={saving} onClick={() => void cancel()}>
+      footer={schedule?.status === "pending" ? (
+        <button type="button" className="coffee-delay-dialog__cancel" disabled={saving || !canCancel} onClick={() => void cancel()}>
           {saving ? "Сохраняем…" : "Отменить запуск"}
         </button>
+      ) : schedule?.status === "executing" ? (
+        <span className="coffee-delay-dialog__executing">Запуск выполняется…</span>
       ) : undefined}
     >
       {hasActiveSchedule && schedule && (
         <div className="coffee-delay-dialog__active" data-testid="coffee-delayed-start-active" role="status" aria-live="polite">
-          <strong>{coffeeDelayCountdownLabel(schedule.dueAt, now) === "время наступило" ? "Проверяем запуск…" : `Включится через ${coffeeDelayCountdownLabel(schedule.dueAt, now)}`}</strong>
+          <strong>
+            {schedule.status === "executing"
+              ? "Запуск выполняется…"
+              : coffeeDelayCountdownLabel(schedule.dueAt, now) === "время наступило"
+                ? "Проверяем запуск…"
+                : `Включится через ${coffeeDelayCountdownLabel(schedule.dueAt, now)}`}
+          </strong>
           <span>в {coffeeDelayTargetLabel(schedule.dueAt)}</span>
         </div>
+      )}
+
+      {schedule?.status === "pending" && !canReplace && (
+        <p className="coffee-delay-dialog__availability" role="status">
+          {writesEnabled
+            ? "Состояние кофемашины сейчас не подтверждено. Отмена доступна, а новый запуск — после восстановления связи и актуального состояния."
+            : "Управление отложенным запуском сейчас недоступно по политике панели."}
+        </p>
+      )}
+      {schedule?.status === "executing" && (
+        <p className="coffee-delay-dialog__availability" role="status">
+          Физический запуск уже принят сервером; отмена и замена больше недоступны.
+        </p>
       )}
 
       {schedule?.status === "failed" && (
@@ -101,7 +135,7 @@ export function CoffeeDelayedStartDialog({
 
       <div className="coffee-delay-dialog__presets" role="group" aria-label="Готовое время запуска">
         {[5, 10, 15].map((minutes) => (
-          <button key={minutes} type="button" className="coffee-delay-dialog__preset" disabled={saving} onClick={() => void submit(minutes)}>
+          <button key={minutes} type="button" className="coffee-delay-dialog__preset" disabled={saving || !canReplace} onClick={() => void submit(minutes)}>
             +{minutes} мин
           </button>
         ))}
@@ -119,14 +153,14 @@ export function CoffeeDelayedStartDialog({
           utilityButtonClassName="coffee-delay-dialog__key coffee-delay-dialog__key--utility"
           ariaLabel="Цифровая клавиатура времени запуска"
           clearLabel="C"
-          isKeyDisabled={() => saving}
+          isKeyDisabled={() => saving || !canReplace}
           onKey={(key) => {
             const next = applyNumericKey(customMinutes, key, false, 3, 0);
             setCustomMinutes(next);
             setError(null);
           }}
         />
-        <button type="button" className="coffee-delay-dialog__custom-submit" disabled={saving || !customValid} onClick={() => void submit(customValue as number)}>
+        <button type="button" className="coffee-delay-dialog__custom-submit" disabled={saving || !canReplace || !customValid} onClick={() => void submit(customValue as number)}>
           {saving ? "Сохраняем…" : "Запланировать своё время"}
         </button>
       </section>

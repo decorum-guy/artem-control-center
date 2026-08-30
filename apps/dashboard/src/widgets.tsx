@@ -243,11 +243,15 @@ export function CoffeeWidget({
   if (view.stage === "ready" && duration) stateDetail = `Работает ${duration} · можно готовить кофе`;
   if (view.stage === "running" && duration) stateDetail = `Работает ${duration}`;
   if (view.stage === "running_too_long" && duration) stateDetail = `Включена уже ${duration}`;
-  if (view.stage === "off" && activeDelayedStart) {
+  if (activeDelayedStart?.status === "executing") {
+    stateDetail = `Запуск выполняется · в ${formatDelayedTarget(activeDelayedStart.dueAt)}`;
+  } else if (activeDelayedStart && view.stage === "off") {
     const remaining = formatDelayedRemaining(activeDelayedStart.dueAt, presentationTime);
     stateDetail = remaining === "время наступило"
       ? "Время запуска наступило · проверяем состояние"
       : `Включится через ${remaining} · в ${formatDelayedTarget(activeDelayedStart.dueAt)}`;
+  } else if (activeDelayedStart) {
+    stateDetail = `Запуск запланирован · в ${formatDelayedTarget(activeDelayedStart.dueAt)}`;
   } else if (view.stage === "off" && data.machine.entityLastChangedAt) {
     stateDetail = `Последнее изменение ${new Date(data.machine.entityLastChangedAt).toLocaleTimeString("ru-RU", {
       hour: "2-digit",
@@ -352,26 +356,28 @@ export function CoffeeWidget({
           </p>
         )}
 
-        {activeAction && (
+        {(activeAction || (activeDelayedStart && onDelayedStart)) && (
           <div
             className={`coffee-action-row coffee-action-row--${appearance.buttonLayout}`}
             data-button-layout={appearance.buttonLayout}
           >
-            <button
-              className="primary-action"
-              type="button"
-              data-coffee-action={view.stage === "off" ? "off-primary" : "on-quiet"}
-              disabled={!interactive || !activeAction.enabled || !onAction || actionPending}
-              onClick={() => onAction?.(service, activeAction.id)}
-            >
-              {actionPending ? "Подтверждаем…" : activeAction.title}
-            </button>
-            {view.stage === "off" && onDelayedStart && (
+            {activeAction && (
+              <button
+                className="primary-action"
+                type="button"
+                data-coffee-action={view.stage === "off" ? "off-primary" : "on-quiet"}
+                disabled={!interactive || !activeAction.enabled || !onAction || actionPending}
+                onClick={() => onAction?.(service, activeAction.id)}
+              >
+                {actionPending ? "Подтверждаем…" : activeAction.title}
+              </button>
+            )}
+            {onDelayedStart && (activeDelayedStart || view.stage === "off" && activeAction?.enabled) && (
               <button
                 type="button"
                 className="coffee-delayed-start-action"
                 data-testid="coffee-delayed-start-action"
-                disabled={!interactive || !activeAction.enabled || delayedStartPending}
+                disabled={!interactive || delayedStartPending}
                 onClick={onDelayedStart}
               >
                 {delayedStartPending ? "Сохраняем…" : activeDelayedStart ? "Изменить запуск" : "Отложить"}

@@ -96,6 +96,9 @@ export function App() {
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
   const [coffeeActionPending, setCoffeeActionPending] = useState(false);
   const [coffeeDelayedStart, setCoffeeDelayedStart] = useState<CoffeeDelayedStartRecord | null>(null);
+  const [coffeeDelayedStartCanReplace, setCoffeeDelayedStartCanReplace] = useState(false);
+  const [coffeeDelayedStartWritesEnabled, setCoffeeDelayedStartWritesEnabled] = useState(false);
+  const [coffeeDelayedStartConfirming, setCoffeeDelayedStartConfirming] = useState(false);
   const [coffeeDelayedStartPending, setCoffeeDelayedStartPending] = useState(false);
   const [coffeeDelayedStartDialogOpen, setCoffeeDelayedStartDialogOpen] = useState(false);
   const snapshotCoordinator = useRef<SnapshotCoordinator | null>(null);
@@ -129,10 +132,18 @@ export function App() {
     try {
       const result = await getCoffeeDelayedStart();
       setCoffeeDelayedStart(result.schedule);
+      setCoffeeDelayedStartWritesEnabled(result.writesEnabled);
+      setCoffeeDelayedStartCanReplace(
+        result.writesEnabled
+        && result.available
+        && result.schedule?.status !== "executing"
+      );
       return result.schedule;
     } catch {
       // A failed read-back must not leave a stale confirmed countdown on screen.
       setCoffeeDelayedStart(null);
+      setCoffeeDelayedStartCanReplace(false);
+      setCoffeeDelayedStartWritesEnabled(false);
       return null;
     }
   }, []);
@@ -144,6 +155,10 @@ export function App() {
     const timer = window.setInterval(() => void refreshCoffeeDelayedStart(), 10_000);
     return () => window.clearInterval(timer);
   }, [hasSnapshot, refreshCoffeeDelayedStart, scenario]);
+
+  useEffect(() => {
+    if (snapshot) void refreshCoffeeDelayedStart();
+  }, [refreshCoffeeDelayedStart, snapshot]);
 
   useEffect(() => {
     const onPopState = () => setRoute(routeFromLocation());
@@ -261,11 +276,22 @@ export function App() {
   }
 
   async function saveCoffeeDelayedStart(delayMinutes: number): Promise<void> {
-    if (!guardMutation() || coffeeDelayedStartPending) return;
-    setCoffeeDelayedStartPending(true);
+    if (!guardMutation() || coffeeDelayedStartPending || coffeeDelayedStartConfirming || confirmationOpen) return;
+    setCoffeeDelayedStartConfirming(true);
     try {
+      const confirmation = await confirmAction("home.coffee.turn_on", {
+        target: `Кофемашина · запуск через ${delayMinutes} мин`
+      });
+      if (!confirmation.confirmed || !guardMutation()) return;
+      setCoffeeDelayedStartPending(true);
       const result = await createCoffeeDelayedStart(delayMinutes, crypto.randomUUID());
       setCoffeeDelayedStart(result.schedule);
+      setCoffeeDelayedStartWritesEnabled(result.writesEnabled);
+      setCoffeeDelayedStartCanReplace(
+        result.writesEnabled
+        && result.available
+        && result.schedule?.status !== "executing"
+      );
       await reconcileSnapshot();
       if (result.schedule?.status === "pending" || result.schedule?.status === "executing") {
         showNotice({
@@ -289,6 +315,7 @@ export function App() {
       throw error;
     } finally {
       setCoffeeDelayedStartPending(false);
+      setCoffeeDelayedStartConfirming(false);
     }
   }
 
@@ -454,7 +481,7 @@ export function App() {
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
                 coffeeDelayedStart={coffeeDelayedStart}
-                coffeeDelayedStartPending={coffeeDelayedStartPending}
+                coffeeDelayedStartPending={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
                 onCoffeeDelayedStart={openCoffeeDelayedStart}
               />
             ) : (
@@ -464,7 +491,7 @@ export function App() {
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
                 coffeeDelayedStart={coffeeDelayedStart}
-                coffeeDelayedStartPending={coffeeDelayedStartPending}
+                coffeeDelayedStartPending={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
                 onCoffeeDelayedStart={openCoffeeDelayedStart}
               />
             )
@@ -477,7 +504,7 @@ export function App() {
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
                 coffeeDelayedStart={coffeeDelayedStart}
-                coffeeDelayedStartPending={coffeeDelayedStartPending}
+                coffeeDelayedStartPending={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
                 onCoffeeDelayedStart={openCoffeeDelayedStart}
               />
             ) : (
@@ -487,7 +514,7 @@ export function App() {
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
                 coffeeDelayedStart={coffeeDelayedStart}
-                coffeeDelayedStartPending={coffeeDelayedStartPending}
+                coffeeDelayedStartPending={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
                 onCoffeeDelayedStart={openCoffeeDelayedStart}
               />
             )
@@ -529,7 +556,9 @@ export function App() {
       {coffeeDelayedStartDialogOpen && (
         <CoffeeDelayedStartDialog
           schedule={coffeeDelayedStart}
-          saving={coffeeDelayedStartPending}
+          saving={coffeeDelayedStartPending || coffeeDelayedStartConfirming}
+          canReplace={coffeeDelayedStartCanReplace}
+          writesEnabled={coffeeDelayedStartWritesEnabled}
           onCreate={saveCoffeeDelayedStart}
           onCancel={cancelCoffeeDelayedStartSchedule}
           onClose={() => setCoffeeDelayedStartDialogOpen(false)}

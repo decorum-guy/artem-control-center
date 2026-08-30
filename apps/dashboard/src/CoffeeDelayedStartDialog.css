@@ -27,6 +27,21 @@
   line-height: var(--cc-type-body-line);
 }
 
+.coffee-delay-dialog__availability,
+.coffee-delay-dialog__executing {
+  margin: 0 0 var(--cc-space-3);
+  color: var(--cc-text-secondary);
+  font-size: var(--cc-type-body-size);
+  line-height: var(--cc-type-body-line);
+}
+
+.coffee-delay-dialog__executing {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  color: var(--cc-warning);
+}
+
 .coffee-delay-dialog__presets {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
