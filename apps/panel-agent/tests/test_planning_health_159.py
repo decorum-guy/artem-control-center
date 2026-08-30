@@ -5,6 +5,7 @@ import copy
 from datetime import datetime, timezone
 
 import httpx
+import pytest
 
 from panel_agent.planning import (
     EventListEnvelope,
@@ -198,6 +199,115 @@ def test_provider_freshness_is_separate_from_operational_planning_health(tmp_pat
         assert projection.sourceStatus == "current"
         assert not _provider_health_problem(status)
         assert not _status_is_degraded(status)
+
+
+@pytest.mark.parametrize(
+    ("old_status", "old_error_code", "fresh_status", "fresh_error_code", "expected_status"),
+    [
+        ("current", None, "stale", "provider_connection_timeout", "degraded"),
+        ("current", None, "error", "provider_authentication_failed", "degraded"),
+        ("current", None, "current", "provider_connection_reset", "current"),
+        ("stale", "provider_connection_timeout", "current", None, "current"),
+        ("error", "provider_authentication_failed", "current", None, "current"),
+        ("current", None, "disabled", None, "current"),
+        ("current", None, "not_configured", None, "current"),
+    ],
+    ids=(
+        "fresh-stale-overrides-current-status",
+        "fresh-error-overrides-current-status",
+        "fresh-current-with-error-remains-current",
+        "fresh-current-recovers-old-stale-status",
+        "fresh-current-recovers-old-error-status",
+        "fresh-disabled-does-not-degrade",
+        "fresh-not-configured-does-not-degrade",
+    ),
+)
+def test_fresh_domain_provider_metadata_has_precedence_over_slow_status(
+    tmp_path,
+    old_status: str,
+    old_error_code: str | None,
+    fresh_status: str,
+    fresh_error_code: str | None,
+    expected_status: str,
+):
+    client = SelectiveRefreshClient()
+    client.provider_status = old_status
+    client.provider_error_code = old_error_code
+    client.sources = provider_sources(old_status, old_error_code)
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        await adapter.start()
+        client.sources = provider_sources(fresh_status, fresh_error_code)
+        monotonic[0] = 1.0
+        assert await adapter.refresh_domains() is True
+        projection = adapter.projection
+        status = adapter._last_status
+        await adapter.close()
+        return projection, status
+
+    projection, status = asyncio.run(exercise())
+    assert projection is not None and status is not None
+    assert projection.sourceStatus == expected_status
+    assert status.planningHealth is not None
+    assert status.planningHealth.providerStatus == old_status
+    icloud = next(source for source in projection.providerStatuses if source.provider == "icloud")
+    assert icloud.status == fresh_status
+    assert icloud.errorCode == fresh_error_code
+    assert all(issue.source != "planning-status" for issue in projection.health.issues)
+
+
+def test_partial_domain_retry_uses_fresh_stale_provider_metadata(tmp_path):
+    client = SelectiveRefreshClient()
+    client.provider_status = "current"
+    client.sources = provider_sources("current", None)
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        await adapter.start()
+        client.sources = provider_sources("stale", "provider_dns_failed")
+        client.failures = {"tasks"}
+        monotonic[0] = 1.0
+        assert await adapter.refresh_domains() is False
+        projection = adapter.projection
+        await adapter.close()
+        return projection
+
+    projection = asyncio.run(exercise())
+    assert projection is not None
+    assert projection.sourceStatus == "degraded"
+    assert next(domain for domain in projection.health.domains if domain.domain == "tasks").status == "retrying"
+    icloud = next(source for source in projection.providerStatuses if source.provider == "icloud")
+    assert (icloud.status, icloud.errorCode) == ("stale", "provider_dns_failed")
+    assert all(issue.source != "planning-status" for issue in projection.health.issues)
+
+
+def test_domain_stale_and_offline_remain_more_severe_than_provider_degradation(tmp_path):
+    client = SelectiveRefreshClient()
+    client.provider_status = "current"
+    client.sources = provider_sources("current", None)
+    monotonic = [0.0]
+    adapter = make_adapter(tmp_path, client, monotonic)
+
+    async def exercise():
+        await adapter.start()
+        client.sources = provider_sources("stale", "provider_connection_timeout")
+        client.failures = {"tasks"}
+        monotonic[0] = 91.0
+        assert await adapter.refresh_domains() is False
+        stale = adapter.projection
+        monotonic[0] = 301.0
+        assert await adapter.refresh_domains() is False
+        offline = adapter.projection
+        await adapter.close()
+        return stale, offline
+
+    stale, offline = asyncio.run(exercise())
+    assert stale is not None and offline is not None
+    assert stale.sourceStatus == "stale"
+    assert offline.sourceStatus == "offline"
 
 
 def test_operational_health_remains_degraded_independently_of_provider(tmp_path):

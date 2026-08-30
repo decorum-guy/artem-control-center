@@ -288,15 +288,23 @@ def test_canonical_event_join_is_safe_and_same_name_calendars_remain_distinct(tm
         )
 
 
-def test_external_freshness_does_not_replace_global_planning_status(tmp_path):
-    adapter = PlanningAdapter(_settings(tmp_path))
-    projected = adapter._project_sources([UpstreamPlanningSource.model_validate(source) for source in _sources()])
-    projection = empty_planning_projection(
-        generated_at=FIXTURE_TIMESTAMP,
-        source_status="current",
-    ).model_copy(update={"providerStatuses": projected}, deep=True)
-    assert projection.sourceStatus == "current"
-    assert projection.providerStatuses[1].status == "stale"
+def test_fresh_external_provider_metadata_degrades_global_planning_status(tmp_path):
+    client = _RefreshClient(sources=_source_batch(external_status="stale"))
+    adapter = PlanningAdapter(_settings(tmp_path), client=client)
+
+    async def exercise():
+        assert await adapter.refresh_domains() is True
+        projection = adapter.projection
+        await adapter.close()
+        return projection
+
+    projection = asyncio.run(exercise())
+    assert projection is not None
+    assert projection.sourceStatus == "degraded"
+    icloud = next(source for source in projection.providerStatuses if source.provider == "icloud")
+    assert icloud.status == "stale"
+    assert icloud.errorCode == "provider_timeout"
+    assert all(issue.source != "planning-status" for issue in projection.health.issues)
 
 
 def test_current_provider_attempt_error_survives_browser_safe_projection(tmp_path):
