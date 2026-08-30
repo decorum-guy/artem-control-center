@@ -397,6 +397,91 @@ test.describe("Issue #112 Slice B1 physical polish", () => {
     await expect(page.getByTestId("planning-calendar-selected-day-empty")).toHaveCount(0);
   });
 
+  test("August → September → August keeps target identity truthful and reuses the exact month cache", async ({ page }) => {
+    const state = { revision: 1, status: "current" };
+    await installSse(page);
+    await installPlanningSnapshot(page, () => state);
+    const fixture = await installCalendarFixture(page, () => state);
+    await page.unroute("**/api/v1/planning/events**");
+    let releaseSeptember: (() => void) | null = null;
+    let releaseReturnAugust: (() => void) | null = null;
+    let septemberStarted = false;
+    let returnAugustStarted = false;
+    let augustReads = 0;
+    let septemberCompleted = false;
+    let augustFrom: string | null = null;
+    let septemberFrom: string | null = null;
+    await page.route("**/api/v1/planning/events**", async (route) => {
+      fixture.methods.push(route.request().method());
+      if (route.request().method() !== "GET") return route.fallback();
+      const from = new URL(route.request().url()).searchParams.get("from") ?? "";
+      if (augustFrom === null) augustFrom = from;
+      const september = from !== augustFrom;
+      if (september) {
+        septemberFrom = from;
+        septemberStarted = true;
+        await new Promise<void>((resolve) => { releaseSeptember = resolve; });
+        septemberCompleted = true;
+      } else {
+        augustReads += 1;
+        if (septemberCompleted && augustReads > 1) {
+          returnAugustStarted = true;
+          await new Promise<void>((resolve) => { releaseReturnAugust = resolve; });
+        }
+      }
+      const payload = {
+        schemaVersion: "planning.panel.v1",
+        kind: "list",
+        domain: "calendar_event",
+        generatedAt: "2026-08-12T09:00:00Z",
+        sourceStatus: "current",
+        lastSyncedAt: "2026-08-12T09:00:00Z",
+        staleAfter: "2026-08-12T09:05:00Z",
+        items: [september
+        ? calendarEvent("00000000-0000-4000-8000-000000001594", { title: "SEPTEMBER_ONLY_EVENT_159A4", startAtUtc: "2026-09-12T10:00:00Z", endAtUtc: "2026-09-12T11:00:00Z" })
+        : calendarEvent("00000000-0000-4000-8000-000000001593", { title: "AUGUST_ONLY_EVENT_159A4", startAtUtc: "2026-08-12T10:00:00Z", endAtUtc: "2026-08-12T11:00:00Z" })],
+        sources: b1Sources,
+        limit: 100,
+        offset: 0,
+        count: 1,
+        hasMore: false
+      };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
+    });
+
+    await page.goto("/calendar");
+    await expect(page.getByTestId("planning-calendar-month-heading")).toContainText("Август");
+    await expect(page.getByText("AUGUST_ONLY_EVENT_159A4")).toBeVisible();
+    await expect(page.getByText("SEPTEMBER_ONLY_EVENT_159A4")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Следующий месяц" }).click();
+    await expect.poll(() => septemberStarted).toBe(true);
+    expect(septemberFrom).not.toBe(augustFrom);
+    await expect(page.getByTestId("planning-calendar-month-heading")).toContainText("Сентябрь");
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
+    await expect(page.getByText("Данные недоступны")).toHaveCount(0);
+    await expect(page.getByText("Есть проблемы")).toHaveCount(0);
+    await expect(page.getByText("AUGUST_ONLY_EVENT_159A4")).toHaveCount(0);
+    await expect(page.getByText("SEPTEMBER_ONLY_EVENT_159A4")).toHaveCount(0);
+    await expect(page.getByTestId("planning-route-loading")).toBeVisible();
+
+    releaseSeptember?.();
+    await expect(page.getByTestId("planning-calendar-month-heading")).toContainText("Сентябрь");
+    await page.locator("[data-testid='planning-calendar-month-cell'][data-date='2026-09-12']").click();
+    await expect(page.getByText("SEPTEMBER_ONLY_EVENT_159A4")).toBeVisible();
+    await expect(page.getByText("AUGUST_ONLY_EVENT_159A4")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Предыдущий месяц" }).click();
+    await expect.poll(() => returnAugustStarted).toBe(true);
+    await expect(page.getByTestId("planning-calendar-month-heading")).toContainText("Август");
+    await page.locator("[data-testid='planning-calendar-month-cell'][data-date='2026-08-12']").click();
+    await expect(page.getByText("AUGUST_ONLY_EVENT_159A4")).toBeVisible();
+    await expect(page.getByText("SEPTEMBER_ONLY_EVENT_159A4")).toHaveCount(0);
+    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
+    releaseReturnAugust?.();
+    await expect(page.getByText("AUGUST_ONLY_EVENT_159A4")).toBeVisible();
+  });
+
   test("same-query background refresh is silent before dwell, non-reflowing after dwell, and keeps last good data on error", async ({ page }, testInfo) => {
     const state = { revision: 1, status: "current" };
     await installSse(page);

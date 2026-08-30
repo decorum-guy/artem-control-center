@@ -1572,7 +1572,7 @@ export function usePlanningRead<T>(
     const cachedTarget = cacheRef.current.get(queryKey);
     setState((previous) => {
       const sameQuery = previous.queryKey === queryKey;
-      const data = sameQuery ? previous.data : cachedTarget;
+      const data = sameQuery ? previous.data ?? cachedTarget : cachedTarget;
       const hasData = data !== null;
       return {
         queryKey,
