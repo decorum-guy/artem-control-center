@@ -175,9 +175,8 @@ function Claim-ArtemTargetHandoffLease {
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target
     )
-    $claim = $null
     try {
-        Invoke-ArtemTargetHandoffLockMutation -Paths $Paths -Mutation {
+        $claim = Invoke-ArtemTargetHandoffLockMutation -Paths $Paths -Mutation {
             $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
             $isExplicit = (
                 (Test-ArtemTargetHandoffLease -Existing $existing -LockRequestId $LockRequestId -Current $Current -Target $Target) -and
@@ -189,7 +188,7 @@ function Claim-ArtemTargetHandoffLease {
             if (-not $isExplicit -and -not $isLegacy) {
                 throw "Software update handoff lease does not match the requested revisions"
             }
-            $claim = [pscustomobject]@{
+            $claimResult = [pscustomobject]@{
                 Protocol = if ($isLegacy) { "legacy" } else { "explicit" }
                 PreviousOwnerPid = if ($isLegacy) { [int]$existing.ownerPid } else { $null }
             }
@@ -202,6 +201,7 @@ function Claim-ArtemTargetHandoffLease {
                 ownerPid = $PID
                 updatedAt = [DateTime]::UtcNow.ToString("o")
             }
+            return $claimResult
         }
     }
     catch {
