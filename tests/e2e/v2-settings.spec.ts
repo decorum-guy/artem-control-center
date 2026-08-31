@@ -324,6 +324,110 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expectNoDocumentOverflow(page);
   });
 
+  test("a touch backdrop gesture closes AI without clicking the newly exposed Settings row", async ({ page }) => {
+    await mockCoffeeSettings(page);
+    await mockAISettings(page);
+    await openSettings(page);
+    await page.getByTestId("settings-summary-ai").click();
+    const sheet = page.getByTestId("settings-ai-sheet");
+    await expect(sheet).toBeVisible();
+
+    const target = page.getByTestId("settings-summary-interface-copy");
+    const targetBox = await target.boundingBox();
+    const sheetBox = await sheet.boundingBox();
+    expect(targetBox).not.toBeNull();
+    expect(sheetBox).not.toBeNull();
+    expect(targetBox!.x + targetBox!.width / 2).toBeLessThan(sheetBox!.x);
+
+    await page.evaluate(() => {
+      const events = ["pointerdown", "pointerup", "click"];
+      const log: string[] = [];
+      for (const type of events) {
+        document.addEventListener(type, (event) => {
+          const target = event.target instanceof Element ? event.target.closest("[data-testid]")?.getAttribute("data-testid") : null;
+          log.push(`${type}:${target ?? event.target?.nodeName ?? "unknown"}`);
+        }, true);
+      }
+      Object.defineProperty(window, "__sheetEventLog", { value: log, configurable: true });
+    });
+
+    await page.touchscreen.tap(
+      targetBox!.x + targetBox!.width / 2,
+      targetBox!.y + targetBox!.height / 2
+    );
+
+    await expect.poll(async () => page.evaluate(() => (window as Window & { __sheetEventLog?: string[] }).__sheetEventLog)).toEqual([
+      "pointerdown:settings-ai-sheet-backdrop",
+      "pointerup:settings-ai-sheet-backdrop",
+      "click:settings-ai-sheet-backdrop"
+    ]);
+
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByTestId("settings-interface-copy-sheet")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/settings$/);
+
+    await target.click();
+    await expect(page.getByTestId("settings-interface-copy-sheet")).toBeVisible();
+  });
+
+  test("a mouse backdrop gesture closes AI without clicking the newly exposed Settings row", async ({ page }) => {
+    await mockCoffeeSettings(page);
+    await mockAISettings(page);
+    await openSettings(page);
+    await page.getByTestId("settings-summary-ai").click();
+    const sheet = page.getByTestId("settings-ai-sheet");
+    const target = page.getByTestId("settings-summary-interface-copy");
+    await expect(sheet).toBeVisible();
+
+    const targetBox = await target.boundingBox();
+    expect(targetBox).not.toBeNull();
+    await page.mouse.click(
+      targetBox!.x + targetBox!.width / 2,
+      targetBox!.y + targetBox!.height / 2
+    );
+
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByTestId("settings-interface-copy-sheet")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/settings$/);
+
+    await target.click();
+    await expect(page.getByTestId("settings-interface-copy-sheet")).toBeVisible();
+  });
+
+  test("touch inside Sheet content does not close or reach Settings", async ({ page }) => {
+    await mockCoffeeSettings(page);
+    await mockAISettings(page);
+    await openSettings(page);
+    await page.getByTestId("settings-summary-ai").click();
+    const sheet = page.getByTestId("settings-ai-sheet");
+    const heading = sheet.getByRole("heading", { name: "Провайдеры", exact: true });
+    const headingBox = await heading.boundingBox();
+    expect(headingBox).not.toBeNull();
+
+    await page.touchscreen.tap(
+      headingBox!.x + headingBox!.width / 2,
+      headingBox!.y + headingBox!.height / 2
+    );
+
+    await expect(sheet).toBeVisible();
+    await expect(page.getByTestId("settings-interface-copy-sheet")).toHaveCount(0);
+  });
+
+  test("close button closes the Sheet once without activating Settings", async ({ page }) => {
+    await mockCoffeeSettings(page);
+    await mockAISettings(page);
+    await openSettings(page);
+    await page.getByTestId("settings-summary-ai").click();
+    const sheet = page.getByTestId("settings-ai-sheet");
+    await expect(sheet).toBeVisible();
+
+    await sheet.getByRole("button", { name: "Закрыть", exact: true }).click();
+
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByTestId("settings-interface-copy-sheet")).toHaveCount(0);
+    await expect(page.getByTestId("settings-summary-ai")).toBeFocused();
+  });
+
   test("AI Settings selects Local without exposing a browser model selector", async ({ page }) => {
     await mockCoffeeSettings(page);
     await mockAISettings(page);
