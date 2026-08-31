@@ -381,86 +381,38 @@
 
 .coffee-panel--overview .coffee-asset {
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 24px;
   align-items: center;
-  justify-content: flex-end;
+  justify-items: center;
   align-self: stretch;
   width: auto;
   height: 100%;
   min-height: 0;
-  gap: 2px;
-  padding: 0 8px 8px;
+  padding: 36px 8px 8px;
   border-left: 0;
   background: transparent;
   pointer-events: none;
 }
 
-/* Keep the warming activity source-owned by the rendered image. Scaling the
-   visual wrapper moves the machine and its activity together, including the
-   transformed image bounds used by the appearance controls. */
 .coffee-panel--overview .coffee-asset__visual {
-  position: relative;
-  left: 0;
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
   max-width: 100%;
   max-height: 100%;
-  transform: translateX(var(--cc-coffee-state-shift, 0px))
-    scale(calc(var(--cc-coffee-image-scale, 1) * var(--cc-coffee-state-scale, 1)));
-  transform-origin: center center;
-  transition: none;
-}
-
-/* State changes animate the visual composition, while appearance-control
-   edits remain synchronous so the saved scale/position is immediately
-   inspectable in the editor. */
-.coffee-panel--overview.coffee-panel--transition-moving .coffee-asset__visual,
-.coffee-panel--overview.coffee-panel--transition-revealing .coffee-asset__visual {
-  transition: left 360ms var(--cc-motion-ease), transform 360ms var(--cc-motion-ease);
-}
-.coffee-panel--overview.coffee-panel--transition-moving .coffee-asset,
-.coffee-panel--overview.coffee-panel--transition-revealing .coffee-asset {
-  transition: transform 360ms var(--cc-motion-ease);
-}
-
-/* The larger resting canvas would otherwise place its transparent image box
-   over the adjacent health mark. Keep the resting/turning composition in the
-   asset column; the browser can animate this visual-only offset without
-   changing grid geometry. */
-.coffee-panel--overview.coffee-panel--off .coffee-asset__visual,
-.coffee-panel--overview.coffee-panel--turning_on .coffee-asset__visual {
-  left: clamp(72px, 8.5vw, 108px);
-}
-
-.coffee-panel--overview.coffee-panel--turning_on.coffee-panel--transition-moving,
-.coffee-panel--overview.coffee-panel--turning_on.coffee-panel--transition-revealing,
-.coffee-panel--overview.coffee-panel--warming,
-.coffee-panel--overview.coffee-panel--ready,
-.coffee-panel--overview.coffee-panel--running,
-.coffee-panel--overview.coffee-panel--running_too_long {
-  --cc-coffee-state-shift: 18px;
-  --cc-coffee-state-scale: .94;
 }
 
 .coffee-panel--overview.coffee-panel--transition-moving .coffee-progress {
   visibility: hidden;
 }
 
-/* Keep the quiet/default composition centered beneath the service status.
-   The spacious state copy remains bounded so it cannot reach the image zone. */
-.overview-v2-grid-shell[data-grid-profile="landscape-12"]
-  .coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-asset {
-  transform: translateX(calc(-1 * clamp(96px, 11.2vw, 143px)));
-}
-
 .coffee-panel--overview .coffee-asset__image {
   width: auto;
-  height: 220px;
+  height: min(220px, 100%);
   max-width: 164px;
   max-height: none;
   object-fit: contain;
@@ -468,7 +420,7 @@
 }
 
 .coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset__image {
-  height: 176px;
+  height: min(176px, 100%);
   max-width: 128px;
 }
 
@@ -477,23 +429,19 @@
 }
 .coffee-panel--overview[data-overview-size-variant="compact"] .coffee-asset__image,
 .coffee-panel--overview[data-overview-size-variant="compact"][data-overview-copy-density="dense"] .coffee-asset__image {
-  height: 148px;
+  height: min(148px, 100%);
   max-width: 104px;
 }
 .coffee-panel--overview[data-overview-size-variant="large"] .coffee-asset {
   padding-right: 12px;
 }
 .coffee-panel--overview[data-overview-size-variant="large"] .coffee-asset__image {
-  height: 244px;
+  height: min(244px, 100%);
   max-width: 184px;
 }
 .coffee-panel--overview[data-overview-size-variant="large"][data-overview-copy-density="dense"] .coffee-asset__image {
-  height: 196px;
+  height: min(196px, 100%);
   max-width: 132px;
-}
-
-.coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset {
-  transform: none;
 }
 
 /* Appearance values select only these source-owned semantic offsets. */
@@ -519,43 +467,6 @@
 .coffee-panel--overview.coffee-panel--image-y-3 { --cc-coffee-image-y: 1; }
 .coffee-panel--overview.coffee-panel--image-y-4 { --cc-coffee-image-y: 2; }
 
-.coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-asset {
-  transform: translateX(calc(-1 * clamp(96px, 11.2vw, 143px) + 12px * var(--cc-coffee-image-x, 0)))
-    translateY(calc(4px * var(--cc-coffee-image-y, 0)));
-}
-.coffee-panel--overview[data-overview-size-variant="compact"][data-overview-copy-density="spacious"] .coffee-asset {
-  transform: translateX(0) translateY(calc(4px * var(--cc-coffee-image-y, 0)));
-}
-.overview-v2-grid-shell[data-grid-profile="landscape-12"]
-  .coffee-panel--overview[data-overview-size-variant="compact"][data-overview-copy-density="spacious"] .coffee-asset {
-  transform: translateX(0) translateY(calc(4px * var(--cc-coffee-image-y, 0)));
-}
-.coffee-panel--overview[data-overview-size-variant="compact"] .coffee-asset__visual {
-  left: 0;
-}
-.coffee-panel--overview[data-overview-copy-density="spacious"]:not([data-overview-size-variant="compact"]) .coffee-asset__visual {
-  left: clamp(72px, 8.5vw, 108px);
-}
-.coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset {
-  transform: translateX(calc(12px * var(--cc-coffee-image-x, 0)))
-    translateY(calc(4px * var(--cc-coffee-image-y, 0)));
-}
-
-.coffee-panel--overview .coffee-state-marker {
-  position: static;
-  flex: 0 0 auto;
-  min-width: 0;
-  min-height: 32px;
-  max-width: 100%;
-  padding: 6px 8px;
-  overflow: hidden;
-  color: var(--cc-text-secondary);
-  background: var(--cc-surface-1);
-  font-size: 11px;
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .coffee-panel--overview.coffee-panel--ready .coffee-panel__state strong {
   color: var(--cc-success);
@@ -568,11 +479,6 @@
   font-size: var(--cc-type-metadata-size);
   line-height: var(--cc-type-metadata-line);
 }
-.coffee-panel--overview.coffee-panel--ready .coffee-state-marker {
-  color: var(--cc-success);
-  border-color: var(--cc-success-border);
-}
-
 .coffee-panel--overview .coffee-progress__track {
   background: color-mix(in srgb, var(--cc-coffee-progress-color) 18%, var(--cc-surface-2));
 }
@@ -603,8 +509,8 @@
   position: static;
   top: auto;
   align-items: flex-start;
-  height: 22px;
-  flex: 0 0 22px;
+  height: 24px;
+  flex: 0 0 auto;
 }
 
 .overview-home-widget {

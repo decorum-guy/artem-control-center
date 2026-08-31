@@ -292,24 +292,16 @@ export function CoffeeWidget({
         </span>
       )
     : null;
-  const coffeeVisual = variant === "overview"
-    ? appearance.showImage
-      ? (
-          <div
-            className="coffee-asset__visual"
-            style={{ "--cc-coffee-image-scale": imageScale / 100 } as CSSProperties}
-          >
-            {coffeeActivity}
-            {coffeeImage}
-          </div>
-        )
-      : null
-    : (
-        <>
+  const coffeeVisual = appearance.showImage
+    ? (
+        <div
+          className="coffee-asset__visual"
+          style={{ "--cc-coffee-image-scale": imageScale / 100 } as CSSProperties}
+        >
           {coffeeImage}
-          {coffeeActivity}
-        </>
-      );
+        </div>
+      )
+    : null;
 
   return (
     <article
@@ -327,13 +319,15 @@ export function CoffeeWidget({
       data-image-y={appearance.imageYStep}
       style={{ "--cc-coffee-progress-color": view.progressColor ?? "var(--cc-accent-strong)" } as CSSProperties}
     >
+      <div className="coffee-panel__status" data-testid="coffee-online-status">
+        <HealthMark health={service.health} compact healthyLabel="Онлайн" />
+      </div>
       <div className="coffee-panel__copy">
         <div className="coffee-panel__heading">
           <div>
-            <p className="section-kicker">Дом · кофемашина</p>
+            <p className="section-kicker">Дом</p>
             <h2>{service.title}</h2>
           </div>
-          <HealthMark health={service.health} compact healthyLabel="Онлайн" />
         </div>
 
         <div className={`coffee-panel__state ${view.stage === "ready" ? "coffee-panel__state--ready" : ""}`} aria-live="polite">
@@ -401,11 +395,7 @@ export function CoffeeWidget({
 
       <div className="coffee-asset" data-fit={manifest.visualAsset?.fit ?? "contain"} data-image-visible={appearance.showImage}>
         {coffeeVisual}
-        {appearance.showStateMarker && (
-          <span className={`coffee-state-marker coffee-state-marker--${view.stage}`}>
-            {view.stage === "warming" ? "Разогрев" : view.label}
-          </span>
-        )}
+        {coffeeActivity}
       </div>
     </article>
   );

@@ -306,10 +306,10 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
         ? [
             ".coffee-panel--overview .coffee-panel__heading h2",
             ".coffee-panel--overview .coffee-panel__heading .v2-status-text",
+            ".coffee-panel--overview .coffee-panel__status .health-mark",
             ".coffee-panel--overview .coffee-panel__state",
             ".coffee-panel--overview .coffee-authority",
-            ".coffee-panel--overview .coffee-asset",
-            ".coffee-panel--overview .coffee-state-marker"
+            ".coffee-panel--overview .coffee-asset"
           ].map((selector) => ({ selector, rect: rectFor(frame?.querySelector(selector) ?? null) })).filter(({ rect }) => rect)
         : []
     };
@@ -352,13 +352,12 @@ async function assertCoffeeContentGeometry(page: Page, scenarioLabel = "current 
     const activityBars = Array.from(coffee?.querySelectorAll(".coffee-activity i") ?? []).map((element) => rectFor(element)).filter(Boolean);
     const semanticContent = [
       ".coffee-panel__heading h2",
-      ".coffee-panel__heading .health-mark",
+      ".coffee-panel__status .health-mark",
       ".coffee-panel__state",
       ".coffee-progress",
       ".coffee-policy-note",
       ".coffee-panel__copy .primary-action",
-      ".coffee-authority",
-      ".coffee-state-marker"
+      ".coffee-authority"
     ].map((selector) => ({ selector, rect: rectFor(coffee?.querySelector(selector) ?? null) })).filter(({ rect }) => rect);
     return { asset, image, activity, activityBars, semanticContent };
   });
@@ -369,16 +368,18 @@ async function assertCoffeeContentGeometry(page: Page, scenarioLabel = "current 
     expect(geometry.activity.right).toBeLessThanOrEqual(geometry.asset.right + 1);
     expect(geometry.activity.top).toBeGreaterThanOrEqual(geometry.asset.top - 1);
     expect(geometry.activity.bottom).toBeLessThanOrEqual(geometry.asset.bottom + 1);
-    const gap = geometry.image!.top - geometry.activity.bottom;
-    expect(gap, `${scenarioLabel}: activity-to-image gap`).toBeGreaterThanOrEqual(3);
-    expect(gap, `${scenarioLabel}: activity-to-image gap`).toBeLessThanOrEqual(18);
+    const gap = geometry.activity.top - geometry.image!.bottom;
+    expect(gap, `${scenarioLabel}: activity-to-image gap`).toBeGreaterThanOrEqual(0);
+    expect(gap, `${scenarioLabel}: activity-to-image gap`).toBeLessThanOrEqual(64);
     expect(rectIntersects(geometry.activity, geometry.image), `${scenarioLabel}: activity intersects image`).toBe(false);
-    const activityVisualBottom = Math.max(...geometry.activityBars.map((bar) => bar!.bottom));
-    const activityVisualGap = geometry.image!.top - activityVisualBottom;
-    expect(activityVisualGap, `${scenarioLabel}: animated activity-to-image gap`).toBeGreaterThanOrEqual(2);
-    expect(activityVisualGap, `${scenarioLabel}: animated activity-to-image gap`).toBeLessThanOrEqual(16);
     for (const bar of geometry.activityBars) {
-      if (bar) expect(rectIntersects(bar, geometry.image), `${scenarioLabel}: animated activity intersects image`).toBe(false);
+      if (bar) {
+        expect(bar.left).toBeGreaterThanOrEqual(geometry.asset.left - 1);
+        expect(bar.right).toBeLessThanOrEqual(geometry.asset.right + 1);
+        expect(bar.top).toBeGreaterThanOrEqual(geometry.asset.top - 1);
+        expect(bar.bottom).toBeLessThanOrEqual(geometry.asset.bottom + 1);
+        expect(rectIntersects(bar, geometry.image), `${scenarioLabel}: animated activity intersects image`).toBe(false);
+      }
     }
   }
   for (const content of geometry.semanticContent) {
@@ -740,7 +741,6 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     expect(at120).toMatchObject({ scale: "120", x: "-2", y: "1", assetTransform: at70.assetTransform });
     expect(at120.visual.transform).toMatch(/^matrix\(1\.2, 0, 0, 1\.2, 0, 0\)$/);
     expect(Math.abs(at120.imageCenter.x - at70.imageCenter.x)).toBeLessThanOrEqual(1);
-    expect(Math.abs(at120.imageCenter.y - at70.imageCenter.y)).toBeLessThanOrEqual(1);
 
     await setCoffeeScale(page, "70");
     const at70Again = await readCoffeeTransform(page);

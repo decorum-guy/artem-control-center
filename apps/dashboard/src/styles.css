@@ -845,7 +845,15 @@ p { color: var(--text-secondary); }
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
+  min-height: 0;
+  position: relative;
   padding: clamp(20px, 2.4vw, 28px);
+}
+.coffee-panel__status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
 }
 .coffee-panel__heading {
   display: flex;
@@ -918,10 +926,16 @@ p { color: var(--text-secondary); }
   font-weight: 740;
 }
 .coffee-asset {
+  /* Keep the illustration and warming indicator in separate reserved rows. */
   position: relative;
   display: grid;
-  place-items: center;
+  grid-template-rows: minmax(0, 1fr) 24px;
+  row-gap: 6px;
+  align-items: center;
+  justify-items: center;
   min-height: 260px;
+  box-sizing: border-box;
+  padding: 36px 16px 10px;
   overflow: hidden;
   border-left: 1px solid var(--border-soft);
   background: var(--surface-secondary);
@@ -929,10 +943,21 @@ p { color: var(--text-secondary); }
 }
 .coffee-asset__image {
   display: block;
-  width: min(86%, 360px);
-  height: min(78%, 330px);
+  width: auto;
+  height: auto;
   max-width: 100%;
   max-height: 100%;
+  object-position: center;
+}
+.coffee-asset__visual {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  transform: scale(var(--cc-coffee-image-scale, 1));
+  transform-origin: center;
 }
 .coffee-asset__fallback {
   display: grid;
@@ -946,27 +971,13 @@ p { color: var(--text-secondary); }
   text-align: center;
 }
 .coffee-asset__fallback span { max-width: 150px; font-size: 12px; line-height: 1.4; }
-.coffee-state-marker {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  min-height: 32px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--text-secondary);
-  background: var(--surface-primary);
-  font-size: 12px;
-  font-weight: 700;
-}
-.coffee-state-marker--ready { color: var(--success); border-color: var(--success); }
-.coffee-state-marker--running_too_long { color: var(--warning); border-color: var(--warning); }
 .coffee-activity {
-  position: absolute;
-  top: 8%;
   display: flex;
+  align-items: flex-start;
+  justify-content: center;
   gap: 7px;
-  height: 32px;
+  width: 100%;
+  height: 24px;
 }
 .coffee-activity i {
   width: 2px;
@@ -1401,7 +1412,8 @@ p { color: var(--text-secondary); }
 
 @keyframes coffee-activity {
   0%, 100% { transform: translateY(5px); opacity: .22; }
-  50% { transform: translateY(-6px); opacity: .78; }
+  /* Activity may animate within its reserved row, never into the image row. */
+  50% { transform: translateY(0); opacity: .78; }
 }
 
 .motion-reduced *, .motion-reduced *::before, .motion-reduced *::after,
