@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
+. (Join-Path $PSScriptRoot "updater-target-handoff.ps1")
 
 function Invoke-CheckedCommand {
     param(
@@ -550,34 +551,37 @@ function Invoke-ArtemTargetUpdater {
         -PreviousHead $PreviousHead `
         -TargetHead $TargetHead `
         -LockRequestId $LockRequestId
-    Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
-    $targetScriptArgument = "`"$($Paths.UpdateScript)`""
-
-    # This is the only continuation entrypoint. The path is derived from the
-    # checked-out repository and the exact revision is carried in the locked,
-    # bounded transaction state; no browser/user path or ref is accepted.
-    $targetProcess = Start-Process `
-        -FilePath "powershell.exe" `
-        -ArgumentList @(
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            $targetScriptArgument,
-            "-ExpectedCurrentHead",
-            $PreviousHead,
-            "-ExpectedTargetHead",
-            $TargetHead,
-            "-RequestId",
-            $LockRequestId,
-            "-Continuation"
-        ) `
-        -WorkingDirectory $Paths.RepoRoot `
-        -WindowStyle Hidden `
-        -Wait `
-        -PassThru
+    # Transfer the active parent lease to a bounded, ownerless handoff record
+    # before the child starts. The child atomically claims this exact record;
+    # it never needs to infer whether the waiting parent remains observable.
+    Publish-ArtemTargetHandoffLease `
+        -Paths $Paths `
+        -LockRequestId $LockRequestId `
+        -Current $PreviousHead `
+        -Target $TargetHead
+    try {
+        $targetProcess = Start-ArtemTargetContinuation `
+            -Paths $Paths `
+            -Current $PreviousHead `
+            -Target $TargetHead `
+            -LockRequestId $LockRequestId `
+            -TargetScript $Paths.UpdateScript
+    }
+    catch {
+        Reclaim-ArtemTargetHandoffLease `
+            -Paths $Paths `
+            -LockRequestId $LockRequestId `
+            -Current $PreviousHead `
+            -Target $TargetHead
+        throw
+    }
     if ($null -eq $targetProcess -or $targetProcess.ExitCode -ne 0) {
+        Reclaim-ArtemTargetHandoffLease `
+            -Paths $Paths `
+            -LockRequestId $LockRequestId `
+            -Current $PreviousHead `
+            -Target $TargetHead
+        Complete-ArtemTargetHandoffFailure -Paths $Paths -LockRequestId $LockRequestId
         throw "Target updater continuation failed"
     }
 }
@@ -618,12 +622,14 @@ if (-not $RequestId) {
     New-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
 }
 else {
-    New-ArtemUpdateLock `
-        -Paths $paths `
-        -LockRequestId $RequestId `
-        -Current $ExpectedCurrentHead `
-        -Target $ExpectedTargetHead `
-        -AcceptExisting
+    if (-not $Continuation) {
+        New-ArtemUpdateLock `
+            -Paths $paths `
+            -LockRequestId $RequestId `
+            -Current $ExpectedCurrentHead `
+            -Target $ExpectedTargetHead `
+            -AcceptExisting
+    }
 }
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -641,13 +647,26 @@ $rollbackRestored = $false
 try {
     # From the first instruction after lock acquisition onward, every exit is
     # protected by the finally below. This includes transcript startup failure.
-    Claim-ArtemUpdateLock `
-        -Paths $paths `
-        -LockRequestId $RequestId `
-        -Current $ExpectedCurrentHead `
-        -Target $ExpectedTargetHead
+    if ($Continuation) {
+        Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "arguments-accepted" -Result "success"
+        Claim-ArtemTargetHandoffLease `
+            -Paths $paths `
+            -LockRequestId $RequestId `
+            -Current $ExpectedCurrentHead `
+            -Target $ExpectedTargetHead
+    }
+    else {
+        Claim-ArtemUpdateLock `
+            -Paths $paths `
+            -LockRequestId $RequestId `
+            -Current $ExpectedCurrentHead `
+            -Target $ExpectedTargetHead
+    }
     Start-Transcript -Path $transcriptPath -Force | Out-Null
     $transcriptStarted = $true
+    if ($Continuation) {
+        Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "transcript-started" -Result "success"
+    }
 
     Write-ArtemUpdateState -Paths $paths -Status "checking"
     Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
@@ -691,6 +710,7 @@ try {
             throw "Target updater continuation selected an invalid recovery action"
         }
         Assert-ArtemTargetUpdaterLogic -Paths $paths -ExpectedTargetHead $ExpectedTargetHead
+        Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "target-bootstrap-accepted" -Result "success"
         $currentHead = $decision.CurrentHead
         $targetHead = $decision.TargetHead
         $rollbackHead = $decision.RollbackHead
