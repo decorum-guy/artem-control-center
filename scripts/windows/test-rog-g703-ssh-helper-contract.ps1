@@ -11,6 +11,19 @@ if ($helper -notmatch 'ValidateSet\("health", "sleep", "hibernate"\)') {
 if ($helper -match 'Invoke-Expression|\[scriptblock\]|\[string\]\$Command|\[string\]\$Script') {
     throw "ROG SSH helper must not expose a generic command or scriptblock surface."
 }
+if ($helper -match '\$args\b') {
+    throw "ROG SSH helper must not read the implicit args automatic variable under StrictMode."
+}
+if ($helper -notmatch 'ValueFromRemainingArguments = \$true[\s\S]*?\[string\[\]\]\$RemainingArguments = @\(\)') {
+    throw "ROG SSH helper must explicitly capture unexpected trailing values."
+}
+if ($helper -notmatch 'if \(\$RemainingArguments\.Count -ne 0\)\s*\{\s*exit 64') {
+    throw "ROG SSH helper must reject unexpected trailing values with exit 64."
+}
+$startProcessBlock = [regex]::Match($helper, 'Start-Process[\s\S]*?-WindowStyle Hidden').Value
+if (-not $startProcessBlock -or $startProcessBlock -match 'RemainingArguments') {
+    throw "ROG SSH helper must never forward remaining arguments."
+}
 if ($helper -notmatch 'SetSuspendState\(\$false, \$true, \$false\)') {
     throw "ROG SSH Sleep must use explicit Windows suspend rather than hibernation."
 }
@@ -31,6 +44,15 @@ if ($LASTEXITCODE -ne 0) {
 $health = ($healthOutput | Out-String | ConvertFrom-Json)
 if ($health.schemaVersion -ne 1 -or -not $health.ok -or $health.status -ne "online") {
     throw "ROG SSH helper health JSON contract is invalid."
+}
+
+$trailingOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helperPath -Operation health UNEXPECTED_ARGUMENT_101A
+$trailingExitCode = $LASTEXITCODE
+if ($trailingExitCode -ne 64) {
+    throw "ROG SSH helper must reject unexpected trailing arguments with exit 64."
+}
+if (($trailingOutput | Out-String).Trim()) {
+    throw "ROG SSH helper must not emit a health response after trailing argument rejection."
 }
 
 if ($installer -notmatch 'ValidateSet\("install", "status", "uninstall"\)') {

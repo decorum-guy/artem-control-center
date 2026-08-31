@@ -4,14 +4,16 @@ param(
     [ValidateSet("health", "sleep", "hibernate")]
     [string]$Operation,
     [Parameter(DontShow = $true)]
-    [switch]$ExecuteTransition
+    [switch]$ExecuteTransition,
+    [Parameter(DontShow = $true, ValueFromRemainingArguments = $true)]
+    [string[]]$RemainingArguments = @()
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $transitionDelayMilliseconds = 1200
 
-if ($args.Count -ne 0) {
+if ($RemainingArguments.Count -ne 0) {
     exit 64
 }
 
