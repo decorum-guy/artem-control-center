@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { planningFixtures } from "./planningFixtures";
 import {
   countOverdueTasks,
+  displayPlanningOverviewItems,
   formatCalendarEventTime,
   formatOverdueTaskCount,
   formatReminderDueLabel,
@@ -238,6 +239,72 @@ describe("Planning Overview selectors and presentation", () => {
     const summary = planningOverviewSummary(snapshot, fixtureNow);
     expect(summary.overviewItems.map((entry) => entry.item.title)).toEqual(["Напоминание 1", "Напоминание 2", "Напоминание 3"]);
     expect(formatTaskDueLabel({ ...planningFixtures.overviewDensity.tasks.upcoming[0], dueDate: "2026-08-14", dueTime: null, timezone: null })).not.toContain("00:00");
+  });
+
+  it("normalizes unavailable domains before the bounded Overview curation", () => {
+    const calendar = planningFixtures.overviewDensity.calendar.today[0];
+    const task = planningFixtures.overviewDensity.tasks.upcoming[0];
+    const reminder = planningFixtures.overviewDensity.reminders.upcoming[0];
+    const snapshot = {
+      ...planningFixtures.overviewDensity,
+      health: {
+        lastAttemptedAt: "2026-08-12T12:00:00Z",
+        lastSuccessfulAt: "2026-08-12T11:59:00Z",
+        consecutiveFailures: 3,
+        issues: [],
+        domains: [
+          { domain: "reminders" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "tasks" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "calendar" as const, status: "unavailable" as const, consecutiveFailures: 3, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "projects" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" }
+        ]
+      }
+    };
+    const meaningful = [
+      { kind: "calendar" as const, item: { ...calendar, id: "calendar-a", title: "CAL_EVENT_A_159A4B" } },
+      { kind: "calendar" as const, item: { ...calendar, id: "calendar-b", title: "CAL_EVENT_B_159A4B" } },
+      { kind: "calendar" as const, item: { ...calendar, id: "calendar-c", title: "CAL_EVENT_C_159A4B" } },
+      { kind: "task" as const, item: { ...task, id: "task-d", title: "TASK_D_159A4B" }, overdue: false },
+      { kind: "reminder" as const, item: { ...reminder, id: "reminder-e", title: "REMINDER_E_159A4B" } }
+    ];
+
+    const standard = displayPlanningOverviewItems(snapshot, meaningful, 3);
+    expect(standard.map((entry) => [entry.kind, entry.presentation, entry.item?.title])).toEqual([
+      ["calendar", "unavailable", undefined],
+      ["task", "meaningful", "TASK_D_159A4B"],
+      ["reminder", "meaningful", "REMINDER_E_159A4B"]
+    ]);
+    expect(displayPlanningOverviewItems(snapshot, meaningful, 2)).toHaveLength(2);
+    expect(standard).toHaveLength(3);
+  });
+
+  it("retains current, retrying, degraded, and stale meaningful Calendar candidates in stable order", () => {
+    const calendar = planningFixtures.overviewDensity.calendar.today[0];
+    const meaningful = [
+      { kind: "calendar" as const, item: { ...calendar, id: "calendar-alpha", title: "ALPHA" } },
+      { kind: "calendar" as const, item: { ...calendar, id: "calendar-beta", title: "BETA" } },
+      { kind: "calendar" as const, item: { ...calendar, id: "calendar-gamma", title: "GAMMA" } }
+    ];
+    for (const status of ["current", "retrying", "degraded", "stale"] as const) {
+      const snapshot = {
+        ...planningFixtures.overviewDensity,
+        health: {
+          lastAttemptedAt: null,
+          lastSuccessfulAt: "2026-08-12T11:59:00Z",
+          consecutiveFailures: 0,
+          issues: [],
+          domains: [
+            { domain: "reminders" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null },
+            { domain: "tasks" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null },
+            { domain: "calendar" as const, status, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null },
+            { domain: "projects" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null }
+          ]
+        }
+      };
+      const display = displayPlanningOverviewItems(snapshot, meaningful, 3);
+      expect(display.map((entry) => entry.item?.title)).toEqual(["ALPHA", "BETA", "GAMMA"]);
+      expect(display.every((entry) => entry.presentation === "meaningful")).toBe(true);
+    }
   });
 
   it("orders cross-kind timed items by their actual instant and handles ties deterministically", () => {

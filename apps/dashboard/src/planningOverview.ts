@@ -473,6 +473,74 @@ export type PlanningOverviewItem =
   | { readonly kind: "task"; readonly item: PlanningTask; readonly overdue: boolean }
   | { readonly kind: "calendar"; readonly item: PlanningCalendarEvent };
 
+/** A bounded Overview row after per-domain freshness has been applied. */
+export type PlanningOverviewDisplayItem =
+  | { readonly kind: "reminder"; readonly item: PlanningReminder | null; readonly presentation: "meaningful" | "placeholder" | "unavailable" }
+  | { readonly kind: "task"; readonly item: PlanningTask | null; readonly overdue: boolean; readonly presentation: "meaningful" | "placeholder" | "unavailable" }
+  | { readonly kind: "calendar"; readonly item: PlanningCalendarEvent | null; readonly presentation: "meaningful" | "placeholder" | "unavailable" };
+
+function overviewItemDomain(item: PlanningOverviewItem | PlanningOverviewDisplayItem): PlanningOverviewDomain {
+  return item.kind === "calendar" ? "calendar" : item.kind === "task" ? "tasks" : "reminders";
+}
+
+function unavailableOverviewItem(domain: PlanningOverviewDomain): PlanningOverviewDisplayItem {
+  switch (domain) {
+    case "reminders": return { kind: "reminder", item: null, presentation: "unavailable" };
+    case "tasks": return { kind: "task", item: null, overdue: false, presentation: "unavailable" };
+    case "calendar": return { kind: "calendar", item: null, presentation: "unavailable" };
+  }
+}
+
+function meaningfulOverviewItem(item: PlanningOverviewItem): PlanningOverviewDisplayItem {
+  return { ...item, presentation: "meaningful" };
+}
+
+const overviewPlaceholders: readonly PlanningOverviewDisplayItem[] = [
+  { kind: "reminder", item: null, presentation: "placeholder" },
+  { kind: "task", item: null, overdue: false, presentation: "placeholder" },
+  { kind: "calendar", item: null, presentation: "placeholder" }
+];
+
+/**
+ * Normalize unavailable domains before curation: their first candidate becomes
+ * one domain status row and later candidates are discarded. Other freshness
+ * states retain their real objects. The final row limit is applied afterwards.
+ */
+export function displayPlanningOverviewItems(
+  snapshot: PlanningSnapshot,
+  meaningful: readonly PlanningOverviewItem[],
+  limit: 2 | 3
+): PlanningOverviewDisplayItem[] {
+  const normalized: PlanningOverviewDisplayItem[] = [];
+  const unavailableDomains = new Set<PlanningOverviewDomain>();
+
+  for (const item of meaningful) {
+    const domain = overviewItemDomain(item);
+    if (planningDomainStatus(snapshot, domain) !== "unavailable") {
+      normalized.push(meaningfulOverviewItem(item));
+      continue;
+    }
+    if (unavailableDomains.has(domain)) continue;
+    unavailableDomains.add(domain);
+    normalized.push(unavailableOverviewItem(domain));
+  }
+
+  const items = normalized.slice(0, limit);
+  const represented = new Set(items.map(overviewItemDomain));
+  for (const placeholder of overviewPlaceholders) {
+    if (items.length >= limit) break;
+    const domain = overviewItemDomain(placeholder);
+    if (!represented.has(domain)) {
+      const status = planningDomainStatus(snapshot, domain);
+      items.push(status === "unavailable"
+        ? unavailableOverviewItem(domain)
+        : placeholder);
+      represented.add(domain);
+    }
+  }
+  return items;
+}
+
 type OverviewOrderKey =
   | { readonly precision: "instant"; readonly timestamp: number }
   | { readonly precision: "date"; readonly date: string; readonly timeZone: string | null }

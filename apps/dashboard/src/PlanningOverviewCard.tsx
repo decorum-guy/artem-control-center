@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import type { PlanningCalendarEvent, PlanningCalendarSourceCalendar, PlanningDomainHealthStatus, PlanningHealthIssue, PlanningProviderFreshnessStatus, PlanningReminder, PlanningSnapshot, PlanningTask } from "@artem/contracts";
+import type { PlanningCalendarSourceCalendar, PlanningDomainHealthStatus, PlanningHealthIssue, PlanningProviderFreshnessStatus, PlanningSnapshot } from "@artem/contracts";
 import type { ShellNavigationTarget } from "./Shell";
 import { Sheet } from "./Sheet";
 import { calendarLocalDateForEvent, calendarNavigationForDate, type CalendarNavigationTarget } from "./calendarNavigation";
@@ -12,41 +12,15 @@ import {
   formatTaskDueLabel,
   planningHealthPresentation,
   planningDomainStatus,
+  displayPlanningOverviewItems,
   planningOverviewRowLimit,
-  planningOverviewSummary,
-  type PlanningOverviewItem
+  planningOverviewSummary
 } from "./planningOverview";
 import { planningRemindersRouteEnabled } from "./planningRouteConfig";
 import { calendarEventColor } from "./planningRouteLogic";
 import { useCalendarDisplayPreferences } from "./CalendarDisplayPreferences";
 
 type PlanningNavigationTarget = Extract<ShellNavigationTarget, "/calendar" | "/tasks" | "/reminders"> | CalendarNavigationTarget;
-
-type PlanningDisplayItem =
-  | { readonly kind: "reminder"; readonly item: PlanningReminder | null }
-  | { readonly kind: "task"; readonly item: PlanningTask | null; readonly overdue: boolean }
-  | { readonly kind: "calendar"; readonly item: PlanningCalendarEvent | null };
-
-function displayItemsForSummary(
-  meaningful: readonly PlanningOverviewItem[],
-  limit: 2 | 3
-): PlanningDisplayItem[] {
-  const items: PlanningDisplayItem[] = meaningful.slice(0, limit);
-  const represented = new Set(items.map((entry) => entry.kind));
-  const placeholders: PlanningDisplayItem[] = [
-    { kind: "reminder", item: null },
-    { kind: "task", item: null, overdue: false },
-    { kind: "calendar", item: null }
-  ];
-  for (const placeholder of placeholders) {
-    if (items.length >= limit) break;
-    if (!represented.has(placeholder.kind)) {
-      items.push(placeholder);
-      represented.add(placeholder.kind);
-    }
-  }
-  return items;
-}
 
 function usePlanningPresentationNow(sourceStatus: PlanningSnapshot["sourceStatus"] | "unavailable") {
   const [now, setNow] = useState(() => new Date());
@@ -141,15 +115,12 @@ function PlanningRow({
 }
 
 function unavailableRowTitle(
-  health: ReturnType<typeof planningHealthPresentation>,
   emptyTitle: string,
-  domainStatus?: PlanningDomainHealthStatus
+  domainStatus: PlanningDomainHealthStatus
 ): string {
-  return domainStatus === "unavailable"
-    || domainStatus === "stale"
-    || (!domainStatus && (health.state === "offline" || health.state === "stale"))
-    ? "Данные недоступны"
-    : emptyTitle;
+  if (domainStatus === "unavailable") return "Данные недоступны";
+  if (domainStatus === "stale") return "Данные могут быть устаревшими";
+  return emptyTitle;
 }
 
 type PlanningHealthProblem = {
@@ -345,7 +316,7 @@ export function PlanningOverviewCard({
     );
   }
 
-  const displayItems = displayItemsForSummary(summary.overviewItems, planningOverviewRowLimit(sizeVariant));
+  const displayItems = displayPlanningOverviewItems(planning, summary.overviewItems, planningOverviewRowLimit(sizeVariant));
   const overdueCount = formatOverdueTaskCount(summary.overdueTaskCount);
 
   return (
@@ -370,9 +341,13 @@ export function PlanningOverviewCard({
         {displayItems.map((entry, index) => {
           const kindOccurrence = displayItems.slice(0, index).filter((item) => item.kind === entry.kind).length + 1;
           const suffix = kindOccurrence === 1 ? "" : `-${kindOccurrence}`;
-          const testId = `planning-${entry.kind === "calendar" ? "event" : entry.kind}-row${suffix}`;
+          const testId = entry.presentation === "unavailable"
+            ? `planning-${entry.kind === "calendar" ? "calendar" : entry.kind}-status-row`
+            : `planning-${entry.kind === "calendar" ? "event" : entry.kind}-row${suffix}`;
           const domain = entry.kind === "calendar" ? "calendar" : entry.kind === "task" ? "tasks" : "reminders";
           const rowState = planningDomainStatus(planning, domain);
+          const isUnavailableStatus = entry.presentation === "unavailable";
+          const isMeaningful = entry.presentation === "meaningful";
           const className = rowState !== "current" && rowState !== "retrying" ? "planning-row--not-current" : "";
           const rowSourceStatus = rowState === "retrying" || rowState === "current"
             ? "current"
@@ -385,60 +360,60 @@ export function PlanningOverviewCard({
                 testId={testId}
                 className={className}
                 dataState={rowState}
-                label="Напоминание"
-                title={reminder && rowState !== "unavailable" ? reminder.title : unavailableRowTitle(health, "Напоминаний нет", rowState)}
-                meta={reminder ? formatReminderDueLabel(reminder, rowSourceStatus, now) : undefined}
-                time={reminder ? formatReminderExactTime(reminder) : undefined}
+                label={isUnavailableStatus ? "Напоминания" : "Напоминание"}
+                title={isMeaningful && reminder ? reminder.title : unavailableRowTitle("Напоминаний нет", rowState)}
+                meta={isMeaningful && reminder ? formatReminderDueLabel(reminder, rowSourceStatus, now) : undefined}
+                time={isMeaningful && reminder ? formatReminderExactTime(reminder) : undefined}
                 dateTime={reminder?.dueAtUtc}
-                onClick={reminder && rowState !== "unavailable" && planningRemindersRouteEnabled ? () => onNavigate("/reminders") : undefined}
-                ariaLabel={reminder ? `${reminder.title}. ${formatReminderDueLabel(reminder, rowSourceStatus, now)}. Точное время ${formatReminderExactTime(reminder)}` : undefined}
-                empty={!reminder}
+                onClick={isMeaningful && reminder && planningRemindersRouteEnabled ? () => onNavigate("/reminders") : undefined}
+                ariaLabel={isMeaningful && reminder ? `${reminder.title}. ${formatReminderDueLabel(reminder, rowSourceStatus, now)}. Точное время ${formatReminderExactTime(reminder)}` : undefined}
+                empty={!isMeaningful}
               />
             );
           }
           if (entry.kind === "task") {
             const task = entry.item;
-            const taskTitle = task
-              && rowState !== "unavailable"
+            const taskTitle = isMeaningful && task
               ? entry.overdue ? `${overdueCount} · ${task.title}` : task.title
-              : unavailableRowTitle(health, "Нет просроченных задач", rowState);
+              : unavailableRowTitle("Нет просроченных задач", rowState);
             return (
               <PlanningRow
                 key={`${entry.kind}-${index}`}
                 testId={testId}
                 className={className}
                 dataState={rowState}
-                label={entry.overdue ? "Просроченные задачи" : "Задача"}
+                label={isUnavailableStatus ? "Задачи" : entry.overdue ? "Просроченные задачи" : "Задача"}
                 title={taskTitle}
-                meta={task && rowState !== "unavailable" ? formatTaskDueLabel(task) : health.state === "current" || health.state === "degraded" ? overdueCount : undefined}
-                onClick={task && rowState !== "unavailable" ? () => onNavigate("/tasks") : undefined}
-                ariaLabel={task ? `${task.title}. ${formatTaskDueLabel(task)}` : undefined}
-                empty={!task}
+                meta={isMeaningful && task ? formatTaskDueLabel(task) : entry.presentation === "placeholder" && (rowState === "current" || rowState === "degraded") ? overdueCount : undefined}
+                onClick={isMeaningful && task ? () => onNavigate("/tasks") : undefined}
+                ariaLabel={isMeaningful && task ? `${task.title}. ${formatTaskDueLabel(task)}` : undefined}
+                empty={!isMeaningful}
               />
             );
           }
           const event = entry.item;
-          const eventDate = event ? formatCalendarEventDate(event) : null;
+          const eventDate = isMeaningful && event ? formatCalendarEventDate(event) : null;
+          const calendarLabel = event?.calendarIdentity?.calendarLabel.trim() || event?.sourceLabel.trim() || "Календарь";
           return (
             <PlanningRow
               key={`${entry.kind}-${index}`}
               testId={testId}
               className={className}
               dataState={rowState}
-              indicatorColor={event ? calendarEventColor(event, planning.providerStatuses, calendarDisplayPreferences?.overrides ?? []) : undefined}
+              indicatorColor={isMeaningful && event ? calendarEventColor(event, planning.providerStatuses, calendarDisplayPreferences?.overrides ?? []) : undefined}
               indicatorTestId={entry.kind === "calendar" && kindOccurrence === 1
                 ? "planning-overview-calendar-marker"
                 : undefined}
-              label="Календарь"
-              title={event && rowState !== "unavailable" ? event.title : unavailableRowTitle(health, "Событий нет", rowState)}
-              meta={event ? formatCalendarEventTime(event) : undefined}
+              label={isMeaningful ? calendarLabel : "Календарь"}
+              title={isMeaningful && event ? event.title : unavailableRowTitle("Событий нет", rowState)}
+              meta={isMeaningful && event ? formatCalendarEventTime(event) : undefined}
               time={eventDate ?? undefined}
-              onClick={event && rowState !== "unavailable" ? () => {
+              onClick={isMeaningful && event ? () => {
                 const dateTarget = calendarNavigationForDate(calendarLocalDateForEvent(event) ?? "");
                 onNavigate(dateTarget ?? "/calendar");
               } : undefined}
-              ariaLabel={event ? `${event.title}. ${formatCalendarEventTime(event)}${eventDate ? ` · ${eventDate}` : ""}` : undefined}
-              empty={!event}
+              ariaLabel={isMeaningful && event ? `${event.title}. ${formatCalendarEventTime(event)}${eventDate ? ` · ${eventDate}` : ""}` : undefined}
+              empty={!isMeaningful}
             />
           );
         })}

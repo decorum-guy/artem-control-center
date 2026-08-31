@@ -293,6 +293,81 @@ test.describe("B2 Planning Overview", () => {
     }
   });
 
+  test("collapses an unavailable Calendar domain once while retaining healthy Overview rows", async ({ page }) => {
+    const baseEvent = planningFixtures.overviewDensity.calendar.upcoming[0];
+    const planning = {
+      ...planningFixtures.overviewDensity,
+      sourceStatus: "degraded" as const,
+      calendar: {
+        ...planningFixtures.overviewDensity.calendar,
+        upcoming: [
+          { ...baseEvent, id: "00000000-0000-4000-8000-000000159401", title: "CAL_EVENT_A_159A4B", startAtUtc: "2026-08-12T12:50:00Z", endAtUtc: "2026-08-12T13:50:00Z" },
+          { ...baseEvent, id: "00000000-0000-4000-8000-000000159402", title: "CAL_EVENT_B_159A4B", startAtUtc: "2026-08-12T13:00:00Z", endAtUtc: "2026-08-12T14:00:00Z" },
+          { ...baseEvent, id: "00000000-0000-4000-8000-000000159403", title: "CAL_EVENT_C_159A4B", startAtUtc: "2026-08-12T13:10:00Z", endAtUtc: "2026-08-12T14:10:00Z" }
+        ]
+      },
+      health: {
+        lastAttemptedAt: "2026-08-12T12:00:00Z",
+        lastSuccessfulAt: "2026-08-12T11:59:00Z",
+        consecutiveFailures: 3,
+        issues: [],
+        domains: [
+          { domain: "reminders" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "tasks" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "calendar" as const, status: "unavailable" as const, consecutiveFailures: 3, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "projects" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" }
+        ]
+      }
+    };
+    await mockPlanning(page, planning);
+    await page.goto("/overview?theme=day");
+
+    const card = page.getByTestId("planning-overview-card");
+    const statusRow = page.getByTestId("planning-calendar-status-row");
+    await expect(statusRow).toHaveCount(1);
+    await expect(statusRow).toContainText("Календарь");
+    await expect(statusRow).toContainText("Данные недоступны");
+    await expect(card.getByText("Данные недоступны", { exact: true })).toHaveCount(1);
+    await expect(card).not.toContainText("CAL_EVENT_A_159A4B");
+    await expect(card).not.toContainText("CAL_EVENT_B_159A4B");
+    await expect(card).not.toContainText("CAL_EVENT_C_159A4B");
+    await expect(card).toContainText("Позвонить в сервис");
+    await expect(card).toContainText("Ранняя задача");
+    await expect(statusRow.locator(".planning-row__source-marker")).toHaveCount(0);
+    await expectNoDocumentHorizontalOverflow(page);
+  });
+
+  test("keeps a stale retained Calendar event title and safe calendar label", async ({ page }) => {
+    const event = planningFixtures.overviewDensity.calendar.upcoming[0];
+    const planning = {
+      ...planningFixtures.empty,
+      sourceStatus: "stale" as const,
+      calendar: {
+        ...planningFixtures.empty.calendar,
+        upcoming: [{ ...event, id: "00000000-0000-4000-8000-000000159404", title: "Сохранённая встреча 159A4B", calendarIdentity: { ...event.calendarIdentity!, calendarLabel: "Команда" } }]
+      },
+      health: {
+        lastAttemptedAt: "2026-08-12T12:00:00Z",
+        lastSuccessfulAt: "2026-08-12T11:59:00Z",
+        consecutiveFailures: 2,
+        issues: [],
+        domains: [
+          { domain: "reminders" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "tasks" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "calendar" as const, status: "stale" as const, consecutiveFailures: 2, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" },
+          { domain: "projects" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: "2026-08-12T11:59:00Z" }
+        ]
+      }
+    };
+    await mockPlanning(page, planning);
+    await page.goto("/overview?theme=day");
+    const eventRow = page.getByTestId("planning-event-row");
+    await expect(eventRow).toContainText("Сохранённая встреча 159A4B");
+    await expect(eventRow).toContainText("Команда");
+    await expect(eventRow).toHaveAttribute("data-planning-state", "stale");
+    await expect(eventRow).not.toContainText("Данные недоступны");
+  });
+
   test("uses server-owned domain evidence in the Planning problem details", async ({ page }) => {
     const planning = {
       ...planningFixtures.healthy,
