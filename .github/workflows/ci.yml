@@ -59,6 +59,7 @@ jobs:
           ./scripts/windows/test-production-scripts.ps1
           ./scripts/windows/test-update-production-validation-temp.ps1
           ./scripts/windows/test-update-production-bootstrap.ps1
+          ./scripts/windows/test-updater-target-handoff.ps1
           ./scripts/windows/test-update-production-recovery.ps1
           ./scripts/windows/test-connectivity-contract.ps1
           ./scripts/windows/test-connectivity-keygen.ps1

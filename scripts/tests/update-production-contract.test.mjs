@@ -16,8 +16,12 @@ test("target-dependent update work is below the explicit target continuation", (
   assert.ok(targetProof > continuation);
   assert.ok(build > targetProof);
   assert.ok(restart > build);
-  assert.match(updater, /-File\"?,\s*\$targetScriptArgument/);
-  assert.match(updater, /\"-Continuation\"/);
+  assert.match(updater, /Publish-ArtemTargetHandoffLease/);
+  assert.match(updater, /Start-ArtemTargetContinuation/);
+  const handoff = readFileSync(resolve(root, "scripts/windows/updater-target-handoff.ps1"), "utf8");
+  assert.match(handoff, /"-File", \('\"\{0\}\"' -f \$TargetScript\)/);
+  assert.match(handoff, /"-Continuation"/);
+  assert.match(handoff, /Claim-ArtemTargetHandoffLease/);
 });
 
 test("same-SHA updates require artifact and served-runtime proof", () => {
@@ -93,6 +97,38 @@ test("Windows PowerShell atomic state publication passes a true CLR null backup 
   }
   assert.match(productionScripts, /first write must publish by Move/i);
   assert.match(productionScripts, /second must publish by File\.Replace/i);
+});
+
+test("target continuation has a bounded private lease handoff and executable Windows regression", () => {
+  const handoff = readFileSync(resolve(root, "scripts/windows/updater-target-handoff.ps1"), "utf8");
+  const windowsRegression = readFileSync(resolve(root, "scripts/windows/test-updater-target-handoff.ps1"), "utf8");
+  const child = readFileSync(resolve(root, "scripts/windows/test-updater-target-handoff-child.ps1"), "utf8");
+  const legacyParent = readFileSync(resolve(root, "scripts/windows/test-updater-target-handoff-legacy-parent.ps1"), "utf8");
+  const ci = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
+  assert.match(handoff, /handoff = "target-continuation"/);
+  assert.match(handoff, /New-Object -TypeName System\.Threading\.Mutex/);
+  assert.match(handoff, /Reclaim-ArtemTargetHandoffLease/);
+  assert.match(handoff, /Test-ArtemLegacyTargetHandoffLease/);
+  assert.match(handoff, /Test-ArtemTargetHandoffTransaction/);
+  assert.match(handoff, /Restore-ArtemLegacyTargetHandoffLease/);
+  assert.match(handoff, /update-handoff-\{0\}\.json/);
+  assert.match(windowsRegression, /Start-ArtemTargetContinuation/);
+  assert.match(windowsRegression, /-Label "request id"/);
+  assert.match(windowsRegression, /-Label "current revision"/);
+  assert.match(windowsRegression, /-Label "target revision"/);
+  assert.match(windowsRegression, /-Label "competing owner"/);
+  assert.match(windowsRegression, /Parent could not reclaim rollback authority after child failure/);
+  assert.match(windowsRegression, /Legacy parent continuation child failed/);
+  assert.match(windowsRegression, /Rejected legacy child claim removed the parent lease/);
+  assert.match(windowsRegression, /Failed legacy child did not restore parent rollback authority/);
+  assert.match(windowsRegression, /Reclaim overwrote a competing owner/);
+  assert.match(windowsRegression, /ownerless no-marker/);
+  assert.match(child, /\[switch\]\$Continuation/);
+  assert.match(legacyParent, /a2b0eb4b241032eb3b8975a7c8fff24fc4966219/);
+  assert.match(legacyParent, /Start-Process/);
+  assert.doesNotMatch(legacyParent, /Publish-ArtemTargetHandoffLease/);
+  assert.match(updater, /\[int\]\$existing\.ownerPid\s+-eq\s+\$PID/);
+  assert.match(ci, /test-updater-target-handoff\.ps1/);
 });
 
 test("dashboard failure reasons are exhaustive over the bounded owner result union", () => {
