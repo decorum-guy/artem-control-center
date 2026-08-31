@@ -16,10 +16,11 @@ $paths = [pscustomobject]@{
     RuntimeRoot = $runtimeRoot
     Logs = Join-Path $runtimeRoot "logs"
     UpdateLock = Join-Path $runtimeRoot "update-lock.json"
+    UpdateTransactionState = Join-Path $runtimeRoot "update-transaction.json"
 }
 
 if (-not $Continuation) { exit 21 }
-Claim-ArtemTargetHandoffLease `
+$claim = Claim-ArtemTargetHandoffLease `
     -Paths $paths `
     -LockRequestId $RequestId `
     -Current $ExpectedCurrentHead `
@@ -33,10 +34,21 @@ Claim-ArtemTargetHandoffLease `
         requestId = $RequestId
         continuation = [bool]$Continuation
         ownerPid = $PID
+        protocol = [string]$claim.Protocol
     } | ConvertTo-Json -Compress),
     [Text.Encoding]::ASCII
 )
 
-if ($env:ARTEM_TARGET_HANDOFF_TEST_FAIL -eq "1") { exit 22 }
+if ($env:ARTEM_TARGET_HANDOFF_TEST_FAIL -eq "1") {
+    if ([string]$claim.Protocol -eq "legacy") {
+        Restore-ArtemLegacyTargetHandoffLease `
+            -Paths $paths `
+            -LockRequestId $RequestId `
+            -Current $ExpectedCurrentHead `
+            -Target $ExpectedTargetHead `
+            -ParentPid ([int]$claim.PreviousOwnerPid)
+    }
+    exit 22
+}
 Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "target-bootstrap-accepted" -Result "success"
 exit 0

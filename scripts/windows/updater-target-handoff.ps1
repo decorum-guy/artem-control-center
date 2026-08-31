@@ -103,6 +103,47 @@ function Test-ArtemTargetHandoffLease {
     )
 }
 
+function Test-ArtemTargetHandoffTimestamp {
+    param([object]$Value)
+    try { $updated = [DateTimeOffset]::Parse([string]$Value).ToUniversalTime() }
+    catch { return $false }
+    $age = [DateTimeOffset]::UtcNow - $updated
+    return $age.TotalSeconds -ge 0 -and $age.TotalMinutes -le 2
+}
+
+function Test-ArtemTargetHandoffTransaction {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string]$LockRequestId,
+        [Parameter(Mandatory)][string]$Current,
+        [Parameter(Mandatory)][string]$Target
+    )
+    $transaction = Get-ArtemJsonPayload -Path $Paths.UpdateTransactionState
+    return (
+        $null -ne $transaction -and $transaction.schemaVersion -eq 1 -and
+        [string]$transaction.status -eq "incomplete" -and [string]$transaction.phase -eq "handoff" -and
+        [string]$transaction.requestId -eq $LockRequestId -and [string]$transaction.previousHead -eq $Current -and
+        [string]$transaction.targetHead -eq $Target -and
+        (Test-ArtemTargetHandoffTimestamp -Value $transaction.updatedAt)
+    )
+}
+
+function Test-ArtemLegacyTargetHandoffLease {
+    param(
+        [object]$Existing, [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string]$LockRequestId, [Parameter(Mandatory)][string]$Current,
+        [Parameter(Mandatory)][string]$Target
+    )
+    $hasOwner = $null -ne $Existing -and $Existing.PSObject.Properties.Name -contains "ownerPid"
+    $hasHandoff = $null -ne $Existing -and $Existing.PSObject.Properties.Name -contains "handoff"
+    return (
+        (Test-ArtemTargetHandoffLease -Existing $Existing -LockRequestId $LockRequestId -Current $Current -Target $Target) -and
+        $hasOwner -and -not $hasHandoff -and -not ($Existing.ownerPid -is [bool]) -and [int]$Existing.ownerPid -gt 0 -and
+        (Test-ArtemTargetHandoffTimestamp -Value $Existing.updatedAt) -and
+        (Test-ArtemTargetHandoffTransaction -Paths $Paths -LockRequestId $LockRequestId -Current $Current -Target $Target)
+    )
+}
+
 function Publish-ArtemTargetHandoffLease {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -134,15 +175,23 @@ function Claim-ArtemTargetHandoffLease {
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target
     )
+    $claim = $null
     try {
         Invoke-ArtemTargetHandoffLockMutation -Paths $Paths -Mutation {
             $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
-            if (
-                -not (Test-ArtemTargetHandoffLease -Existing $existing -LockRequestId $LockRequestId -Current $Current -Target $Target) -or
-                [string]$existing.handoff -ne "target-continuation" -or
-                $null -ne $existing.ownerPid
-            ) {
+            $isExplicit = (
+                (Test-ArtemTargetHandoffLease -Existing $existing -LockRequestId $LockRequestId -Current $Current -Target $Target) -and
+                [string]$existing.handoff -eq "target-continuation" -and $null -eq $existing.ownerPid -and
+                (Test-ArtemTargetHandoffTimestamp -Value $existing.updatedAt) -and
+                (Test-ArtemTargetHandoffTransaction -Paths $Paths -LockRequestId $LockRequestId -Current $Current -Target $Target)
+            )
+            $isLegacy = Test-ArtemLegacyTargetHandoffLease -Existing $existing -Paths $Paths -LockRequestId $LockRequestId -Current $Current -Target $Target
+            if (-not $isExplicit -and -not $isLegacy) {
                 throw "Software update handoff lease does not match the requested revisions"
+            }
+            $claim = [pscustomobject]@{
+                Protocol = if ($isLegacy) { "legacy" } else { "explicit" }
+                PreviousOwnerPid = if ($isLegacy) { [int]$existing.ownerPid } else { $null }
             }
             Write-ArtemTargetHandoffJson -Path $Paths.UpdateLock -Payload @{
                 schemaVersion = 1
@@ -160,6 +209,29 @@ function Claim-ArtemTargetHandoffLease {
         throw
     }
     Write-ArtemTargetHandoffEvidence -Paths $Paths -LockRequestId $LockRequestId -Stage "lease-accepted" -Result "success"
+    return $claim
+}
+
+function Restore-ArtemLegacyTargetHandoffLease {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target,
+        [Parameter(Mandatory)][int]$ParentPid
+    )
+    if ($ParentPid -le 0) { throw "Legacy updater parent identity is invalid" }
+    Invoke-ArtemTargetHandoffLockMutation -Paths $Paths -Mutation {
+        $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+        if (-not (Test-ArtemTargetHandoffLease -Existing $existing -LockRequestId $LockRequestId -Current $Current -Target $Target) -or [int]$existing.ownerPid -ne $PID) {
+            throw "Software update child no longer owns the legacy handoff lease"
+        }
+        Write-ArtemTargetHandoffJson -Path $Paths.UpdateLock -Payload @{
+            schemaVersion = 1; status = "updating"; requestId = $LockRequestId
+            expectedCurrentHead = $Current; expectedTargetHead = $Target; ownerPid = $ParentPid
+            updatedAt = [DateTime]::UtcNow.ToString("o")
+        }
+    }
 }
 
 function Reclaim-ArtemTargetHandoffLease {
@@ -167,12 +239,18 @@ function Reclaim-ArtemTargetHandoffLease {
         [Parameter(Mandatory)]$Paths,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target,
+        [int]$ExitedChildPid = 0
     )
     Invoke-ArtemTargetHandoffLockMutation -Paths $Paths -Mutation {
         $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
-        if ($null -ne $existing -and -not (Test-ArtemTargetHandoffLease -Existing $existing -LockRequestId $LockRequestId -Current $Current -Target $Target)) {
-            throw "Software update handoff recovery lease does not match the transaction"
+        if ($null -ne $existing) {
+            $exact = Test-ArtemTargetHandoffLease -Existing $existing -LockRequestId $LockRequestId -Current $Current -Target $Target
+            $ownerless = $exact -and [string]$existing.handoff -eq "target-continuation" -and $null -eq $existing.ownerPid
+            $exitedChild = $exact -and $ExitedChildPid -gt 0 -and [int]$existing.ownerPid -eq $ExitedChildPid
+            if (-not $ownerless -and -not $exitedChild) {
+                throw "Software update handoff recovery lease is not owned by the exited target child"
+            }
         }
         Write-ArtemTargetHandoffJson -Path $Paths.UpdateLock -Payload @{
             schemaVersion = 1

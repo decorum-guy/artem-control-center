@@ -348,7 +348,11 @@ function Remove-ArtemUpdateLock {
         [Parameter(Mandatory)][string]$LockRequestId
     )
     $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
-    if ($null -ne $existing -and [string]$existing.requestId -eq $LockRequestId) {
+    if (
+        $null -ne $existing -and
+        [string]$existing.requestId -eq $LockRequestId -and
+        [int]$existing.ownerPid -eq $PID
+    ) {
         Remove-Item -LiteralPath $Paths.UpdateLock -Force -ErrorAction SilentlyContinue
     }
 }
@@ -580,7 +584,8 @@ function Invoke-ArtemTargetUpdater {
             -Paths $Paths `
             -LockRequestId $LockRequestId `
             -Current $PreviousHead `
-            -Target $TargetHead
+            -Target $TargetHead `
+            -ExitedChildPid $targetProcess.Id
         Complete-ArtemTargetHandoffFailure -Paths $Paths -LockRequestId $LockRequestId
         throw "Target updater continuation failed"
     }
@@ -643,13 +648,14 @@ $handoffStarted = $false
 $rollbackHead = $null
 $buildRoot = $null
 $rollbackRestored = $false
+$targetHandoffClaim = $null
 
 try {
     # From the first instruction after lock acquisition onward, every exit is
     # protected by the finally below. This includes transcript startup failure.
     if ($Continuation) {
         Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "arguments-accepted" -Result "success"
-        Claim-ArtemTargetHandoffLease `
+        $targetHandoffClaim = Claim-ArtemTargetHandoffLease `
             -Paths $paths `
             -LockRequestId $RequestId `
             -Current $ExpectedCurrentHead `
@@ -975,7 +981,22 @@ catch {
     throw $failure
 }
 finally {
-    Remove-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
+    if (
+        $Continuation -and
+        $null -ne $targetHandoffClaim -and
+        [string]$targetHandoffClaim.Protocol -eq "legacy" -and
+        -not $transactionStarted
+    ) {
+        Restore-ArtemLegacyTargetHandoffLease `
+            -Paths $paths `
+            -LockRequestId $RequestId `
+            -Current $ExpectedCurrentHead `
+            -Target $ExpectedTargetHead `
+            -ParentPid ([int]$targetHandoffClaim.PreviousOwnerPid)
+    }
+    else {
+        Remove-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
+    }
     if ($transcriptStarted) {
         Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
         Write-Host "Update log: $transcriptPath"
