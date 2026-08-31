@@ -4,12 +4,15 @@ import asyncio
 import inspect
 import ipaddress
 import json
+import os
 import re
+import shutil
 import socket
 import time
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Protocol
 
 import httpx
@@ -64,6 +67,14 @@ _SAFE_ERROR_CODES = {
     "health_unreachable",
     "invalid_companion_response",
     "rog_g703_not_configured",
+    "ssh_action_rejected",
+    "ssh_client_unavailable",
+    "ssh_identity_file_missing",
+    "ssh_invalid_response",
+    "ssh_known_hosts_file_missing",
+    "ssh_output_too_large",
+    "ssh_timeout",
+    "ssh_transport_failed",
     "sleep_timeout",
     "wake_timeout",
     "wol_send_failed",
@@ -119,19 +130,27 @@ class WakeOnLanSender:
         return sent
 
 
-class RogCompanion(Protocol):
+class RogPowerBackend(Protocol):
+    """One selected, server-owned power backend for the fixed ROG actions."""
+
     async def health(self) -> bool: ...
 
     async def hibernate(self) -> None: ...
 
     async def sleep(self) -> None: ...
 
+    def is_configured(self) -> bool: ...
 
-class CompanionRequestError(RuntimeError):
+
+class RogPowerBackendError(RuntimeError):
     def __init__(self, code: str, *, unreachable: bool = False) -> None:
         super().__init__(code)
         self.code = code
         self.unreachable = unreachable
+
+
+class CompanionRequestError(RogPowerBackendError):
+    """Compatibility name for the existing HTTP companion error contract."""
 
 
 async def _read_bounded_response(response: httpx.Response, limit: int) -> bytes:
@@ -157,6 +176,9 @@ class HttpRogCompanion:
         self.timeout = settings.rog_g703_http_timeout_seconds
         self.response_limit = settings.rog_g703_response_limit_bytes
         self.transport = transport
+
+    def is_configured(self) -> bool:
+        return bool(self.base_url and self.secret)
 
     async def health(self) -> bool:
         payload = await self._request("GET", "/health", expected_status=200)
@@ -230,6 +252,259 @@ class HttpRogCompanion:
         return payload
 
 
+SshRogOperation = Literal["health", "sleep", "hibernate"]
+_SSH_OPERATIONS = frozenset({"health", "sleep", "hibernate"})
+ROG_G703_SSH_HELPER_PATH = (
+    "C:/ProgramData/ArtemControlCenter/RogG703Ssh/rog-g703-ssh-helper.ps1"
+)
+_SSH_HOSTNAME_PATTERN = re.compile(
+    r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)"
+    r"(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$"
+)
+_SSH_USER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+class SshRogPowerBackend:
+    """Pinned-key SSH implementation of the fixed ROG power backend.
+
+    All connection data is loaded from server-owned settings.  The remote
+    command consists solely of the repository-owned helper and one fixed
+    allow-listed operation; browser input never reaches this subprocess.
+    """
+
+    def __init__(
+        self,
+        settings: IntegrationSettings,
+        *,
+        executable_finder: Callable[[str], str | None] | None = None,
+    ) -> None:
+        self.host = settings.rog_g703_ssh_host
+        self.user = settings.rog_g703_ssh_user
+        self.port = settings.rog_g703_ssh_port
+        self.identity_file = settings.rog_g703_ssh_identity_file
+        self.known_hosts_file = settings.rog_g703_ssh_known_hosts_file
+        self.connect_timeout = settings.rog_g703_ssh_connect_timeout_seconds
+        self.command_timeout = settings.rog_g703_ssh_command_timeout_seconds
+        self.output_limit = settings.rog_g703_ssh_output_limit_bytes
+        self._executable_finder = executable_finder or shutil.which
+
+    def is_configured(self) -> bool:
+        return bool(
+            _valid_ssh_host(self.host)
+            and _SSH_USER_PATTERN.fullmatch(self.user)
+            and 1 <= self.port <= 65535
+            and self.identity_file
+            and self.known_hosts_file
+            and not _contains_control_character(self.identity_file)
+            and not _contains_control_character(self.known_hosts_file)
+            and Path(self.identity_file).is_file()
+            and Path(self.known_hosts_file).is_file()
+        )
+
+    async def health(self) -> bool:
+        payload = await self._run("health")
+        if set(payload) != {"schemaVersion", "ok", "status"}:
+            raise RogPowerBackendError("ssh_invalid_response")
+        if (
+            payload.get("schemaVersion") != 1
+            or payload.get("ok") is not True
+            or payload.get("status") != "online"
+        ):
+            raise RogPowerBackendError("ssh_invalid_response")
+        return True
+
+    async def hibernate(self) -> None:
+        await self._accepted("hibernate")
+
+    async def sleep(self) -> None:
+        await self._accepted("sleep")
+
+    async def _accepted(self, operation: Literal["sleep", "hibernate"]) -> None:
+        payload = await self._run(operation)
+        if set(payload) != {"schemaVersion", "accepted", "operation"}:
+            raise RogPowerBackendError("ssh_action_rejected")
+        if (
+            payload.get("schemaVersion") != 1
+            or payload.get("accepted") is not True
+            or payload.get("operation") != operation
+        ):
+            raise RogPowerBackendError("ssh_action_rejected")
+
+    async def _run(self, operation: SshRogOperation | str) -> dict[str, Any]:
+        if operation not in _SSH_OPERATIONS:
+            raise RogPowerBackendError("ssh_action_rejected")
+        executable = self._runtime_executable()
+        self._validate_runtime_files()
+        argv = self._argv(executable, operation)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            raise RogPowerBackendError("ssh_client_unavailable") from None
+        except (OSError, ValueError):
+            raise RogPowerBackendError("ssh_transport_failed", unreachable=True) from None
+
+        stdout_task = asyncio.create_task(
+            _read_limited_stream(process.stdout, self.output_limit)
+        )
+        stderr_task = asyncio.create_task(
+            _read_limited_stream(process.stderr, self.output_limit)
+        )
+        wait_task = asyncio.create_task(process.wait())
+        tasks = (stdout_task, stderr_task, wait_task)
+        try:
+            stdout, stderr, returncode = await asyncio.wait_for(
+                asyncio.gather(*tasks),
+                timeout=self.command_timeout,
+            )
+        except asyncio.TimeoutError:
+            await _kill_and_reap(process, tasks)
+            raise RogPowerBackendError("ssh_timeout", unreachable=True) from None
+        except RogPowerBackendError:
+            await _kill_and_reap(process, tasks)
+            raise
+        except (OSError, ValueError):
+            await _kill_and_reap(process, tasks)
+            raise RogPowerBackendError("ssh_transport_failed", unreachable=True) from None
+
+        if len(stdout) > self.output_limit or len(stderr) > self.output_limit:
+            raise RogPowerBackendError("ssh_output_too_large")
+        if returncode != 0:
+            raise RogPowerBackendError("ssh_transport_failed", unreachable=True)
+        try:
+            payload = json.loads(stdout.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RogPowerBackendError("ssh_invalid_response") from None
+        if not isinstance(payload, dict):
+            raise RogPowerBackendError("ssh_invalid_response")
+        return payload
+
+    def _runtime_executable(self) -> str:
+        executable = self._executable_finder("ssh")
+        if not executable:
+            raise RogPowerBackendError("ssh_client_unavailable")
+        return executable
+
+    def _validate_runtime_files(self) -> None:
+        if not _valid_ssh_host(self.host) or not _SSH_USER_PATTERN.fullmatch(self.user):
+            raise RogPowerBackendError("ssh_transport_failed")
+        if not 1 <= self.port <= 65535:
+            raise RogPowerBackendError("ssh_transport_failed")
+        if _contains_control_character(self.identity_file) or _contains_control_character(
+            self.known_hosts_file
+        ):
+            raise RogPowerBackendError("ssh_transport_failed")
+        if not Path(self.identity_file).is_file():
+            raise RogPowerBackendError("ssh_identity_file_missing")
+        if not Path(self.known_hosts_file).is_file():
+            raise RogPowerBackendError("ssh_known_hosts_file_missing")
+
+    def _argv(
+        self,
+        executable: str,
+        operation: SshRogOperation | str,
+    ) -> tuple[str, ...]:
+        if operation not in _SSH_OPERATIONS:
+            raise RogPowerBackendError("ssh_action_rejected")
+        destination = f"{self.user}@{self.host}"
+        return (
+            executable,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"UserKnownHostsFile={self.known_hosts_file}",
+            "-o",
+            f"GlobalKnownHostsFile={os.devnull}",
+            "-o",
+            f"ConnectTimeout={self.connect_timeout}",
+            "-o",
+            "ConnectionAttempts=1",
+            "-o",
+            "NumberOfPasswordPrompts=0",
+            "-o",
+            "PasswordAuthentication=no",
+            "-o",
+            "KbdInteractiveAuthentication=no",
+            "-i",
+            self.identity_file,
+            "-p",
+            str(self.port),
+            destination,
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            ROG_G703_SSH_HELPER_PATH,
+            operation,
+        )
+
+
+def _contains_control_character(value: str) -> bool:
+    return not value or any(ord(character) < 32 for character in value)
+
+
+def _valid_ssh_host(value: str) -> bool:
+    if (
+        not value
+        or "@" in value
+        or any(character.isspace() or ord(character) < 32 for character in value)
+    ):
+        return False
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return bool(_SSH_HOSTNAME_PATTERN.fullmatch(value))
+    return True
+
+
+async def _read_limited_stream(
+    stream: asyncio.StreamReader | None,
+    limit: int,
+) -> bytes:
+    if stream is None:
+        return b""
+    data = bytearray()
+    while True:
+        chunk = await stream.read(min(4096, limit + 1 - len(data)))
+        if not chunk:
+            return bytes(data)
+        data.extend(chunk)
+        if len(data) > limit:
+            raise RogPowerBackendError("ssh_output_too_large")
+
+
+async def _kill_and_reap(
+    process: asyncio.subprocess.Process,
+    tasks: tuple[asyncio.Task[Any], ...],
+) -> None:
+    if process.returncode is None:
+        process.kill()
+    await asyncio.gather(process.wait(), return_exceptions=True)
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _selected_rog_power_backend(settings: IntegrationSettings) -> RogPowerBackend:
+    """Choose exactly one configured backend; no health/action fallback exists."""
+
+    if settings.rog_g703_transport == "http":
+        return HttpRogCompanion(settings)
+    if settings.rog_g703_transport == "ssh":
+        return SshRogPowerBackend(settings)
+    raise ValueError("invalid_rog_g703_transport")
+
+
 ChangeCallback = Callable[[], Awaitable[None]]
 
 
@@ -238,12 +513,12 @@ class RogG703Device:
         self,
         settings: IntegrationSettings,
         *,
-        companion: RogCompanion | None = None,
+        companion: RogPowerBackend | None = None,
         clock: Callable[[], float] | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self.settings = settings
-        self.companion = companion or HttpRogCompanion(settings)
+        self.companion: RogPowerBackend = companion or _selected_rog_power_backend(settings)
         self._clock = clock or time.monotonic
         self._sleep = sleep or asyncio.sleep
         self.status: RogDeviceStatus = "offline"
@@ -263,8 +538,7 @@ class RogG703Device:
         return bool(
             self.enabled
             and self.settings.rog_g703_target_id == ROG_G703_TARGET_ID
-            and self.settings.rog_g703_companion_base_url
-            and self.settings.rog_g703_companion_secret
+            and self.companion.is_configured()
         )
 
     def set_on_change(self, callback: ChangeCallback | None) -> None:
@@ -342,7 +616,7 @@ class RogG703Device:
                 if not await self.companion.health():
                     await self.set_status("offline")
                     return True
-            except CompanionRequestError as exc:
+            except RogPowerBackendError as exc:
                 if exc.unreachable:
                     await self.set_status("offline")
                     return True
@@ -657,6 +931,8 @@ class RogG703ActionExecutor:
         await self.device.set_status("hibernating")
         try:
             await self.device.companion.hibernate()
+        except RogPowerBackendError as exc:
+            raise RuntimeError(exc.code) from None
         except Exception as exc:
             raise RuntimeError("companion_hibernate_failed") from exc
 
@@ -697,6 +973,8 @@ class RogG703ActionExecutor:
         await self.device.set_status("sleeping")
         try:
             await self.device.companion.sleep()
+        except RogPowerBackendError as exc:
+            raise RuntimeError(exc.code) from None
         except Exception as exc:
             raise RuntimeError("companion_sleep_failed") from exc
 
