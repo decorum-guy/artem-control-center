@@ -20,7 +20,10 @@ function Assert-Administrator {
 
 function Protect-HelperFiles {
     & icacls.exe $installRoot /inheritance:r | Out-Null
-    & icacls.exe $installRoot /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" "Users:(OI)(CI)RX" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not remove inherited ROG SSH helper ACL entries."
+    }
+    & icacls.exe $installRoot /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Could not apply the ROG SSH helper ACL."
     }

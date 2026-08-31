@@ -39,8 +39,23 @@ if ($installer -notmatch 'ValidateSet\("install", "status", "uninstall"\)') {
 if ($installer -notmatch 'ArtemControlCenter\\RogG703Ssh' -or $installer -notmatch 'rog-g703-ssh-helper\.ps1') {
     throw "ROG SSH helper installer must use the fixed ProgramData destination."
 }
-if ($installer -notmatch 'Users:\(OI\)\(CI\)RX' -or $installer -notmatch 'Administrators:\(OI\)\(CI\)F') {
-    throw "ROG SSH helper installer must preserve read/execute while protecting modification."
+foreach ($requiredAcl in @(
+    '\*S-1-5-18:\(OI\)\(CI\)F',
+    '\*S-1-5-32-544:\(OI\)\(CI\)F',
+    '\*S-1-5-32-545:\(OI\)\(CI\)RX'
+)) {
+    if ($installer -notmatch $requiredAcl) {
+        throw "ROG SSH helper installer must use the required well-known SID ACL."
+    }
+}
+if ($installer -match '"SYSTEM:\(OI\)\(CI\)F"|"Administrators:\(OI\)\(CI\)F"|"Users:\(OI\)\(CI\)RX"') {
+    throw "ROG SSH helper installer must not depend on localized account or group names."
+}
+if ($installer -notmatch 'icacls\.exe \$installRoot /inheritance:r[\s\S]*?\$LASTEXITCODE[\s\S]*?throw') {
+    throw "ROG SSH helper installer must fail closed when inheritance removal fails."
+}
+if ($installer -notmatch 'icacls\.exe \$installRoot /grant:r[\s\S]*?\$LASTEXITCODE[\s\S]*?throw') {
+    throw "ROG SSH helper installer must fail closed when SID ACL grant fails."
 }
 if ($installer -match 'New-NetFirewallRule|Set-Service|Start-Service|sshd|password|secret|credential') {
     throw "ROG SSH helper installer must not change SSH server, firewall, or credentials."

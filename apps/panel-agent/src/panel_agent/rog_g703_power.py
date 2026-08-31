@@ -423,7 +423,7 @@ class SshRogPowerBackend:
             "-o",
             f"GlobalKnownHostsFile={os.devnull}",
             "-o",
-            f"ConnectTimeout={self.connect_timeout:g}",
+            f"ConnectTimeout={self.connect_timeout}",
             "-o",
             "ConnectionAttempts=1",
             "-o",

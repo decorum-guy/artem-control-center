@@ -76,7 +76,7 @@ def ssh_settings(tmp_path: Path, **overrides) -> IntegrationSettings:
         "rog_g703_ssh_port": 22022,
         "rog_g703_ssh_identity_file": str(identity_file),
         "rog_g703_ssh_known_hosts_file": str(known_hosts_file),
-        "rog_g703_ssh_connect_timeout_seconds": 2,
+        "rog_g703_ssh_connect_timeout_seconds": 3,
         "rog_g703_ssh_command_timeout_seconds": 2,
         "rog_g703_ssh_output_limit_bytes": 4096,
         "rog_g703_wol_repeats": 3,
@@ -273,7 +273,8 @@ def test_ssh_argv_uses_only_pinned_server_owned_connection_arguments(tmp_path) -
     assert "NumberOfPasswordPrompts=0" in argv
     assert "PasswordAuthentication=no" in argv
     assert "KbdInteractiveAuthentication=no" in argv
-    assert f"ConnectTimeout={settings.rog_g703_ssh_connect_timeout_seconds:g}" in argv
+    assert "ConnectTimeout=3" in argv
+    assert not any(option.startswith("ConnectTimeout=3.") for option in argv)
     assert "-i" in argv and settings.rog_g703_ssh_identity_file in argv
     assert "-p" in argv and str(settings.rog_g703_ssh_port) in argv
     target_index = argv.index("private-rog-user-101a@private-rog-host-101a.local")
@@ -883,6 +884,40 @@ def test_enabled_ssh_environment_validates_only_selected_backend_fields(monkeypa
     assert settings.rog_g703_transport == "ssh"
     assert settings.rog_g703_companion_base_url == ""
     assert settings.rog_g703_companion_secret == ""
+    assert settings.rog_g703_ssh_connect_timeout_seconds == 3
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [("1", 1), ("10", 10), ("0", 1), ("11", 10)],
+)
+def test_enabled_ssh_environment_bounds_integer_connect_timeout(monkeypatch, configured, expected) -> None:
+    monkeypatch.setenv("PANEL_ROG_G703_ENABLED", "true")
+    monkeypatch.setenv("PANEL_ROG_G703_TRANSPORT", "ssh")
+    monkeypatch.setenv("PANEL_ROG_G703_MAC", "AA:BB:CC:DD:EE:FF")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_HOST", "rog-g703gi.local")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_USER", "artem-control")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_PORT", "22")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_IDENTITY_FILE", "C:\\server\\rog-key")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_KNOWN_HOSTS_FILE", "C:\\server\\rog-known-hosts")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_CONNECT_TIMEOUT_SECONDS", configured)
+
+    assert IntegrationSettings.from_env().rog_g703_ssh_connect_timeout_seconds == expected
+
+
+def test_enabled_ssh_environment_rejects_noninteger_connect_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("PANEL_ROG_G703_ENABLED", "true")
+    monkeypatch.setenv("PANEL_ROG_G703_TRANSPORT", "ssh")
+    monkeypatch.setenv("PANEL_ROG_G703_MAC", "AA:BB:CC:DD:EE:FF")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_HOST", "rog-g703gi.local")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_USER", "artem-control")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_PORT", "22")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_IDENTITY_FILE", "C:\\server\\rog-key")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_KNOWN_HOSTS_FILE", "C:\\server\\rog-known-hosts")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_CONNECT_TIMEOUT_SECONDS", "0.5")
+
+    with pytest.raises(RuntimeError, match="PANEL_ROG_G703_SSH_CONNECT_TIMEOUT_SECONDS"):
+        IntegrationSettings.from_env()
 
 
 @pytest.mark.parametrize(
@@ -919,12 +954,14 @@ def test_ssh_public_snapshot_and_action_error_redact_connection_canaries(tmp_pat
 
     backend = FailingBackend([True])
     device = RogG703Device(settings, companion=backend)
+    configured_connection_values = (
+        settings.rog_g703_ssh_host,
+        settings.rog_g703_ssh_user,
+        settings.rog_g703_ssh_identity_file,
+        settings.rog_g703_ssh_known_hosts_file,
+    )
     snapshot = json.dumps(device.service_snapshot().model_dump())
-    for canary in (
-        "PRIVATE_ROG_HOST_101A",
-        "PRIVATE_ROG_USER_101A",
-        "PRIVATE_ROG_KEY_PATH_101A",
-        "PRIVATE_ROG_KNOWN_HOSTS_101A",
+    for canary in configured_connection_values + (
         "RAW_SSH_STDERR_101A",
         "RAW_WINDOWS_PATH_101A",
     ):
@@ -932,20 +969,23 @@ def test_ssh_public_snapshot_and_action_error_redact_connection_canaries(tmp_pat
 
     async def scenario() -> None:
         await device.set_status("online")
-        access = AccessPolicyStore(tmp_path / "policy.json")
+        access = AccessPolicyStore(tmp_path / "policy.json", audit_dir=tmp_path / "audit")
         access.set_profile("standard")
         executor = RogG703ActionExecutor(settings, access, device=device, wol_sender=lambda: 3)
         started = await executor.start(RogG703ActionRequest(actionId=ROG_G703_SLEEP_ACTION))
         finished = await wait_terminal(executor, started.correlationId)
         assert finished.error == "ssh_transport_failed"
         serialized = json.dumps(finished.model_dump())
-        for canary in (
-            "PRIVATE_ROG_HOST_101A",
-            "PRIVATE_ROG_USER_101A",
+        audit = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (tmp_path / "audit").glob("*.jsonl")
+        )
+        for canary in configured_connection_values + (
             "RAW_SSH_STDERR_101A",
             "RAW_WINDOWS_PATH_101A",
         ):
             assert canary not in serialized
+            assert canary not in audit
 
     asyncio.run(scenario())
 

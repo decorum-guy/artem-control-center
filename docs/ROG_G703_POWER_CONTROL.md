@@ -83,7 +83,7 @@ PANEL_ROG_G703_SSH_COMMAND_TIMEOUT_SECONDS=10
 PANEL_ROG_G703_SSH_OUTPUT_LIMIT_BYTES=4096
 \`\`\`
 
-Startup accepts only \`http\` or \`ssh\`. SSH host must be a hostname or literal address, and SSH user is a narrow Windows/OpenSSH-compatible identifier; whitespace, \`@\`, control characters, and shell syntax are rejected. Port must be 1–65535. The identity and dedicated \`known_hosts\` paths are server-only values and are checked again at runtime: a missing file fails closed without exposing the path.
+Startup accepts only \`http\` or \`ssh\`. SSH host must be a hostname or literal address, and SSH user is a narrow Windows/OpenSSH-compatible identifier; whitespace, \`@\`, control characters, and shell syntax are rejected. Port must be 1–65535. \`PANEL_ROG_G703_SSH_CONNECT_TIMEOUT_SECONDS\` is an integer bounded to 1–10 seconds (default 3), so OpenSSH always receives an integer \`ConnectTimeout\`. The identity and dedicated \`known_hosts\` paths are server-only values and are checked again at runtime: a missing file fails closed without exposing the path.
 
 The SSH client is argv-based (never a local shell) and uses \`BatchMode=yes\`, \`IdentitiesOnly=yes\`, \`StrictHostKeyChecking=yes\`, \`UserKnownHostsFile=<dedicated path>\`, \`GlobalKnownHostsFile=<platform null device>\`, \`ConnectionAttempts=1\`, \`NumberOfPasswordPrompts=0\`, \`PasswordAuthentication=no\`, \`KbdInteractiveAuthentication=no\`, the configured identity file, port, and bounded connect timeout. Setting \`GlobalKnownHostsFile\` to the platform null device prevents global host keys from widening or replacing the dedicated pinning policy. It invokes only this fixed remote helper plus one operation:
 
@@ -102,6 +102,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\ins
 
 It copies the helper only to \`C:\\ProgramData\\ArtemControlCenter\\RogG703Ssh\\rog-g703-ssh-helper.ps1\` and applies an ACL with administrator/SYSTEM modification rights and ordinary-user read/execute access. Physical key provisioning, host-key capture/pinning, and updating protected Panel Agent runtime configuration are deliberate post-merge owner actions; this repository change does not execute them.
 
+### Owner-authorized SSH physical acceptance
+
+HTTP remains the default backend. SSH is opt-in and must be configured only during an owner-authorized physical setup window:
+
+1. Install the fixed SSH helper locally on the ASUS first; do not remove or alter the HTTP companion merely to use SSH.
+2. Verify the owner's existing SSH access and account details before editing Panel Agent runtime settings. This slice does not configure sshd, its firewall, or an account.
+3. Provision a dedicated Panel-Agent-side key and a separate pinned \`known_hosts\` file. Keep real host, user, key, and file paths in protected runtime configuration only—never in browser state, chat, source, or documentation examples.
+4. Prove one direct fixed-helper \`health\` invocation over SSH using that pinned configuration before setting \`PANEL_ROG_G703_TRANSPORT=ssh\`.
+5. Change the protected Panel Agent runtime settings and restart/reload it only through the established production mechanism during that authorized setup.
+6. Accept the physical cycle: Online → Sleep → Offline → Wake → Windows lock screen → automatically Online without unlock; then Online → Hibernate → Offline → Wake → lock screen → automatically Online without unlock.
+
+There is no automatic HTTP fallback in SSH mode. Selecting SSH does not require installing or deleting the old HTTP companion; exactly one selected backend remains authoritative.
+
 ## FIRST MANUAL ASUS INSTALL
 
 This first install does not require Mac-to-ASUS SSH. Perform it locally on the ASUS in an **elevated PowerShell** window.
@@ -112,8 +125,8 @@ From the checked-out repository on the ASUS:
 
 \`\`\`powershell
 git fetch origin
-git switch feat/rog-g703-power-controls
-git pull --ff-only origin feat/rog-g703-power-controls
+git switch main
+git pull --ff-only origin main
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\install-rog-g703-companion.ps1 -Action install -ListenAddress 0.0.0.0 -Port 8769 -FirewallRemoteAddress LocalSubnet -FirewallProfile Private
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\install-rog-g703-companion.ps1 -Action status
@@ -138,7 +151,7 @@ Run these commands in an elevated PowerShell window from the repository checkout
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\install-rog-g703-companion.ps1 -Action status
 
 # Update files/configuration and restart the startup task
-git pull --ff-only origin feat/rog-g703-power-controls
+git pull --ff-only origin main
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\install-rog-g703-companion.ps1 -Action install -ListenAddress 0.0.0.0 -Port 8769 -FirewallRemoteAddress LocalSubnet -FirewallProfile Private
 
 # Restart only, then verify local health

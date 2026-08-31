@@ -54,7 +54,7 @@ class IntegrationSettings:
     rog_g703_ssh_port: int = 22
     rog_g703_ssh_identity_file: str = ""
     rog_g703_ssh_known_hosts_file: str = ""
-    rog_g703_ssh_connect_timeout_seconds: float = 3.0
+    rog_g703_ssh_connect_timeout_seconds: int = 3
     rog_g703_ssh_command_timeout_seconds: float = 10.0
     rog_g703_ssh_output_limit_bytes: int = 4 * 1024
     rog_g703_wol_repeats: int = 3
@@ -233,13 +233,8 @@ class IntegrationSettings:
                 "",
             ).strip(),
             rog_g703_ssh_connect_timeout_seconds=min(
-                10.0,
-                max(
-                    0.5,
-                    float(
-                        os.getenv("PANEL_ROG_G703_SSH_CONNECT_TIMEOUT_SECONDS", "3")
-                    ),
-                ),
+                10,
+                max(1, _int_env("PANEL_ROG_G703_SSH_CONNECT_TIMEOUT_SECONDS", 3)),
             ),
             rog_g703_ssh_command_timeout_seconds=min(
                 30.0,
