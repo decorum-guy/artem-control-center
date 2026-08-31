@@ -90,9 +90,6 @@ try {
     Assert-RejectedClaim -Paths $paths -ClaimRequest ("2" * 24) -ClaimCurrent $current -ClaimTarget $target -Label "request id"
     Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent ("c" * 40) -ClaimTarget $target -Label "current revision"
     Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget ("d" * 40) -Label "target revision"
-    $competing = Get-ArtemJsonPayload -Path $paths.UpdateLock
-    $competing.ownerPid = 999999
-    $competing.PSObject.Properties.Remove("handoff")
     Write-ArtemTargetHandoffJson -Path $paths.UpdateLock -Payload @{
         schemaVersion = 1; status = "updating"; requestId = $request; expectedCurrentHead = $current; expectedTargetHead = $target; ownerPid = 999999; updatedAt = [DateTime]::UtcNow.ToString("o")
     }
