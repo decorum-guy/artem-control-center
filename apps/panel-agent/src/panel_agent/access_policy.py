@@ -44,6 +44,7 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "settings.ai.providers": "standard",
     "settings.reminder_delivery": "standard",
     "settings.interface_copy": "standard",
+    "settings.device_visibility": "standard",
     "settings.capabilities.manage": "full",
     "planning.reminders.create": "standard",
     "planning.reminders.edit": "standard",

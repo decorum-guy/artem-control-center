@@ -667,6 +667,26 @@ export interface CalendarDisplayPreferences {
   writesEnabled: boolean;
 }
 
+/** Source-owned presentation visibility; this is intentionally not a device-management API. */
+export type OwnerFacingDeviceKey = "kettle";
+
+export interface DeviceVisibilityState {
+  key: OwnerFacingDeviceKey;
+  label: string;
+  defaultVisible: boolean;
+  visible: boolean;
+}
+
+export interface DeviceVisibilitySettings {
+  schemaVersion: "device.visibility.v1";
+  revision: number;
+  updatedAt: string;
+  devices: DeviceVisibilityState[];
+  available: boolean;
+  warnings: "stored_device_visibility_unavailable"[];
+  writesEnabled: boolean;
+}
+
 export interface PlanningSnapshot {
   schemaVersion: "planning.panel.v1";
   generatedAt: string;

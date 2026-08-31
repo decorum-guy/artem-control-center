@@ -23,12 +23,14 @@ import { CapabilitySettingsSheet, capabilityStateLabel, capabilitySummary, useCa
 import { AIProviderSettingsSheet, aiStateLabel, aiSummary, useAIProviderSettings, type AIProviderSettingsController } from "./AIProviderSettings";
 import { ReminderDeliverySettingsSheet, reminderDeliveryStateLabel, reminderDeliverySummary, useReminderDeliverySettings, type ReminderDeliverySettingsController } from "./ReminderDeliverySettings";
 import { InterfaceCopySettingsSheet } from "./InterfaceCopySettings";
+import { DeviceVisibilitySettingsSheet, deviceVisibilityStateLabel, deviceVisibilitySummary } from "./DeviceVisibilitySettings";
+import { useDeviceVisibility } from "../../DeviceVisibility";
 import { useInterfaceCopy } from "../../interfaceCopy";
 import "./settingsV2.css";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
-type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery" | "interface-copy";
+type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery" | "interface-copy" | "device-visibility";
 
 const motionLabels: Record<MotionMode, string> = {
   full: "Полное",
@@ -65,6 +67,7 @@ export function SettingsV2Page({
   const capabilities = useCapabilities();
   const ai = useAIProviderSettings();
   const reminderDelivery = useReminderDeliverySettings();
+  const deviceVisibility = useDeviceVisibility();
   const { copy } = useInterfaceCopy();
   const [openSheet, setOpenSheet] = useState<SettingsSheet | null>(null);
 
@@ -119,6 +122,14 @@ export function SettingsV2Page({
 
       <div className="settings-v2-summary-grid">
         <SettingsSummaryColumn>
+          <SettingsSummaryRow
+            title="Устройства"
+            summary={deviceVisibilitySummary(deviceVisibility.loading, deviceVisibility.settings)}
+            stateLabel={deviceVisibilityStateLabel(deviceVisibility.loading, deviceVisibility.settings)}
+            stateTone={deviceVisibility.settings?.available === false ? "unavailable" : "neutral"}
+            testId="settings-summary-device-visibility"
+            onClick={() => setOpenSheet("device-visibility")}
+          />
           <SettingsSummaryRow
             title="Названия и подписи"
             summary="Настройте отображаемый текст без изменения маршрутов и действий"
@@ -231,6 +242,7 @@ function SettingsSheet({
   onClose: () => void;
 }) {
   if (kind === "interface-copy") return <InterfaceCopySettingsSheet onClose={onClose} />;
+  if (kind === "device-visibility") return <DeviceVisibilitySettingsSheet onClose={onClose} />;
   if (kind === "calendars") {
     return (
       <CalendarSettingsSheet

@@ -16,6 +16,7 @@ _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
     ("PATCH", "/api/v1/settings/ai/selection"): "settings.ai.providers",
     ("PATCH", "/api/v1/settings/reminders/delivery"): "settings.reminder_delivery",
     ("PATCH", "/api/v1/settings/interface-copy"): "settings.interface_copy",
+    ("PATCH", "/api/v1/settings/device-visibility"): "settings.device_visibility",
     ("PATCH", "/api/v1/settings/capabilities"): "settings.capabilities.manage",
     ("POST", "/api/v1/system/runtime/apply-capabilities"): "settings.capabilities.manage",
     ("POST", "/api/v1/actions/home/coffee"): "home.coffee.control",

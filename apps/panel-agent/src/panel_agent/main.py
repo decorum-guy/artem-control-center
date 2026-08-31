@@ -27,6 +27,8 @@ from .contracts import (
     CoffeeTimingSettings,
     CalendarDisplayColorPatch,
     CalendarDisplayPreferencesResponse,
+    DeviceVisibilityPatch,
+    DeviceVisibilitySettingsResponse,
     CapabilityPatch,
     DashboardSnapshot,
     DiagnosticsReport,
@@ -57,6 +59,11 @@ from .calendar_display_preferences import (
     CalendarDisplayPreferencesConflict,
     CalendarDisplayPreferencesError,
     CalendarDisplayPreferencesStore,
+)
+from .device_visibility import (
+    DeviceVisibilityRevisionConflict,
+    DeviceVisibilitySettingsStore,
+    DeviceVisibilityStoreError,
 )
 from .build_capabilities import active_build_flags, active_build_states
 from .capabilities import (
@@ -143,6 +150,10 @@ capability_override_store = CapabilityOverrideStore()
 ai_provider_settings_store = AIProviderSettingsStore(SETTINGS.ai_settings_path)
 ai_text_service = AITextService(SETTINGS, ai_provider_settings_store)
 interface_copy_store = InterfaceCopySettingsStore.from_environment(
+    writes_enabled=SETTINGS.writes_enabled,
+)
+device_visibility_store = DeviceVisibilitySettingsStore(
+    SETTINGS.device_visibility_path,
     writes_enabled=SETTINGS.writes_enabled,
 )
 coffee_diary_store = CoffeeDiaryStore.from_environment(writes_enabled=True)
@@ -438,6 +449,47 @@ def _ai_settings_write_allowed() -> bool:
 
 def _interface_copy_write_allowed() -> bool:
     return _write_allowed(True)
+
+
+def _device_visibility_write_allowed() -> bool:
+    return _write_allowed(True)
+
+
+@app.get(
+    "/api/v1/settings/device-visibility",
+    response_model=DeviceVisibilitySettingsResponse,
+)
+def get_device_visibility(response: Response) -> DeviceVisibilitySettingsResponse:
+    settings = device_visibility_store.read()
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{settings.revision}"'
+    response.headers["X-Device-Visibility-Writes-Enabled"] = str(_device_visibility_write_allowed()).lower()
+    return settings.model_copy(update={"writesEnabled": _device_visibility_write_allowed()})
+
+
+@app.patch(
+    "/api/v1/settings/device-visibility",
+    response_model=DeviceVisibilitySettingsResponse,
+)
+def patch_device_visibility(
+    patch: DeviceVisibilityPatch,
+    response: Response,
+) -> DeviceVisibilitySettingsResponse:
+    if not _device_visibility_write_allowed():
+        raise HTTPException(status_code=403, detail="device_visibility_write_disabled")
+    try:
+        saved = device_visibility_store.write(patch)
+    except DeviceVisibilityRevisionConflict:
+        current = device_visibility_store.read()
+        response.headers["ETag"] = f'"{current.revision}"'
+        raise HTTPException(status_code=409, detail="revision_conflict")
+    except DeviceVisibilityStoreError as exc:
+        status_code = 503 if str(exc) == "stored_device_visibility_unavailable" else 422
+        raise HTTPException(status_code=status_code, detail=str(exc))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{saved.revision}"'
+    response.headers["X-Device-Visibility-Writes-Enabled"] = "true"
+    return saved.model_copy(update={"writesEnabled": True})
 
 
 async def _read_bounded_coffee_diary_body(request: Request) -> bytes:

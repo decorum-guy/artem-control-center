@@ -34,6 +34,8 @@ import { SystemV2Page } from "./features/system/SystemV2Page";
 import { SettingsV2Page } from "./features/settings/SettingsV2Page";
 import { useInteractionLock } from "./InteractionLock";
 import { CoffeeDiaryPage } from "./CoffeeDiaryPage";
+import { useDeviceVisibility } from "./DeviceVisibility";
+import { visiblePresentationSnapshot } from "./deviceVisibilityPresentation";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -74,6 +76,7 @@ export function App() {
   const { confirmAction, confirmationOpen } = useActionConfirmation();
   const { guardMutation } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
+  const { settings: deviceVisibilitySettings } = useDeviceVisibility();
   const [route, setRoute] = useState<ShellRoutePath>(routeFromLocation);
   const [scenario, setScenario] = useState<string>(() =>
     import.meta.env.DEV
@@ -149,6 +152,10 @@ export function App() {
   }, []);
 
   const hasSnapshot = snapshot !== null;
+  const presentationSnapshot = useMemo(
+    () => snapshot ? visiblePresentationSnapshot(snapshot, deviceVisibilitySettings) : null,
+    [snapshot, deviceVisibilitySettings]
+  );
   useEffect(() => {
     if (!hasSnapshot) return;
     void refreshCoffeeDelayedStart();
@@ -476,7 +483,7 @@ export function App() {
           {route === "/overview" && (
             overviewV2Enabled ? (
               <OverviewV2Page
-                snapshot={snapshot}
+                snapshot={presentationSnapshot ?? snapshot}
                 onNavigate={navigate}
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
@@ -486,7 +493,7 @@ export function App() {
               />
             ) : (
               <OverviewPage
-                snapshot={snapshot}
+                snapshot={presentationSnapshot ?? snapshot}
                 onNavigate={navigate}
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
@@ -500,7 +507,7 @@ export function App() {
           {route === "/home" && (
             v2VisualShellEnabled ? (
               <HomeV2Page
-                snapshot={snapshot}
+                snapshot={presentationSnapshot ?? snapshot}
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}
                 coffeeDelayedStart={coffeeDelayedStart}
@@ -509,7 +516,7 @@ export function App() {
               />
             ) : (
               <HomePage
-                snapshot={snapshot}
+                snapshot={presentationSnapshot ?? snapshot}
                 onNavigate={navigate}
                 onCoffeeAction={(service, actionId) => void runCoffeeAction(service, actionId)}
                 coffeeActionPending={coffeeActionPending}

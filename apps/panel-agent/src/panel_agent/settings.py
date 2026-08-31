@@ -76,6 +76,7 @@ class IntegrationSettings:
     overview_layout_path: str = ".cache/overview-layout.json"
     calendar_display_color_writes_enabled: bool = False
     calendar_display_color_path: str = ".cache/calendar-display-colors.json"
+    device_visibility_path: str = ".cache/device-visibility.json"
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
     panel_planning_enabled: bool = False
@@ -329,6 +330,10 @@ class IntegrationSettings:
             calendar_display_color_path=os.getenv(
                 "PANEL_CALENDAR_DISPLAY_COLOR_PATH",
                 ".cache/calendar-display-colors.json",
+            ).strip(),
+            device_visibility_path=os.getenv(
+                "PANEL_DEVICE_VISIBILITY_PATH",
+                ".cache/device-visibility.json",
             ).strip(),
             access_temporary_minutes=max(
                 1,
