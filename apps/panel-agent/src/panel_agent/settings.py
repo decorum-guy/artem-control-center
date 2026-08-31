@@ -48,6 +48,15 @@ class IntegrationSettings:
     rog_g703_broadcast_interface: str = ""
     rog_g703_companion_base_url: str = ""
     rog_g703_companion_secret: str = ""
+    rog_g703_transport: str = "http"
+    rog_g703_ssh_host: str = ""
+    rog_g703_ssh_user: str = ""
+    rog_g703_ssh_port: int = 22
+    rog_g703_ssh_identity_file: str = ""
+    rog_g703_ssh_known_hosts_file: str = ""
+    rog_g703_ssh_connect_timeout_seconds: float = 3.0
+    rog_g703_ssh_command_timeout_seconds: float = 10.0
+    rog_g703_ssh_output_limit_bytes: int = 4 * 1024
     rog_g703_wol_repeats: int = 3
     rog_g703_wol_cooldown_seconds: int = 5
     rog_g703_sleep_cooldown_seconds: int = 10
@@ -207,6 +216,51 @@ class IntegrationSettings:
             rog_g703_companion_secret=os.getenv(
                 "PANEL_ROG_G703_COMPANION_SECRET",
                 "",
+            ),
+            rog_g703_transport=os.getenv(
+                "PANEL_ROG_G703_TRANSPORT",
+                "http",
+            ).strip().lower(),
+            rog_g703_ssh_host=os.getenv("PANEL_ROG_G703_SSH_HOST", "").strip(),
+            rog_g703_ssh_user=os.getenv("PANEL_ROG_G703_SSH_USER", "").strip(),
+            rog_g703_ssh_port=_int_env("PANEL_ROG_G703_SSH_PORT", 22),
+            rog_g703_ssh_identity_file=os.getenv(
+                "PANEL_ROG_G703_SSH_IDENTITY_FILE",
+                "",
+            ).strip(),
+            rog_g703_ssh_known_hosts_file=os.getenv(
+                "PANEL_ROG_G703_SSH_KNOWN_HOSTS_FILE",
+                "",
+            ).strip(),
+            rog_g703_ssh_connect_timeout_seconds=min(
+                10.0,
+                max(
+                    0.5,
+                    float(
+                        os.getenv("PANEL_ROG_G703_SSH_CONNECT_TIMEOUT_SECONDS", "3")
+                    ),
+                ),
+            ),
+            rog_g703_ssh_command_timeout_seconds=min(
+                30.0,
+                max(
+                    1.0,
+                    float(
+                        os.getenv("PANEL_ROG_G703_SSH_COMMAND_TIMEOUT_SECONDS", "10")
+                    ),
+                ),
+            ),
+            rog_g703_ssh_output_limit_bytes=min(
+                16 * 1024,
+                max(
+                    1024,
+                    int(
+                        os.getenv(
+                            "PANEL_ROG_G703_SSH_OUTPUT_LIMIT_BYTES",
+                            str(4 * 1024),
+                        )
+                    ),
+                ),
             ),
             rog_g703_wol_repeats=min(
                 3,
@@ -377,6 +431,13 @@ def _bool_env(name: str, default: bool) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        raise RuntimeError(f"{name} must be an integer") from None
+
+
 def _validate_planning_settings(settings: IntegrationSettings) -> None:
     if not settings.panel_planning_base_url:
         raise RuntimeError(
@@ -441,26 +502,78 @@ def _validate_rog_g703_settings(settings: IntegrationSettings) -> None:
                 "PANEL_ROG_G703_BROADCAST_ADDRESS must be a LAN broadcast address"
             )
 
-    if not settings.rog_g703_companion_secret or len(settings.rog_g703_companion_secret) < 32:
-        raise RuntimeError(
-            "PANEL_ROG_G703_COMPANION_SECRET must contain at least 32 characters"
-        )
-    if any(character.isspace() or ord(character) < 32 for character in settings.rog_g703_companion_secret):
-        raise RuntimeError("PANEL_ROG_G703_COMPANION_SECRET must not contain whitespace")
+    if settings.rog_g703_transport not in {"http", "ssh"}:
+        raise RuntimeError("PANEL_ROG_G703_TRANSPORT must be http or ssh")
 
-    parsed = urlsplit(settings.rog_g703_companion_base_url)
-    if parsed.scheme != "http" or not parsed.hostname:
-        raise RuntimeError(
-            "PANEL_ROG_G703_COMPANION_BASE_URL must be an http origin"
-        )
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise RuntimeError(
-            "PANEL_ROG_G703_COMPANION_BASE_URL must not contain credentials, query, or fragment"
-        )
-    if parsed.path not in {"", "/"}:
-        raise RuntimeError(
-            "PANEL_ROG_G703_COMPANION_BASE_URL must be an origin without a path"
-        )
+    if settings.rog_g703_transport == "http":
+        if (
+            not settings.rog_g703_companion_secret
+            or len(settings.rog_g703_companion_secret) < 32
+        ):
+            raise RuntimeError(
+                "PANEL_ROG_G703_COMPANION_SECRET must contain at least 32 characters"
+            )
+        if any(
+            character.isspace() or ord(character) < 32
+            for character in settings.rog_g703_companion_secret
+        ):
+            raise RuntimeError("PANEL_ROG_G703_COMPANION_SECRET must not contain whitespace")
+
+        parsed = urlsplit(settings.rog_g703_companion_base_url)
+        if parsed.scheme != "http" or not parsed.hostname:
+            raise RuntimeError(
+                "PANEL_ROG_G703_COMPANION_BASE_URL must be an http origin"
+            )
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise RuntimeError(
+                "PANEL_ROG_G703_COMPANION_BASE_URL must not contain credentials, query, or fragment"
+            )
+        if parsed.path not in {"", "/"}:
+            raise RuntimeError(
+                "PANEL_ROG_G703_COMPANION_BASE_URL must be an origin without a path"
+            )
+    else:
+        _validate_rog_g703_ssh_settings(settings)
 
     if settings.rog_g703_wol_repeats > 3:
         raise RuntimeError("PANEL_ROG_G703_WOL_REPEATS must be at most 3")
+
+
+_ROG_G703_SSH_HOSTNAME_PATTERN = re.compile(
+    r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)"
+    r"(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$"
+)
+_ROG_G703_SSH_USER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def _validate_rog_g703_ssh_settings(settings: IntegrationSettings) -> None:
+    host = settings.rog_g703_ssh_host
+    try:
+        parsed_host = ipaddress.ip_address(host)
+    except ValueError:
+        parsed_host = None
+    if (
+        not host
+        or any(character.isspace() or ord(character) < 32 for character in host)
+        or "@" in host
+        or (parsed_host is None and not _ROG_G703_SSH_HOSTNAME_PATTERN.fullmatch(host))
+    ):
+        raise RuntimeError(
+            "PANEL_ROG_G703_SSH_HOST must be a hostname or literal IP address"
+        )
+
+    user = settings.rog_g703_ssh_user
+    if not _ROG_G703_SSH_USER_PATTERN.fullmatch(user):
+        raise RuntimeError("PANEL_ROG_G703_SSH_USER contains unsafe characters")
+
+    if not 1 <= settings.rog_g703_ssh_port <= 65535:
+        raise RuntimeError("PANEL_ROG_G703_SSH_PORT must be between 1 and 65535")
+
+    for name, value in (
+        ("PANEL_ROG_G703_SSH_IDENTITY_FILE", settings.rog_g703_ssh_identity_file),
+        ("PANEL_ROG_G703_SSH_KNOWN_HOSTS_FILE", settings.rog_g703_ssh_known_hosts_file),
+    ):
+        if not value or any(ord(character) < 32 for character in value):
+            raise RuntimeError(
+                f"{name} must be a server-owned path without control characters"
+            )

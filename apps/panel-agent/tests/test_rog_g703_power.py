@@ -4,6 +4,7 @@ import asyncio
 import io
 import importlib.util
 import json
+import os
 import threading
 from email.message import Message
 from pathlib import Path
@@ -23,10 +24,14 @@ from panel_agent.rog_g703_power import (
     ROG_G703_WAKE_ACTION,
     CompanionRequestError,
     HttpRogCompanion,
+    ROG_G703_SSH_HELPER_PATH,
     RogG703ActionExecutor,
     RogG703ActionRequest,
     RogG703Device,
+    RogPowerBackendError,
+    SshRogPowerBackend,
     WakeOnLanSender,
+    _selected_rog_power_backend,
     build_magic_packet,
     build_rog_g703_action_router,
     parse_mac,
@@ -54,6 +59,81 @@ def rog_settings(**overrides) -> IntegrationSettings:
     return IntegrationSettings(**values)
 
 
+def ssh_settings(tmp_path: Path, **overrides) -> IntegrationSettings:
+    identity_file = tmp_path / "PRIVATE_ROG_KEY_PATH_101A"
+    known_hosts_file = tmp_path / "PRIVATE_ROG_KNOWN_HOSTS_101A"
+    identity_file.write_text("not-a-real-key", encoding="utf-8")
+    known_hosts_file.write_text("rog ssh-ed25519 public-key", encoding="utf-8")
+    values = {
+        "writes_enabled": True,
+        "rog_g703_enabled": True,
+        "rog_g703_target_id": ROG_G703_TARGET_ID,
+        "rog_g703_transport": "ssh",
+        "rog_g703_mac": "AA:BB:CC:DD:EE:FF",
+        "rog_g703_broadcast_address": "255.255.255.255",
+        "rog_g703_ssh_host": "private-rog-host-101a.local",
+        "rog_g703_ssh_user": "private-rog-user-101a",
+        "rog_g703_ssh_port": 22022,
+        "rog_g703_ssh_identity_file": str(identity_file),
+        "rog_g703_ssh_known_hosts_file": str(known_hosts_file),
+        "rog_g703_ssh_connect_timeout_seconds": 2,
+        "rog_g703_ssh_command_timeout_seconds": 2,
+        "rog_g703_ssh_output_limit_bytes": 4096,
+        "rog_g703_wol_repeats": 3,
+        "rog_g703_wol_cooldown_seconds": 3,
+        "rog_g703_hibernate_cooldown_seconds": 5,
+        "rog_g703_sleep_cooldown_seconds": 5,
+        "rog_g703_health_timeout_seconds": 1,
+        "rog_g703_hibernate_timeout_seconds": 1,
+        "rog_g703_sleep_timeout_seconds": 1,
+        "rog_g703_health_poll_seconds": 5,
+    }
+    values.update(overrides)
+    return IntegrationSettings(**values)
+
+
+def completed_stream(payload: bytes) -> asyncio.StreamReader:
+    stream = asyncio.StreamReader()
+    stream.feed_data(payload)
+    stream.feed_eof()
+    return stream
+
+
+class FakeSshProcess:
+    def __init__(self, stdout: bytes, stderr: bytes = b"", returncode: int = 0) -> None:
+        self.stdout = completed_stream(stdout)
+        self.stderr = completed_stream(stderr)
+        self.returncode: int | None = None
+        self._planned_returncode = returncode
+        self.killed = False
+        self.waited = 0
+
+    async def wait(self) -> int:
+        self.waited += 1
+        self.returncode = self._planned_returncode
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+
+
+class HangingSshProcess(FakeSshProcess):
+    def __init__(self) -> None:
+        super().__init__(b"")
+        self._released = asyncio.Event()
+
+    async def wait(self) -> int:
+        self.waited += 1
+        await self._released.wait()
+        self.returncode = -9 if self.killed else 0
+        return self.returncode
+
+    def kill(self) -> None:
+        super().kill()
+        self._released.set()
+
+
 class FakeCompanion:
     def __init__(self, health_values: list[bool] | None = None) -> None:
         self.health_values = list(health_values or [True])
@@ -66,6 +146,9 @@ class FakeCompanion:
         if len(self.health_values) > 1:
             return self.health_values.pop(0)
         return self.health_values[0]
+
+    def is_configured(self) -> bool:
+        return True
 
     async def hibernate(self) -> None:
         self.hibernate_calls += 1
@@ -158,6 +241,191 @@ def test_action_request_has_no_browser_target_or_command_fields() -> None:
         )
 
 
+def test_default_rog_transport_is_http_and_selects_only_http_backend() -> None:
+    settings = rog_settings()
+    assert settings.rog_g703_transport == "http"
+    assert isinstance(_selected_rog_power_backend(settings), HttpRogCompanion)
+
+
+def test_ssh_backend_selection_requires_no_http_credentials_and_no_http_fallback(tmp_path) -> None:
+    settings = ssh_settings(
+        tmp_path,
+        rog_g703_companion_base_url="",
+        rog_g703_companion_secret="",
+    )
+    backend = _selected_rog_power_backend(settings)
+    assert isinstance(backend, SshRogPowerBackend)
+    assert backend.is_configured() is True
+
+
+def test_ssh_argv_uses_only_pinned_server_owned_connection_arguments(tmp_path) -> None:
+    settings = ssh_settings(tmp_path)
+    backend = SshRogPowerBackend(settings, executable_finder=lambda _: "ssh")
+    argv = backend._argv("ssh", "health")
+
+    assert argv[0] == "ssh"
+    assert "BatchMode=yes" in argv
+    assert "IdentitiesOnly=yes" in argv
+    assert "StrictHostKeyChecking=yes" in argv
+    assert f"UserKnownHostsFile={settings.rog_g703_ssh_known_hosts_file}" in argv
+    assert f"GlobalKnownHostsFile={os.devnull}" in argv
+    assert "ConnectionAttempts=1" in argv
+    assert "NumberOfPasswordPrompts=0" in argv
+    assert "PasswordAuthentication=no" in argv
+    assert "KbdInteractiveAuthentication=no" in argv
+    assert f"ConnectTimeout={settings.rog_g703_ssh_connect_timeout_seconds:g}" in argv
+    assert "-i" in argv and settings.rog_g703_ssh_identity_file in argv
+    assert "-p" in argv and str(settings.rog_g703_ssh_port) in argv
+    target_index = argv.index("private-rog-user-101a@private-rog-host-101a.local")
+    assert argv[target_index + 6 : target_index + 9] == ("-File", ROG_G703_SSH_HELPER_PATH, "health")
+    assert "whoami" not in argv
+
+
+def test_ssh_canary_operation_is_rejected_before_subprocess_creation(tmp_path, monkeypatch) -> None:
+    settings = ssh_settings(tmp_path)
+    backend = SshRogPowerBackend(settings, executable_finder=lambda _: "ssh")
+    spawned = False
+
+    async def forbidden_spawn(*args, **kwargs):
+        nonlocal spawned
+        del args, kwargs
+        spawned = True
+        raise AssertionError("must not spawn")
+
+    monkeypatch.setattr("panel_agent.rog_g703_power.asyncio.create_subprocess_exec", forbidden_spawn)
+
+    async def scenario() -> None:
+        with pytest.raises(RogPowerBackendError, match="ssh_action_rejected"):
+            await backend._run("whoami && calc.exe")
+
+    asyncio.run(scenario())
+    assert spawned is False
+
+
+def test_ssh_valid_health_response_is_strict_and_safe(tmp_path, monkeypatch) -> None:
+    settings = ssh_settings(tmp_path)
+    backend = SshRogPowerBackend(settings, executable_finder=lambda _: "ssh")
+
+    async def scenario() -> None:
+        process = FakeSshProcess(b'{"schemaVersion":1,"ok":true,"status":"online"}\n')
+
+        async def spawn(*args, **kwargs):
+            assert args[0] == "ssh"
+            assert kwargs["stdout"] is asyncio.subprocess.PIPE
+            assert kwargs["stderr"] is asyncio.subprocess.PIPE
+            return process
+
+        monkeypatch.setattr("panel_agent.rog_g703_power.asyncio.create_subprocess_exec", spawn)
+        assert await backend.health() is True
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"not-json",
+        b'{"schemaVersion":1,"ok":true,"status":"sleeping"}',
+        b'{"schemaVersion":1,"ok":true,"status":"online","extra":true}',
+        b'["online"]',
+    ],
+)
+def test_ssh_health_rejects_noncanonical_response(tmp_path, monkeypatch, payload) -> None:
+    backend = SshRogPowerBackend(ssh_settings(tmp_path), executable_finder=lambda _: "ssh")
+
+    async def spawn(*args, **kwargs):
+        del args, kwargs
+        return FakeSshProcess(payload)
+
+    monkeypatch.setattr("panel_agent.rog_g703_power.asyncio.create_subprocess_exec", spawn)
+    with pytest.raises(RogPowerBackendError, match="ssh_invalid_response"):
+        asyncio.run(backend.health())
+
+
+def test_ssh_actions_accept_only_the_matching_strict_operation(tmp_path, monkeypatch) -> None:
+    backend = SshRogPowerBackend(ssh_settings(tmp_path), executable_finder=lambda _: "ssh")
+    outputs = [
+        b'{"schemaVersion":1,"accepted":true,"operation":"sleep"}',
+        b'{"schemaVersion":1,"accepted":true,"operation":"hibernate"}',
+        b'{"schemaVersion":1,"accepted":true,"operation":"hibernate"}',
+    ]
+
+    async def spawn(*args, **kwargs):
+        del args, kwargs
+        return FakeSshProcess(outputs.pop(0))
+
+    monkeypatch.setattr("panel_agent.rog_g703_power.asyncio.create_subprocess_exec", spawn)
+
+    async def scenario() -> None:
+        await backend.sleep()
+        await backend.hibernate()
+        with pytest.raises(RogPowerBackendError, match="ssh_action_rejected"):
+            await backend.sleep()
+
+    asyncio.run(scenario())
+
+
+def test_ssh_output_limit_and_missing_files_fail_closed(tmp_path, monkeypatch) -> None:
+    settings = ssh_settings(tmp_path, rog_g703_ssh_output_limit_bytes=1024)
+    backend = SshRogPowerBackend(settings, executable_finder=lambda _: "ssh")
+
+    async def spawn(*args, **kwargs):
+        del args, kwargs
+        return FakeSshProcess(b"x" * 1025)
+
+    monkeypatch.setattr("panel_agent.rog_g703_power.asyncio.create_subprocess_exec", spawn)
+    with pytest.raises(RogPowerBackendError, match="ssh_output_too_large"):
+        asyncio.run(backend.health())
+
+    missing_key = ssh_settings(tmp_path, rog_g703_ssh_identity_file=str(tmp_path / "missing-key"))
+    with pytest.raises(RogPowerBackendError, match="ssh_identity_file_missing"):
+        asyncio.run(SshRogPowerBackend(missing_key, executable_finder=lambda _: "ssh").health())
+    missing_hosts = ssh_settings(tmp_path, rog_g703_ssh_known_hosts_file=str(tmp_path / "missing-hosts"))
+    with pytest.raises(RogPowerBackendError, match="ssh_known_hosts_file_missing"):
+        asyncio.run(SshRogPowerBackend(missing_hosts, executable_finder=lambda _: "ssh").health())
+
+
+def test_ssh_missing_client_and_nonzero_exit_are_safe(tmp_path, monkeypatch) -> None:
+    backend = SshRogPowerBackend(ssh_settings(tmp_path), executable_finder=lambda _: None)
+    with pytest.raises(RogPowerBackendError, match="ssh_client_unavailable"):
+        asyncio.run(backend.health())
+
+    backend = SshRogPowerBackend(ssh_settings(tmp_path), executable_finder=lambda _: "ssh")
+
+    async def spawn(*args, **kwargs):
+        del args, kwargs
+        return FakeSshProcess(b"", b"RAW_SSH_STDERR_101A", returncode=255)
+
+    monkeypatch.setattr("panel_agent.rog_g703_power.asyncio.create_subprocess_exec", spawn)
+    with pytest.raises(RogPowerBackendError, match="ssh_transport_failed"):
+        asyncio.run(backend.health())
+
+
+def test_ssh_timeout_kills_and_reaps_the_subprocess(tmp_path, monkeypatch) -> None:
+    backend = SshRogPowerBackend(
+        ssh_settings(tmp_path, rog_g703_ssh_command_timeout_seconds=0.01),
+        executable_finder=lambda _: "ssh",
+    )
+    process: HangingSshProcess | None = None
+
+    async def scenario() -> None:
+        nonlocal process
+        process = HangingSshProcess()
+
+        async def spawn(*args, **kwargs):
+            del args, kwargs
+            return process
+
+        monkeypatch.setattr("panel_agent.rog_g703_power.asyncio.create_subprocess_exec", spawn)
+        with pytest.raises(RogPowerBackendError, match="ssh_timeout"):
+            await backend.health()
+
+    asyncio.run(scenario())
+    assert process is not None
+    assert process.killed is True
+    assert process.waited >= 1
+
+
 def test_wol_send_success_does_not_claim_online_without_companion_health(tmp_path) -> None:
     async def scenario() -> None:
         companion = FakeCompanion([False])
@@ -209,6 +477,48 @@ def test_health_appearance_confirms_online_and_cooldown_blocks_burst(tmp_path) -
         assert calls == 1
         assert executor.availability(ROG_G703_WAKE_ACTION)["availability"] == "cooldown"
         assert executor.availability(ROG_G703_SLEEP_ACTION)["availability"] == "allowed"
+
+    asyncio.run(scenario())
+
+
+def test_selected_ssh_health_false_false_true_confirms_wake_and_exposes_online_actions(tmp_path) -> None:
+    async def scenario() -> None:
+        settings = ssh_settings(tmp_path)
+        backend = FakeCompanion([False, False, True])
+        clock = FakeClock()
+        device = RogG703Device(settings, companion=backend, clock=clock, sleep=clock.sleep)
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_profile("standard")
+        executor = RogG703ActionExecutor(settings, access, device=device, wol_sender=lambda: 3)
+
+        started = await executor.start(RogG703ActionRequest(actionId=ROG_G703_WAKE_ACTION))
+        finished = await wait_terminal(executor, started.correlationId)
+
+        assert finished.status == "online"
+        assert device.status == "online"
+        assert device.last_error is None
+        actions = {action.id: action.enabled for action in device.service_snapshot().actions}
+        assert actions[ROG_G703_SLEEP_ACTION] is True
+        assert actions[ROG_G703_HIBERNATE_ACTION] is True
+        assert backend.health_calls == 3
+
+    asyncio.run(scenario())
+
+
+def test_regular_selected_backend_poll_recovers_after_wake_timeout(tmp_path) -> None:
+    async def scenario() -> None:
+        settings = ssh_settings(tmp_path)
+        backend = FakeCompanion([False, True])
+        clock = FakeClock()
+        device = RogG703Device(settings, companion=backend, clock=clock, sleep=clock.sleep)
+
+        assert await device.wait_until_online(0.25) is False
+        assert device.status == "offline"
+        assert device.last_error == "wake_timeout"
+
+        assert await device.refresh() is True
+        assert device.status == "online"
+        assert device.last_error is None
 
     asyncio.run(scenario())
 
@@ -555,6 +865,89 @@ def test_enabled_environment_rejects_invalid_machine_configuration(monkeypatch) 
 
     with pytest.raises(RuntimeError, match="PANEL_ROG_G703_MAC"):
         IntegrationSettings.from_env()
+
+
+def test_enabled_ssh_environment_validates_only_selected_backend_fields(monkeypatch) -> None:
+    monkeypatch.setenv("PANEL_ROG_G703_ENABLED", "true")
+    monkeypatch.setenv("PANEL_ROG_G703_TRANSPORT", "ssh")
+    monkeypatch.setenv("PANEL_ROG_G703_MAC", "AA:BB:CC:DD:EE:FF")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_HOST", "rog-g703gi.local")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_USER", "artem-control")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_PORT", "22")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_IDENTITY_FILE", "C:\\server\\rog-key")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_KNOWN_HOSTS_FILE", "C:\\server\\rog-known-hosts")
+    monkeypatch.delenv("PANEL_ROG_G703_COMPANION_BASE_URL", raising=False)
+    monkeypatch.delenv("PANEL_ROG_G703_COMPANION_SECRET", raising=False)
+
+    settings = IntegrationSettings.from_env()
+    assert settings.rog_g703_transport == "ssh"
+    assert settings.rog_g703_companion_base_url == ""
+    assert settings.rog_g703_companion_secret == ""
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("PANEL_ROG_G703_TRANSPORT", "telnet", "PANEL_ROG_G703_TRANSPORT"),
+        ("PANEL_ROG_G703_SSH_HOST", "rog@evil", "PANEL_ROG_G703_SSH_HOST"),
+        ("PANEL_ROG_G703_SSH_USER", "bad user", "PANEL_ROG_G703_SSH_USER"),
+        ("PANEL_ROG_G703_SSH_PORT", "65536", "PANEL_ROG_G703_SSH_PORT"),
+        ("PANEL_ROG_G703_SSH_PORT", "not-a-port", "PANEL_ROG_G703_SSH_PORT"),
+    ],
+)
+def test_enabled_ssh_environment_rejects_unsafe_selected_settings(monkeypatch, name, value, message) -> None:
+    monkeypatch.setenv("PANEL_ROG_G703_ENABLED", "true")
+    monkeypatch.setenv("PANEL_ROG_G703_TRANSPORT", "ssh")
+    monkeypatch.setenv("PANEL_ROG_G703_MAC", "AA:BB:CC:DD:EE:FF")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_HOST", "rog-g703gi.local")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_USER", "artem-control")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_PORT", "22")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_IDENTITY_FILE", "C:\\server\\rog-key")
+    monkeypatch.setenv("PANEL_ROG_G703_SSH_KNOWN_HOSTS_FILE", "C:\\server\\rog-known-hosts")
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(RuntimeError, match=message):
+        IntegrationSettings.from_env()
+
+
+def test_ssh_public_snapshot_and_action_error_redact_connection_canaries(tmp_path) -> None:
+    settings = ssh_settings(tmp_path)
+
+    class FailingBackend(FakeCompanion):
+        async def sleep(self) -> None:
+            raise RogPowerBackendError("ssh_transport_failed")
+
+    backend = FailingBackend([True])
+    device = RogG703Device(settings, companion=backend)
+    snapshot = json.dumps(device.service_snapshot().model_dump())
+    for canary in (
+        "PRIVATE_ROG_HOST_101A",
+        "PRIVATE_ROG_USER_101A",
+        "PRIVATE_ROG_KEY_PATH_101A",
+        "PRIVATE_ROG_KNOWN_HOSTS_101A",
+        "RAW_SSH_STDERR_101A",
+        "RAW_WINDOWS_PATH_101A",
+    ):
+        assert canary not in snapshot
+
+    async def scenario() -> None:
+        await device.set_status("online")
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_profile("standard")
+        executor = RogG703ActionExecutor(settings, access, device=device, wol_sender=lambda: 3)
+        started = await executor.start(RogG703ActionRequest(actionId=ROG_G703_SLEEP_ACTION))
+        finished = await wait_terminal(executor, started.correlationId)
+        assert finished.error == "ssh_transport_failed"
+        serialized = json.dumps(finished.model_dump())
+        for canary in (
+            "PRIVATE_ROG_HOST_101A",
+            "PRIVATE_ROG_USER_101A",
+            "RAW_SSH_STDERR_101A",
+            "RAW_WINDOWS_PATH_101A",
+        ):
+            assert canary not in serialized
+
+    asyncio.run(scenario())
 
 
 def test_companion_http_contract_requires_auth_and_invokes_distinct_fixed_operations(monkeypatch, tmp_path) -> None:

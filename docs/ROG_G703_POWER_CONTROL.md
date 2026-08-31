@@ -2,9 +2,9 @@
 
 This feature adds three fixed controls for the ASUS ROG G703GI Windows laptop:
 
-- **Включить** — sends a Wake-on-LAN magic packet and waits for the ASUS companion to become reachable.
-- **Сон** — asks the companion to enter Windows Sleep/suspend, then waits for the ASUS companion to become unreachable.
-- **Гибернация** — asks the companion to enter Windows S4 hibernation, then waits for the companion to become unreachable.
+- **Включить** — sends a Wake-on-LAN magic packet and waits for the selected ASUS backend to become reachable.
+- **Сон** — asks the selected backend to enter Windows Sleep/suspend, then waits for that same backend to become unreachable.
+- **Гибернация** — asks the selected backend to enter Windows S4 hibernation, then waits for that same backend to become unreachable.
 
 The integration is disabled by default. It is deliberately a fixed device integration: the browser can select only the registered target and action IDs. It cannot provide a MAC address, host, URL, command, PowerShell text, or credentials.
 
@@ -15,10 +15,13 @@ The control path is:
 \`\`\`text
 Control Center browser
   -> Panel Agent fixed action route
-     -> fixed WOL sender or fixed authenticated ASUS companion
+     -> fixed WOL sender (Wake only)
+     -> exactly one selected power backend: HTTP companion or pinned SSH helper
 \`\`\`
 
-The WOL sender uses the backend-configured Ethernet MAC, a configured broadcast address/interface, UDP port 9, and a bounded burst of at most three canonical magic packets. A successful UDP send is not treated as proof that the ASUS is online.
+The WOL sender uses the backend-configured Ethernet MAC, a configured broadcast address/interface, UDP port 9, and a bounded burst of at most three canonical magic packets. A successful UDP send is not treated as proof that the ASUS is online. After Wake, successful `health` from the selected backend is authoritative, including while Windows is at its lock screen; no interactive-user or unlock condition is part of this state machine.
+
+`PANEL_ROG_G703_TRANSPORT` selects exactly one backend. It defaults to `http` for backwards compatibility. There is no HTTP→SSH or SSH→HTTP fallback, racing health probe, or “either backend” online rule. The selected backend owns health, Sleep, and Hibernate together.
 
 The companion exposes only these routes:
 
@@ -39,6 +42,7 @@ Set these values in the Panel Agent runtime environment on the control machine a
 \`\`\`dotenv
 PANEL_ROG_G703_ENABLED=true
 PANEL_ROG_G703_TARGET_ID=rog_g703gi
+PANEL_ROG_G703_TRANSPORT=http
 PANEL_ROG_G703_MAC=AA:BB:CC:DD:EE:FF
 PANEL_ROG_G703_BROADCAST_ADDRESS=255.255.255.255
 PANEL_ROG_G703_BROADCAST_INTERFACE=192.168.1.10
@@ -58,6 +62,45 @@ The MAC, companion address, and secret above are placeholders only. Do not commi
 The existing global `PANEL_WRITES_ENABLED` gate and Panel Agent access profile still apply. Sleep and Hibernate use the same `standard` risk/access class. Keep that gate off during setup and enable it only when the broader write policy is intentionally enabled; the ROG feature does not bypass it.
 
 The Panel Agent sends one fixed \`Authorization: Bearer ...\` header to the fixed origin and fixed routes. It does not follow redirects, accepts only bounded responses, and never logs the secret. The default transport is HTTP on the trusted home LAN; HTTP is not encrypted and must not be exposed to the public internet. The bootstrap firewall rule is LAN-scoped and can be narrowed to an explicit IPv4/CIDR.
+
+The HTTP companion URL and secret are required only when \`PANEL_ROG_G703_TRANSPORT=http\` (the default). SSH settings are ignored in HTTP mode.
+
+## Opt-in pinned SSH backend
+
+SSH is a server-owned opt-in backend for reachability after Windows resume. Before selecting it, install the repository-owned fixed helper on the ASUS. The browser never receives or sends SSH host, user, port, key, known-hosts path, helper path, PowerShell, command, or arbitrary action data.
+
+On the Panel Agent host, use a dedicated key and a dedicated pinned \`known_hosts\` file. These placeholders are required only for SSH mode:
+
+\`\`\`dotenv
+PANEL_ROG_G703_TRANSPORT=ssh
+PANEL_ROG_G703_SSH_HOST=rog-g703gi.local
+PANEL_ROG_G703_SSH_USER=artem-control
+PANEL_ROG_G703_SSH_PORT=22
+PANEL_ROG_G703_SSH_IDENTITY_FILE=C:\\ProgramData\\ArtemControlCenter\\keys\\rog-g703-ssh
+PANEL_ROG_G703_SSH_KNOWN_HOSTS_FILE=C:\\ProgramData\\ArtemControlCenter\\keys\\rog-g703-known_hosts
+PANEL_ROG_G703_SSH_CONNECT_TIMEOUT_SECONDS=3
+PANEL_ROG_G703_SSH_COMMAND_TIMEOUT_SECONDS=10
+PANEL_ROG_G703_SSH_OUTPUT_LIMIT_BYTES=4096
+\`\`\`
+
+Startup accepts only \`http\` or \`ssh\`. SSH host must be a hostname or literal address, and SSH user is a narrow Windows/OpenSSH-compatible identifier; whitespace, \`@\`, control characters, and shell syntax are rejected. Port must be 1–65535. The identity and dedicated \`known_hosts\` paths are server-only values and are checked again at runtime: a missing file fails closed without exposing the path.
+
+The SSH client is argv-based (never a local shell) and uses \`BatchMode=yes\`, \`IdentitiesOnly=yes\`, \`StrictHostKeyChecking=yes\`, \`UserKnownHostsFile=<dedicated path>\`, \`GlobalKnownHostsFile=<platform null device>\`, \`ConnectionAttempts=1\`, \`NumberOfPasswordPrompts=0\`, \`PasswordAuthentication=no\`, \`KbdInteractiveAuthentication=no\`, the configured identity file, port, and bounded connect timeout. Setting \`GlobalKnownHostsFile\` to the platform null device prevents global host keys from widening or replacing the dedicated pinning policy. It invokes only this fixed remote helper plus one operation:
+
+\`\`\`text
+C:/ProgramData/ArtemControlCenter/RogG703Ssh/rog-g703-ssh-helper.ps1 health|sleep|hibernate
+\`\`\`
+
+The helper accepts exactly \`health\`, \`sleep\`, and \`hibernate\`. \`health\` writes exactly \`{"schemaVersion":1,"ok":true,"status":"online"}\`. Sleep and Hibernate start a fixed delayed local transition, emit and flush exactly \`{"schemaVersion":1,"accepted":true,"operation":"sleep|hibernate"}\`, and exit before power loss. Sleep uses \`SetSuspendState(FALSE, TRUE, FALSE)\`; Hibernate invokes \`shutdown.exe /h\`. It has no generic shell, scriptblock, command, or trailing operation arguments.
+
+Install the helper locally on the ASUS from this checkout in an elevated PowerShell window; this does not change sshd, the firewall, credentials, or a live connection:
+
+\`\`\`powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\install-rog-g703-ssh-helper.ps1 -Action install
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\install-rog-g703-ssh-helper.ps1 -Action status
+\`\`\`
+
+It copies the helper only to \`C:\\ProgramData\\ArtemControlCenter\\RogG703Ssh\\rog-g703-ssh-helper.ps1\` and applies an ACL with administrator/SYSTEM modification rights and ordinary-user read/execute access. Physical key provisioning, host-key capture/pinning, and updating protected Panel Agent runtime configuration are deliberate post-merge owner actions; this repository change does not execute them.
 
 ## FIRST MANUAL ASUS INSTALL
 

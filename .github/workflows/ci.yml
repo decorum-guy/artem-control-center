@@ -65,6 +65,7 @@ jobs:
           ./scripts/windows/test-avalar-identities-contract.ps1
           ./scripts/windows/test-avalar-identities.ps1
           ./scripts/windows/test-rog-g703-companion.ps1
+          ./scripts/windows/test-rog-g703-ssh-helper-contract.ps1
 
       - name: Run focused Coffee Diary Windows lock gate
         if: runner.os == 'Windows'
