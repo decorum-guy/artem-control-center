@@ -226,7 +226,10 @@ function OverlayFrame({
       className={`cc-overlay-backdrop cc-overlay-backdrop--${variant}`}
       data-testid={testId ? `${testId}-backdrop` : undefined}
       onKeyDown={handleKeyDown}
-      onPointerDown={(event) => {
+      onClick={(event) => {
+        // Keep the portal mounted through pointerup/click. Closing on pointerdown
+        // lets the browser retarget the remainder of the same gesture to newly
+        // exposed background content.
         if (closeOnBackdrop && event.target === event.currentTarget) requestClose();
       }}
     >
