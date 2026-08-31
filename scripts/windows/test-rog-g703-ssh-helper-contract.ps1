@@ -54,6 +54,9 @@ if ($trailingExitCode -ne 64) {
 if (($trailingOutput | Out-String).Trim()) {
     throw "ROG SSH helper must not emit a health response after trailing argument rejection."
 }
+# The child failure was expected and fully asserted above; do not propagate it
+# through GitHub Actions' parent PowerShell harness.
+$global:LASTEXITCODE = 0
 
 if ($installer -notmatch 'ValidateSet\("install", "status", "uninstall"\)') {
     throw "ROG SSH helper installer must expose only install, status, and uninstall."
