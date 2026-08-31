@@ -11,6 +11,7 @@ import { CoffeeUploadPage } from "./CoffeeUploadPage";
 import { NoticeCenterProvider } from "./NoticeCenter";
 import { InteractionLockProvider } from "./InteractionLock";
 import { CalendarDisplayPreferencesProvider } from "./CalendarDisplayPreferences";
+import { DeviceVisibilityProvider } from "./DeviceVisibility";
 import { KioskPresenceHeartbeat } from "./KioskPresenceHeartbeat";
 import { InterfaceCopyProvider } from "./interfaceCopy";
 import "./InteractionLock.css";
@@ -35,7 +36,8 @@ createRoot(document.getElementById("root")!).render(publicCoffeeUpload ? <Coffee
     <NoticeCenterProvider>
       <InteractionLockProvider>
         <CalendarDisplayPreferencesProvider>
-          <AccessProvider>
+          <DeviceVisibilityProvider>
+            <AccessProvider>
             <ActionConfirmationProvider>
               <InterfaceCopyProvider>
                 <WeatherProvider>
@@ -48,7 +50,8 @@ createRoot(document.getElementById("root")!).render(publicCoffeeUpload ? <Coffee
                 </WeatherProvider>
               </InterfaceCopyProvider>
             </ActionConfirmationProvider>
-          </AccessProvider>
+            </AccessProvider>
+          </DeviceVisibilityProvider>
         </CalendarDisplayPreferencesProvider>
       </InteractionLockProvider>
     </NoticeCenterProvider>

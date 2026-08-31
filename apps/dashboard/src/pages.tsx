@@ -257,10 +257,12 @@ export function HomePage({ snapshot, onCoffeeAction, coffeeActionPending, coffee
             {homeDevices.map((service) => (
               <HomeDeviceWidget key={service.id} service={service} prominent />
             ))}
-            <div className="future-device">
-              <strong>Новые устройства</strong>
-              <span>Появятся здесь после регистрации manifest.</span>
-            </div>
+            {homeDevices.length > 0 && (
+              <div className="future-device">
+                <strong>Новые устройства</strong>
+                <span>Появятся здесь после регистрации manifest.</span>
+              </div>
+            )}
           </div>
         </section>
       </div>

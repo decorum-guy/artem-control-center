@@ -656,6 +656,38 @@ class CalendarDisplayPreferencesResponse(BaseModel):
     writesEnabled: bool = False
 
 
+OwnerFacingDeviceKey = Literal["kettle"]
+
+
+class DeviceVisibilityPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expectedRevision: int = Field(ge=0, le=2_147_483_647)
+    deviceKey: OwnerFacingDeviceKey
+    visible: bool
+
+
+class DeviceVisibilityState(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    key: OwnerFacingDeviceKey
+    label: str = Field(min_length=1, max_length=100)
+    defaultVisible: bool
+    visible: bool
+
+
+class DeviceVisibilitySettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schemaVersion: Literal["device.visibility.v1"]
+    revision: int = Field(ge=0)
+    updatedAt: str
+    devices: List[DeviceVisibilityState] = Field(default_factory=list, max_length=16)
+    available: bool
+    warnings: List[Literal["stored_device_visibility_unavailable"]] = Field(default_factory=list, max_length=1)
+    writesEnabled: bool = False
+
+
 class CapabilityPatch(BaseModel):
     """The browser may name only an explicit registry capability ID."""
 
