@@ -88,7 +88,8 @@ exit `$child.ExitCode
     }
 
     $updaterText = Get-Content -LiteralPath (Join-Path $PSScriptRoot "update-production.ps1") -Raw
-    if ($updaterText -notmatch 'Invoke-ArtemTargetUpdater' -or $updaterText -notmatch 'Start-Process[\s\S]*-Continuation') {
+    $handoffText = Get-Content -LiteralPath (Join-Path $PSScriptRoot "updater-target-handoff.ps1") -Raw
+    if ($updaterText -notmatch 'Invoke-ArtemTargetUpdater' -or $handoffText -notmatch 'Start-Process[\s\S]*-Continuation') {
         throw "Canonical updater is missing the explicit target continuation handoff"
     }
     if ($baseHead -eq $targetHead) { throw "Bootstrap fixture did not create two revisions" }
