@@ -42,6 +42,14 @@ test.describe("owner diagnostics surface", () => {
         }
       })
     }));
+    await page.route("**/api/v1/system/update/status", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ schemaVersion: 1, status: "idle" })
+      });
+    });
     const consoleErrors: string[] = [];
     const httpErrors: string[] = [];
     page.on("console", (message) => {
