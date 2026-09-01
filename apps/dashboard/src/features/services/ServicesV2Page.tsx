@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import { ErrorBoundary } from "../../ErrorBoundary";
-import { RouteHeader, StatusText, WorkZone } from "../../ShellPrimitives";
+import { RouteHeader, SectionHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { CollapsibleGroup } from "../operations/CollapsibleGroup";
 import { HealthRow } from "../operations/HealthRow";
 import {
@@ -44,13 +44,11 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
       </section>
 
       <WorkZone className="services-attention-zone" data-testid="services-attention-zone" aria-label="Сервисы, требующие внимания">
-        <header className="density-zone-heading">
-          <div>
-            <p className="section-kicker">Операционная зона</p>
-            <h2>{attention.length ? "Сначала проверьте эти сервисы" : "Сервисные состояния"}</h2>
-          </div>
-          <span>{attention.length ? `${attention.length} требуют внимания` : "Нет открытых состояний"}</span>
-        </header>
+        <SectionHeader
+          eyebrow="Операционная зона"
+          title={attention.length ? "Сначала проверьте эти сервисы" : "Сервисные состояния"}
+          metadata={attention.length ? `${attention.length} требуют внимания` : "Нет открытых состояний"}
+        />
         <div className="health-row-list">
           {attention.length ? attention.map((service) => (
             <ErrorBoundary key={service.id} title={service.title}>

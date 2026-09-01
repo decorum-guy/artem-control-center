@@ -1939,6 +1939,10 @@ body::-webkit-scrollbar {
 .density-route-toolbar > button { min-height: 48px; padding: 0 12px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-control); color: var(--cc-text); background: var(--cc-interactive); font-size: var(--cc-type-control-size); font-weight: var(--cc-type-control-weight); }
 .density-route-toolbar > button:hover { background: var(--cc-hover); }
 
+.v2-section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--cc-space-3); min-width: 0; padding: 12px 0; }
+.v2-section-header h2 { margin: 1px 0 0; color: var(--cc-text); font-size: var(--cc-type-section-title-size); font-weight: var(--cc-type-section-title-weight); line-height: var(--cc-type-section-title-line); overflow-wrap: anywhere; }
+.v2-section-header > span { color: var(--cc-text-secondary); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); text-align: right; }
+
 @media (max-width: 760px) {
   .density-route-toolbar > span { display: none; }
 }

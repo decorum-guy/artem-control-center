@@ -108,9 +108,6 @@
 .home-v2-empty span { color: var(--cc-text-muted); font-size: var(--cc-type-body-size); }
 
 .home-v2-secondary-zone { margin-top: 12px; border-top: 1px solid var(--cc-divider); }
-.density-section-heading, .density-zone-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--cc-space-3); min-width: 0; padding: 12px 0; }
-.density-section-heading h2, .density-zone-heading h2 { margin: 1px 0 0; color: var(--cc-text); font-size: var(--cc-type-section-title-size); font-weight: var(--cc-type-section-title-weight); line-height: var(--cc-type-section-title-line); overflow-wrap: anywhere; }
-.density-section-heading > span, .density-zone-heading > span { color: var(--cc-text-secondary); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); text-align: right; }
 .home-v2-device-rows { overflow: hidden; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-zone); background: var(--cc-surface-1); }
 .home-v2-device-rows .device-row + .device-row { border-top: 1px solid var(--cc-divider); }
 
