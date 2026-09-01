@@ -5,7 +5,7 @@ import { ErrorBoundary } from "../../ErrorBoundary";
 import { Icon } from "../../icons";
 import { RuntimeControls } from "../../RuntimeControls";
 import { Sheet } from "../../Sheet";
-import { RouteHeader, StatusText, WorkZone } from "../../ShellPrimitives";
+import { OperationalStatusSummary, RouteHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { RogG703DetailControl } from "../../RogG703Controls";
 import { useInterfaceCopy } from "../../interfaceCopy";
 import {
@@ -189,19 +189,18 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
         data-testid="system-v2-toolbar"
       />
 
-      <section className={`system-aggregate-strip${attention.length ? " system-aggregate-strip--attention" : ""}`} data-testid="system-aggregate-strip">
-        <div>
-          <p className="section-kicker">Диагностика и хосты</p>
-          <StatusText label={aggregateLabel} tone={aggregateTone} />
-        </div>
-        <span>
-          {relevant.length
-            ? `${attention.length} текущих проблем · ${counts.healthy} системных сервисов в норме`
-            : attention.length
-              ? `${attention.length} текущих проблем`
-              : "Нет подтверждённых системных сервисов"}
-        </span>
-      </section>
+      <OperationalStatusSummary
+        eyebrow="Диагностика и хосты"
+        statusLabel={aggregateLabel}
+        tone={aggregateTone}
+        detail={relevant.length
+          ? `${attention.length} текущих проблем · ${counts.healthy} системных сервисов в норме`
+          : attention.length
+            ? `${attention.length} текущих проблем`
+            : "Нет подтверждённых системных сервисов"}
+        attention={attention.length > 0}
+        data-testid="system-aggregate-strip"
+      />
 
       <section
         className={`system-problem-surface${attention.length ? " system-problem-surface--attention" : ""}`}
