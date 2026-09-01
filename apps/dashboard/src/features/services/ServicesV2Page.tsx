@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import { ErrorBoundary } from "../../ErrorBoundary";
-import { RouteHeader, SectionHeader, StatusText, WorkZone } from "../../ShellPrimitives";
+import { OperationalStatusSummary, RouteHeader, SectionHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { CollapsibleGroup } from "../operations/CollapsibleGroup";
 import { HealthRow } from "../operations/HealthRow";
 import {
@@ -38,10 +38,13 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
         data-testid="services-v2-toolbar"
       />
 
-      <section className={`services-attention-summary${attention.length ? " services-attention-summary--attention" : ""}`} data-testid="services-attention-summary">
-        <StatusText label={attentionSummary} tone={attention.length ? healthTone(attention[0].health) : "success"} />
-        <span>{countSummary}</span>
-      </section>
+      <OperationalStatusSummary
+        statusLabel={attentionSummary}
+        tone={attention.length ? healthTone(attention[0].health) : "success"}
+        detail={countSummary}
+        attention={attention.length > 0}
+        data-testid="services-attention-summary"
+      />
 
       <WorkZone className="services-attention-zone" data-testid="services-attention-zone" aria-label="Сервисы, требующие внимания">
         <SectionHeader

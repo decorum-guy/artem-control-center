@@ -101,6 +101,45 @@ export function SectionHeader({
   );
 }
 
+export type OperationalStatusSummaryProps = Omit<HTMLAttributes<HTMLElement>, "title"> & {
+  eyebrow?: string;
+  statusLabel: string;
+  tone: StatusTone;
+  detail: ReactNode;
+  attention?: boolean;
+};
+
+export function OperationalStatusSummary({
+  eyebrow,
+  statusLabel,
+  tone,
+  detail,
+  attention = false,
+  className,
+  ...props
+}: OperationalStatusSummaryProps) {
+  const status = <StatusText label={statusLabel} tone={tone} />;
+  return (
+    <section
+      {...props}
+      className={[
+        "v2-operational-status-summary",
+        attention && "v2-operational-status-summary--attention",
+        className
+      ].filter(Boolean).join(" ")}
+      data-operational-status-summary="true"
+    >
+      {eyebrow ? (
+        <div className="v2-operational-status-summary__primary-copy">
+          <p className="section-kicker">{eyebrow}</p>
+          {status}
+        </div>
+      ) : status}
+      <span className="v2-operational-status-summary__detail">{detail}</span>
+    </section>
+  );
+}
+
 export function WorkZone({
   children,
   className,
