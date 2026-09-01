@@ -28,6 +28,13 @@ const planningIssueLabels: Record<PlanningHealthIssue["source"], string> = {
   "planning-status": "Дела"
 };
 
+const rogIncidentErrorCodes = new Set([
+  "companion_health_failed", "companion_hibernate_failed", "companion_sleep_failed", "companion_response_too_large",
+  "hibernate_timeout", "invalid_companion_response", "rog_g703_not_configured", "ssh_action_rejected",
+  "ssh_client_unavailable", "ssh_identity_file_missing", "ssh_invalid_response", "ssh_known_hosts_file_missing",
+  "ssh_output_too_large", "ssh_timeout", "ssh_transport_failed", "sleep_timeout", "wake_timeout", "wol_send_failed"
+]);
+
 function diagnosticsStateForPlanningIssue(
   status: PlanningHealthIssue["status"]
 ): Extract<DiagnosticsProblemState, "offline" | "degraded" | "stale"> | null {
@@ -78,16 +85,17 @@ function problem(
 export function currentProblemsForSnapshot(
   snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">
 ): DiagnosticsProblem[] {
-  const problems: DiagnosticsProblem[] = [];
+  const problems = new Map<string, DiagnosticsProblem>();
+  const add = (next: DiagnosticsProblem) => { problems.set(next.id, next); };
   for (const service of snapshot.services) {
     if (!service.enabled || service.health === "healthy") continue;
     if (service.id === "rog_g703gi") {
       const data = service.data as Record<string, unknown>;
-      const code = data.errorCode ?? data.lastErrorCode ?? data.failureCode;
-      if (typeof code !== "string" || !/^[a-z0-9][a-z0-9._:-]{0,119}$/.test(code)) continue;
+      const code = data.lastError;
+      if (typeof code !== "string" || !rogIncidentErrorCodes.has(code)) continue;
     }
     const subsystem = serviceLabels[service.id] ?? "Сервис";
-    problems.push(problem(
+    add(problem(
       `service:${service.id}`,
       subsystem,
       stateForHealth(service),
@@ -99,8 +107,9 @@ export function currentProblemsForSnapshot(
   const planning = snapshot.planning;
   const planningIssues = planning?.health?.issues ?? [];
   const ownerPlanningIssues = planningIssues.filter((issue) => diagnosticsStateForPlanningIssue(issue.status) !== null);
+  const hasAttributablePlanningIssue = ownerPlanningIssues.some((issue) => issue.source !== "planning-status");
   if (planning && planning.sourceStatus !== "current" && ownerPlanningIssues.length === 0) {
-    problems.push(problem(
+    add(problem(
       "planning:source",
       "Дела",
       planning.sourceStatus,
@@ -111,8 +120,9 @@ export function currentProblemsForSnapshot(
   for (const issue of planningIssues) {
     const state = diagnosticsStateForPlanningIssue(issue.status);
     if (state === null) continue;
+    if (issue.source === "planning-status" && hasAttributablePlanningIssue) continue;
     const subsystem = planningIssueLabels[issue.source];
-    problems.push(problem(
+    add(problem(
       `planning:${issue.source === "projects" ? "tasks" : issue.source}`,
       subsystem,
       state,
@@ -128,7 +138,7 @@ export function currentProblemsForSnapshot(
     const id = /^[a-z0-9][a-z0-9._:-]{0,127}$/.test(provider.id)
       ? provider.id
       : "redacted";
-    problems.push(problem(
+    add(problem(
       hasCalendarIssue ? "planning:calendar" : `calendar-provider:${id}`,
       subsystem,
       state,
@@ -136,7 +146,7 @@ export function currentProblemsForSnapshot(
       provider.lastSyncedAt
     ));
   }
-  return problems;
+  return [...problems.values()];
 }
 
 export function problemStateLabel(state: DiagnosticsProblemState): string {

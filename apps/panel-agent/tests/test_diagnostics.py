@@ -5,10 +5,10 @@ from starlette.testclient import TestClient
 
 from panel_agent.diagnostics import DiagnosticsCollector
 from panel_agent.fixtures import services_for_scenario
-from panel_agent.planning import PlanningReadEnvelope, empty_planning_projection
+from panel_agent.planning import PlanningHealthIssue, PlanningReadEnvelope, empty_planning_projection
 from panel_agent.planning_api import build_planning_router
 from panel_agent.settings import IntegrationSettings
-from panel_agent.contracts import DashboardSnapshot
+from panel_agent.contracts import DashboardSnapshot, ServiceSnapshot
 
 
 def make_snapshot(services=None, *, planning=None, revision=1):
@@ -374,3 +374,38 @@ def test_provider_error_code_reaches_fixed_evidence_without_private_canaries():
     payload = report.model_dump_json()
     for canary in ("Bearer secret-canary", "password=secret-canary", "/private/runtime.env", "curl private-host", "PRIVATE_CALENDAR_TITLE_CANARY"):
         assert canary not in payload
+
+
+def test_rog_expected_states_and_fixed_failures_follow_the_real_last_error_contract():
+    def rog(*, health="offline", last_error=None, status="offline"):
+        return ServiceSnapshot(
+            id="rog_g703gi", title="ROG", enabled=True, dataContract="rog_g703.v1",
+            health=health, source="live", summary="ignored", actions=[],
+            data={"status": status, "lastError": last_error},
+        )
+
+    collector = DiagnosticsCollector(IntegrationSettings())
+    for service in (rog(), rog(last_error="health_unreachable"), rog(health="degraded", status="sleeping"), rog(health="degraded", status="hibernating")):
+        assert collector.report(make_snapshot([service])).problems == []
+    for code in ("wake_timeout", "wol_send_failed", "ssh_timeout"):
+        report = collector.report(make_snapshot([rog(last_error=code)]))
+        assert len(report.problems) == 1
+        assert report.problems[0].technicalEvidence.errorCode == code
+    assert collector.report(make_snapshot([rog(last_error="PRIVATE_COMMAND_CANARY")])).problems == []
+
+
+def test_planning_owner_problem_deduplication_and_internal_label_policy():
+    planning = empty_planning_projection(generated_at="2026-08-25T12:00:00Z", source_status="degraded", provider_status="error")
+    planning.providerStatuses[0].provider = "icloud"
+    planning.health.issues = [
+        PlanningHealthIssue(source="calendar", status="stale", consecutiveFailures=1),
+        PlanningHealthIssue(source="tasks", status="degraded", consecutiveFailures=1),
+        PlanningHealthIssue(source="planning-status", status="degraded", consecutiveFailures=1),
+    ]
+    report = DiagnosticsCollector(IntegrationSettings()).report(make_snapshot(healthy_services(), planning=planning))
+    assert [problem.id for problem in report.problems] == ["planning:calendar", "planning:tasks"]
+    assert {problem.subsystem for problem in report.problems} == {"Календарь", "Задачи"}
+
+    planning.health.issues = [PlanningHealthIssue(source="projects", status="degraded", consecutiveFailures=1)]
+    report = DiagnosticsCollector(IntegrationSettings()).report(make_snapshot(healthy_services(), planning=planning))
+    assert [problem.subsystem for problem in report.problems] == ["Задачи", "Календарь"]

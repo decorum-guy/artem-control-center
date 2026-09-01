@@ -28,6 +28,7 @@ from .contracts import (
     DiagnosticsTransition,
 )
 from .settings import IntegrationSettings
+from .rog_g703_power import _SAFE_ERROR_CODES as ROG_SAFE_ERROR_CODES
 
 
 _SAFE_REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
@@ -164,11 +165,12 @@ def _problem_from_service(
         return None
     state = _HEALTH_STATE.get(service.health, "degraded")
     data = service.data if isinstance(service.data, dict) else {}
-    error_code = _safe_code(data.get("errorCode") or data.get("lastErrorCode") or data.get("failureCode"))
+    error_code = _safe_code(data.get("lastError"))
     # Sleeping/offline is an expected ROG host state; only a confirmed
     # integration failure is an owner incident.
-    if service.id == "rog_g703gi" and error_code is None:
-        return None
+    if service.id == "rog_g703gi":
+        if error_code not in ROG_SAFE_ERROR_CODES or error_code == "health_unreachable":
+            return None
     return DiagnosticsProblem(
         id=f"service:{service.id}",
         subsystem=_service_label(service.id),
@@ -218,6 +220,7 @@ def _problems_for_snapshot(
             issue for issue in planning.health.issues
             if _planning_issue_state(issue.status) is not None
         ]
+        has_attributable_issue = any(issue.source != "planning-status" for issue in planning_issues)
         if planning.sourceStatus != "current" and not planning_issues:
             problem_id = "planning:source"
             first_observed.setdefault(problem_id, observed_at)
@@ -244,6 +247,8 @@ def _problems_for_snapshot(
         for issue in planning_issues:
             state = _planning_issue_state(issue.status)
             if state is None:
+                continue
+            if issue.source == "planning-status" and has_attributable_issue:
                 continue
             owner_source = "tasks" if issue.source == "projects" else issue.source
             problem_id = f"planning:{owner_source}"

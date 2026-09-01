@@ -85,4 +85,34 @@ test.describe("owner diagnostics surface", () => {
     });
     expect(JSON.stringify(payload)).not.toMatch(/secret|PRIVATE_EVENT|PRIVATE_REMINDER|PRIVATE_TASK/i);
   });
+
+  test("raw-error Sheet is scoped, selectable, and fits desktop and narrow screens", async ({ page }) => {
+    const evidence = {
+      kind: "planning-provider", source: null, domain: "calendar", provider: "icloud", providerId: "icloud-safe",
+      status: "error", errorCode: "provider_timeout", consecutiveFailures: null, lastAttemptedAt: null,
+      lastSuccessfulAt: null, observedAt: "2026-08-25T12:00:00Z", cacheUsed: false, fallbackUsed: false,
+      resultStatus: null, projectionStatus: null
+    };
+    await page.route("**/api/v1/diagnostics**", (route) => route.fulfill({
+      status: 200, contentType: "application/json", body: JSON.stringify({
+        schemaVersion: "diagnostics.v1", generatedAt: "2026-08-25T12:00:00Z", buildRevision: "test", mode: "fixtures",
+        snapshotRevision: 1, recentTransitions: [], collectorStatus: [], planning: {}, calendar: {}, calendarReads: [], mutationGates: {},
+        problems: [{ id: "planning:calendar", subsystem: "Календарь", severity: "error", state: "error", current: true,
+          summary: "Календарь сообщил об ошибке", firstObservedAt: null, lastObservedAt: "2026-08-25T12:00:00Z",
+          lastHealthyAt: null, freshness: null, correlationCode: "provider_error", technicalEvidence: evidence }]
+      })
+    }));
+    await page.goto("/system");
+    await page.getByRole("button", { name: "Показать сырую ошибку" }).click();
+    const sheet = page.getByTestId("problem-technical-evidence-sheet");
+    await expect(sheet).toContainText("Календарь");
+    const field = sheet.getByLabel("Санитизированная техническая запись");
+    await expect(field).toHaveValue(/errorCode: provider_timeout/);
+    await expect(sheet.getByRole("button", { name: "Копировать" })).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(sheet.getByRole("button", { name: "Копировать" })).toHaveCSS("min-height", "48px");
+    await page.setViewportSize({ width: 390, height: 720 });
+    const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth }));
+    expect(dimensions.width).toBeLessThanOrEqual(dimensions.viewport + 1);
+  });
 });
