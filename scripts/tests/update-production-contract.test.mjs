@@ -103,7 +103,12 @@ test("Windows PowerShell atomic state publication passes a true CLR null backup 
   assert.match(productionScripts, /Panel target change rewrote the accepted lease or reached handoff/);
   const expectedAssertion = updater.indexOf("Assert-ArtemExpectedUpdatePreflight", updater.indexOf("$preflight = Get-ArtemUpdatePreflight"));
   const manualBinding = updater.indexOf("Bind-ArtemUpdateLockRevisions", expectedAssertion);
+  const transaction = updater.indexOf("Write-ArtemUpdateTransaction", expectedAssertion);
+  const shutdown = updater.indexOf("Stop-ArtemRuntime", expectedAssertion);
+  const handoff = updater.indexOf("Invoke-ArtemTargetUpdater", expectedAssertion);
   assert.ok(expectedAssertion >= 0 && manualBinding > expectedAssertion);
+  assert.ok(transaction > expectedAssertion && shutdown > expectedAssertion && handoff > expectedAssertion);
+  assert.match(updater, /function Assert-ArtemExpectedUpdatePreflight[\s\S]*?-not \$Continuation -and \$HasExpected -and \([\s\S]*?\$Current -ne \$ExpectedCurrent[\s\S]*?\$Target -ne \$ExpectedTarget[\s\S]*?throw "Update target changed since it was checked in the panel"/);
   assert.match(updater, /if \(-not \$Continuation -and -not \$hasExpected\)\s*\{[\s\S]{0,240}?Bind-ArtemUpdateLockRevisions/);
 });
 

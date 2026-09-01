@@ -191,8 +191,39 @@ try {
     if ($updaterText -notmatch 'git\.exe[\s\S]*?fetch[\s\S]*?origin[\s\S]*?main') {
         throw "Updater must re-fetch the canonical origin/main before shutdown"
     }
-    if ($updaterText -notmatch '\$currentHead\s+-ne\s+\$ExpectedCurrentHead[\s\S]*?\$targetHead\s+-ne\s+\$ExpectedTargetHead') {
-        throw "Updater must reject an exact-target mismatch before production shutdown"
+    if ($updaterText -notmatch 'function\s+Assert-ArtemExpectedUpdatePreflight[\s\S]*?-not\s+\$Continuation\s+-and\s+\$HasExpected\s+-and\s+\([\s\S]*?\$Current\s+-ne\s+\$ExpectedCurrent[\s\S]*?\$Target\s+-ne\s+\$ExpectedTarget[\s\S]*?throw\s+"Update target changed since it was checked in the panel"') {
+        throw "Updater must retain the exact panel preflight mismatch rejection"
+    }
+    $preflightIndex = $updaterText.IndexOf('$preflight = Get-ArtemUpdatePreflight')
+    $preflightAssertionIndex = if ($preflightIndex -ge 0) {
+        $updaterText.IndexOf('Assert-ArtemExpectedUpdatePreflight', $preflightIndex)
+    }
+    else { -1 }
+    $manualBindingIndex = if ($preflightAssertionIndex -ge 0) {
+        $updaterText.IndexOf('Bind-ArtemUpdateLockRevisions', $preflightAssertionIndex)
+    }
+    else { -1 }
+    $transactionIndex = if ($preflightAssertionIndex -ge 0) {
+        $updaterText.IndexOf('Write-ArtemUpdateTransaction', $preflightAssertionIndex)
+    }
+    else { -1 }
+    $shutdownIndex = if ($preflightAssertionIndex -ge 0) {
+        $updaterText.IndexOf('Stop-ArtemRuntime', $preflightAssertionIndex)
+    }
+    else { -1 }
+    $handoffIndex = if ($preflightAssertionIndex -ge 0) {
+        $updaterText.IndexOf('Invoke-ArtemTargetUpdater', $preflightAssertionIndex)
+    }
+    else { -1 }
+    if (
+        $preflightIndex -lt 0 -or
+        $preflightAssertionIndex -le $preflightIndex -or
+        $manualBindingIndex -le $preflightAssertionIndex -or
+        $transactionIndex -le $preflightAssertionIndex -or
+        $shutdownIndex -le $preflightAssertionIndex -or
+        $handoffIndex -le $preflightAssertionIndex
+    ) {
+        throw "Updater must assert panel preflight bounds before binding, transaction, shutdown, or target handoff"
     }
     if ($updaterText -notmatch '\$transactionStarted\s*=\s*\$true[\s\S]*?Stop-ArtemRuntime') {
         throw "Updater rollback ownership must begin only when the production transaction starts"
