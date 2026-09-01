@@ -903,3 +903,51 @@ def test_terminal_success_wins_during_updater_lock_cleanup(monkeypatch, tmp_path
     payload = client.get("/api/v1/system/update/status").json()
     assert payload["status"] == "success"
     assert payload["result"] == "updated"
+
+
+@pytest.mark.parametrize("result", ["updater_spawn_failed", "updater_early_exit"])
+def test_runtime_spawn_failure_results_are_exact_owner_safe_codes(monkeypatch, tmp_path, result):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "failed",
+            "requestId": REQUEST,
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": result,
+            "rawError": "private updater details",
+        }),
+        encoding="utf-8",
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "failed"
+    assert payload["result"] == result
+    assert payload["requestId"] == REQUEST
+    assert payload["currentHead"] == CURRENT
+    assert payload["targetHead"] == TARGET
+    assert "rawError" not in payload
+
+
+def test_runtime_owner_state_rejects_arbitrary_spawn_failure_result(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "failed",
+            "requestId": REQUEST,
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": "private updater error",
+        }),
+        encoding="utf-8",
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "failed"
+    assert "result" not in payload

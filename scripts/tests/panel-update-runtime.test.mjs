@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
   activePanelUpdateLease,
+  canPublishPanelUpdateRuntimeFailure,
+  createPanelUpdateSpawnLifecycle,
+  isExactPanelUpdateLock,
   isSafePanelUpdateCommand,
   UPDATE_HANDOFF_MAX_AGE_MS
 } from "../production-runtime.mjs";
@@ -22,6 +26,29 @@ function validCommand() {
     requestId: REQUEST,
     requestedAt: "2026-08-26T12:00:00.000Z"
   };
+}
+
+function fakeUpdater(pid = 4242) {
+  const updater = new EventEmitter();
+  updater.pid = pid;
+  updater.unrefCalls = 0;
+  updater.unref = () => { updater.unrefCalls += 1; };
+  return updater;
+}
+
+function launchLifecycle({ authoritative = false, runtimeAlive = true } = {}) {
+  const updater = fakeUpdater();
+  const failures = [];
+  const logs = [];
+  createPanelUpdateSpawnLifecycle({
+    command: validCommand(),
+    updater,
+    isRuntimeAlive: () => runtimeAlive,
+    hasAuthoritativeEvidence: () => authoritative,
+    publishFailure: (result) => { failures.push(result); return true; },
+    log: (level, message) => logs.push({ level, message })
+  });
+  return { updater, failures, logs };
 }
 
 function updateLock(updatedAt, ownerPid) {
@@ -89,6 +116,80 @@ test("pre-owner handoff lease is short and future timestamps cannot become immor
   assert.equal(
     activePanelUpdateLease(updateLock("2999-01-01T00:00:00.000Z"), { nowMs }),
     null
+  );
+});
+
+test("successful updater spawn records request-bound acceptance only after spawn", () => {
+  const { updater, failures, logs } = launchLifecycle();
+  assert.equal(logs.length, 0);
+  updater.emit("spawn");
+  assert.equal(updater.unrefCalls, 1);
+  assert.equal(failures.length, 0);
+  assert.match(logs[0].message, new RegExp(`accepted requestId=${REQUEST} pid=4242`));
+});
+
+test("updater spawn error publishes only the fixed safe spawn result", () => {
+  const { updater, failures, logs } = launchLifecycle();
+  updater.emit("error", new Error("private Powershell launch detail"));
+  assert.deepEqual(failures, ["updater_spawn_failed"]);
+  assert.equal(logs.some(({ message }) => message.includes("handoff accepted")), false);
+  assert.equal(failures.join(" ").includes("private"), false);
+});
+
+test("unexplained early updater exit publishes the fixed safe early-exit result", () => {
+  const { updater, failures } = launchLifecycle();
+  updater.emit("spawn");
+  updater.emit("exit", 71, null);
+  assert.deepEqual(failures, ["updater_early_exit"]);
+  assert.equal(failures.join(" ").includes("71"), false);
+});
+
+test("authoritative updater evidence wins over early child exit", () => {
+  const { updater, failures, logs } = launchLifecycle({ authoritative: true });
+  updater.emit("spawn");
+  updater.emit("exit", 1, null);
+  assert.deepEqual(failures, []);
+  assert.match(logs.at(-1).message, /retained authoritative evidence/);
+});
+
+test("exact ownerless lock matching never accepts updater-owned or different requests", () => {
+  const command = validCommand();
+  assert.equal(isExactPanelUpdateLock(updateLock(new Date().toISOString()), command, { ownerless: true }), true);
+  assert.equal(isExactPanelUpdateLock(updateLock(new Date().toISOString(), 4242), command, { ownerless: true }), false);
+  assert.equal(
+    isExactPanelUpdateLock({ ...updateLock(new Date().toISOString()), requestId: "f".repeat(24) }, command, { ownerless: true }),
+    false
+  );
+});
+
+test("runtime failure publisher never overwrites updater ownership or a different request", () => {
+  const command = validCommand();
+  const state = {
+    schemaVersion: 1,
+    status: "updating",
+    requestId: REQUEST,
+    currentHead: CURRENT,
+    targetHead: TARGET
+  };
+  assert.equal(canPublishPanelUpdateRuntimeFailure({ command, state, lock: updateLock(new Date().toISOString()) }), true);
+  assert.equal(
+    canPublishPanelUpdateRuntimeFailure({ command, state, lock: updateLock(new Date().toISOString(), 4242) }),
+    false,
+    "an updater-owned lock wins"
+  );
+  assert.equal(
+    canPublishPanelUpdateRuntimeFailure({
+      command,
+      state: { ...state, requestId: "f".repeat(24) },
+      lock: { ...updateLock(new Date().toISOString()), requestId: "f".repeat(24) }
+    }),
+    false,
+    "a different request cannot be overwritten"
+  );
+  assert.equal(
+    canPublishPanelUpdateRuntimeFailure({ command, state, lock: updateLock(new Date().toISOString()), authoritative: true }),
+    false,
+    "a terminal updater state or transaction wins"
   );
 });
 

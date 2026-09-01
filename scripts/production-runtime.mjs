@@ -297,6 +297,19 @@ export function isSafePanelUpdateCommand(command) {
 }
 
 export const UPDATE_HANDOFF_MAX_AGE_MS = 2 * 60_000;
+const UPDATE_TRANSACTION_PHASES = new Set([
+  "started",
+  "stopping",
+  "checkout",
+  "handoff",
+  "target-authoritative",
+  "validating",
+  "building",
+  "artifact-ready",
+  "restarting",
+  "verifying",
+  "rollback"
+]);
 
 export function activePanelUpdateLease(
   payload,
@@ -322,6 +335,81 @@ export function activePanelUpdateLease(
   const ageMs = nowMs - updatedAt;
   if (ageMs < 0 || ageMs > UPDATE_HANDOFF_MAX_AGE_MS) return null;
   return payload;
+}
+
+export function isExactPanelUpdateLock(payload, command, { ownerless = false } = {}) {
+  if (
+    !payload
+    || payload.schemaVersion !== 1
+    || payload.status !== "updating"
+    || payload.requestId !== command?.requestId
+    || payload.expectedCurrentHead !== command?.expectedCurrentHead
+    || payload.expectedTargetHead !== command?.expectedTargetHead
+  ) {
+    return false;
+  }
+  return !ownerless || payload.ownerPid === undefined || payload.ownerPid === null;
+}
+
+export function canPublishPanelUpdateRuntimeFailure({ command, state, lock, authoritative = false }) {
+  if (authoritative) return false;
+  const stateMatches = Boolean(
+    state
+    && state.schemaVersion === 1
+    && (state.status === "checking" || state.status === "updating")
+    && state.requestId === command?.requestId
+    && state.currentHead === command?.expectedCurrentHead
+    && state.targetHead === command?.expectedTargetHead
+  );
+  const lockMatches = isExactPanelUpdateLock(lock, command, { ownerless: true });
+  return (stateMatches || lockMatches) && (!state || stateMatches) && (!lock || lockMatches);
+}
+
+export function createPanelUpdateSpawnLifecycle({
+  command,
+  updater,
+  isRuntimeAlive,
+  hasAuthoritativeEvidence,
+  publishFailure,
+  log
+}) {
+  let spawned = false;
+  let handled = false;
+
+  updater.once("spawn", () => {
+    if (handled) return;
+    spawned = true;
+    updater.unref();
+    // The PID is deliberately confined to the runtime diagnostic log.
+    log("INFO", `Panel update handoff accepted requestId=${command.requestId} pid=${updater.pid ?? "unknown"}`);
+  });
+
+  updater.once("error", (error) => {
+    if (spawned || handled) {
+      log("ERROR", `Panel updater process error requestId=${command.requestId}: ${error?.message || error}`);
+      return;
+    }
+    handled = true;
+    const published = publishFailure("updater_spawn_failed");
+    log(
+      published ? "ERROR" : "WARN",
+      `Panel updater spawn failed requestId=${command.requestId}: ${error?.message || error}`
+    );
+  });
+
+  updater.once("exit", (code, signal) => {
+    if (!spawned || handled || !isRuntimeAlive()) return;
+    handled = true;
+    if (hasAuthoritativeEvidence()) {
+      log("INFO", `Panel updater exit retained authoritative evidence requestId=${command.requestId}`);
+      return;
+    }
+    const published = publishFailure("updater_early_exit");
+    log(
+      published ? "WARN" : "INFO",
+      `Panel updater exited before authoritative evidence requestId=${command.requestId} code=${code ?? "null"} signal=${signal ?? "null"}`
+    );
+  });
 }
 
 export function capabilityStoreRevision(path) {
@@ -508,13 +596,86 @@ export async function runProductionRuntime() {
     });
   }
 
-  function writeUpdateState(status, result) {
+  function writeUpdateState(status, result, fields = {}) {
     atomicWriteJson(updateStatePath, {
       schemaVersion: 1,
       status,
       updatedAt: new Date().toISOString(),
-      ...(result ? { result } : {})
+      ...(result ? { result } : {}),
+      ...fields
     });
+  }
+
+  function readRuntimeJson(path) {
+    try {
+      const payload = JSON.parse(readFileSync(path, "utf8"));
+      return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isExactPanelUpdateState(payload, command, statuses) {
+    return Boolean(
+      payload
+      && payload.schemaVersion === 1
+      && statuses.includes(payload.status)
+      && payload.requestId === command.requestId
+      && payload.currentHead === command.expectedCurrentHead
+      && payload.targetHead === command.expectedTargetHead
+    );
+  }
+
+  function isExactPanelUpdateTransaction(payload, command) {
+    return Boolean(
+      payload
+      && payload.schemaVersion === 1
+      && payload.status === "incomplete"
+      && UPDATE_TRANSACTION_PHASES.has(payload.phase)
+      && payload.requestId === command.requestId
+      && payload.previousHead === command.expectedCurrentHead
+      && payload.targetHead === command.expectedTargetHead
+      && typeof payload.updatedAt === "string"
+      && Number.isFinite(Date.parse(payload.updatedAt))
+    );
+  }
+
+  function hasAuthoritativePanelUpdateEvidence(command) {
+    const state = readRuntimeJson(updateStatePath);
+    if (isExactPanelUpdateState(state, command, ["success", "failed"])) return true;
+    const transaction = readRuntimeJson(join(runtimeDir, "update-transaction.json"));
+    if (isExactPanelUpdateTransaction(transaction, command)) return true;
+    const lock = readRuntimeJson(updateLockPath);
+    return isExactPanelUpdateLock(lock, command) && Number.isInteger(lock.ownerPid) && lock.ownerPid > 0;
+  }
+
+  function releaseExactOwnerlessPanelUpdateLock(command) {
+    const lock = readRuntimeJson(updateLockPath);
+    if (!isExactPanelUpdateLock(lock, command, { ownerless: true })) return false;
+    // Re-read immediately before removal so a competing request or updater
+    // ownership claim is never intentionally removed by this runtime path.
+    const confirmed = readRuntimeJson(updateLockPath);
+    if (!isExactPanelUpdateLock(confirmed, command, { ownerless: true })) return false;
+    rmSync(updateLockPath, { force: true });
+    return true;
+  }
+
+  function publishPanelUpdateRuntimeFailure(command, result) {
+    const state = readRuntimeJson(updateStatePath);
+    const lock = readRuntimeJson(updateLockPath);
+    if (!canPublishPanelUpdateRuntimeFailure({
+      command,
+      state,
+      lock,
+      authoritative: hasAuthoritativePanelUpdateEvidence(command)
+    })) return false;
+    writeUpdateState("failed", result, {
+      requestId: command.requestId,
+      currentHead: command.expectedCurrentHead,
+      targetHead: command.expectedTargetHead
+    });
+    releaseExactOwnerlessPanelUpdateLock(command);
+    return true;
   }
 
   function activeUpdateLock() {
@@ -729,31 +890,47 @@ export async function runProductionRuntime() {
       return;
     }
 
-    const updater = spawn(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        updaterPath,
-        "-ExpectedCurrentHead",
-        command.expectedCurrentHead,
-        "-ExpectedTargetHead",
-        command.expectedTargetHead,
-        "-RequestId",
-        command.requestId
-      ],
-      {
-        cwd: root,
-        detached: true,
-        windowsHide: true,
-        stdio: "ignore"
-      }
-    );
-    updater.unref();
-    log("INFO", `Panel update handoff accepted requestId=${command.requestId}`);
+    let updater;
+    try {
+      updater = spawn(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          updaterPath,
+          "-ExpectedCurrentHead",
+          command.expectedCurrentHead,
+          "-ExpectedTargetHead",
+          command.expectedTargetHead,
+          "-RequestId",
+          command.requestId
+        ],
+        {
+          cwd: root,
+          detached: true,
+          windowsHide: true,
+          stdio: "ignore"
+        }
+      );
+    } catch (error) {
+      const published = publishPanelUpdateRuntimeFailure(command, "updater_spawn_failed");
+      log(
+        published ? "ERROR" : "WARN",
+        `Panel updater spawn threw requestId=${command.requestId}: ${error?.message || error}`
+      );
+      return;
+    }
+    createPanelUpdateSpawnLifecycle({
+      command,
+      updater,
+      isRuntimeAlive: () => !shuttingDown,
+      hasAuthoritativeEvidence: () => hasAuthoritativePanelUpdateEvidence(command),
+      publishFailure: (result) => publishPanelUpdateRuntimeFailure(command, result),
+      log
+    });
   }
 
   function consumeRuntimeCommand() {

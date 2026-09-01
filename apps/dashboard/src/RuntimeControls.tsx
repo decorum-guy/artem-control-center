@@ -69,6 +69,8 @@ const updateFailureReasonCopy: Record<UpdateFailureResult, string> = {
   restart_failed: "Не удалось перезапустить Control Center после обновления.",
   repair_required: "Требуется восстановление установленной версии панели.",
   target_handoff_lease_rejected: "Новая версия обновлятора не приняла подтверждённую передачу управления.",
+  updater_spawn_failed: "Не удалось запустить обновлятор.",
+  updater_early_exit: "Обновлятор завершился до начала установки.",
   updater_stale: "Обновление остановилось без подтверждённого результата. Нужна проверка установки."
 };
 
