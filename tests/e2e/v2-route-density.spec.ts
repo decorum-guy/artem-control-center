@@ -226,20 +226,17 @@ test.describe("Control Center V2 PR7 route density", () => {
     const coffeeGeometry = await page.locator(".coffee-panel--home-v2").evaluate((panel) => {
       const asset = panel.querySelector<HTMLElement>(".coffee-asset");
       const image = panel.querySelector<HTMLImageElement>(".coffee-asset__image");
-      const marker = panel.querySelector<HTMLElement>(".coffee-state-marker");
-      if (!asset || !image || !marker) return null;
+      if (!asset || !image) return null;
       const rect = (element: Element) => {
         const box = element.getBoundingClientRect();
         return { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height };
       };
       const assetRect = rect(asset);
       const imageRect = rect(image);
-      const markerRect = rect(marker);
       const style = getComputedStyle(image);
       return {
         asset: assetRect,
         image: imageRect,
-        marker: markerRect,
         objectFit: style.objectFit,
         naturalRatio: image.naturalWidth / image.naturalHeight
       };
@@ -249,7 +246,6 @@ test.describe("Control Center V2 PR7 route density", () => {
     expect(coffeeGeometry!.image.right).toBeLessThanOrEqual(coffeeGeometry!.asset.right + 1);
     expect(coffeeGeometry!.image.top).toBeGreaterThanOrEqual(coffeeGeometry!.asset.top - 1);
     expect(coffeeGeometry!.image.bottom).toBeLessThanOrEqual(coffeeGeometry!.asset.bottom + 1);
-    expect(coffeeGeometry!.image.bottom).toBeLessThanOrEqual(coffeeGeometry!.marker.top - 2);
     expect(coffeeGeometry!.objectFit).toBe("contain");
     expect(coffeeGeometry!.naturalRatio).toBeCloseTo(1024 / 1536, 2);
 

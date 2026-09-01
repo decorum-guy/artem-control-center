@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { OverviewLayoutItem } from "@artem/contracts";
 import {
   appearanceControlsFor,
+  appearanceControlsForPresentation,
   coffeeAppearanceConfig,
   defaultAppearanceConfig,
   normalizeLayoutItem,
@@ -86,6 +87,11 @@ describe("bounded Overview appearance schema", () => {
       "showAuthority",
       "showImage"
     ]);
+  });
+
+  it("does not expose the removed operational Coffee state marker control", () => {
+    expect(appearanceControlsForPresentation("home.coffee-machine").map((control) => control.key))
+      .not.toContain("showStateMarker");
   });
 
   it("clamps only in the source-owned runtime resolver", () => {

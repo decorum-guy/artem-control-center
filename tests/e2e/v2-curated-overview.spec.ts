@@ -635,24 +635,19 @@ test.describe("PR4 curated Overview", () => {
     const coffee = page.getByTestId("widget-coffee-machine");
     const image = coffee.locator(".coffee-asset__image");
     const asset = coffee.locator(".coffee-asset");
-    const online = coffee.locator(".coffee-panel__heading .health-mark");
-    const marker = coffee.locator(".coffee-state-marker");
+    const online = coffee.locator(".coffee-panel__status .health-mark");
     const spaciousImageBox = await image.boundingBox();
     const onlineBox = await online.boundingBox();
-    const markerBox = await marker.boundingBox();
+    const coffeeBox = await coffee.boundingBox();
     expect(await coffee.getAttribute("data-overview-copy-density")).toBe("spacious");
     expect(spaciousImageBox?.width).toBeGreaterThan(136);
     expect(spaciousImageBox?.width).toBeLessThanOrEqual(164);
     expect(spaciousImageBox?.height).toBeLessThanOrEqual(240);
     expect(await online).toContainText("Онлайн");
     expect(await online).not.toContainText("Работает");
-    expect(spaciousImageBox!.x).toBeGreaterThanOrEqual((onlineBox?.x ?? 0) + (onlineBox?.width ?? 0));
-    const imageToMarkerGap = markerBox!.y - (spaciousImageBox!.y + spaciousImageBox!.height);
-    expect(imageToMarkerGap).toBeGreaterThanOrEqual(0);
-    expect(imageToMarkerGap).toBeLessThanOrEqual(4);
-    const coffeeBox = await coffee.boundingBox();
-    expect(markerBox!.x).toBeGreaterThanOrEqual(coffeeBox!.x);
-    expect(markerBox!.x + markerBox!.width).toBeLessThanOrEqual(coffeeBox!.x + coffeeBox!.width);
+    expect(onlineBox!.y).toBeGreaterThanOrEqual(coffeeBox!.y);
+    expect(onlineBox!.x + onlineBox!.width).toBeLessThanOrEqual(coffeeBox!.x + coffeeBox!.width);
+    await expect(coffee.locator(".coffee-state-marker")).toHaveCount(0);
     await expect(coffee).toContainText("Источник: Home Assistant");
     await expect(asset).toHaveCSS("border-left-width", "0px");
     expect(await asset.evaluate((element) => getComputedStyle(element).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
@@ -663,27 +658,25 @@ test.describe("PR4 curated Overview", () => {
     const warmingImageBox = await warmingCoffee.locator(".coffee-asset__image").boundingBox();
     const warmingProgressBox = await warmingCoffee.locator(".coffee-progress").boundingBox();
     expect(await warmingCoffee.getAttribute("data-overview-copy-density")).toBe("dense");
-    expect(warmingImageBox?.x).toBeGreaterThanOrEqual(
-      (warmingProgressBox?.x ?? 0) + (warmingProgressBox?.width ?? 0) - 1
-    );
+    const warmingAssetBox = await warmingCoffee.locator(".coffee-asset").boundingBox();
+    expect(warmingImageBox!.x).toBeGreaterThanOrEqual((warmingAssetBox?.x ?? 0) - 1);
+    expect(warmingImageBox!.x + warmingImageBox!.width).toBeLessThanOrEqual((warmingAssetBox?.x ?? 0) + (warmingAssetBox?.width ?? 0) + 1);
+    expect(warmingProgressBox).not.toBeNull();
 
     await page.goto("/overview?scenario=ha-offline-policy-available&theme=night");
     await waitForOverview(page);
     const denseCoffee = page.getByTestId("widget-coffee-machine");
     const denseImage = denseCoffee.locator(".coffee-asset__image");
     const denseAsset = denseCoffee.locator(".coffee-asset");
-    const denseMarker = denseCoffee.locator(".coffee-state-marker");
     const denseImageBox = await denseImage.boundingBox();
     const denseAssetBox = await denseAsset.boundingBox();
-    const denseMarkerBox = await denseMarker.boundingBox();
     expect(await denseCoffee.getAttribute("data-overview-copy-density")).toBe("dense");
     expect(denseImageBox?.width).toBeLessThan(spaciousImageBox?.width ?? Number.POSITIVE_INFINITY);
-    expect(denseImageBox?.x).toBeGreaterThan(spaciousImageBox?.x ?? 0);
     expect(Math.abs(
       (denseImageBox!.x + denseImageBox!.width / 2) - (denseAssetBox!.x + denseAssetBox!.width / 2)
     )).toBeLessThanOrEqual(1);
-    expect((denseImageBox?.y ?? 0) + (denseImageBox?.height ?? 0)).toBeLessThanOrEqual(denseMarkerBox?.y ?? Number.POSITIVE_INFINITY);
-    await expect(denseMarker).toHaveText("Недоступна");
+    expect(denseImageBox!.y + denseImageBox!.height).toBeLessThanOrEqual(denseAssetBox!.y + denseAssetBox!.height + 1);
+    await expect(denseCoffee.locator(".coffee-state-marker")).toHaveCount(0);
     await expectNoOverflow(page);
   });
 
@@ -844,6 +837,7 @@ test.describe("PR4 curated Overview", () => {
     const visual = coffee.locator(".coffee-asset__visual");
     const resting = await visual.boundingBox();
     expect(resting).not.toBeNull();
+    const restingTransform = await visual.evaluate((element) => getComputedStyle(element).transform);
 
     coffeeFixtureOverride = "turning-on";
     await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
@@ -854,9 +848,10 @@ test.describe("PR4 curated Overview", () => {
     await expect(coffee).toHaveAttribute("data-transition", "revealing");
     await page.waitForTimeout(320);
     const settled = await visual.boundingBox();
-    expect(settled?.x).toBeGreaterThan((resting?.x ?? Number.NaN) + 5);
-    expect(settled?.width).toBeLessThan((resting?.width ?? Number.NaN) - 2);
+    expect(Math.abs((settled?.x ?? Number.NaN) - (resting?.x ?? Number.NaN))).toBeLessThanOrEqual(1);
+    expect(Math.abs((settled?.width ?? Number.NaN) - (resting?.width ?? Number.NaN))).toBeLessThanOrEqual(1);
     const settledTransform = await visual.evaluate((element) => getComputedStyle(element).transform);
+    expect(settledTransform).toBe(restingTransform);
 
     await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
     await page.waitForTimeout(80);

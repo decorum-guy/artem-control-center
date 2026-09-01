@@ -226,9 +226,9 @@ export function appearanceControlSection(widgetType: string, control: Appearance
 }
 
 export function appearanceControlsForPresentation(widgetType: string): readonly AppearanceControl[] {
-  const controls = appearanceControlsFor(widgetType);
+  const controls = appearanceControlsFor(widgetType).filter((control) => control.key !== "showStateMarker");
   if (widgetType !== "home.coffee-machine") return controls;
-  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "composition", "buttonLayout", "showStateMarker", "showAuthority"];
+  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "composition", "buttonLayout", "showAuthority"];
   return [...controls].sort((left, right) => order.indexOf(left.key) - order.indexOf(right.key));
 }
 
