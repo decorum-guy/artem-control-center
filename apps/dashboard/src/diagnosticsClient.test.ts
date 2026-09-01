@@ -1,7 +1,12 @@
+// @vitest-environment jsdom
+import { act, createElement, useEffect } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DiagnosticsReport } from "@artem/contracts";
-import { diagnosticsProblems, fetchDiagnosticsReport, resetDiagnosticsClientForTests } from "./diagnosticsClient";
+import { diagnosticsProblems, fetchDiagnosticsReport, readyDiagnosticsCacheSizeForTests, resetDiagnosticsClientForTests, useDiagnosticsReport, type DiagnosticsState } from "./diagnosticsClient";
 import { emptyPlanningFixture } from "./planningFixtures";
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function report(revision: number, problems: DiagnosticsReport["problems"]): DiagnosticsReport {
   return { snapshotRevision: revision, problems } as DiagnosticsReport;
@@ -13,6 +18,8 @@ afterEach(() => {
   resetDiagnosticsClientForTests();
   vi.unstubAllGlobals();
 });
+
+async function settle(): Promise<void> { await Promise.resolve(); await Promise.resolve(); }
 
 describe("revision-aware diagnostics client", () => {
   it("never reuses revision 100 authority for revision 101 recovery", async () => {
@@ -50,5 +57,36 @@ describe("revision-aware diagnostics client", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchDiagnosticsReport(101)).resolves.toMatchObject({ snapshotRevision: 101 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains only two ready reports after many revisions", async () => {
+    vi.stubGlobal("fetch", vi.fn((_, init) => {
+      void init;
+      const revision = Number((vi.mocked(fetch).mock.calls.length));
+      return Promise.resolve({ ok: true, json: async () => report(revision, []) });
+    }));
+    for (let revision = 1; revision <= 8; revision += 1) await fetchDiagnosticsReport(revision);
+    expect(readyDiagnosticsCacheSizeForTests()).toBe(2);
+  });
+
+  it("synchronously hides revision 100 while revision 101 is checking without remount", async () => {
+    const queue: Array<(value: unknown) => void> = [];
+    vi.stubGlobal("fetch", vi.fn(() => new Promise((resolve) => queue.push(resolve))));
+    let latest: DiagnosticsState | null = null;
+    function Harness({ revision }: { revision: number }) {
+      const state = useDiagnosticsReport(revision);
+      useEffect(() => { latest = state; }, [state]);
+      return null;
+    }
+    const host = document.createElement("div");
+    const root: Root = createRoot(host);
+    await act(async () => { root.render(createElement(Harness, { revision: 100 })); await settle(); });
+    await act(async () => { queue.shift()?.({ ok: true, json: async () => report(100, [{ id: "planning:calendar" } as DiagnosticsReport["problems"][number]]) }); await settle(); });
+    expect(latest).toMatchObject({ status: "ready", report: { problems: [{ id: "planning:calendar" }] } });
+    await act(async () => { root.render(createElement(Harness, { revision: 101 })); await settle(); });
+    expect(latest).toMatchObject({ status: "checking", report: null });
+    await act(async () => { queue.shift()?.({ ok: true, json: async () => report(101, []) }); await settle(); });
+    expect(latest).toMatchObject({ status: "ready", report: { problems: [] } });
+    await act(async () => root.unmount());
   });
 });

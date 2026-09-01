@@ -7,6 +7,18 @@ export type DiagnosticsState = { status: DiagnosticsStatus; report: DiagnosticsR
 
 const readyByRevision = new Map<number, DiagnosticsReport>();
 const inFlightByRevision = new Map<number, Promise<DiagnosticsReport>>();
+const MAX_READY_REVISIONS = 2;
+type StoredDiagnosticsState = DiagnosticsState & { revision: number };
+
+function retainReady(revision: number, report: DiagnosticsReport): void {
+  readyByRevision.delete(revision);
+  readyByRevision.set(revision, report);
+  while (readyByRevision.size > MAX_READY_REVISIONS) {
+    const oldest = readyByRevision.keys().next().value as number | undefined;
+    if (oldest === undefined) break;
+    readyByRevision.delete(oldest);
+  }
+}
 
 async function requestForRevision(revision: number, retry = false): Promise<DiagnosticsReport> {
   const response = await fetch("/api/v1/diagnostics?scenario=ha-healthy", { cache: "no-store" });
@@ -25,7 +37,7 @@ export function fetchDiagnosticsReport(revision: number): Promise<DiagnosticsRep
   if (existing) return existing;
   const request = requestForRevision(revision)
     .then((report) => {
-      readyByRevision.set(revision, report);
+      retainReady(revision, report);
       return report;
     })
     .finally(() => { inFlightByRevision.delete(revision); });
@@ -38,6 +50,10 @@ export function resetDiagnosticsClientForTests(): void {
   inFlightByRevision.clear();
 }
 
+export function readyDiagnosticsCacheSizeForTests(): number {
+  return readyByRevision.size;
+}
+
 export function diagnosticsProblems(
   state: DiagnosticsState,
   snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">
@@ -48,23 +64,23 @@ export function diagnosticsProblems(
 }
 
 export function useDiagnosticsReport(revision: number): DiagnosticsState {
-  const [state, setState] = useState<DiagnosticsState>(() => {
+  const [state, setState] = useState<StoredDiagnosticsState>(() => {
     const report = readyByRevision.get(revision);
-    return report ? { status: "ready", report } : { status: "checking", report: null };
+    return report ? { revision, status: "ready", report } : { revision, status: "checking", report: null };
   });
   useEffect(() => {
     let live = true;
     const cached = readyByRevision.get(revision);
     if (cached) {
-      setState({ status: "ready", report: cached });
+      setState({ revision, status: "ready", report: cached });
       return () => { live = false; };
     }
-    setState({ status: "checking", report: null });
+    setState({ revision, status: "checking", report: null });
     void fetchDiagnosticsReport(revision).then(
-      (report) => { if (live) setState({ status: "ready", report }); },
-      () => { if (live) setState({ status: "unavailable", report: null }); }
+      (report) => { if (live) setState({ revision, status: "ready", report }); },
+      () => { if (live) setState({ revision, status: "unavailable", report: null }); }
     );
     return () => { live = false; };
   }, [revision]);
-  return state;
+  return state.revision === revision ? state : { status: "checking", report: null };
 }

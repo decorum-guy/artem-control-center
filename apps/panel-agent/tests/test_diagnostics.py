@@ -393,6 +393,12 @@ def test_rog_expected_states_and_fixed_failures_follow_the_real_last_error_contr
         assert report.problems[0].technicalEvidence.errorCode == code
     assert collector.report(make_snapshot([rog(last_error="PRIVATE_COMMAND_CANARY")])).problems == []
 
+    for code in ("sleep_timeout", "hibernate_timeout", "action_failed"):
+        report = collector.report(make_snapshot([rog(health="healthy", last_error=code, status="online")]))
+        assert len(report.problems) == 1
+        assert report.problems[0].state == "degraded"
+    assert collector.report(make_snapshot([rog(health="healthy", last_error=None, status="online")])).problems == []
+
 
 def test_planning_owner_problem_deduplication_and_internal_label_policy():
     planning = empty_planning_projection(generated_at="2026-08-25T12:00:00Z", source_status="degraded", provider_status="error")

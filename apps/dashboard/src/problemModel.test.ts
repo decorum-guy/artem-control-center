@@ -99,6 +99,15 @@ describe("owner diagnostics problem model", () => {
     }
   });
 
+  it("retains healthy ROG action failures as degraded incidents", () => {
+    const base = { id: "rog_g703gi", title: "ROG", enabled: true, dataContract: "device.v1", health: "healthy" as const, source: "live" as const, summary: "online", actions: [] };
+    for (const lastError of ["sleep_timeout", "hibernate_timeout", "action_failed"]) {
+      expect(currentProblemsForSnapshot(snapshot({ services: [{ ...base, data: { lastError } }] }))).toMatchObject([{ subsystem: "ROG", state: "degraded" }]);
+    }
+    expect(currentProblemsForSnapshot(snapshot({ services: [{ ...base, data: { lastError: null } }] }))).toEqual([]);
+    expect(currentProblemsForSnapshot(snapshot({ services: [{ ...base, data: { lastError: "PRIVATE_EXCEPTION_CANARY" } }] }))).toEqual([]);
+  });
+
   it("does not expose internal Planning labels in the fallback", () => {
     const planning = {
       ...planningFixtures.healthy,

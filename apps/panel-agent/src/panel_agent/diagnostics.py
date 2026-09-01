@@ -30,6 +30,8 @@ from .contracts import (
 from .settings import IntegrationSettings
 from .rog_g703_power import _SAFE_ERROR_CODES as ROG_SAFE_ERROR_CODES
 
+ROG_INCIDENT_ERROR_CODES = ROG_SAFE_ERROR_CODES | {"action_failed"}
+
 
 _SAFE_REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _SAFE_OPAQUE_ID = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
@@ -161,16 +163,18 @@ def _problem_from_service(
     observed_at: str,
     first_observed_at: str,
 ) -> DiagnosticsProblem | None:
-    if not service.enabled or service.health == "healthy":
+    if not service.enabled:
         return None
-    state = _HEALTH_STATE.get(service.health, "degraded")
     data = service.data if isinstance(service.data, dict) else {}
     error_code = _safe_code(data.get("lastError"))
     # Sleeping/offline is an expected ROG host state; only a confirmed
     # integration failure is an owner incident.
     if service.id == "rog_g703gi":
-        if error_code not in ROG_SAFE_ERROR_CODES or error_code == "health_unreachable":
+        if error_code not in ROG_INCIDENT_ERROR_CODES or error_code == "health_unreachable":
             return None
+    elif service.health == "healthy":
+        return None
+    state = "degraded" if service.id == "rog_g703gi" and service.health == "healthy" else _HEALTH_STATE.get(service.health, "degraded")
     return DiagnosticsProblem(
         id=f"service:{service.id}",
         subsystem=_service_label(service.id),

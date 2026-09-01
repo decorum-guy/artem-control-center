@@ -93,7 +93,7 @@ test.describe("owner diagnostics surface", () => {
       lastSuccessfulAt: null, observedAt: "2026-08-25T12:00:00Z", cacheUsed: false, fallbackUsed: false,
       resultStatus: null, projectionStatus: null
     };
-    await page.route("**/api/v1/diagnostics**", (route) => route.fulfill({
+    await page.route(/\/api\/v1\/diagnostics(?:\?.*)?$/, (route) => route.fulfill({
       status: 200, contentType: "application/json", body: JSON.stringify({
         schemaVersion: "diagnostics.v1", generatedAt: "2026-08-25T12:00:00Z", buildRevision: "test", mode: "fixtures",
         snapshotRevision: 1, recentTransitions: [], collectorStatus: [], planning: {}, calendar: {}, calendarReads: [], mutationGates: {},
