@@ -370,6 +370,25 @@ function Bind-ArtemUpdateLockRevisions {
     }
 }
 
+function Assert-ArtemExpectedUpdatePreflight {
+    param(
+        [switch]$Continuation,
+        [switch]$HasExpected,
+        [string]$Current,
+        [string]$Target,
+        [string]$ExpectedCurrent,
+        [string]$ExpectedTarget
+    )
+    if (
+        -not $Continuation -and $HasExpected -and (
+            $Current -ne $ExpectedCurrent -or
+            $Target -ne $ExpectedTarget
+        )
+    ) {
+        throw "Update target changed since it was checked in the panel"
+    }
+}
+
 function Remove-ArtemUpdateLock {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -707,7 +726,14 @@ try {
     $preflight = Get-ArtemUpdatePreflight -Paths $paths
     $currentHead = $preflight.Current
     $targetHead = $preflight.Target
-    if (-not $Continuation) {
+    Assert-ArtemExpectedUpdatePreflight `
+        -Continuation:$Continuation `
+        -HasExpected:$hasExpected `
+        -Current $currentHead `
+        -Target $targetHead `
+        -ExpectedCurrent $ExpectedCurrentHead `
+        -ExpectedTarget $ExpectedTargetHead
+    if (-not $Continuation -and -not $hasExpected) {
         # Manual invocations acquire a lease before preflight.  Persist the
         # discovered exact revisions before any handoff can be published.
         Bind-ArtemUpdateLockRevisions -Paths $paths -LockRequestId $RequestId -Current $currentHead -Target $targetHead
@@ -717,13 +743,6 @@ try {
 
     if ($null -ne $existingTransaction -and [string]$existingTransaction.phase -eq "rollback") {
         throw "An incomplete production rollback requires recovery before another update"
-    }
-
-    if (-not $Continuation -and $hasExpected -and (
-        $currentHead -ne $ExpectedCurrentHead -or
-        $targetHead -ne $ExpectedTargetHead
-    )) {
-        throw "Update target changed since it was checked in the panel"
     }
 
     $targetPhase = $false

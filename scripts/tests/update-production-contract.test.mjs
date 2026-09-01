@@ -92,12 +92,19 @@ test("Windows PowerShell atomic state publication passes a true CLR null backup 
     "Claim-ArtemUpdateLock",
     "Refresh-ArtemUpdateLock",
     "Bind-ArtemUpdateLockRevisions",
+    "Assert-ArtemExpectedUpdatePreflight",
     "Write-ArtemUpdateTransaction"
   ]) {
     assert.match(productionScripts, new RegExp(functionName));
   }
   assert.match(productionScripts, /first write must publish by Move/i);
   assert.match(productionScripts, /second must publish by File\.Replace/i);
+  assert.match(productionScripts, /Manual preflight did not bind the owned lease/);
+  assert.match(productionScripts, /Panel target change rewrote the accepted lease or reached handoff/);
+  const expectedAssertion = updater.indexOf("Assert-ArtemExpectedUpdatePreflight", updater.indexOf("$preflight = Get-ArtemUpdatePreflight"));
+  const manualBinding = updater.indexOf("Bind-ArtemUpdateLockRevisions", expectedAssertion);
+  assert.ok(expectedAssertion >= 0 && manualBinding > expectedAssertion);
+  assert.match(updater, /if \(-not \$Continuation -and -not \$hasExpected\)\s*\{[\s\S]{0,240}?Bind-ArtemUpdateLockRevisions/);
 });
 
 test("target continuation has a bounded private lease handoff and executable Windows regression", () => {
