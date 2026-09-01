@@ -6,7 +6,9 @@ import { resolve } from "node:path";
 
 import {
   activePanelUpdateLease,
+  canPublishPanelUpdateEarlyExit,
   canPublishPanelUpdateRuntimeFailure,
+  classifyPanelUpdateLockOwnership,
   createPanelUpdateSpawnLifecycle,
   isExactPanelUpdateLock,
   isSafePanelUpdateCommand,
@@ -61,6 +63,54 @@ function updateLock(updatedAt, ownerPid) {
     updatedAt,
     ...(ownerPid === undefined ? {} : { ownerPid })
   };
+}
+
+function activeUpdateState() {
+  return {
+    schemaVersion: 1,
+    status: "updating",
+    requestId: REQUEST,
+    currentHead: CURRENT,
+    targetHead: TARGET
+  };
+}
+
+function simulateEarlyExit({ state = activeUpdateState(), lock, transaction = null } = {}) {
+  const command = validCommand();
+  const updater = fakeUpdater();
+  const originalLock = lock;
+  const originalTransaction = transaction;
+  let currentState = state;
+  let currentLock = lock;
+  createPanelUpdateSpawnLifecycle({
+    command,
+    updater,
+    isRuntimeAlive: () => true,
+    hasAuthoritativeEvidence: () => (
+      currentState?.schemaVersion === 1
+      && ["success", "failed"].includes(currentState.status)
+      && currentState.requestId === REQUEST
+      && currentState.currentHead === CURRENT
+      && currentState.targetHead === TARGET
+    ),
+    publishFailure: (result, { childPid } = {}) => {
+      if (!canPublishPanelUpdateEarlyExit({ command, state: currentState, lock: currentLock, childPid })) return false;
+      currentState = {
+        schemaVersion: 1,
+        status: "failed",
+        result,
+        requestId: REQUEST,
+        currentHead: CURRENT,
+        targetHead: TARGET
+      };
+      if (classifyPanelUpdateLockOwnership(currentLock, command, childPid) === "ownerless") currentLock = null;
+      return true;
+    },
+    log: () => {}
+  });
+  updater.emit("spawn");
+  updater.emit("exit", 1, null);
+  return { state: currentState, lock: currentLock, transaction, originalLock, originalTransaction };
 }
 
 test("panel update command accepts only exact bounded revision metadata", () => {
@@ -162,7 +212,7 @@ test("exact ownerless lock matching never accepts updater-owned or different req
   );
 });
 
-test("runtime failure publisher never overwrites updater ownership or a different request", () => {
+test("runtime spawn failure publisher still requires an exact ownerless lock", () => {
   const command = validCommand();
   const state = {
     schemaVersion: 1,
@@ -172,11 +222,7 @@ test("runtime failure publisher never overwrites updater ownership or a differen
     targetHead: TARGET
   };
   assert.equal(canPublishPanelUpdateRuntimeFailure({ command, state, lock: updateLock(new Date().toISOString()) }), true);
-  assert.equal(
-    canPublishPanelUpdateRuntimeFailure({ command, state, lock: updateLock(new Date().toISOString(), 4242) }),
-    false,
-    "an updater-owned lock wins"
-  );
+  assert.equal(canPublishPanelUpdateRuntimeFailure({ command, state, lock: updateLock(new Date().toISOString(), 4242) }), false);
   assert.equal(
     canPublishPanelUpdateRuntimeFailure({
       command,
@@ -189,8 +235,68 @@ test("runtime failure publisher never overwrites updater ownership or a differen
   assert.equal(
     canPublishPanelUpdateRuntimeFailure({ command, state, lock: updateLock(new Date().toISOString()), authoritative: true }),
     false,
-    "a terminal updater state or transaction wins"
+    "a terminal updater state wins"
   );
+});
+
+test("H1 claimed exact updater lock then pre-transcript exit publishes early exit without releasing the lock", () => {
+  const lock = updateLock(new Date().toISOString(), 4242);
+  const result = simulateEarlyExit({ lock });
+  assert.equal(result.state.result, "updater_early_exit");
+  assert.equal(result.state.requestId, REQUEST);
+  assert.equal(result.state.currentHead, CURRENT);
+  assert.equal(result.state.targetHead, TARGET);
+  assert.equal("ownerPid" in result.state, false);
+  assert.equal(result.lock, result.originalLock);
+});
+
+test("H2 incomplete transaction remains diagnostic evidence and does not suppress an exited child", () => {
+  const transaction = {
+    schemaVersion: 1,
+    status: "incomplete",
+    phase: "started",
+    requestId: REQUEST,
+    previousHead: CURRENT,
+    targetHead: TARGET
+  };
+  const result = simulateEarlyExit({ lock: updateLock(new Date().toISOString(), 4242), transaction });
+  assert.equal(result.state.result, "updater_early_exit");
+  assert.equal(result.transaction, result.originalTransaction);
+  assert.equal(result.lock.ownerPid, 4242);
+});
+
+test("H3 a different updater owner PID prevents state overwrite and lock cleanup", () => {
+  const state = activeUpdateState();
+  const lock = updateLock(new Date().toISOString(), 5252);
+  const result = simulateEarlyExit({ state, lock });
+  assert.equal(result.state, state);
+  assert.equal(result.lock, lock);
+});
+
+test("H4 terminal updater success remains authoritative after child exit", () => {
+  const state = { ...activeUpdateState(), status: "success", result: "updated" };
+  const result = simulateEarlyExit({ state, lock: updateLock(new Date().toISOString(), 4242) });
+  assert.equal(result.state, state);
+});
+
+test("H5 terminal updater failure remains authoritative after child exit", () => {
+  const state = { ...activeUpdateState(), status: "failed", result: "build_failed" };
+  const result = simulateEarlyExit({ state, lock: updateLock(new Date().toISOString(), 4242) });
+  assert.equal(result.state, state);
+});
+
+test("H6 ownerless early exit publishes and removes only the exact ownerless lock", () => {
+  const result = simulateEarlyExit({ lock: updateLock(new Date().toISOString()) });
+  assert.equal(result.state.result, "updater_early_exit");
+  assert.equal(result.lock, null);
+});
+
+test("H7 different request or revisions cannot be mutated on child exit", () => {
+  const state = { ...activeUpdateState(), requestId: "f".repeat(24) };
+  const lock = { ...updateLock(new Date().toISOString(), 4242), expectedTargetHead: "c".repeat(40) };
+  const result = simulateEarlyExit({ state, lock });
+  assert.equal(result.state, state);
+  assert.equal(result.lock, lock);
 });
 
 test("supervisor handoff is wired to the fixed canonical updater script and owner identity", () => {

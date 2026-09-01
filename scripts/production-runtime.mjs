@@ -297,19 +297,6 @@ export function isSafePanelUpdateCommand(command) {
 }
 
 export const UPDATE_HANDOFF_MAX_AGE_MS = 2 * 60_000;
-const UPDATE_TRANSACTION_PHASES = new Set([
-  "started",
-  "stopping",
-  "checkout",
-  "handoff",
-  "target-authoritative",
-  "validating",
-  "building",
-  "artifact-ready",
-  "restarting",
-  "verifying",
-  "rollback"
-]);
 
 export function activePanelUpdateLease(
   payload,
@@ -365,6 +352,28 @@ export function canPublishPanelUpdateRuntimeFailure({ command, state, lock, auth
   return (stateMatches || lockMatches) && (!state || stateMatches) && (!lock || lockMatches);
 }
 
+export function classifyPanelUpdateLockOwnership(lock, command, childPid) {
+  if (!isExactPanelUpdateLock(lock, command)) return "mismatch";
+  if (lock.ownerPid === undefined || lock.ownerPid === null) return "ownerless";
+  if (Number.isInteger(childPid) && childPid > 0 && lock.ownerPid === childPid) return "exited_child";
+  return "different_owner";
+}
+
+export function canPublishPanelUpdateEarlyExit({ command, state, lock, terminal = false, childPid }) {
+  if (terminal) return false;
+  const stateMatches = Boolean(
+    state
+    && state.schemaVersion === 1
+    && (state.status === "checking" || state.status === "updating")
+    && state.requestId === command?.requestId
+    && state.currentHead === command?.expectedCurrentHead
+    && state.targetHead === command?.expectedTargetHead
+  );
+  const lockOwnership = classifyPanelUpdateLockOwnership(lock, command, childPid);
+  const lockMatches = lockOwnership === "ownerless" || lockOwnership === "exited_child";
+  return (stateMatches || lockMatches) && (!state || stateMatches) && (!lock || lockMatches);
+}
+
 export function createPanelUpdateSpawnLifecycle({
   command,
   updater,
@@ -404,7 +413,7 @@ export function createPanelUpdateSpawnLifecycle({
       log("INFO", `Panel updater exit retained authoritative evidence requestId=${command.requestId}`);
       return;
     }
-    const published = publishFailure("updater_early_exit");
+    const published = publishFailure("updater_early_exit", { childPid: updater.pid });
     log(
       published ? "WARN" : "INFO",
       `Panel updater exited before authoritative evidence requestId=${command.requestId} code=${code ?? "null"} signal=${signal ?? "null"}`
@@ -626,27 +635,9 @@ export async function runProductionRuntime() {
     );
   }
 
-  function isExactPanelUpdateTransaction(payload, command) {
-    return Boolean(
-      payload
-      && payload.schemaVersion === 1
-      && payload.status === "incomplete"
-      && UPDATE_TRANSACTION_PHASES.has(payload.phase)
-      && payload.requestId === command.requestId
-      && payload.previousHead === command.expectedCurrentHead
-      && payload.targetHead === command.expectedTargetHead
-      && typeof payload.updatedAt === "string"
-      && Number.isFinite(Date.parse(payload.updatedAt))
-    );
-  }
-
-  function hasAuthoritativePanelUpdateEvidence(command) {
+  function hasTerminalPanelUpdateEvidence(command) {
     const state = readRuntimeJson(updateStatePath);
     if (isExactPanelUpdateState(state, command, ["success", "failed"])) return true;
-    const transaction = readRuntimeJson(join(runtimeDir, "update-transaction.json"));
-    if (isExactPanelUpdateTransaction(transaction, command)) return true;
-    const lock = readRuntimeJson(updateLockPath);
-    return isExactPanelUpdateLock(lock, command) && Number.isInteger(lock.ownerPid) && lock.ownerPid > 0;
   }
 
   function releaseExactOwnerlessPanelUpdateLock(command) {
@@ -660,15 +651,14 @@ export async function runProductionRuntime() {
     return true;
   }
 
-  function publishPanelUpdateRuntimeFailure(command, result) {
+  function publishPanelUpdateRuntimeFailure(command, result, { childPid } = {}) {
     const state = readRuntimeJson(updateStatePath);
     const lock = readRuntimeJson(updateLockPath);
-    if (!canPublishPanelUpdateRuntimeFailure({
-      command,
-      state,
-      lock,
-      authoritative: hasAuthoritativePanelUpdateEvidence(command)
-    })) return false;
+    const terminal = hasTerminalPanelUpdateEvidence(command);
+    const allowed = result === "updater_early_exit"
+      ? canPublishPanelUpdateEarlyExit({ command, state, lock, terminal, childPid })
+      : canPublishPanelUpdateRuntimeFailure({ command, state, lock, authoritative: terminal });
+    if (!allowed) return false;
     writeUpdateState("failed", result, {
       requestId: command.requestId,
       currentHead: command.expectedCurrentHead,
@@ -927,8 +917,8 @@ export async function runProductionRuntime() {
       command,
       updater,
       isRuntimeAlive: () => !shuttingDown,
-      hasAuthoritativeEvidence: () => hasAuthoritativePanelUpdateEvidence(command),
-      publishFailure: (result) => publishPanelUpdateRuntimeFailure(command, result),
+      hasAuthoritativeEvidence: () => hasTerminalPanelUpdateEvidence(command),
+      publishFailure: (result, options) => publishPanelUpdateRuntimeFailure(command, result, options),
       log
     });
   }
