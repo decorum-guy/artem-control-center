@@ -402,6 +402,7 @@ try {
         "New-ArtemUpdateLock",
         "Claim-ArtemUpdateLock",
         "Refresh-ArtemUpdateLock",
+        "Bind-ArtemUpdateLockRevisions",
         "Write-ArtemUpdateTransaction"
     )) {
         $functionAst = $updaterAst.Find({
@@ -442,6 +443,11 @@ try {
         -Current $currentHead `
         -Target $targetHead
     Claim-ArtemUpdateLock `
+        -Paths $stateRegressionPaths `
+        -LockRequestId $requestId `
+        -Current $currentHead `
+        -Target $targetHead
+    Bind-ArtemUpdateLockRevisions `
         -Paths $stateRegressionPaths `
         -LockRequestId $requestId `
         -Current $currentHead `

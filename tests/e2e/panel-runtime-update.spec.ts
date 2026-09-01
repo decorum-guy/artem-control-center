@@ -535,6 +535,7 @@ test.describe("Control Center runtime update UX", () => {
       ["update_lock_mismatch", "потеряло подтверждённое состояние операции"],
       ["served_artifact_mismatch", "запущена не та версия панели"],
       ["repair_required", "Требуется восстановление установленной версии панели."],
+      ["target_handoff_lease_rejected", "Новая версия обновлятора не приняла подтверждённую передачу управления."],
       ["not-a-real-result", "Обновление не завершено. Повторите попытку или проверьте установку панели."]
     ] as const;
 

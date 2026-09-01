@@ -342,6 +342,34 @@ function Refresh-ArtemUpdateLock {
     Write-ArtemUpdateJson -Path $Paths.UpdateLock -Payload $payload
 }
 
+function Bind-ArtemUpdateLockRevisions {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target
+    )
+    $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+    if (
+        $null -eq $existing -or
+        $existing.schemaVersion -ne 1 -or
+        [string]$existing.status -ne "updating" -or
+        [string]$existing.requestId -ne $LockRequestId -or
+        [int]$existing.ownerPid -ne $PID
+    ) {
+        throw "Software update lease ownership was lost before preflight binding"
+    }
+    Write-ArtemUpdateJson -Path $Paths.UpdateLock -Payload @{
+        schemaVersion = 1
+        status = "updating"
+        requestId = $LockRequestId
+        expectedCurrentHead = $Current
+        expectedTargetHead = $Target
+        ownerPid = $PID
+        updatedAt = [DateTime]::UtcNow.ToString("o")
+    }
+}
+
 function Remove-ArtemUpdateLock {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -677,9 +705,14 @@ try {
     Write-ArtemUpdateState -Paths $paths -Status "checking"
     Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $preflight = Get-ArtemUpdatePreflight -Paths $paths
-    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $currentHead = $preflight.Current
     $targetHead = $preflight.Target
+    if (-not $Continuation) {
+        # Manual invocations acquire a lease before preflight.  Persist the
+        # discovered exact revisions before any handoff can be published.
+        Bind-ArtemUpdateLockRevisions -Paths $paths -LockRequestId $RequestId -Current $currentHead -Target $targetHead
+    }
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $existingTransaction = Get-ArtemUpdateTransaction -Paths $paths
 
     if ($null -ne $existingTransaction -and [string]$existingTransaction.phase -eq "rollback") {

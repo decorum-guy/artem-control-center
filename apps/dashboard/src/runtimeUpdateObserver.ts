@@ -26,6 +26,7 @@ export type UpdateOwnerResult =
   | "served_artifact_mismatch"
   | "restart_failed"
   | "repair_required"
+  | "target_handoff_lease_rejected"
   | "updater_stale";
 
 export type UpdateActivityCode = UpdateOwnerPhase | "completed";

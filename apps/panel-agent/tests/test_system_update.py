@@ -572,6 +572,94 @@ def test_status_uses_server_owned_dead_owner_evidence(monkeypatch, tmp_path):
     assert payload["result"] == "updater_stale"
 
 
+def test_status_preserves_exact_target_handoff_lease_rejection(monkeypatch, tmp_path):
+    client, service = make_client(
+        monkeypatch,
+        tmp_path,
+        FakeGit(),
+        profile="full",
+        owner_alive=lambda _pid, _request_id: False,
+    )
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "updating",
+            "requestId": REQUEST,
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+    write_update_lock(
+        service.lock_path,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        owner_pid=4242,
+    )
+    evidence_path = service.runtime_root / "logs" / f"update-handoff-{REQUEST}.json"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "requestId": REQUEST,
+            "stage": "lease-accepted",
+            "result": "lease-rejected",
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "failed"
+    assert payload["result"] == "target_handoff_lease_rejected"
+    assert "lease-rejected" not in json.dumps(payload)
+    assert "update-handoff" not in json.dumps(payload)
+
+
+def test_status_rejects_wrong_or_malformed_handoff_evidence(monkeypatch, tmp_path):
+    client, service = make_client(
+        monkeypatch,
+        tmp_path,
+        FakeGit(),
+        profile="full",
+        owner_alive=lambda _pid, _request_id: False,
+    )
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "updating",
+            "requestId": REQUEST,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }),
+        encoding="utf-8",
+    )
+    write_update_lock(
+        service.lock_path,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        owner_pid=4242,
+    )
+    evidence_path = service.runtime_root / "logs" / f"update-handoff-{REQUEST}.json"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "requestId": "1" * 24,
+            "stage": "lease-accepted",
+            "result": "lease-rejected",
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "transcript": "C:/private/update.log",
+        }),
+        encoding="utf-8",
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["status"] == "failed"
+    assert payload["result"] == "updater_stale"
+    assert "private" not in json.dumps(payload)
+
+
 def write_update_transaction(path: Path, *, updated_at: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(

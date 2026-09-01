@@ -91,6 +91,7 @@ test("Windows PowerShell atomic state publication passes a true CLR null backup 
     "New-ArtemUpdateLock",
     "Claim-ArtemUpdateLock",
     "Refresh-ArtemUpdateLock",
+    "Bind-ArtemUpdateLockRevisions",
     "Write-ArtemUpdateTransaction"
   ]) {
     assert.match(productionScripts, new RegExp(functionName));
@@ -109,6 +110,7 @@ test("target continuation has a bounded private lease handoff and executable Win
   assert.match(handoff, /New-Object -TypeName System\.Threading\.Mutex/);
   assert.match(handoff, /Reclaim-ArtemTargetHandoffLease/);
   assert.match(handoff, /Test-ArtemLegacyTargetHandoffLease/);
+  assert.match(handoff, /Test-ArtemNullHeadLegacyTargetHandoffLease/);
   assert.match(handoff, /Test-ArtemTargetHandoffTransaction/);
   assert.match(handoff, /Restore-ArtemLegacyTargetHandoffLease/);
   assert.match(handoff, /update-handoff-\{0\}\.json/);
@@ -119,6 +121,11 @@ test("target continuation has a bounded private lease handoff and executable Win
   assert.match(windowsRegression, /-Label "competing owner"/);
   assert.match(windowsRegression, /Parent could not reclaim rollback authority after child failure/);
   assert.match(windowsRegression, /Legacy parent continuation child failed/);
+  assert.match(windowsRegression, /Populated legacy parent continuation child failed/);
+  assert.match(windowsRegression, /only current missing/);
+  assert.match(windowsRegression, /only target missing/);
+  assert.match(windowsRegression, /completed transaction/);
+  assert.match(windowsRegression, /populated mismatched current lock SHA/);
   assert.match(windowsRegression, /Rejected legacy child claim removed the parent lease/);
   assert.match(windowsRegression, /Failed legacy child did not restore parent rollback authority/);
   assert.match(windowsRegression, /Reclaim overwrote a competing owner/);
@@ -147,6 +154,7 @@ test("dashboard failure reasons are exhaustive over the bounded owner result uni
     "served_artifact_mismatch",
     "restart_failed",
     "repair_required",
+    "target_handoff_lease_rejected",
     "updater_stale"
   ]) {
     assert.match(controls, new RegExp(`^  ${result}:`, "m"));
@@ -162,6 +170,8 @@ test("owner-safe update progress is server-owned and rollback remains a distinct
   assert.match(systemUpdate, /UPDATE_PHASE_PROGRESS/);
   assert.match(systemUpdate, /progressPercent/);
   assert.match(systemUpdate, /served_verified/);
+  assert.match(systemUpdate, /target_handoff_lease_rejected/);
+  assert.match(systemUpdate, /set\(evidence\) != \{"schemaVersion", "requestId", "stage", "result", "updatedAt"\}/);
   assert.match(observer, /UPDATE_ACTIVITY_COPY/);
   assert.match(observer, /no browser elapsed-time deadline/);
   assert.match(controls, /runtime-update-activity/);
