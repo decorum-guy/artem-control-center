@@ -24,9 +24,9 @@ function New-TestPaths {
 }
 
 function Set-TestHandoffTransaction {
-    param([Parameter(Mandatory)]$Paths, [string]$Phase = "handoff", [string]$TransactionRequest = $request, [string]$UpdatedAt = [DateTime]::UtcNow.ToString("o"))
+    param([Parameter(Mandatory)]$Paths, [string]$Phase = "handoff", [string]$Status = "incomplete", [string]$TransactionRequest = $request, [string]$UpdatedAt = [DateTime]::UtcNow.ToString("o"))
     Write-ArtemTargetHandoffJson -Path $Paths.UpdateTransactionState -Payload @{
-        schemaVersion = 1; status = "incomplete"; phase = $Phase; requestId = $TransactionRequest
+        schemaVersion = 1; status = $Status; phase = $Phase; requestId = $TransactionRequest
         previousHead = $current; targetHead = $target; updatedAt = $UpdatedAt
     }
 }
@@ -41,6 +41,17 @@ function Set-TestParentLease {
         expectedTargetHead = $target
         ownerPid = $PID
         updatedAt = [DateTime]::UtcNow.ToString("o")
+    }
+}
+
+function Set-TestNullHeadLegacyParentLease {
+    param([Parameter(Mandatory)]$Paths, [object]$OwnerPid = $PID, [string]$UpdatedAt = [DateTime]::UtcNow.ToString("o"))
+    Write-ArtemTargetHandoffJson -Path $Paths.UpdateLock -Payload @{
+        schemaVersion = 1
+        status = "updating"
+        requestId = $request
+        ownerPid = $OwnerPid
+        updatedAt = $UpdatedAt
     }
 }
 
@@ -122,10 +133,11 @@ try {
         throw "Parent could not reclaim rollback authority after child failure"
     }
 
-    # This is the deployed a2b0 parent shape: an owned lease plus a fresh
-    # handoff transaction, deliberately without Publish-ArtemTargetHandoffLease.
+    # This is the deployed a2b0 parent shape: its manual parent acquired an
+    # owned lease before preflight, so both expected revisions are absent even
+    # though the fresh exact handoff transaction contains them.
     $env:ARTEM_TARGET_HANDOFF_TEST_FAIL = ""
-    Set-TestParentLease -Paths $paths
+    Set-TestNullHeadLegacyParentLease -Paths $paths
     Set-TestHandoffTransaction -Paths $paths
     $legacy = Start-ArtemLegacyTargetContinuationFixture -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript
     if ($legacy.ExitCode -ne 0) { throw "Legacy parent continuation child failed" }
@@ -134,8 +146,26 @@ try {
     if (
         [string]$legacyReceipt.protocol -ne "legacy" -or
         [int]$legacyClaimed.ownerPid -ne [int]$legacyReceipt.ownerPid -or
-        [int]$legacyClaimed.ownerPid -eq $PID
+        [int]$legacyClaimed.ownerPid -eq $PID -or
+        [string]$legacyClaimed.expectedCurrentHead -ne $current -or
+        [string]$legacyClaimed.expectedTargetHead -ne $target -or
+        $null -ne $legacyClaimed.handoff
     ) { throw "Legacy parent lease was not atomically claimed by the target child" }
+
+    # Keep supporting the already-tested populated legacy parent while the
+    # deployed null-head parent is handled by the narrower predicate above.
+    Set-TestParentLease -Paths $paths
+    Set-TestHandoffTransaction -Paths $paths
+    $populatedLegacy = Start-ArtemLegacyTargetContinuationFixture -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript
+    if ($populatedLegacy.ExitCode -ne 0) { throw "Populated legacy parent continuation child failed" }
+    $populatedReceipt = Get-ArtemJsonPayload -Path (Join-Path $root "child-receipt.json")
+    $populatedClaimed = Get-ArtemJsonPayload -Path $paths.UpdateLock
+    if (
+        [string]$populatedReceipt.protocol -ne "legacy" -or
+        [int]$populatedClaimed.ownerPid -ne [int]$populatedReceipt.ownerPid -or
+        [string]$populatedClaimed.expectedCurrentHead -ne $current -or
+        [string]$populatedClaimed.expectedTargetHead -ne $target
+    ) { throw "Populated legacy parent lease was not atomically claimed by the target child" }
 
     # Every legacy field is independently bounded; a failed real child claim
     # must retain the old parent's lease for its deterministic rollback.
@@ -162,9 +192,50 @@ try {
     Set-TestHandoffTransaction -Paths $paths
     Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget $target -Label "ownerless no-marker"
 
+    # Null-head compatibility is all-or-nothing and still needs every exact
+    # transaction and owner proof; no generic loose lease can cross this boundary.
+    Set-TestNullHeadLegacyParentLease -Paths $paths
+    Remove-Item -LiteralPath $paths.UpdateTransactionState -Force
+    Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget $target -Label "null-head missing transaction"
+    foreach ($case in @(
+        @{ Label = "null-head stale transaction"; Phase = "handoff"; TransactionRequest = $request; LockAt = [DateTime]::UtcNow.ToString("o"); TransactionAt = [DateTime]::UtcNow.AddMinutes(-3).ToString("o"); Owner = $PID; Current = $null; Target = $null },
+        @{ Label = "null-head wrong phase"; Phase = "checkout"; TransactionRequest = $request; LockAt = [DateTime]::UtcNow.ToString("o"); TransactionAt = [DateTime]::UtcNow.ToString("o"); Owner = $PID; Current = $null; Target = $null },
+        @{ Label = "null-head wrong request"; Phase = "handoff"; TransactionRequest = ("2" * 24); LockAt = [DateTime]::UtcNow.ToString("o"); TransactionAt = [DateTime]::UtcNow.ToString("o"); Owner = $PID; Current = $null; Target = $null },
+        @{ Label = "only current missing"; Phase = "handoff"; TransactionRequest = $request; LockAt = [DateTime]::UtcNow.ToString("o"); TransactionAt = [DateTime]::UtcNow.ToString("o"); Owner = $PID; Current = $null; Target = $target },
+        @{ Label = "only target missing"; Phase = "handoff"; TransactionRequest = $request; LockAt = [DateTime]::UtcNow.ToString("o"); TransactionAt = [DateTime]::UtcNow.ToString("o"); Owner = $PID; Current = $current; Target = $null },
+        @{ Label = "null-head stale lock"; Phase = "handoff"; TransactionRequest = $request; LockAt = [DateTime]::UtcNow.AddMinutes(-3).ToString("o"); TransactionAt = [DateTime]::UtcNow.ToString("o"); Owner = $PID; Current = $null; Target = $null },
+        @{ Label = "invalid owner"; Phase = "handoff"; TransactionRequest = $request; LockAt = [DateTime]::UtcNow.ToString("o"); TransactionAt = [DateTime]::UtcNow.ToString("o"); Owner = "not-a-pid"; Current = $null; Target = $null }
+    )) {
+        $lease = @{ schemaVersion = 1; status = "updating"; requestId = $request; ownerPid = $case.Owner; updatedAt = $case.LockAt }
+        if ($null -ne $case.Current) { $lease.expectedCurrentHead = $case.Current }
+        if ($null -ne $case.Target) { $lease.expectedTargetHead = $case.Target }
+        Write-ArtemTargetHandoffJson -Path $paths.UpdateLock -Payload $lease
+        Set-TestHandoffTransaction -Paths $paths -Phase $case.Phase -TransactionRequest $case.TransactionRequest -UpdatedAt $case.TransactionAt
+        Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget $target -Label $case.Label
+    }
+
+    Set-TestNullHeadLegacyParentLease -Paths $paths
+    Set-TestHandoffTransaction -Paths $paths
+    Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent ("c" * 40) -ClaimTarget $target -Label "null-head wrong current"
+    Set-TestNullHeadLegacyParentLease -Paths $paths
+    Set-TestHandoffTransaction -Paths $paths
+    Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget ("d" * 40) -Label "null-head wrong target"
+    Set-TestNullHeadLegacyParentLease -Paths $paths
+    Set-TestHandoffTransaction -Paths $paths -Status "completed"
+    Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget $target -Label "completed transaction"
+    Set-TestNullHeadLegacyParentLease -Paths $paths
+    Set-TestHandoffTransaction -Paths $paths -Status "failed"
+    Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget $target -Label "failed transaction"
+    Write-ArtemTargetHandoffJson -Path $paths.UpdateLock -Payload @{ schemaVersion = 1; status = "updating"; requestId = $request; expectedCurrentHead = ("c" * 40); expectedTargetHead = $target; ownerPid = $PID; updatedAt = [DateTime]::UtcNow.ToString("o") }
+    Set-TestHandoffTransaction -Paths $paths
+    Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget $target -Label "populated mismatched current lock SHA"
+    Write-ArtemTargetHandoffJson -Path $paths.UpdateLock -Payload @{ schemaVersion = 1; status = "updating"; requestId = $request; expectedCurrentHead = $current; expectedTargetHead = ("d" * 40); ownerPid = $PID; updatedAt = [DateTime]::UtcNow.ToString("o") }
+    Set-TestHandoffTransaction -Paths $paths
+    Assert-RejectedClaim -Paths $paths -ClaimRequest $request -ClaimCurrent $current -ClaimTarget $target -Label "populated mismatched target lock SHA"
+
     # A real child rejection cannot remove a parent-owned legacy lease.
     $env:ARTEM_TARGET_HANDOFF_TEST_FAIL = ""
-    Set-TestParentLease -Paths $paths
+    Set-TestNullHeadLegacyParentLease -Paths $paths
     Set-TestHandoffTransaction -Paths $paths -Phase "checkout"
     $rejectedChild = Start-ArtemLegacyTargetContinuationFixture -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript
     $preserved = Get-ArtemJsonPayload -Path $paths.UpdateLock
@@ -172,7 +243,7 @@ try {
 
     # A claimed legacy child that exits before target work restores the old
     # parent lease, so the deployed parent can still enter its rollback path.
-    Set-TestParentLease -Paths $paths
+    Set-TestNullHeadLegacyParentLease -Paths $paths
     Set-TestHandoffTransaction -Paths $paths
     $env:ARTEM_TARGET_HANDOFF_TEST_FAIL = "1"
     $legacyFailed = Start-ArtemLegacyTargetContinuationFixture -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript

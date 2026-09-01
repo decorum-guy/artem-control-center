@@ -34,6 +34,7 @@ SAFE_OWNER_RESULTS = frozenset({
     "served_artifact_mismatch",
     "restart_failed",
     "repair_required",
+    "target_handoff_lease_rejected",
     "updater_stale",
 })
 UPDATE_PHASES = frozenset({
@@ -325,6 +326,31 @@ class PanelUpdateService:
         self._git_runner = git_runner or self._run_git
         self._update_owner_alive = update_owner_alive
 
+    def _handoff_failure_result(self, request_id: str | None) -> str | None:
+        """Read only the updater's fixed, request-bound handoff evidence.
+
+        The browser never receives this file or any of its contents.  A result
+        is surfaced only for the exact schema/stage/result tuple emitted when
+        the target continuation rejects its bounded lease.
+        """
+        safe_request_id = _safe_request_id(request_id)
+        if safe_request_id is None:
+            return None
+        evidence = _read_json(
+            self.runtime_root / "logs" / f"update-handoff-{safe_request_id}.json"
+        )
+        if (
+            not evidence
+            or set(evidence) != {"schemaVersion", "requestId", "stage", "result", "updatedAt"}
+            or evidence.get("schemaVersion") != 1
+            or evidence.get("requestId") != safe_request_id
+            or _safe_timestamp(evidence.get("updatedAt")) is None
+        ):
+            return None
+        if evidence.get("stage") == "lease-accepted" and evidence.get("result") == "lease-rejected":
+            return "target_handoff_lease_rejected"
+        return None
+
     @classmethod
     def from_environment(cls) -> "PanelUpdateService | None":
         raw_command = os.getenv("PANEL_RUNTIME_COMMAND_PATH", "").strip()
@@ -499,6 +525,11 @@ class PanelUpdateService:
                 or (_safe_revision(transaction.get("previousHead")) if transaction_valid else None)
                 or _safe_revision(lock_payload.get("expectedCurrentHead") if lock_payload else None)
             )
+            evidence_request_id = (
+                _safe_request_id(payload.get("requestId"))
+                or (_safe_request_id(transaction.get("requestId")) if transaction_valid else None)
+                or _safe_request_id(lock_payload.get("requestId") if lock_payload else None)
+            )
             return self._owner_state_payload(
                 status="failed",
                 payload=payload,
@@ -507,7 +538,7 @@ class PanelUpdateService:
                 target_head=effective_target,
                 lock_request_id=_safe_request_id(lock_payload.get("requestId") if lock_payload else None),
                 lock_updated_at=_safe_timestamp(lock_payload.get("updatedAt") if lock_payload else None),
-                result="updater_stale",
+                result=self._handoff_failure_result(evidence_request_id) or "updater_stale",
             )
 
         if state_status in {"success", "failed"}:

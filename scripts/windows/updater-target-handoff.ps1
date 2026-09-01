@@ -144,6 +144,31 @@ function Test-ArtemLegacyTargetHandoffLease {
     )
 }
 
+function Test-ArtemNullHeadLegacyTargetHandoffLease {
+    param(
+        [object]$Existing, [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][string]$LockRequestId, [Parameter(Mandatory)][string]$Current,
+        [Parameter(Mandatory)][string]$Target
+    )
+    # The deployed manual parent created its owned lease before preflight, so
+    # both revision fields can be absent.  This exception remains bounded by
+    # the exact fresh handoff transaction that preflight later published.
+    $hasOwner = $null -ne $Existing -and $Existing.PSObject.Properties.Name -contains "ownerPid"
+    $hasHandoff = $null -ne $Existing -and $Existing.PSObject.Properties.Name -contains "handoff"
+    $currentMissing = $null -eq $Existing.expectedCurrentHead -or [string]::IsNullOrWhiteSpace([string]$Existing.expectedCurrentHead)
+    $targetMissing = $null -eq $Existing.expectedTargetHead -or [string]::IsNullOrWhiteSpace([string]$Existing.expectedTargetHead)
+    return (
+        $null -ne $Existing -and
+        $Existing.schemaVersion -eq 1 -and
+        [string]$Existing.status -eq "updating" -and
+        [string]$Existing.requestId -eq $LockRequestId -and
+        $hasOwner -and -not $hasHandoff -and -not ($Existing.ownerPid -is [bool]) -and [int]$Existing.ownerPid -gt 0 -and
+        $currentMissing -and $targetMissing -and
+        (Test-ArtemTargetHandoffTimestamp -Value $Existing.updatedAt) -and
+        (Test-ArtemTargetHandoffTransaction -Paths $Paths -LockRequestId $LockRequestId -Current $Current -Target $Target)
+    )
+}
+
 function Publish-ArtemTargetHandoffLease {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -184,7 +209,9 @@ function Claim-ArtemTargetHandoffLease {
                 (Test-ArtemTargetHandoffTimestamp -Value $existing.updatedAt) -and
                 (Test-ArtemTargetHandoffTransaction -Paths $Paths -LockRequestId $LockRequestId -Current $Current -Target $Target)
             )
-            $isLegacy = Test-ArtemLegacyTargetHandoffLease -Existing $existing -Paths $Paths -LockRequestId $LockRequestId -Current $Current -Target $Target
+            $isPopulatedLegacy = Test-ArtemLegacyTargetHandoffLease -Existing $existing -Paths $Paths -LockRequestId $LockRequestId -Current $Current -Target $Target
+            $isNullHeadLegacy = Test-ArtemNullHeadLegacyTargetHandoffLease -Existing $existing -Paths $Paths -LockRequestId $LockRequestId -Current $Current -Target $Target
+            $isLegacy = $isPopulatedLegacy -or $isNullHeadLegacy
             if (-not $isExplicit -and -not $isLegacy) {
                 throw "Software update handoff lease does not match the requested revisions"
             }

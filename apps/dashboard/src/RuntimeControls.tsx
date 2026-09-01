@@ -68,6 +68,7 @@ const updateFailureReasonCopy: Record<UpdateFailureResult, string> = {
   served_artifact_mismatch: "После перезапуска запущена не та версия панели.",
   restart_failed: "Не удалось перезапустить Control Center после обновления.",
   repair_required: "Требуется восстановление установленной версии панели.",
+  target_handoff_lease_rejected: "Новая версия обновлятора не приняла подтверждённую передачу управления.",
   updater_stale: "Обновление остановилось без подтверждённого результата. Нужна проверка установки."
 };
 

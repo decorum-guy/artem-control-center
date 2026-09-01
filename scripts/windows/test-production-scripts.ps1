@@ -191,8 +191,39 @@ try {
     if ($updaterText -notmatch 'git\.exe[\s\S]*?fetch[\s\S]*?origin[\s\S]*?main') {
         throw "Updater must re-fetch the canonical origin/main before shutdown"
     }
-    if ($updaterText -notmatch '\$currentHead\s+-ne\s+\$ExpectedCurrentHead[\s\S]*?\$targetHead\s+-ne\s+\$ExpectedTargetHead') {
-        throw "Updater must reject an exact-target mismatch before production shutdown"
+    if ($updaterText -notmatch 'function\s+Assert-ArtemExpectedUpdatePreflight[\s\S]*?-not\s+\$Continuation\s+-and\s+\$HasExpected\s+-and\s+\([\s\S]*?\$Current\s+-ne\s+\$ExpectedCurrent[\s\S]*?\$Target\s+-ne\s+\$ExpectedTarget[\s\S]*?throw\s+"Update target changed since it was checked in the panel"') {
+        throw "Updater must retain the exact panel preflight mismatch rejection"
+    }
+    $preflightIndex = $updaterText.IndexOf('$preflight = Get-ArtemUpdatePreflight')
+    $preflightAssertionIndex = if ($preflightIndex -ge 0) {
+        $updaterText.IndexOf('Assert-ArtemExpectedUpdatePreflight', $preflightIndex)
+    }
+    else { -1 }
+    $manualBindingIndex = if ($preflightAssertionIndex -ge 0) {
+        $updaterText.IndexOf('Bind-ArtemUpdateLockRevisions', $preflightAssertionIndex)
+    }
+    else { -1 }
+    $transactionIndex = if ($preflightAssertionIndex -ge 0) {
+        $updaterText.IndexOf('Write-ArtemUpdateTransaction', $preflightAssertionIndex)
+    }
+    else { -1 }
+    $shutdownIndex = if ($preflightAssertionIndex -ge 0) {
+        $updaterText.IndexOf('Stop-ArtemRuntime', $preflightAssertionIndex)
+    }
+    else { -1 }
+    $handoffIndex = if ($preflightAssertionIndex -ge 0) {
+        $updaterText.IndexOf('Invoke-ArtemTargetUpdater', $preflightAssertionIndex)
+    }
+    else { -1 }
+    if (
+        $preflightIndex -lt 0 -or
+        $preflightAssertionIndex -le $preflightIndex -or
+        $manualBindingIndex -le $preflightAssertionIndex -or
+        $transactionIndex -le $preflightAssertionIndex -or
+        $shutdownIndex -le $preflightAssertionIndex -or
+        $handoffIndex -le $preflightAssertionIndex
+    ) {
+        throw "Updater must assert panel preflight bounds before binding, transaction, shutdown, or target handoff"
     }
     if ($updaterText -notmatch '\$transactionStarted\s*=\s*\$true[\s\S]*?Stop-ArtemRuntime') {
         throw "Updater rollback ownership must begin only when the production transaction starts"
@@ -402,6 +433,8 @@ try {
         "New-ArtemUpdateLock",
         "Claim-ArtemUpdateLock",
         "Refresh-ArtemUpdateLock",
+        "Bind-ArtemUpdateLockRevisions",
+        "Assert-ArtemExpectedUpdatePreflight",
         "Write-ArtemUpdateTransaction"
     )) {
         $functionAst = $updaterAst.Find({
@@ -436,16 +469,64 @@ try {
         throw "Windows 5.1 atomic JSON second-write regression failed"
     }
 
+    # Modern manual updater: it owns a lease before preflight, with neither
+    # expected revision supplied. Preflight must bind the discovered pair.
     New-ArtemUpdateLock `
         -Paths $stateRegressionPaths `
-        -LockRequestId $requestId `
-        -Current $currentHead `
-        -Target $targetHead
+        -LockRequestId $requestId
     Claim-ArtemUpdateLock `
+        -Paths $stateRegressionPaths `
+        -LockRequestId $requestId
+    Assert-ArtemExpectedUpdatePreflight -HasExpected:$false -Current $currentHead -Target $targetHead
+    Bind-ArtemUpdateLockRevisions `
         -Paths $stateRegressionPaths `
         -LockRequestId $requestId `
         -Current $currentHead `
         -Target $targetHead
+    $manualLease = Get-ArtemJsonPayload -Path $stateRegressionPaths.UpdateLock
+    if (
+        [string]$manualLease.expectedCurrentHead -ne $currentHead -or
+        [string]$manualLease.expectedTargetHead -ne $targetHead -or
+        [int]$manualLease.ownerPid -ne $PID
+    ) {
+        throw "Manual preflight did not bind the owned lease to its discovered revisions"
+    }
+
+    # A panel request owns the externally accepted A/B pair. If preflight sees
+    # A/C, it must fail before any mutation can replace B with C or start a handoff.
+    $panelStateRoot = Join-Path $stateRegressionRoot "panel-bounds"
+    New-Item -ItemType Directory -Force -Path $panelStateRoot | Out-Null
+    $panelPaths = [pscustomobject]@{
+        RuntimeRoot = $panelStateRoot
+        UpdateLock = Join-Path $panelStateRoot "update-lock.json"
+        UpdateState = Join-Path $panelStateRoot "update-state.json"
+        UpdateTransactionState = Join-Path $panelStateRoot "update-transaction.json"
+    }
+    $panelTarget = "c" * 40
+    New-ArtemUpdateLock -Paths $panelPaths -LockRequestId $requestId -Current $currentHead -Target $targetHead
+    Claim-ArtemUpdateLock -Paths $panelPaths -LockRequestId $requestId -Current $currentHead -Target $targetHead
+    $targetChanged = $false
+    try {
+        Assert-ArtemExpectedUpdatePreflight `
+            -HasExpected:$true `
+            -Current $currentHead `
+            -Target $panelTarget `
+            -ExpectedCurrent $currentHead `
+            -ExpectedTarget $targetHead
+    }
+    catch {
+        $targetChanged = $_.Exception.Message -eq "Update target changed since it was checked in the panel"
+    }
+    if (-not $targetChanged) { throw "Panel target change did not reject before lease binding" }
+    $panelLease = Get-ArtemJsonPayload -Path $panelPaths.UpdateLock
+    if (
+        [string]$panelLease.expectedCurrentHead -ne $currentHead -or
+        [string]$panelLease.expectedTargetHead -ne $targetHead -or
+        [int]$panelLease.ownerPid -ne $PID -or
+        (Test-Path -LiteralPath $panelPaths.UpdateTransactionState)
+    ) {
+        throw "Panel target change rewrote the accepted lease or reached handoff"
+    }
     Refresh-ArtemUpdateLock -Paths $stateRegressionPaths -LockRequestId $requestId
     Write-ArtemUpdateState -Paths $stateRegressionPaths -Status "checking"
     Write-ArtemUpdateTransaction `

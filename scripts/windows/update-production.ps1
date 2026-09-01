@@ -342,6 +342,53 @@ function Refresh-ArtemUpdateLock {
     Write-ArtemUpdateJson -Path $Paths.UpdateLock -Payload $payload
 }
 
+function Bind-ArtemUpdateLockRevisions {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target
+    )
+    $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+    if (
+        $null -eq $existing -or
+        $existing.schemaVersion -ne 1 -or
+        [string]$existing.status -ne "updating" -or
+        [string]$existing.requestId -ne $LockRequestId -or
+        [int]$existing.ownerPid -ne $PID
+    ) {
+        throw "Software update lease ownership was lost before preflight binding"
+    }
+    Write-ArtemUpdateJson -Path $Paths.UpdateLock -Payload @{
+        schemaVersion = 1
+        status = "updating"
+        requestId = $LockRequestId
+        expectedCurrentHead = $Current
+        expectedTargetHead = $Target
+        ownerPid = $PID
+        updatedAt = [DateTime]::UtcNow.ToString("o")
+    }
+}
+
+function Assert-ArtemExpectedUpdatePreflight {
+    param(
+        [switch]$Continuation,
+        [switch]$HasExpected,
+        [string]$Current,
+        [string]$Target,
+        [string]$ExpectedCurrent,
+        [string]$ExpectedTarget
+    )
+    if (
+        -not $Continuation -and $HasExpected -and (
+            $Current -ne $ExpectedCurrent -or
+            $Target -ne $ExpectedTarget
+        )
+    ) {
+        throw "Update target changed since it was checked in the panel"
+    }
+}
+
 function Remove-ArtemUpdateLock {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -677,20 +724,25 @@ try {
     Write-ArtemUpdateState -Paths $paths -Status "checking"
     Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $preflight = Get-ArtemUpdatePreflight -Paths $paths
-    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $currentHead = $preflight.Current
     $targetHead = $preflight.Target
+    Assert-ArtemExpectedUpdatePreflight `
+        -Continuation:$Continuation `
+        -HasExpected:$hasExpected `
+        -Current $currentHead `
+        -Target $targetHead `
+        -ExpectedCurrent $ExpectedCurrentHead `
+        -ExpectedTarget $ExpectedTargetHead
+    if (-not $Continuation -and -not $hasExpected) {
+        # Manual invocations acquire a lease before preflight.  Persist the
+        # discovered exact revisions before any handoff can be published.
+        Bind-ArtemUpdateLockRevisions -Paths $paths -LockRequestId $RequestId -Current $currentHead -Target $targetHead
+    }
+    Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $existingTransaction = Get-ArtemUpdateTransaction -Paths $paths
 
     if ($null -ne $existingTransaction -and [string]$existingTransaction.phase -eq "rollback") {
         throw "An incomplete production rollback requires recovery before another update"
-    }
-
-    if (-not $Continuation -and $hasExpected -and (
-        $currentHead -ne $ExpectedCurrentHead -or
-        $targetHead -ne $ExpectedTargetHead
-    )) {
-        throw "Update target changed since it was checked in the panel"
     }
 
     $targetPhase = $false

@@ -7,6 +7,28 @@ const CURRENT = "abc12345" + "0".repeat(32);
 const TARGET = "def45678" + "1".repeat(32);
 const CHANGED_TARGET = "fedcba98" + "2".repeat(32);
 
+const boundedFailureCases = [
+  ["build_failed", "Не удалось проверить или собрать новую версию."],
+  ["restart_failed", "Не удалось перезапустить Control Center после обновления."],
+  ["artifact_assertion_failed", "Новая сборка не прошла проверку."],
+  ["updater_unavailable", "Служба обновления недоступна."],
+  ["rollback_restored", "Предыдущая версия восстановлена."],
+  ["rollback_failed", "Нужна проверка установки."],
+  ["updater_stale", "Обновление остановилось без подтверждённого результата."],
+  ["pre_update_failed", "Не удалось подготовить обновление."],
+  ["invalid_update_command", "Команда обновления недействительна."],
+  ["capability_apply_active", "сейчас применяется конфигурация панели"],
+  ["update_lock_mismatch", "потеряло подтверждённое состояние операции"],
+  ["served_artifact_mismatch", "запущена не та версия панели"],
+  ["repair_required", "Требуется восстановление установленной версии панели."],
+  ["target_handoff_lease_rejected", "Новая версия обновлятора не приняла подтверждённую передачу управления."]
+] as const;
+
+const unknownFailureCase = [
+  "not-a-real-result",
+  "Обновление не завершено. Повторите попытку или проверьте установку панели."
+] as const;
+
 type UpdateCheck = {
   schemaVersion: "panel-update.v1";
   currentHead: string | null;
@@ -518,27 +540,10 @@ test.describe("Control Center runtime update UX", () => {
     expect(api.getStatusCount()).toBe(statusCountBeforeClose);
   });
 
-  test("bounded terminal results show fixed owner-safe failure reasons", async ({ page }) => {
-    const api = await installRuntimeFixtures(page, "full");
-    const zone = await openSystem(page);
-    const cases = [
-      ["build_failed", "Не удалось проверить или собрать новую версию."],
-      ["restart_failed", "Не удалось перезапустить Control Center после обновления."],
-      ["artifact_assertion_failed", "Новая сборка не прошла проверку."],
-      ["updater_unavailable", "Служба обновления недоступна."],
-      ["rollback_restored", "Предыдущая версия восстановлена."],
-      ["rollback_failed", "Нужна проверка установки."],
-      ["updater_stale", "Обновление остановилось без подтверждённого результата."],
-      ["pre_update_failed", "Не удалось подготовить обновление."],
-      ["invalid_update_command", "Команда обновления недействительна."],
-      ["capability_apply_active", "сейчас применяется конфигурация панели"],
-      ["update_lock_mismatch", "потеряло подтверждённое состояние операции"],
-      ["served_artifact_mismatch", "запущена не та версия панели"],
-      ["repair_required", "Требуется восстановление установленной версии панели."],
-      ["not-a-real-result", "Обновление не завершено. Повторите попытку или проверьте установку панели."]
-    ] as const;
-
-    for (const [result, copy] of cases) {
+  for (const [result, copy] of [...boundedFailureCases, unknownFailureCase]) {
+    test(`terminal failure ${result} shows only fixed owner-safe copy`, async ({ page }) => {
+      const api = await installRuntimeFixtures(page, "full");
+      const zone = await openSystem(page);
       api.queueStatuses(
         { schemaVersion: 1, status: "updating", currentHead: CURRENT, targetHead: TARGET, phase: "building" },
         { schemaVersion: 1, status: "failed", result, currentHead: CURRENT, targetHead: TARGET, phase: "building" }
@@ -549,8 +554,8 @@ test.describe("Control Center runtime update UX", () => {
       await expect(dialog).toContainText(copy);
       expect(await dialog.textContent()).not.toMatch(/C:\\|\/home\/|stderr|git|update-production\.ps1|fake-secret-token/i);
       await closeUpdateDialog(page);
-    }
-  });
+    });
+  }
 
   test("changed target conflict rechecks instead of silently applying the new target", async ({ page }) => {
     const api = await installRuntimeFixtures(page, "full");
