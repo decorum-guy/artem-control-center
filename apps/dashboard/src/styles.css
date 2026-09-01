@@ -881,7 +881,22 @@ p { color: var(--text-secondary); }
 }
 .overview-coffee .coffee-panel--featured { min-height: 280px; }
 .overview-coffee .coffee-panel--featured .coffee-panel__copy { padding: 20px; }
-.overview-coffee .coffee-panel--featured .coffee-asset { min-height: 240px; }
+.overview-coffee .coffee-panel--featured .coffee-asset {
+  /* Keep the legacy Overview card's stable media rows inside the first viewport. */
+  min-height: 240px;
+  padding: 12px 16px 10px;
+}
+.overview-coffee .coffee-panel--featured .coffee-asset__visual {
+  height: 220px;
+  max-height: 100%;
+}
+.overview-coffee .coffee-panel--featured .coffee-asset__image {
+  width: auto;
+  height: min(220px, 100%);
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
 .coffee-progress {
   display: grid;
   grid-template-columns: 1fr 42px;

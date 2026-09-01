@@ -100,11 +100,13 @@ test.describe("#173 Coffee composition stabilization", () => {
       await page.goto(`/overview?scenario=${scenario}&theme=night`);
       const coffee = await waitForCoffee(page, stage);
       await assertCoffeeComposition(coffee);
+      const panelBox = await rect(coffee);
+      expect(panelBox.height).toBeGreaterThanOrEqual(280);
+      expect(panelBox.height).toBeLessThanOrEqual(330);
       const assetBox = await rect(coffee.locator(".coffee-asset"));
       const imageBox = await rect(coffee.locator(".coffee-asset__image"));
       imageCenters[stage] = imageBox.x + imageBox.width / 2 - (assetBox.x + assetBox.width / 2);
       if (stage !== "unavailable") {
-        const panelBox = await rect(coffee);
         const online = coffee.locator(".coffee-panel__status .health-mark--healthy");
         const onlineBox = await rect(online);
         onlineAnchors.push({

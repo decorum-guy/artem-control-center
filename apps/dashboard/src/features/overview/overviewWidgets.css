@@ -714,6 +714,10 @@
   min-height: 0;
 }
 
+.overview-v2-grid-item > .coffee-panel--overview {
+  min-height: 280px;
+}
+
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-rog-widget {
   padding: 8px 10px;
 }
