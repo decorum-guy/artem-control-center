@@ -167,6 +167,8 @@ test("dashboard failure reasons are exhaustive over the bounded owner result uni
     "restart_failed",
     "repair_required",
     "target_handoff_lease_rejected",
+    "updater_spawn_failed",
+    "updater_early_exit",
     "updater_stale"
   ]) {
     assert.match(controls, new RegExp(`^  ${result}:`, "m"));
