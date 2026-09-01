@@ -8,11 +8,13 @@ import { Sheet } from "../../Sheet";
 import { OperationalStatusSummary, RouteHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { RogG703DetailControl } from "../../RogG703Controls";
 import { useInterfaceCopy } from "../../interfaceCopy";
+import { fetchDiagnosticsReport, useDiagnosticsReport } from "../../diagnosticsClient";
 import {
   copyDiagnosticsText,
   currentProblemsForSnapshot,
   diagnosticsFallbackCopyText,
   diagnosticsSupportText,
+  problemTechnicalEvidenceText,
   problemStateLabel,
   problemTone
 } from "../../problemModel";
@@ -94,7 +96,7 @@ function SystemDiagnosticRow({ service }: { service: ServiceSnapshot }) {
   );
 }
 
-function ProblemRow({ problem }: { problem: DiagnosticsProblem }) {
+function ProblemRow({ problem, onEvidence }: { problem: DiagnosticsProblem; onEvidence: (problem: DiagnosticsProblem) => void }) {
   return (
     <article
       className={`system-problem-row system-problem-row--${problem.state}`}
@@ -108,8 +110,35 @@ function ProblemRow({ problem }: { problem: DiagnosticsProblem }) {
         <StatusText label={problemStateLabel(problem.state)} tone={problemTone(problem.state)} />
         <span>{problem.freshness ?? `Наблюдалось ${problem.lastObservedAt}`}</span>
       </div>
+      {problem.technicalEvidence && <button type="button" className="system-problem-evidence" onClick={() => onEvidence(problem)}>Показать сырую ошибку</button>}
     </article>
   );
+}
+
+function ProblemEvidenceSheet({ problem, onClose }: { problem: DiagnosticsProblem; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [fallback, setFallback] = useState(false);
+  const text = problemTechnicalEvidenceText(problem);
+  async function copyEvidence() {
+    const success = await copyDiagnosticsText(text, navigator.clipboard);
+    setCopied(success);
+    setFallback(!success);
+  }
+  return <Sheet
+    testId="problem-technical-evidence-sheet"
+    eyebrow="Диагностика"
+    title={problem.subsystem}
+    description={problem.summary}
+    onClose={onClose}
+    footer={<button type="button" className="system-problem-evidence" onClick={() => void copyEvidence()}>Копировать</button>}
+  >
+    <div className="system-problem-evidence-sheet">
+      <p>Техническая запись ограничена безопасными полями диагностики.</p>
+      <textarea aria-label="Санитизированная техническая запись" readOnly value={text} onFocus={(event) => event.currentTarget.select()} />
+      {copied && <p role="status">Скопировано.</p>}
+      {fallback && <p role="status">{diagnosticsFallbackCopyText}</p>}
+    </div>
+  </Sheet>;
 }
 
 export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
@@ -119,11 +148,13 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const [reportError, setReportError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "fallback" | "failed">("idle");
   const [fallbackText, setFallbackText] = useState("");
+  const [selectedProblem, setSelectedProblem] = useState<DiagnosticsProblem | null>(null);
+  const sharedDiagnostics = useDiagnosticsReport(snapshot.revision);
   const currentProblems = useMemo(() => currentProblemsForSnapshot(snapshot), [snapshot]);
   const subjects = selectSystemServiceSubjects(snapshot.services);
   const { rog, runtime, update, backup, diagnostics } = subjects;
   const relevant = visibleSystemServices(subjects);
-  const attention = currentProblems;
+  const attention = report?.problems ?? sharedDiagnostics.report?.problems ?? currentProblems;
   const counts = countHealth(relevant);
   const aggregateLabel = !relevant.length
     ? "Состояние недоступно"
@@ -139,11 +170,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   useEffect(() => {
     let active = true;
     setReportError(null);
-    void fetch("/api/v1/diagnostics?scenario=ha-healthy", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`diagnostics_${response.status}`);
-        return await response.json() as DiagnosticsReport;
-      })
+    void fetchDiagnosticsReport()
       .then((next) => {
         if (active) setReport(next);
       })
@@ -156,9 +183,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   async function ensureReport(): Promise<DiagnosticsReport | null> {
     if (report) return report;
     try {
-      const response = await fetch("/api/v1/diagnostics?scenario=ha-healthy", { cache: "no-store" });
-      if (!response.ok) throw new Error("diagnostics_unavailable");
-      const next = await response.json() as DiagnosticsReport;
+      const next = await fetchDiagnosticsReport();
       setReport(next);
       return next;
     } catch {
@@ -218,7 +243,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
         </header>
         {attention.length ? (
           <div className="system-problem-list">
-            {attention.map((item) => <ProblemRow key={item.id} problem={item} />)}
+            {attention.map((item) => <ProblemRow key={item.id} problem={item} onEvidence={setSelectedProblem} />)}
           </div>
         ) : (
           <p className="system-problem-empty">Текущих проблем не обнаружено.</p>
@@ -245,6 +270,8 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
         {copyState === "failed" && <p className="system-problem-feedback" role="status">Не удалось подготовить диагностику.</p>}
         {reportError && <p className="system-problem-feedback">{reportError}</p>}
       </section>
+
+      {selectedProblem?.technicalEvidence && <ProblemEvidenceSheet problem={selectedProblem} onClose={() => setSelectedProblem(null)} />}
 
       <section className="system-v2-zone-grid" data-testid="system-primary-zones" aria-label="Основные системные зоны">
         {rog ? (

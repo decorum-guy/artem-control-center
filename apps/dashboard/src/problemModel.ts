@@ -24,8 +24,8 @@ const planningIssueLabels: Record<PlanningHealthIssue["source"], string> = {
   reminders: "Напоминания",
   tasks: "Задачи",
   calendar: "Календарь",
-  projects: "Проекты",
-  "planning-status": "Planning"
+  projects: "Задачи",
+  "planning-status": "Дела"
 };
 
 function diagnosticsStateForPlanningIssue(
@@ -81,6 +81,11 @@ export function currentProblemsForSnapshot(
   const problems: DiagnosticsProblem[] = [];
   for (const service of snapshot.services) {
     if (!service.enabled || service.health === "healthy") continue;
+    if (service.id === "rog_g703gi") {
+      const data = service.data as Record<string, unknown>;
+      const code = data.errorCode ?? data.lastErrorCode ?? data.failureCode;
+      if (typeof code !== "string" || !/^[a-z0-9][a-z0-9._:-]{0,119}$/.test(code)) continue;
+    }
     const subsystem = serviceLabels[service.id] ?? "Сервис";
     problems.push(problem(
       `service:${service.id}`,
@@ -97,7 +102,7 @@ export function currentProblemsForSnapshot(
   if (planning && planning.sourceStatus !== "current" && ownerPlanningIssues.length === 0) {
     problems.push(problem(
       "planning:source",
-      "Planning",
+      "Дела",
       planning.sourceStatus,
       snapshot.generatedAt,
       planning.lastSyncedAt
@@ -108,22 +113,23 @@ export function currentProblemsForSnapshot(
     if (state === null) continue;
     const subsystem = planningIssueLabels[issue.source];
     problems.push(problem(
-      `planning:${issue.source}`,
+      `planning:${issue.source === "projects" ? "tasks" : issue.source}`,
       subsystem,
       state,
       snapshot.generatedAt,
       issue.lastSuccessfulAt
     ));
   }
+  const hasCalendarIssue = planningIssues.some((issue) => issue.source === "calendar" && diagnosticsStateForPlanningIssue(issue.status) !== null);
   for (const provider of planning?.providerStatuses ?? []) {
     if (provider.status !== "error" && provider.status !== "stale") continue;
     const state = provider.status;
-    const subsystem = provider.provider === "icloud" ? "iCloud Calendar" : "Local Planning";
+    const subsystem = "Календарь";
     const id = /^[a-z0-9][a-z0-9._:-]{0,127}$/.test(provider.id)
       ? provider.id
       : "redacted";
     problems.push(problem(
-      `calendar-provider:${id}`,
+      hasCalendarIssue ? "planning:calendar" : `calendar-provider:${id}`,
       subsystem,
       state,
       snapshot.generatedAt,
@@ -174,6 +180,18 @@ export function diagnosticsSupportText(report: import("@artem/contracts").Diagno
     ...report.collectorStatus.map((item) => `collector: ${item.collector} | ${item.status}${item.code ? ` | ${item.code}` : ""}`)
   ];
   return lines.join("\n");
+}
+
+/** Stable, selectable text for one already-sanitized diagnostics problem. */
+export function problemTechnicalEvidenceText(problem: DiagnosticsProblem): string {
+  const evidence = problem.technicalEvidence;
+  if (!evidence) return "";
+  const record = {
+    problemId: problem.id,
+    correlationCode: problem.correlationCode,
+    ...evidence
+  };
+  return Object.entries(record).map(([key, value]) => `${key}: ${value ?? "null"}`).join("\n");
 }
 
 export async function copyDiagnosticsText(

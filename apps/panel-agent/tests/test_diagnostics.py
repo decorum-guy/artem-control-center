@@ -360,3 +360,17 @@ def test_secret_and_private_content_canaries_never_cross_allowlisted_report():
         "PRIVATE_TASK_TEXT_CANARY",
     ):
         assert canary not in payload
+
+
+def test_provider_error_code_reaches_fixed_evidence_without_private_canaries():
+    planning = empty_planning_projection(
+        generated_at="2026-08-25T12:00:00Z", source_status="current", provider_status="error"
+    )
+    planning.providerStatuses[0].errorCode = "provider_timeout"
+    report = DiagnosticsCollector(IntegrationSettings()).report(make_snapshot(healthy_services(), planning=planning))
+
+    assert report.planning.providers[0].errorCode == "provider_timeout"
+    assert report.problems[0].technicalEvidence.errorCode == "provider_timeout"
+    payload = report.model_dump_json()
+    for canary in ("Bearer secret-canary", "password=secret-canary", "/private/runtime.env", "curl private-host", "PRIVATE_CALENDAR_TITLE_CANARY"):
+        assert canary not in payload

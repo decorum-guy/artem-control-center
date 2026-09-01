@@ -10,6 +10,7 @@ import { planningModuleForRoute, planningNavigationModules } from "./planningMod
 import { InteractionLockControl, InteractionLockStatus } from "./InteractionLock";
 import { currentProblemsForSnapshot, problemTone } from "./problemModel";
 import { useInterfaceCopy } from "./interfaceCopy";
+import { useDiagnosticsReport } from "./diagnosticsClient";
 import type { InterfaceCopyField } from "@artem/contracts";
 
 export type RoutePath =
@@ -138,7 +139,8 @@ function LegacyProductShell({
 }) {
   const { copy } = useInterfaceCopy();
   const [now, setNow] = useState(() => new Date());
-  const currentProblems = currentProblemsForSnapshot(snapshot);
+  const diagnostics = useDiagnosticsReport(0);
+  const currentProblems = diagnostics.report?.problems ?? (diagnostics.unavailable ? currentProblemsForSnapshot(snapshot) : []);
   const attentionCount = currentProblems.length;
 
   useEffect(() => {
@@ -300,7 +302,8 @@ function V2ProductShell({
 }) {
   const { copy } = useInterfaceCopy();
   const [now, setNow] = useState(() => new Date());
-  const currentProblems = currentProblemsForSnapshot(snapshot);
+  const diagnostics = useDiagnosticsReport(0);
+  const currentProblems = diagnostics.report?.problems ?? (diagnostics.unavailable ? currentProblemsForSnapshot(snapshot) : []);
   const attentionCount = currentProblems.length;
 
   useEffect(() => {
@@ -308,7 +311,9 @@ function V2ProductShell({
     return () => window.clearInterval(timer);
   }, []);
 
-  const systemLabel = attentionCount
+  const systemLabel = !diagnostics.report && !diagnostics.unavailable
+    ? "Проверяем состояние"
+    : attentionCount
     ? `${attentionCount} требуют внимания`
     : "Системы в норме";
 

@@ -22,6 +22,7 @@ from .contracts import (
     DiagnosticsMutationGates,
     DiagnosticsPlanningSummary,
     DiagnosticsProblem,
+    DiagnosticsTechnicalEvidence,
     DiagnosticsProviderSummary,
     DiagnosticsReport,
     DiagnosticsTransition,
@@ -32,6 +33,7 @@ from .settings import IntegrationSettings
 _SAFE_REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _SAFE_OPAQUE_ID = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
 _SAFE_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T[^\s]{1,48}$")
+_SAFE_CODE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,119}$")
 
 _SERVICE_LABELS = {
     "home-assistant": "Home Assistant",
@@ -123,6 +125,10 @@ def _provider_id(value: object) -> str:
     return "redacted"
 
 
+def _safe_code(value: object) -> Optional[str]:
+    return value if isinstance(value, str) and _SAFE_CODE.fullmatch(value) else None
+
+
 def _provider_problem_state(status: str) -> str | None:
     if status == "error":
         return "error"
@@ -135,8 +141,8 @@ _PLANNING_ISSUE_LABELS = {
     "reminders": "Напоминания",
     "tasks": "Задачи",
     "calendar": "Календарь",
-    "projects": "Проекты",
-    "planning-status": "Planning",
+    "projects": "Задачи",
+    "planning-status": "Дела",
 }
 
 
@@ -158,6 +164,11 @@ def _problem_from_service(
         return None
     state = _HEALTH_STATE.get(service.health, "degraded")
     data = service.data if isinstance(service.data, dict) else {}
+    error_code = _safe_code(data.get("errorCode") or data.get("lastErrorCode") or data.get("failureCode"))
+    # Sleeping/offline is an expected ROG host state; only a confirmed
+    # integration failure is an owner incident.
+    if service.id == "rog_g703gi" and error_code is None:
+        return None
     return DiagnosticsProblem(
         id=f"service:{service.id}",
         subsystem=_service_label(service.id),
@@ -176,6 +187,10 @@ def _problem_from_service(
             else None
         ),
         correlationCode=f"service_health_{state}",
+        technicalEvidence=DiagnosticsTechnicalEvidence(
+            kind="service", status=state, errorCode=error_code,
+            observedAt=_safe_timestamp(observed_at),
+        ),
     )
 
 
@@ -209,22 +224,29 @@ def _problems_for_snapshot(
             state = planning.sourceStatus
             result[problem_id] = DiagnosticsProblem(
                 id=problem_id,
-                subsystem="Planning",
+                subsystem="Дела",
                 severity=_severity(state),
                 state=state,
                 current=True,
-                summary=_problem_summary("Planning", state),
+                summary=_problem_summary("Дела", state),
                 firstObservedAt=first_observed[problem_id],
                 lastObservedAt=observed_at,
                 lastHealthyAt=_safe_timestamp(planning.lastSyncedAt),
                 freshness=planning.lastSyncedAt,
                 correlationCode=f"planning_source_{state}",
+                technicalEvidence=DiagnosticsTechnicalEvidence(
+                    kind="planning-aggregate", status=state,
+                    lastSuccessfulAt=_safe_timestamp(planning.lastSyncedAt),
+                    observedAt=_safe_timestamp(observed_at),
+                    cacheUsed=planning.sourceStatus in {"stale", "offline"},
+                ),
             )
         for issue in planning_issues:
             state = _planning_issue_state(issue.status)
             if state is None:
                 continue
-            problem_id = f"planning:{issue.source}"
+            owner_source = "tasks" if issue.source == "projects" else issue.source
+            problem_id = f"planning:{owner_source}"
             first_observed.setdefault(problem_id, observed_at)
             label = _PLANNING_ISSUE_LABELS[issue.source]
             result[problem_id] = DiagnosticsProblem(
@@ -239,15 +261,25 @@ def _problems_for_snapshot(
                 lastHealthyAt=_safe_timestamp(issue.lastSuccessfulAt),
                 freshness=_safe_timestamp(issue.lastSuccessfulAt),
                 correlationCode=f"planning_{issue.source}_{state}",
+                technicalEvidence=DiagnosticsTechnicalEvidence(
+                    kind="planning-domain", source=issue.source,
+                    domain=owner_source if owner_source in {"reminders", "tasks", "calendar"} else None,
+                    status=issue.status,
+                    consecutiveFailures=max(0, min(1000, issue.consecutiveFailures)),
+                    lastAttemptedAt=_safe_timestamp(issue.lastAttemptedAt),
+                    lastSuccessfulAt=_safe_timestamp(issue.lastSuccessfulAt),
+                    observedAt=_safe_timestamp(observed_at),
+                    cacheUsed=planning.sourceStatus in {"stale", "offline"},
+                ),
             )
         for provider in planning.providerStatuses:
             provider_state = _provider_problem_state(provider.status)
             if provider_state is None:
                 continue
             provider_id = _provider_id(provider.id)
-            problem_id = f"calendar-provider:{provider_id}"
+            problem_id = "planning:calendar" if any(issue.source == "calendar" for issue in planning_issues) else f"calendar-provider:{provider_id}"
             first_observed.setdefault(problem_id, observed_at)
-            label = _provider_label(provider.provider)
+            label = "Календарь"
             result[problem_id] = DiagnosticsProblem(
                 id=problem_id,
                 subsystem=label,
@@ -260,6 +292,14 @@ def _problems_for_snapshot(
                 lastHealthyAt=_safe_timestamp(provider.lastSyncedAt),
                 freshness=_safe_timestamp(provider.lastSyncedAt),
                 correlationCode=f"provider_{provider_state}",
+                technicalEvidence=DiagnosticsTechnicalEvidence(
+                    kind="planning-provider", domain="calendar", provider=provider.provider,
+                    providerId=provider_id, status=provider.status,
+                    errorCode=_safe_code(getattr(provider, "errorCode", None)),
+                    lastSuccessfulAt=_safe_timestamp(provider.lastSyncedAt),
+                    observedAt=_safe_timestamp(provider.observedAt) or _safe_timestamp(observed_at),
+                    cacheUsed=planning.sourceStatus in {"stale", "offline"},
+                ),
             )
     for problem_id in list(first_observed):
         if (
@@ -517,6 +557,7 @@ class DiagnosticsCollector:
                 provider=provider.provider,
                 label=_provider_label(provider.provider),
                 status=provider.status,
+                errorCode=_safe_code(getattr(provider, "errorCode", None)),
                 configured=provider.configured,
                 lastSyncedAt=_safe_timestamp(provider.lastSyncedAt),
                 observedAt=_safe_timestamp(provider.observedAt),
@@ -564,6 +605,7 @@ class DiagnosticsCollector:
                     provider=provider_name,
                     label=_provider_label(provider_name),
                     status=str(getattr(provider, "status", "unknown"))[:32] or "unknown",
+                    errorCode=_safe_code(getattr(provider, "errorCode", None)),
                     configured=bool(getattr(provider, "configured", False)),
                     lastSyncedAt=_safe_timestamp(getattr(provider, "lastSyncedAt", None)),
                     observedAt=_safe_timestamp(getattr(provider, "observedAt", None)),

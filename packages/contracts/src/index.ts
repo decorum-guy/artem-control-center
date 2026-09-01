@@ -347,6 +347,25 @@ export type DiagnosticsProblemState =
   | "recovered";
 export type DiagnosticsSeverity = "info" | "warning" | "error";
 
+/** Fixed, sanitized support evidence. This is deliberately not an upstream payload. */
+export interface DiagnosticsTechnicalEvidence {
+  kind: "service" | "planning-domain" | "planning-provider" | "planning-aggregate";
+  source: "reminders" | "tasks" | "calendar" | "projects" | "planning-status" | null;
+  domain: "reminders" | "tasks" | "calendar" | null;
+  provider: "local" | "icloud" | null;
+  providerId: string | null;
+  status: string | null;
+  errorCode: string | null;
+  consecutiveFailures: number | null;
+  lastAttemptedAt: string | null;
+  lastSuccessfulAt: string | null;
+  observedAt: string | null;
+  cacheUsed: boolean | null;
+  fallbackUsed: boolean | null;
+  resultStatus: string | null;
+  projectionStatus: string | null;
+}
+
 export interface DiagnosticsProblem {
   id: string;
   subsystem: string;
@@ -359,6 +378,7 @@ export interface DiagnosticsProblem {
   lastHealthyAt: string | null;
   freshness: string | null;
   correlationCode: string | null;
+  technicalEvidence?: DiagnosticsTechnicalEvidence | null;
 }
 
 export interface DiagnosticsTransition {
@@ -405,6 +425,7 @@ export interface DiagnosticsProviderSummary {
   provider: "local" | "icloud";
   label: string;
   status: string;
+  errorCode: string | null;
   configured: boolean;
   lastSyncedAt: string | null;
   observedAt: string | null;
