@@ -2,7 +2,7 @@ import type { CoffeeDelayedStartRecord, DashboardSnapshot, ServiceSnapshot } fro
 import { ErrorBoundary } from "../../ErrorBoundary";
 import { Icon } from "../../icons";
 import { resolveManifest } from "../../registry";
-import { RouteHeader, StatusText } from "../../ShellPrimitives";
+import { RouteHeader, SectionHeader, StatusText } from "../../ShellPrimitives";
 import { CoffeeWidget } from "../../widgets";
 import { DeviceRow } from "../operations/DeviceRow";
 import { useInterfaceCopy } from "../../interfaceCopy";
@@ -93,13 +93,7 @@ export function HomeV2Page({
 
       {selection.additional.length > 0 && (
         <section className="home-v2-secondary-zone" data-testid="home-secondary-devices">
-          <header className="density-section-heading">
-            <div>
-              <p className="section-kicker">Дом</p>
-              <h2>Другие устройства</h2>
-            </div>
-            <span>{selection.additional.length}</span>
-          </header>
+          <SectionHeader eyebrow="Дом" title="Другие устройства" metadata={selection.additional.length} />
           <div className="home-v2-device-rows">
             {selection.additional.map((service) => <DeviceRow key={service.id} service={service} />)}
           </div>

@@ -73,6 +73,34 @@ export function RouteHeader({
   );
 }
 
+export type SectionHeaderProps = Omit<HTMLAttributes<HTMLElement>, "title"> & {
+  eyebrow: string;
+  title: string;
+  metadata: ReactNode;
+};
+
+export function SectionHeader({
+  eyebrow,
+  title,
+  metadata,
+  className,
+  ...props
+}: SectionHeaderProps) {
+  return (
+    <header
+      {...props}
+      className={["v2-section-header", className].filter(Boolean).join(" ")}
+      data-section-header="true"
+    >
+      <div>
+        <p className="section-kicker">{eyebrow}</p>
+        <h2>{title}</h2>
+      </div>
+      <span>{metadata}</span>
+    </header>
+  );
+}
+
 export function WorkZone({
   children,
   className,

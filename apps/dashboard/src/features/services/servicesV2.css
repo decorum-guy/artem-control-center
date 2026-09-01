@@ -14,8 +14,8 @@
 .services-attention-summary--attention { border-color: var(--cc-warning-border); background: var(--cc-warning-bg); }
 
 .services-attention-zone { margin-top: 12px; padding: 0 16px 12px; }
-.services-attention-zone .density-zone-heading { min-height: 56px; padding: 12px 0; }
-.services-attention-zone .density-zone-heading h2 { font-size: var(--cc-type-section-title-size); }
+.services-attention-zone .v2-section-header { min-height: 56px; padding: 12px 0; }
+.services-attention-zone .v2-section-header h2 { font-size: var(--cc-type-section-title-size); }
 .services-attention-zone .health-row-list { border-top: 1px solid var(--cc-divider); }
 .services-attention-zone .health-row { min-height: 72px; }
 .services-attention-empty { display: flex; align-items: center; justify-content: space-between; gap: var(--cc-space-3); min-height: 64px; color: var(--cc-text-secondary); }
