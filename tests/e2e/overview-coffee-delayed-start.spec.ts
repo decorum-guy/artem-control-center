@@ -91,6 +91,15 @@ function mutateCoffeeSnapshot(snapshot: Record<string, any>, state: "off" | "sta
 test.describe.configure({ mode: "serial" });
 
 test.beforeEach(async ({ page }) => {
+  await mockAccessPolicy(page, false);
+  await page.route("**/api/v1/snapshot**", async (route) => {
+    const response = await route.fetch();
+    const snapshot = await response.json() as Record<string, any>;
+    snapshot.services = snapshot.services.map((service: Record<string, any>) => service.id === "coffee-machine"
+      ? { ...service, actions: service.actions.map((action: Record<string, any>) => ({ ...action, enabled: true })) }
+      : service);
+    await route.fulfill({ response, body: JSON.stringify(snapshot), headers: { ...response.headers(), "content-type": "application/json" } });
+  });
   await page.request.delete(delayedStartPath);
 });
 
@@ -99,7 +108,16 @@ test("confirmed OFF Coffee shows immediate and delayed actions", async ({ page }
   const coffee = page.getByTestId("widget-coffee-machine");
   await expect(coffee).toBeVisible();
   await expect(coffee.getByRole("button", { name: "Включить" })).toBeVisible();
-  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveText("Отложить");
+  const delayed = page.getByTestId("coffee-delayed-start-action");
+  await expect(delayed).toBeVisible();
+  await expect(delayed).toHaveAccessibleName("Отложить включение");
+  await expect(delayed).toHaveText("");
+  await expect(coffee.locator("button:text-is('Отложить')")).toHaveCount(0);
+  const targets = await Promise.all([
+    coffee.getByRole("button", { name: "Включить" }).boundingBox(),
+    delayed.boundingBox()
+  ]);
+  expect(targets.every((target) => target && target.width >= 48 && target.height >= 48)).toBe(true);
 });
 
 test("preset schedule survives reload, exposes authoritative countdown, and cancels", async ({ page }) => {
@@ -118,10 +136,10 @@ test("preset schedule survives reload, exposes authoritative countdown, and canc
   await confirmCoffeeTurnOn(page, "Кофемашина · запуск через 5 мин");
   await expect(dialog.getByTestId("coffee-delayed-start-active")).toContainText("Включится через");
   await expect(dialog.getByTestId("coffee-delayed-start-active")).toContainText("в ");
-  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveText("Изменить запуск");
+  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Изменить отложенный запуск");
 
   await page.reload();
-  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveText("Изменить запуск");
+  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Изменить отложенный запуск");
   await page.getByTestId("coffee-delayed-start-action").tap();
   await expect(page.getByTestId("coffee-delayed-start-active")).toContainText("Включится через");
 
@@ -129,7 +147,7 @@ test("preset schedule survives reload, exposes authoritative countdown, and canc
   await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
 
   await page.reload();
-  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveText("Отложить");
+  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Отложить включение");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
   expect(overflow).toBe(true);
 });
@@ -313,7 +331,7 @@ test("pending schedule remains manageable while Coffee state is stale", async ({
   await expect(coffee).toContainText("Запуск запланирован");
   await expect(coffee).toContainText("в ");
   await expect(coffee).not.toContainText("Выключена");
-  await expect(coffee.getByTestId("coffee-delayed-start-action")).toHaveText("Изменить запуск");
+  await expect(coffee.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Изменить отложенный запуск");
 
   await coffee.getByTestId("coffee-delayed-start-action").tap();
   const dialog = page.getByTestId("coffee-delayed-start-dialog");
@@ -401,8 +419,7 @@ test("executing schedule is visible but not cancellable or replaceable", async (
   await page.getByTestId("coffee-delayed-start-action").tap();
   const dialog = page.getByTestId("coffee-delayed-start-dialog");
   await expect(dialog).toContainText("Запуск выполняется");
-  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveText("Проверить запуск");
-  await expect(page.getByTestId("coffee-delayed-start-action")).not.toHaveText("Изменить запуск");
+  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Проверить отложенный запуск");
   await expect(dialog.getByRole("button", { name: "Отменить запуск" })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "+5 мин" })).toBeDisabled();
   await expect(dialog.getByRole("button", { name: "Запланировать своё время" })).toBeDisabled();

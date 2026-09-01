@@ -13,6 +13,7 @@ import { coffeePresentation } from "./coffee";
 import { resolveWidgetAsset } from "./widgetAssets";
 import type { CoffeeAppearanceConfig } from "./features/overview/appearanceConfig";
 import { sourceOwnedCoffeeScale } from "./features/overview/appearanceConfig";
+import { Icon } from "./icons";
 
 const healthLabels = {
   healthy: "Работает",
@@ -302,6 +303,13 @@ export function CoffeeWidget({
         </div>
       )
     : null;
+  const delayedStartLabel = delayedStartPending
+    ? "Сохраняем отложенный запуск"
+    : activeDelayedStart?.status === "executing"
+      ? "Проверить отложенный запуск"
+      : activeDelayedStart
+        ? "Изменить отложенный запуск"
+        : "Отложить включение";
 
   return (
     <article
@@ -371,16 +379,12 @@ export function CoffeeWidget({
                 type="button"
                 className="coffee-delayed-start-action"
                 data-testid="coffee-delayed-start-action"
+                aria-label={delayedStartLabel}
+                title={delayedStartLabel}
                 disabled={!interactive || delayedStartPending}
                 onClick={onDelayedStart}
               >
-                {delayedStartPending
-                  ? "Сохраняем…"
-                  : activeDelayedStart?.status === "executing"
-                    ? "Проверить запуск"
-                    : activeDelayedStart
-                      ? "Изменить запуск"
-                      : "Отложить"}
+                <Icon name="timer" size={22} />
               </button>
             )}
           </div>
