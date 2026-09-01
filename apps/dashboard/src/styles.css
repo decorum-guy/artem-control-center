@@ -1924,6 +1924,25 @@ body::-webkit-scrollbar {
   overflow-y: auto;
 }
 
+.density-route-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cc-space-3);
+  min-width: 0;
+  height: 40px;
+  margin-bottom: var(--cc-space-3);
+}
+
+.density-route-toolbar h1 { min-width: 0; margin: 0; color: var(--cc-text); font-size: var(--cc-type-page-title-size); font-weight: var(--cc-type-page-title-weight); line-height: var(--cc-type-page-title-line); letter-spacing: -.025em; }
+.density-route-toolbar > span { min-width: 0; color: var(--cc-text-secondary); font-size: var(--cc-type-body-size); line-height: var(--cc-type-body-line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.density-route-toolbar > button { min-height: 48px; padding: 0 12px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-control); color: var(--cc-text); background: var(--cc-interactive); font-size: var(--cc-type-control-size); font-weight: var(--cc-type-control-weight); }
+.density-route-toolbar > button:hover { background: var(--cc-hover); }
+
+@media (max-width: 760px) {
+  .density-route-toolbar > span { display: none; }
+}
+
 .v2-shell .v2-route-header h1 {
   font-size: var(--cc-type-page-title-size);
   line-height: var(--cc-type-page-title-line);

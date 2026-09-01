@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import { ErrorBoundary } from "../../ErrorBoundary";
-import { StatusText, WorkZone } from "../../ShellPrimitives";
+import { RouteHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { CollapsibleGroup } from "../operations/CollapsibleGroup";
 import { HealthRow } from "../operations/HealthRow";
 import {
@@ -31,10 +31,12 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
 
   return (
     <div className="services-v2-page" data-testid="route-services-v2">
-      <header className="density-route-toolbar" data-testid="services-v2-toolbar">
-        <h1>{copy("page.services.title")}</h1>
-        {copy("page.services.subtitle") && <span>{copy("page.services.subtitle")}</span>}
-      </header>
+      <RouteHeader
+        variant="compact"
+        title={copy("page.services.title")}
+        description={copy("page.services.subtitle")}
+        data-testid="services-v2-toolbar"
+      />
 
       <section className={`services-attention-summary${attention.length ? " services-attention-summary--attention" : ""}`} data-testid="services-attention-summary">
         <StatusText label={attentionSummary} tone={attention.length ? healthTone(attention[0].health) : "success"} />

@@ -34,25 +34,41 @@ export function StatusText({
   );
 }
 
+export type RouteHeaderVariant = "default" | "compact";
+
+export type RouteHeaderProps = Omit<HTMLAttributes<HTMLElement>, "title"> & {
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+  variant?: RouteHeaderVariant;
+};
+
 export function RouteHeader({
   eyebrow,
   title,
   description,
   actions,
-  className
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  actions?: ReactNode;
-  className?: string;
-}) {
+  variant = "default",
+  className,
+  ...props
+}: RouteHeaderProps) {
+  const compact = variant === "compact";
   return (
-    <header className={["page-heading", "v2-route-header", className].filter(Boolean).join(" ")}>
-      <p className="section-kicker">{eyebrow}</p>
+    <header
+      {...props}
+      className={[
+        compact ? "density-route-toolbar" : "page-heading",
+        "v2-route-header",
+        className
+      ].filter(Boolean).join(" ")}
+      data-route-header-variant={variant}
+    >
+      {eyebrow && <p className="section-kicker">{eyebrow}</p>}
       <h1>{title}</h1>
+      {compact && description && <span>{description}</span>}
       {actions}
-      {description && <p>{description}</p>}
+      {!compact && description && <p>{description}</p>}
     </header>
   );
 }
