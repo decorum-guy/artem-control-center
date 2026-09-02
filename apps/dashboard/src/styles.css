@@ -966,12 +966,11 @@ p { color: var(--text-secondary); }
 }
 .coffee-asset__visual {
   display: grid;
-  grid-template-columns: minmax(0, 72%) minmax(0, 28%);
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
-  /* The illustration intentionally starts at the media-region edge, leaving the right side free for activity. */
+  /* The illustration starts at the media-region edge; activity is its sibling in the asset container. */
   place-items: center start;
   transform: scale(var(--cc-coffee-image-scale, 1));
   transform-origin: center;
