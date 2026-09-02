@@ -55,9 +55,12 @@ async function expectNoOverflow(page: Page) {
 async function assertCoffeeComposition(coffee: Locator) {
   const panelBox = await rect(coffee);
   const asset = coffee.locator(".coffee-asset");
+  const visual = coffee.locator(".coffee-asset__visual");
   const image = coffee.locator(".coffee-asset__image");
   const assetBox = await rect(asset);
+  const visualBox = await rect(visual);
   const imageBox = await rect(image);
+  expectContained(visualBox, assetBox);
   expectContained(imageBox, assetBox);
   await expect(coffee.locator(".coffee-panel__heading .section-kicker")).toHaveText("Дом");
   await expect(coffee.locator(".coffee-panel__heading h2")).toHaveText("Кофемашина");
