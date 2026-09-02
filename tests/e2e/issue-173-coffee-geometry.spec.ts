@@ -105,14 +105,6 @@ test.describe("#173 Coffee composition stabilization", () => {
         })
       });
     });
-    await page.route("**/api/v1/snapshot**", async (route) => {
-      const response = await route.fetch();
-      const snapshot = await response.json() as { services: Array<{ id: string; actions: Array<Record<string, unknown>> }> };
-      snapshot.services = snapshot.services.map((service) => service.id === "coffee-machine"
-        ? { ...service, actions: service.actions.map((action) => ({ ...action, enabled: true })) }
-        : service);
-      await route.fulfill({ response, body: JSON.stringify(snapshot), headers: { ...response.headers(), "content-type": "application/json" } });
-    });
   });
 
   test("keeps the 1280px Coffee media and footer geometry stable across states", async ({ page }, testInfo: TestInfo) => {
