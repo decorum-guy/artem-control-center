@@ -415,7 +415,6 @@
 .coffee-panel--overview[data-overview-interactive="true"] .coffee-asset__visual {
   width: 72%;
   justify-self: start;
-  place-items: center start;
 }
 
 .coffee-panel--overview.coffee-panel--transition-moving .coffee-progress {
@@ -424,10 +423,10 @@
 
 .coffee-panel--overview .coffee-asset__image {
   width: auto;
-  height: min(220px, 100%);
+  height: min(208px, 100%);
   max-width: min(164px, calc(100% / var(--cc-coffee-image-scale, 1)));
   max-height: calc(100% / var(--cc-coffee-image-scale, 1));
-  justify-self: start;
+  justify-self: center;
   object-fit: contain;
   transform: none;
 }
