@@ -51,6 +51,21 @@ test("RestartBudget enforces a bounded rolling window", () => {
   assert.equal(budget.count(1_501), 1);
 });
 
+test("supervisor liveness checks do not restart an Agent that is live but still becoming ready", () => {
+  const source = readFileSync(new URL("../production-runtime.mjs", import.meta.url), "utf8");
+  const healthLoop = source.slice(source.indexOf("healthTimer = setInterval"));
+  assert.match(healthLoop, /probeHealth\("http:\/\/127\.0\.0\.1:8787\/health\/live"\)/);
+  assert.doesNotMatch(healthLoop, /health\/ready/);
+});
+
+test("Windows launcher retains readiness, rather than liveness, as its deployment gate", () => {
+  const common = readFileSync(new URL("../windows/runtime-common.ps1", import.meta.url), "utf8");
+  const launcher = readFileSync(new URL("../windows/start-production.ps1", import.meta.url), "utf8");
+  assert.match(common, /ReadyUrl = "http:\/\/127\.0\.0\.1:8787\/health\/ready"/);
+  assert.match(launcher, /Wait-ArtemPanelReady\s+-Paths\s+\$paths\s+-TimeoutSeconds\s+60/);
+  assert.doesNotMatch(launcher, /health\/live/);
+});
+
 test("accepted capability apply closes before a later ordinary Agent exit", () => {
   const root = mkdtempSync(join(tmpdir(), "artem-capability-lifecycle-"));
   const active = join(root, "dist");

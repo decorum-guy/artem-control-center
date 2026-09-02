@@ -105,6 +105,16 @@ try {
         -LiteralPath (Join-Path $PSScriptRoot "kiosk-presence.ps1") `
         -Raw
 
+    if ($runtimeCommonText -notmatch 'ReadyUrl\s*=\s*"http://127\.0\.0\.1:8787/health/ready"') {
+        throw "Windows production readiness must use the Panel Agent readiness endpoint"
+    }
+    if ($startText -notmatch 'Wait-ArtemPanelReady\s+-Paths\s+\$paths\s+-TimeoutSeconds\s+60') {
+        throw "Production launcher must retain its 60-second readiness contract"
+    }
+    if ($startText -match 'health/live') {
+        throw "Production launcher must not treat liveness as deployment readiness"
+    }
+
     if ($installerText -notmatch 'npm\.cmd[\s\S]*?build:production') {
         throw "Production installer must use the deterministic accepted V2 build profile"
     }

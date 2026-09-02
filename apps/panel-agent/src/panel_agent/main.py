@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Literal
 from urllib.parse import quote, urlsplit
 from uuid import UUID, uuid4
 
@@ -118,6 +120,32 @@ from .coffee_delayed_start import (
 from .knowledge import KnowledgeReader, build_knowledge_router
 
 
+LOGGER = logging.getLogger(__name__)
+StartupPhase = Literal["starting", "ready", "failed", "stopping"]
+
+
+class PanelStartupLifecycle:
+    """Owns one lifespan bootstrap task and its public readiness state."""
+
+    def __init__(self) -> None:
+        self.phase: StartupPhase = "starting"
+        self.bootstrap_task: asyncio.Task[None] | None = None
+        self.scheduler_started = False
+
+    def begin(self) -> None:
+        self.phase = "starting"
+        self.scheduler_started = False
+
+    def mark_ready(self) -> None:
+        self.phase = "ready"
+
+    def mark_failed(self) -> None:
+        self.phase = "failed"
+
+    def mark_stopping(self) -> None:
+        self.phase = "stopping"
+
+
 def configured_mode() -> PanelMode:
     raw = os.getenv("PANEL_AGENT_MODE", "read_only")
     if raw not in {"fixtures", "read_only", "integration_test", "production"}:
@@ -160,30 +188,64 @@ coffee_diary_store = CoffeeDiaryStore.from_environment(writes_enabled=True)
 coffee_photo_storage = PhotoStorage(cleanup_staged=True)
 coffee_upload_registry = PhotoUploadRegistry(coffee_photo_storage)
 knowledge_reader = KnowledgeReader()
+startup_lifecycle = PanelStartupLifecycle()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if MODE not in {"fixtures", "integration_test"}:
-        await runtime.start()
-        await snapshot_publisher.rebuild()
-    elif SETTINGS.panel_planning_enabled:
-        await runtime.start_planning()
-        await snapshot_publisher.rebuild()
-    # Integration tests construct concurrent TestClients around this imported
-    # app.  The production scheduler is process-owned, while direct scheduler
-    # tests cover recovery and due execution with injected clocks; avoid
-    # sharing one background task across independent test event loops.
-    scheduler_started = MODE == "production"
-    if scheduler_started:
-        await coffee_delayed_start_scheduler.start()
+    startup_lifecycle.begin()
+
+    # Fixture TestClients deliberately share this imported app across event
+    # loops. Keep their established synchronous startup path; production and
+    # read-only modes below are the paths that can perform external warmup.
+    if MODE in {"fixtures", "integration_test"}:
+        try:
+            if SETTINGS.panel_planning_enabled:
+                await runtime.start_planning()
+                await snapshot_publisher.rebuild()
+            startup_lifecycle.mark_ready()
+            yield
+        finally:
+            startup_lifecycle.mark_stopping()
+            await runtime.close()
+            await snapshot_publisher.close()
+        return
+
+    async def bootstrap() -> None:
+        try:
+            await runtime.start()
+            await snapshot_publisher.rebuild()
+            # The production scheduler depends on the runtime's initial state,
+            # so keep it in the owned bootstrap before readiness is published.
+            if MODE == "production":
+                await coffee_delayed_start_scheduler.start()
+                startup_lifecycle.scheduler_started = True
+            startup_lifecycle.mark_ready()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            startup_lifecycle.mark_failed()
+            LOGGER.exception("Panel Agent bootstrap failed")
+
+    # External integrations have bounded but potentially cumulative startup
+    # work.  Uvicorn must be able to serve liveness while that work completes.
+    startup_lifecycle.bootstrap_task = asyncio.create_task(
+        bootstrap(),
+        name="panel-agent-bootstrap",
+    )
     try:
         yield
     finally:
-        if scheduler_started:
+        startup_lifecycle.mark_stopping()
+        bootstrap_task = startup_lifecycle.bootstrap_task
+        if bootstrap_task is not None and not bootstrap_task.done():
+            bootstrap_task.cancel()
+        if bootstrap_task is not None:
+            await asyncio.gather(bootstrap_task, return_exceptions=True)
+        if startup_lifecycle.scheduler_started:
             await coffee_delayed_start_scheduler.close()
-        await snapshot_publisher.close()
         await runtime.close()
+        await snapshot_publisher.close()
 
 
 app = FastAPI(
@@ -268,9 +330,10 @@ def live() -> dict:
 
 
 @app.get("/health/ready")
-def ready() -> dict:
-    return {
-        "ok": True,
+def ready(response: Response) -> dict:
+    phase = startup_lifecycle.phase
+    payload = {
+        "ok": phase == "ready",
         "service": "artem-panel-agent",
         "mode": MODE,
         "writesEnabled": SETTINGS.writes_enabled,
@@ -287,6 +350,12 @@ def ready() -> dict:
             "aiText": SETTINGS.ai_text_enabled,
         },
     }
+    if phase != "ready":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        payload["reason"] = (
+            "panel_startup_failed" if phase == "failed" else "panel_starting"
+        )
+    return payload
 
 
 @app.get("/api/v1/fixtures")
