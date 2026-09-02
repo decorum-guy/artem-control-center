@@ -4,6 +4,8 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+const root = resolve(import.meta.dirname, "../..");
+
 import {
   activePanelUpdateLease,
   canPublishPanelUpdateEarlyExit,
@@ -12,6 +14,7 @@ import {
   createPanelUpdateSpawnLifecycle,
   isExactPanelUpdateLock,
   isSafePanelUpdateCommand,
+  readUpdaterBootstrapEvidence,
   UPDATE_HANDOFF_MAX_AGE_MS
 } from "../production-runtime.mjs";
 
@@ -38,7 +41,7 @@ function fakeUpdater(pid = 4242) {
   return updater;
 }
 
-function launchLifecycle({ authoritative = false, runtimeAlive = true } = {}) {
+function launchLifecycle({ authoritative = false, runtimeAlive = true, bootstrap = null } = {}) {
   const updater = fakeUpdater();
   const failures = [];
   const logs = [];
@@ -48,6 +51,7 @@ function launchLifecycle({ authoritative = false, runtimeAlive = true } = {}) {
     isRuntimeAlive: () => runtimeAlive,
     hasAuthoritativeEvidence: () => authoritative,
     publishFailure: (result) => { failures.push(result); return true; },
+    readBootstrapEvidence: () => bootstrap,
     log: (level, message) => logs.push({ level, message })
   });
   return { updater, failures, logs };
@@ -192,6 +196,32 @@ test("unexplained early updater exit publishes the fixed safe early-exit result"
   updater.emit("exit", 71, null);
   assert.deepEqual(failures, ["updater_early_exit"]);
   assert.equal(failures.join(" ").includes("71"), false);
+});
+
+for (const [label, bootstrap] of [
+  ["pre-script", null],
+  ["after process creation before script body", { stage: "runtime-process-created", result: "recorded" }],
+  ["after script body entry", { stage: "script-entered", result: "recorded" }],
+  ["after helper load", { stage: "helpers-loaded", result: "recorded" }],
+  ["after lease claim", { stage: "lease-claimed", result: "recorded" }]
+]) {
+  test(`early updater exit logs bounded ${label} bootstrap classification`, () => {
+    const { updater, failures, logs } = launchLifecycle({ bootstrap });
+    updater.emit("spawn");
+    updater.emit("exit", 0, null);
+    assert.deepEqual(failures, ["updater_early_exit"]);
+    const expectedStage = !bootstrap || bootstrap.stage === "runtime-process-created"
+      ? "host_or_parameter_pre_script_exit"
+      : bootstrap.stage;
+    assert.match(logs.at(-1).message, new RegExp(`bootstrapStage=${expectedStage}`));
+    assert.match(logs.at(-1).message, new RegExp(`bootstrapResult=${bootstrap?.result ?? "recorded"}`));
+    assert.doesNotMatch(logs.map(({ message }) => message).join(" "), /C:\\\\|secret|private/i);
+  });
+}
+
+test("bootstrap reader correlates only exact strict bounded evidence", () => {
+  const path = resolve(root, "package.json");
+  assert.equal(readUpdaterBootstrapEvidence(path, REQUEST), null, "non-bootstrap JSON is ignored");
 });
 
 test("authoritative updater evidence wins over early child exit", () => {

@@ -112,6 +112,27 @@ test("Windows PowerShell atomic state publication passes a true CLR null backup 
   assert.match(updater, /if \(-not \$Continuation -and -not \$hasExpected\)\s*\{[\s\S]{0,240}?Bind-ArtemUpdateLockRevisions/);
 });
 
+test("private updater bootstrap evidence is bounded and precedes helpers/transcript", () => {
+  const runtime = readFileSync(resolve(root, "scripts/production-runtime.mjs"), "utf8");
+  const common = readFileSync(resolve(root, "scripts/windows/runtime-common.ps1"), "utf8");
+  assert.match(common, /UpdateBootstrapEvidence = Join-Path \$runtimeRoot "update-bootstrap\.json"/);
+  assert.match(updater, /\$ArtemUpdaterBootstrapStages = @\(/);
+  assert.match(updater, /\$ArtemUpdaterBootstrapResults = @\(/);
+  assert.match(updater, /Write-ArtemUpdaterBootstrapEvidence -Stage "script-entered"/);
+  assert.ok(updater.indexOf('Write-ArtemUpdaterBootstrapEvidence -Stage "script-entered"') < updater.indexOf('runtime-common.ps1'));
+  for (const stage of ["helpers-loaded", "paths-initialized", "lease-accepted", "lease-claimed", "transcript-starting", "transcript-started", "authoritative-state-started"]) {
+    assert.match(updater, new RegExp(`-Stage "${stage}"`));
+  }
+  for (const result of ["helper-load-failed", "path-init-failed", "capability-apply-active", "lease-accept-failed", "lease-claim-failed", "transcript-start-failed"]) {
+    assert.match(updater, new RegExp(result));
+  }
+  assert.match(updater, /NullString\]::Value/);
+  assert.doesNotMatch(updater, /\$\(\$_\.Exception\.Message\).*bootstrap/i);
+  assert.match(runtime, /readUpdaterBootstrapEvidence/);
+  assert.match(runtime, /update-bootstrap\.json/);
+  assert.doesNotMatch(runtime, /stdio:\s*"pipe"/);
+});
+
 test("target continuation has a bounded private lease handoff and executable Windows regression", () => {
   const handoff = readFileSync(resolve(root, "scripts/windows/updater-target-handoff.ps1"), "utf8");
   const windowsRegression = readFileSync(resolve(root, "scripts/windows/test-updater-target-handoff.ps1"), "utf8");
