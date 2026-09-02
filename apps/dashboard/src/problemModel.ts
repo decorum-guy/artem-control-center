@@ -24,9 +24,16 @@ const planningIssueLabels: Record<PlanningHealthIssue["source"], string> = {
   reminders: "Напоминания",
   tasks: "Задачи",
   calendar: "Календарь",
-  projects: "Проекты",
-  "planning-status": "Planning"
+  projects: "Задачи",
+  "planning-status": "Дела"
 };
+
+const rogIncidentErrorCodes = new Set([
+  "companion_health_failed", "companion_hibernate_failed", "companion_sleep_failed", "companion_response_too_large",
+  "hibernate_timeout", "invalid_companion_response", "rog_g703_not_configured", "ssh_action_rejected",
+  "ssh_client_unavailable", "ssh_identity_file_missing", "ssh_invalid_response", "ssh_known_hosts_file_missing",
+  "ssh_output_too_large", "ssh_timeout", "ssh_transport_failed", "sleep_timeout", "wake_timeout", "wol_send_failed", "action_failed"
+]);
 
 function diagnosticsStateForPlanningIssue(
   status: PlanningHealthIssue["status"]
@@ -78,11 +85,17 @@ function problem(
 export function currentProblemsForSnapshot(
   snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">
 ): DiagnosticsProblem[] {
-  const problems: DiagnosticsProblem[] = [];
+  const problems = new Map<string, DiagnosticsProblem>();
+  const add = (next: DiagnosticsProblem) => { problems.set(next.id, next); };
   for (const service of snapshot.services) {
-    if (!service.enabled || service.health === "healthy") continue;
+    if (!service.enabled) continue;
+    if (service.id === "rog_g703gi") {
+      const data = service.data as Record<string, unknown>;
+      const code = data.lastError;
+      if (typeof code !== "string" || !rogIncidentErrorCodes.has(code)) continue;
+    } else if (service.health === "healthy") continue;
     const subsystem = serviceLabels[service.id] ?? "Сервис";
-    problems.push(problem(
+    add(problem(
       `service:${service.id}`,
       subsystem,
       stateForHealth(service),
@@ -94,10 +107,11 @@ export function currentProblemsForSnapshot(
   const planning = snapshot.planning;
   const planningIssues = planning?.health?.issues ?? [];
   const ownerPlanningIssues = planningIssues.filter((issue) => diagnosticsStateForPlanningIssue(issue.status) !== null);
+  const hasAttributablePlanningIssue = ownerPlanningIssues.some((issue) => issue.source !== "planning-status");
   if (planning && planning.sourceStatus !== "current" && ownerPlanningIssues.length === 0) {
-    problems.push(problem(
+    add(problem(
       "planning:source",
-      "Planning",
+      "Дела",
       planning.sourceStatus,
       snapshot.generatedAt,
       planning.lastSyncedAt
@@ -106,31 +120,33 @@ export function currentProblemsForSnapshot(
   for (const issue of planningIssues) {
     const state = diagnosticsStateForPlanningIssue(issue.status);
     if (state === null) continue;
+    if (issue.source === "planning-status" && hasAttributablePlanningIssue) continue;
     const subsystem = planningIssueLabels[issue.source];
-    problems.push(problem(
-      `planning:${issue.source}`,
+    add(problem(
+      `planning:${issue.source === "projects" ? "tasks" : issue.source}`,
       subsystem,
       state,
       snapshot.generatedAt,
       issue.lastSuccessfulAt
     ));
   }
+  const hasCalendarIssue = planningIssues.some((issue) => issue.source === "calendar" && diagnosticsStateForPlanningIssue(issue.status) !== null);
   for (const provider of planning?.providerStatuses ?? []) {
     if (provider.status !== "error" && provider.status !== "stale") continue;
     const state = provider.status;
-    const subsystem = provider.provider === "icloud" ? "iCloud Calendar" : "Local Planning";
+    const subsystem = "Календарь";
     const id = /^[a-z0-9][a-z0-9._:-]{0,127}$/.test(provider.id)
       ? provider.id
       : "redacted";
-    problems.push(problem(
-      `calendar-provider:${id}`,
+    add(problem(
+      hasCalendarIssue ? "planning:calendar" : `calendar-provider:${id}`,
       subsystem,
       state,
       snapshot.generatedAt,
       provider.lastSyncedAt
     ));
   }
-  return problems;
+  return [...problems.values()];
 }
 
 export function problemStateLabel(state: DiagnosticsProblemState): string {
@@ -174,6 +190,18 @@ export function diagnosticsSupportText(report: import("@artem/contracts").Diagno
     ...report.collectorStatus.map((item) => `collector: ${item.collector} | ${item.status}${item.code ? ` | ${item.code}` : ""}`)
   ];
   return lines.join("\n");
+}
+
+/** Stable, selectable text for one already-sanitized diagnostics problem. */
+export function problemTechnicalEvidenceText(problem: DiagnosticsProblem): string {
+  const evidence = problem.technicalEvidence;
+  if (!evidence) return "";
+  const record = {
+    problemId: problem.id,
+    correlationCode: problem.correlationCode,
+    ...evidence
+  };
+  return Object.entries(record).map(([key, value]) => `${key}: ${value ?? "null"}`).join("\n");
 }
 
 export async function copyDiagnosticsText(

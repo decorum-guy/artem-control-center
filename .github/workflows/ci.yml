@@ -120,6 +120,12 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run test:e2e -- tests/e2e/b0-samsung.spec.ts
 
+      - name: Run focused diagnostics browser gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+        run: npm run test:e2e -- tests/e2e/diagnostics.spec.ts
+
       - name: Run focused V2 shell gate
         if: runner.os == 'Linux'
         env:

@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import type { DiagnosticsProblem } from "../../packages/contracts/src/index";
+import { diagnosticsProblem, installDiagnosticsFixture } from "./diagnosticsFixture";
 
 const v2Enabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 type Snapshot = { services: Array<Record<string, any>>; [key: string]: any };
@@ -63,15 +65,32 @@ function rogService(status: "online" | "offline" | "waking" | "sleeping" | "hibe
 }
 
 async function installSnapshotMock(page: Page, mutate: SnapshotMutator) {
+  let revision: number | null = null;
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const snapshot = mutate(await response.json() as Snapshot);
+    revision = snapshot.revision;
     await route.fulfill({
       response,
       body: JSON.stringify(snapshot),
       headers: { ...response.headers(), "content-type": "application/json" }
     });
   });
+  return {
+    revision: () => {
+      if (revision === null) throw new Error("Snapshot revision was not observed before diagnostics");
+      return revision;
+    }
+  };
+}
+
+const multiActionProblem = diagnosticsProblem("service:fixture-multi-action", "Сервис", "degraded", "Сервис работает с ограничениями");
+const runtimeProblem = diagnosticsProblem("service:panel-runtime", "Control Center runtime", "degraded", "Control Center runtime работает с ограничениями");
+
+async function installSystemFixture(page: Page, mutate: SnapshotMutator, problems: readonly DiagnosticsProblem[]) {
+  const snapshot = await installSnapshotMock(page, mutate);
+  const diagnostics = await installDiagnosticsFixture(page, snapshot.revision, problems);
+  return { snapshot, diagnostics };
 }
 
 function allHealthy(snapshot: Snapshot): Snapshot {
@@ -361,7 +380,7 @@ test.describe("Control Center V2 PR7 route density", () => {
   });
 
   test("System stays diagnostics-first and preserves ROG contextual states", async ({ page }) => {
-    await installSnapshotMock(page, (snapshot) => addRog(snapshot, "online"));
+    await installSystemFixture(page, (snapshot) => addRog(snapshot, "online"), [multiActionProblem]);
     await page.goto("/system");
     await waitForRoute(page, "route-system");
     await expect(page.getByTestId("system-aggregate-strip")).toContainText("Требуют внимания");
@@ -378,7 +397,8 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(page.getByTestId("system-fact-backup")).toContainText("Источник не подключён");
 
     await page.unroute("**/api/v1/snapshot**");
-    await installSnapshotMock(page, (snapshot) => addRog(snapshot, "offline"));
+    await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);
+    await installSystemFixture(page, (snapshot) => addRog(snapshot, "offline"), [multiActionProblem]);
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Не в сети");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Устройство не отвечает");
@@ -388,7 +408,8 @@ test.describe("Control Center V2 PR7 route density", () => {
     assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");
-    await installSnapshotMock(page, (snapshot) => addRog(snapshot, "waking"));
+    await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);
+    await installSystemFixture(page, (snapshot) => addRog(snapshot, "waking"), [multiActionProblem]);
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Пробуждение");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Ждём, когда ASUS появится в сети");
@@ -396,7 +417,8 @@ test.describe("Control Center V2 PR7 route density", () => {
     assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");
-    await installSnapshotMock(page, (snapshot) => addRog(snapshot, "hibernating"));
+    await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);
+    await installSystemFixture(page, (snapshot) => addRog(snapshot, "hibernating"), [multiActionProblem]);
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Гибернация");
     await expect(page.getByTestId("system-rog-sleep")).toBeDisabled();
@@ -404,7 +426,8 @@ test.describe("Control Center V2 PR7 route density", () => {
     assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");
-    await installSnapshotMock(page, (snapshot) => addRog(snapshot, "sleeping"));
+    await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);
+    await installSystemFixture(page, (snapshot) => addRog(snapshot, "sleeping"), [multiActionProblem]);
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Сон");
     await expect(page.getByTestId("system-rog-sleep")).toBeDisabled();
@@ -412,28 +435,31 @@ test.describe("Control Center V2 PR7 route density", () => {
     assertRogLayout(await measureRogLayout(page));
 
     await page.unroute("**/api/v1/snapshot**");
-    await installSnapshotMock(page, (snapshot) => addRog(snapshot, "unavailable"));
+    await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);
+    await installSystemFixture(page, (snapshot) => addRog(snapshot, "unavailable"), [multiActionProblem]);
     await page.goto("/system");
     await expect(page.getByTestId("system-rog-g703")).toContainText("Недоступен");
     await expect(page.getByTestId("system-rog-action-unavailable")).toBeVisible();
   });
 
   test("System surfaces runtime snapshot truth without inventing metrics", async ({ page }) => {
-    await installSnapshotMock(page, (snapshot) => ({
+    const healthyFixture = await installSystemFixture(page, (snapshot) => ({
       ...addRog(snapshot, "online"),
       services: [...addRog(snapshot, "online").services, runtimeService("healthy")]
-    }));
+    }), [multiActionProblem]);
     await page.goto("/system");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Панель");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("В норме");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Панель работает нормально");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("проверено только что");
+    expect(healthyFixture.diagnostics.revision()).toBe(healthyFixture.snapshot.revision());
 
     await page.unroute("**/api/v1/snapshot**");
-    await installSnapshotMock(page, (snapshot) => ({
+    await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);
+    const degradedFixture = await installSystemFixture(page, (snapshot) => ({
       ...addRog(snapshot, "online"),
       services: [...addRog(snapshot, "online").services, runtimeService("degraded")]
-    }));
+    }), [multiActionProblem, runtimeProblem]);
     await page.goto("/system");
     await expect(page.getByTestId("system-aggregate-strip")).toContainText("Требуют внимания · 2");
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("Панель");
@@ -442,14 +468,25 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(page.getByTestId("system-runtime-snapshot")).toContainText("проверено только что");
     await expect(page.getByTestId("system-runtime-zone")).not.toContainText("CPU");
     await expect(page.getByTestId("system-runtime-zone")).not.toContainText("RAM");
+    expect(degradedFixture.diagnostics.revision()).toBe(degradedFixture.snapshot.revision());
   });
 
   test("captures the exact PR7 route-density review artifact set", async ({ page }, testInfo) => {
     const artifactDir = path.resolve(process.env.V2_ROUTE_DENSITY_ARTIFACT_DIR ?? testInfo.outputPath("v2-route-density-review"));
     await mkdir(artifactDir, { recursive: true });
-    const capture = async (name: string, url: string, mutate?: SnapshotMutator, fullPage = false) => {
+    const capture = async (
+      name: string,
+      url: string,
+      mutate?: SnapshotMutator,
+      problems?: readonly DiagnosticsProblem[],
+      fullPage = false
+    ) => {
       await page.unroute("**/api/v1/snapshot**").catch(() => undefined);
-      if (mutate) await installSnapshotMock(page, mutate);
+      await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/).catch(() => undefined);
+      if (mutate) {
+        const snapshot = await installSnapshotMock(page, mutate);
+        if (problems) await installDiagnosticsFixture(page, snapshot.revision, problems);
+      }
       await page.goto(url);
       await page.waitForTimeout(120);
       await page.screenshot({ path: path.join(artifactDir, name), animations: "disabled", fullPage });
@@ -485,22 +522,22 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expectNoOverflow(page);
     await page.setViewportSize({ width: 1280, height: 720 });
 
-    await capture("system-default.png", "/system", (snapshot) => addRog(snapshot, "online"));
-    await capture("system-rog-online.png", "/system", (snapshot) => addRog(snapshot, "online"));
-    await capture("system-rog-offline.png", "/system", (snapshot) => addRog(snapshot, "offline"));
+    await capture("system-default.png", "/system", (snapshot) => addRog(snapshot, "online"), [multiActionProblem]);
+    await capture("system-rog-online.png", "/system", (snapshot) => addRog(snapshot, "online"), [multiActionProblem]);
+    await capture("system-rog-offline.png", "/system", (snapshot) => addRog(snapshot, "offline"), [multiActionProblem]);
     await page.getByTestId("system-rog-g703").scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(artifactDir, "system-rog-offline-focus.png"), animations: "disabled" });
-    await capture("system-rog-transition.png", "/system", (snapshot) => addRog(snapshot, "waking"));
+    await capture("system-rog-transition.png", "/system", (snapshot) => addRog(snapshot, "waking"), [multiActionProblem]);
     await page.getByTestId("system-rog-g703").scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(artifactDir, "system-rog-transition-focus.png"), animations: "disabled" });
     await capture("system-runtime-attention.png", "/system", (snapshot) => ({
       ...addRog(snapshot, "online"),
       services: [...addRog(snapshot, "online").services, runtimeService("degraded")]
-    }));
+    }), [multiActionProblem, runtimeProblem]);
     await page.setViewportSize({ width: 640, height: 360 });
-    await capture("system-200-percent.png", "/system?scenario=home-long-russian", (snapshot) => addRog(snapshot, "online"));
+    await capture("system-200-percent.png", "/system?scenario=home-long-russian", (snapshot) => addRog(snapshot, "online"), [multiActionProblem]);
     await expectNoOverflow(page);
     await page.setViewportSize({ width: 1280, height: 720 });
-    await capture("routes-long-russian.png", "/services?scenario=home-long-russian", longRussianServices, true);
+    await capture("routes-long-russian.png", "/services?scenario=home-long-russian", longRussianServices, undefined, true);
   });
 });

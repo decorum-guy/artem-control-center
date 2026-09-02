@@ -5,7 +5,8 @@ import {
   copyDiagnosticsText,
   currentProblemsForSnapshot,
   diagnosticsFallbackCopyText,
-  diagnosticsSupportText
+  diagnosticsSupportText,
+  problemTechnicalEvidenceText
 } from "./problemModel";
 
 function snapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
@@ -77,6 +78,83 @@ function report(overrides: Partial<DiagnosticsReport> = {}): DiagnosticsReport {
 }
 
 describe("owner diagnostics problem model", () => {
+  it("does not turn ordinary offline ROG state into a problem", () => {
+    const rog = {
+      id: "rog_g703gi", title: "ROG", enabled: true, dataContract: "device.v1",
+      health: "offline" as const, source: "unavailable" as const, summary: "sleeping", actions: [], data: {}
+    };
+    expect(currentProblemsForSnapshot(snapshot({ services: [rog] }))).toEqual([]);
+    expect(currentProblemsForSnapshot(snapshot({ services: [{ ...rog, data: { lastError: "health_unreachable" } }] }))).toEqual([]);
+    expect(currentProblemsForSnapshot(snapshot({ services: [{ ...rog, data: { lastError: "wake_timeout" } }] }))[0])
+      .toMatchObject({ id: "service:rog_g703gi", state: "offline" });
+  });
+
+  it("keeps sleeping/hibernating ROG quiet and blocks invented lastError strings", () => {
+    const base = { id: "rog_g703gi", title: "ROG", enabled: true, dataContract: "device.v1", health: "degraded" as const, source: "live" as const, summary: "ignored", actions: [] };
+    for (const data of [{ status: "sleeping", lastError: null }, { status: "hibernating", lastError: null }, { lastError: "PRIVATE_COMMAND_CANARY" }]) {
+      expect(currentProblemsForSnapshot(snapshot({ services: [{ ...base, data }] }))).toEqual([]);
+    }
+    for (const lastError of ["wake_timeout", "wol_send_failed", "ssh_timeout"]) {
+      expect(currentProblemsForSnapshot(snapshot({ services: [{ ...base, data: { lastError } }] }))).toHaveLength(1);
+    }
+  });
+
+  it("retains healthy ROG action failures as degraded incidents", () => {
+    const base = { id: "rog_g703gi", title: "ROG", enabled: true, dataContract: "device.v1", health: "healthy" as const, source: "live" as const, summary: "online", actions: [] };
+    for (const lastError of ["sleep_timeout", "hibernate_timeout", "action_failed"]) {
+      expect(currentProblemsForSnapshot(snapshot({ services: [{ ...base, data: { lastError } }] }))).toMatchObject([{ subsystem: "ROG", state: "degraded" }]);
+    }
+    expect(currentProblemsForSnapshot(snapshot({ services: [{ ...base, data: { lastError: null } }] }))).toEqual([]);
+    expect(currentProblemsForSnapshot(snapshot({ services: [{ ...base, data: { lastError: "PRIVATE_EXCEPTION_CANARY" } }] }))).toEqual([]);
+  });
+
+  it("does not expose internal Planning labels in the fallback", () => {
+    const planning = {
+      ...planningFixtures.healthy,
+      health: {
+        lastAttemptedAt: null,
+        lastSuccessfulAt: null,
+        consecutiveFailures: 1,
+        domains: [],
+        issues: [{ source: "projects" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null }]
+      }
+    };
+    const problems = currentProblemsForSnapshot(snapshot({ planning }));
+    expect(problems).toHaveLength(1);
+    expect(problems[0].subsystem).toBe("Задачи");
+  });
+
+  it("deduplicates Calendar, retains independent Tasks, and limits broad Дела attribution", () => {
+    const planning = {
+      ...planningFixtures.healthy,
+      sourceStatus: "degraded" as const,
+      health: {
+        lastAttemptedAt: null, lastSuccessfulAt: null, consecutiveFailures: 1, domains: [],
+        issues: [
+          { source: "calendar" as const, status: "stale" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null },
+          { source: "tasks" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null },
+          { source: "planning-status" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null }
+        ]
+      },
+      providerStatuses: [{ ...planningFixtures.healthy.providerStatuses[0], provider: "icloud" as const, status: "error" as const }]
+    };
+    const problems = currentProblemsForSnapshot(snapshot({ planning }));
+    expect(problems.map((item) => item.id)).toEqual(["planning:calendar", "planning:tasks"]);
+    expect(new Set(problems.map((item) => item.id)).size).toBe(problems.length);
+    const broad = currentProblemsForSnapshot(snapshot({ planning: { ...planningFixtures.healthy, sourceStatus: "stale" as const } }));
+    expect(broad).toMatchObject([{ subsystem: "Дела" }]);
+  });
+
+  it("formats only the fixed sanitized technical record for copying", () => {
+    const text = problemTechnicalEvidenceText({
+      id: "planning:calendar", subsystem: "Календарь", severity: "error", state: "error", current: true,
+      summary: "Календарь сообщил об ошибке", firstObservedAt: null, lastObservedAt: "2026-08-25T12:00:00Z",
+      lastHealthyAt: null, freshness: null, correlationCode: "provider_error",
+      technicalEvidence: { kind: "planning-provider", source: null, domain: "calendar", provider: "icloud", providerId: "icloud-safe", status: "error", errorCode: "provider_timeout", consecutiveFailures: null, lastAttemptedAt: null, lastSuccessfulAt: null, observedAt: null, cacheUsed: false, fallbackUsed: false, resultStatus: null, projectionStatus: null }
+    });
+    expect(text).toContain("errorCode: provider_timeout");
+    expect(text).not.toContain("PRIVATE_CALENDAR_TITLE_CANARY");
+  });
   it("keeps a healthy snapshot at zero current problems", () => {
     expect(currentProblemsForSnapshot(snapshot())).toEqual([]);
   });

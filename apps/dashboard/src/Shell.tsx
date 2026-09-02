@@ -8,8 +8,9 @@ import { StatusText } from "./ShellPrimitives";
 import { v2VisualShellEnabled } from "./visualShellConfig";
 import { planningModuleForRoute, planningNavigationModules } from "./planningModuleRegistry";
 import { InteractionLockControl, InteractionLockStatus } from "./InteractionLock";
-import { currentProblemsForSnapshot, problemTone } from "./problemModel";
+import { problemTone } from "./problemModel";
 import { useInterfaceCopy } from "./interfaceCopy";
+import { diagnosticsProblems, useDiagnosticsReport } from "./diagnosticsClient";
 import type { InterfaceCopyField } from "@artem/contracts";
 
 export type RoutePath =
@@ -106,7 +107,7 @@ export function ProductShell({
   children
 }: {
   route: ShellRoutePath;
-  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision" | "fixtureScenario">;
   onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
@@ -132,14 +133,15 @@ function LegacyProductShell({
   children
 }: {
   route: ShellRoutePath;
-  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision" | "fixtureScenario">;
   onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
   const { copy } = useInterfaceCopy();
   const [now, setNow] = useState(() => new Date());
-  const currentProblems = currentProblemsForSnapshot(snapshot);
-  const attentionCount = currentProblems.length;
+  const diagnostics = useDiagnosticsReport({ revision: snapshot.revision, fixtureScenario: snapshot.fixtureScenario });
+  const currentProblems = diagnosticsProblems(diagnostics, snapshot);
+  const attentionCount = currentProblems?.length ?? 0;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000);
@@ -200,7 +202,7 @@ function LegacyProductShell({
               onClick={() => onNavigate("/system")}
             >
               <i aria-hidden="true" />
-              {attentionCount ? `${attentionCount} требуют внимания` : "Системы в норме"}
+              {diagnostics.status === "checking" ? "Проверяем состояние" : attentionCount ? `${attentionCount} требуют внимания` : "Системы в норме"}
             </button>
             <button
               className="settings-shortcut"
@@ -294,21 +296,24 @@ function V2ProductShell({
   children
 }: {
   route: ShellRoutePath;
-  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">;
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision" | "fixtureScenario">;
   onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
   const { copy } = useInterfaceCopy();
   const [now, setNow] = useState(() => new Date());
-  const currentProblems = currentProblemsForSnapshot(snapshot);
-  const attentionCount = currentProblems.length;
+  const diagnostics = useDiagnosticsReport({ revision: snapshot.revision, fixtureScenario: snapshot.fixtureScenario });
+  const currentProblems = diagnosticsProblems(diagnostics, snapshot);
+  const attentionCount = currentProblems?.length ?? 0;
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const systemLabel = attentionCount
+  const systemLabel = diagnostics.status === "checking"
+    ? "Проверяем состояние"
+    : attentionCount
     ? `${attentionCount} требуют внимания`
     : "Системы в норме";
 
@@ -392,7 +397,7 @@ function V2ProductShell({
               type="button"
               onClick={() => onNavigate("/system")}
             >
-              <StatusText label={systemLabel} tone={attentionCount ? problemTone(currentProblems[0].state) : "success"} />
+              <StatusText label={systemLabel} tone={diagnostics.status === "checking" ? "neutral" : attentionCount ? problemTone(currentProblems![0].state) : "success"} />
             </button>
             <V2AccessHeaderStatus onOpen={() => onNavigate("/settings")} />
             <button

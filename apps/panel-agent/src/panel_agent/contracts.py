@@ -123,6 +123,27 @@ DiagnosticsProblemState = Literal[
 DiagnosticsSeverity = Literal["info", "warning", "error"]
 
 
+class DiagnosticsTechnicalEvidence(BaseModel):
+    """Fixed browser-safe evidence; never accepts raw exceptions or payloads."""
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["service", "planning-domain", "planning-provider", "planning-aggregate"]
+    source: Optional[Literal["reminders", "tasks", "calendar", "projects", "planning-status"]] = None
+    domain: Optional[Literal["reminders", "tasks", "calendar"]] = None
+    provider: Optional[Literal["local", "icloud"]] = None
+    providerId: Optional[str] = Field(default=None, max_length=128)
+    status: Optional[str] = Field(default=None, max_length=32)
+    errorCode: Optional[str] = Field(default=None, max_length=120)
+    consecutiveFailures: Optional[int] = Field(default=None, ge=0, le=1000)
+    lastAttemptedAt: Optional[str] = None
+    lastSuccessfulAt: Optional[str] = None
+    observedAt: Optional[str] = None
+    cacheUsed: Optional[bool] = None
+    fallbackUsed: Optional[bool] = None
+    resultStatus: Optional[str] = Field(default=None, max_length=32)
+    projectionStatus: Optional[str] = Field(default=None, max_length=32)
+
+
 class DiagnosticsProblem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -137,6 +158,7 @@ class DiagnosticsProblem(BaseModel):
     lastHealthyAt: Optional[str] = None
     freshness: Optional[str] = Field(default=None, max_length=120)
     correlationCode: Optional[str] = Field(default=None, max_length=120)
+    technicalEvidence: Optional[DiagnosticsTechnicalEvidence] = None
 
 
 class DiagnosticsTransition(BaseModel):
@@ -167,6 +189,7 @@ class DiagnosticsProviderSummary(BaseModel):
     provider: Literal["local", "icloud"]
     label: str = Field(min_length=1, max_length=128)
     status: str = Field(min_length=1, max_length=32)
+    errorCode: Optional[str] = Field(default=None, max_length=120)
     configured: bool
     lastSyncedAt: Optional[str] = None
     observedAt: Optional[str] = None
