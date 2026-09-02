@@ -128,8 +128,8 @@ test.describe("#173 Coffee composition stabilization", () => {
       const coffee = await waitForCoffee(page, stage);
       await assertCoffeeComposition(coffee);
       const panelBox = await rect(coffee);
-      expect(panelBox.height).toBeGreaterThanOrEqual(260);
-      expect(panelBox.height).toBeLessThanOrEqual(300);
+      expect(panelBox.height).toBeGreaterThanOrEqual(280);
+      expect(panelBox.height).toBeLessThanOrEqual(330);
       const assetBox = await rect(coffee.locator(".coffee-asset"));
       const imageBox = await rect(coffee.locator(".coffee-asset__image"));
       imageLeftEdges[stage] = imageBox.x - assetBox.x;

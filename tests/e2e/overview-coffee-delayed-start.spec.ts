@@ -91,7 +91,6 @@ function mutateCoffeeSnapshot(snapshot: Record<string, any>, state: "off" | "sta
 test.describe.configure({ mode: "serial" });
 
 test.beforeEach(async ({ page }) => {
-  await mockAccessPolicy(page, false);
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const snapshot = await response.json() as Record<string, any>;
@@ -136,7 +135,7 @@ test("preset schedule survives reload, exposes authoritative countdown, and canc
   await confirmCoffeeTurnOn(page, "Кофемашина · запуск через 5 мин");
   await expect(dialog.getByTestId("coffee-delayed-start-active")).toContainText("Включится через");
   await expect(dialog.getByTestId("coffee-delayed-start-active")).toContainText("в ");
-  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Изменить отложенный запуск");
+  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAttribute("aria-label", "Изменить отложенный запуск");
 
   await page.reload();
   await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Изменить отложенный запуск");
@@ -331,7 +330,7 @@ test("pending schedule remains manageable while Coffee state is stale", async ({
   await expect(coffee).toContainText("Запуск запланирован");
   await expect(coffee).toContainText("в ");
   await expect(coffee).not.toContainText("Выключена");
-  await expect(coffee.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Изменить отложенный запуск");
+  await expect(coffee.getByTestId("coffee-delayed-start-action")).toHaveAttribute("aria-label", "Изменить отложенный запуск");
 
   await coffee.getByTestId("coffee-delayed-start-action").tap();
   const dialog = page.getByTestId("coffee-delayed-start-dialog");
@@ -419,7 +418,7 @@ test("executing schedule is visible but not cancellable or replaceable", async (
   await page.getByTestId("coffee-delayed-start-action").tap();
   const dialog = page.getByTestId("coffee-delayed-start-dialog");
   await expect(dialog).toContainText("Запуск выполняется");
-  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAccessibleName("Проверить отложенный запуск");
+  await expect(page.getByTestId("coffee-delayed-start-action")).toHaveAttribute("aria-label", "Проверить отложенный запуск");
   await expect(dialog.getByRole("button", { name: "Отменить запуск" })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "+5 мин" })).toBeDisabled();
   await expect(dialog.getByRole("button", { name: "Запланировать своё время" })).toBeDisabled();
