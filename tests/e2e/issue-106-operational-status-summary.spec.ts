@@ -1,15 +1,31 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { diagnosticsProblem, installDiagnosticsFixture } from "./diagnosticsFixture";
 
 const v2Enabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 type Snapshot = { services: Array<Record<string, any>>; [key: string]: any };
 type SnapshotMutator = (snapshot: Snapshot) => Snapshot;
 
 async function installSnapshotMock(page: Page, mutate: SnapshotMutator) {
+  let revision: number | null = null;
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const snapshot = mutate(await response.json() as Snapshot);
+    revision = snapshot.revision;
     await route.fulfill({ response, body: JSON.stringify(snapshot), headers: { ...response.headers(), "content-type": "application/json" } });
   });
+  return {
+    revision: () => {
+      if (revision === null) throw new Error("Snapshot revision was not observed before diagnostics");
+      return revision;
+    }
+  };
+}
+
+const summarySystemProblem = diagnosticsProblem("service:summary-system-service", "Системный сервис", "degraded", "Системный сервис работает с ограничениями");
+
+async function installSystemFixture(page: Page, mutate: SnapshotMutator, problems = [] as typeof summarySystemProblem[]) {
+  const snapshot = await installSnapshotMock(page, mutate);
+  await installDiagnosticsFixture(page, snapshot.revision, problems);
 }
 
 function healthy(snapshot: Snapshot): Snapshot {
@@ -102,7 +118,7 @@ test.describe("#106 shared operational status summary", () => {
   });
 
   test("keeps System aggregate copy, eyebrow, attention, and unavailable states", async ({ page }) => {
-    await installSnapshotMock(page, onlyHealthySystem);
+    await installSystemFixture(page, onlyHealthySystem);
     await page.goto("/system");
     const summary = page.getByTestId("system-aggregate-strip");
     await expect(summary).toHaveAttribute("data-operational-status-summary", "true");
@@ -112,14 +128,16 @@ test.describe("#106 shared operational status summary", () => {
     await expectGeometry(summary, true);
 
     await page.unroute("**/api/v1/snapshot**");
-    await installSnapshotMock(page, systemAttention);
+    await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);
+    await installSystemFixture(page, systemAttention, [summarySystemProblem]);
     await page.goto("/system");
     await expect(summary).toContainText("Требуют внимания · 1");
     await expect(summary).toContainText("1 текущих проблем · 0 системных сервисов в норме");
     await expect(summary).toHaveClass(/v2-operational-status-summary--attention/);
 
     await page.unroute("**/api/v1/snapshot**");
-    await installSnapshotMock(page, noSystemServices);
+    await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);
+    await installSystemFixture(page, noSystemServices);
     await page.goto("/system");
     await expect(summary).toContainText("Состояние недоступно");
     await expect(summary).toContainText("Нет подтверждённых системных сервисов");
