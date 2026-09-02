@@ -301,6 +301,56 @@ def list_fixtures() -> dict:
     }
 
 
+def _fixture_snapshot_for_scenario(scenario: str) -> DashboardSnapshot:
+    """Build one fixture snapshot without altering the active fixture scenario."""
+    document = load_fixture_document()
+    try:
+        services = services_for_scenario(scenario)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unknown fixture scenario")
+    services.extend(fixture_services)
+    for service in services:
+        if service.id == "coffee-machine":
+            machine = service.data.get("machine", {})
+            if (
+                isinstance(machine, dict)
+                and fixture_coffee_state_override in {"on", "off"}
+            ):
+                machine["state"] = fixture_coffee_state_override
+                machine["available"] = True
+                machine["stale"] = False
+                service.summary = (
+                    "Включена"
+                    if fixture_coffee_state_override == "on"
+                    else "Выключена"
+                )
+            machine_state = (
+                machine.get("state") if isinstance(machine, dict) else None
+            )
+            for action in service.actions:
+                action.enabled = bool(
+                    _write_allowed(SETTINGS.coffee_actions_enabled)
+                    and (
+                        (
+                            action.id == "home.coffee.turn_on"
+                            and machine_state == "off"
+                        )
+                        or (
+                            action.id == "home.coffee.turn_off"
+                            and machine_state == "on"
+                        )
+                    )
+                )
+    return DashboardSnapshot(
+        revision=revision,
+        generatedAt=document["generatedAt"],
+        mode=MODE,
+        fixtureScenario=scenario,
+        services=services,
+        planning=runtime.planning_snapshot(),
+    )
+
+
 @app.get("/api/v1/snapshot", response_model=DashboardSnapshot)
 async def snapshot(
     response: Response,
@@ -309,74 +359,24 @@ async def snapshot(
     global fixture_current_scenario
     response.headers["Cache-Control"] = "no-store"
     if MODE in {"fixtures", "integration_test"}:
-        document = load_fixture_document()
-        try:
-            services = services_for_scenario(scenario)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Unknown fixture scenario")
+        current = _fixture_snapshot_for_scenario(scenario)
         fixture_current_scenario = scenario
-        services.extend(fixture_services)
-        for service in services:
-            if service.id == "coffee-machine":
-                machine = service.data.get("machine", {})
-                if (
-                    isinstance(machine, dict)
-                    and fixture_coffee_state_override in {"on", "off"}
-                ):
-                    machine["state"] = fixture_coffee_state_override
-                    machine["available"] = True
-                    machine["stale"] = False
-                    service.summary = (
-                        "Включена"
-                        if fixture_coffee_state_override == "on"
-                        else "Выключена"
-                    )
-                machine_state = (
-                    machine.get("state") if isinstance(machine, dict) else None
-                )
-                for action in service.actions:
-                    action.enabled = bool(
-                        _write_allowed(SETTINGS.coffee_actions_enabled)
-                        and (
-                            (
-                                action.id == "home.coffee.turn_on"
-                                and machine_state == "off"
-                            )
-                            or (
-                                action.id == "home.coffee.turn_off"
-                                and machine_state == "on"
-                            )
-                        )
-                    )
-        fixture_scenario = scenario
+        return current
     else:
         current = snapshot_publisher.snapshot
         if current is None:
             current = await snapshot_publisher.rebuild()
         return current
-    generated_at = (
-        document["generatedAt"]
-        if fixture_scenario
-        else datetime.now(timezone.utc).isoformat()
-    )
-    return DashboardSnapshot(
-        revision=revision,
-        generatedAt=generated_at,
-        mode=MODE,
-        fixtureScenario=fixture_scenario,
-        services=services,
-        planning=runtime.planning_snapshot(),
-    )
 
 
 @app.get("/api/v1/diagnostics", response_model=DiagnosticsReport)
 async def diagnostics(
     response: Response,
-    scenario: str = Query(default="ha-healthy"),
+    scenario: str | None = Query(default=None),
 ) -> DiagnosticsReport:
     response.headers["Cache-Control"] = "no-store"
     if MODE in {"fixtures", "integration_test"}:
-        current = await snapshot(Response(), scenario)
+        current = _fixture_snapshot_for_scenario(scenario or fixture_current_scenario)
     else:
         current = snapshot_publisher.snapshot
         if current is None:

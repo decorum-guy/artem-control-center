@@ -107,7 +107,7 @@ export function ProductShell({
   children
 }: {
   route: ShellRoutePath;
-  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision">;
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision" | "fixtureScenario">;
   onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
@@ -133,13 +133,13 @@ function LegacyProductShell({
   children
 }: {
   route: ShellRoutePath;
-  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision">;
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision" | "fixtureScenario">;
   onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
   const { copy } = useInterfaceCopy();
   const [now, setNow] = useState(() => new Date());
-  const diagnostics = useDiagnosticsReport(snapshot.revision);
+  const diagnostics = useDiagnosticsReport({ revision: snapshot.revision, fixtureScenario: snapshot.fixtureScenario });
   const currentProblems = diagnosticsProblems(diagnostics, snapshot);
   const attentionCount = currentProblems?.length ?? 0;
 
@@ -296,13 +296,13 @@ function V2ProductShell({
   children
 }: {
   route: ShellRoutePath;
-  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision">;
+  snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt" | "revision" | "fixtureScenario">;
   onNavigate: (target: ShellNavigationTarget) => void;
   children: ReactNode;
 }) {
   const { copy } = useInterfaceCopy();
   const [now, setNow] = useState(() => new Date());
-  const diagnostics = useDiagnosticsReport(snapshot.revision);
+  const diagnostics = useDiagnosticsReport({ revision: snapshot.revision, fixtureScenario: snapshot.fixtureScenario });
   const currentProblems = diagnosticsProblems(diagnostics, snapshot);
   const attentionCount = currentProblems?.length ?? 0;
 

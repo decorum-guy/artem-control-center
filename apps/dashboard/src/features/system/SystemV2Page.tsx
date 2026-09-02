@@ -146,7 +146,8 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "fallback" | "failed">("idle");
   const [fallbackText, setFallbackText] = useState("");
   const [selectedProblem, setSelectedProblem] = useState<DiagnosticsProblem | null>(null);
-  const sharedDiagnostics = useDiagnosticsReport(snapshot.revision);
+  const diagnosticsIdentity = { revision: snapshot.revision, fixtureScenario: snapshot.fixtureScenario };
+  const sharedDiagnostics = useDiagnosticsReport(diagnosticsIdentity);
   const subjects = selectSystemServiceSubjects(snapshot.services);
   const { rog, runtime, update, backup, diagnostics } = subjects;
   const relevant = visibleSystemServices(subjects);
@@ -170,7 +171,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   async function ensureReport(): Promise<DiagnosticsReport | null> {
     if (sharedDiagnostics.status === "ready") return sharedDiagnostics.report;
     try {
-      return await fetchDiagnosticsReport(snapshot.revision);
+      return await fetchDiagnosticsReport(diagnosticsIdentity);
     } catch {
       return null;
     }

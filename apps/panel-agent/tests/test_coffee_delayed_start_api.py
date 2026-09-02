@@ -87,6 +87,27 @@ def test_unavailable_or_stale_fixture_cannot_confirm_a_schedule(monkeypatch, tmp
     assert response.json()["detail"] == "coffee_delayed_start_unavailable"
 
 
+def test_fixture_diagnostics_do_not_change_active_coffee_scenario(monkeypatch, tmp_path):
+    module = load_app(monkeypatch, tmp_path)
+    client = TestClient(module.app)
+
+    stale_snapshot = client.get("/api/v1/snapshot?scenario=home-ha-stale")
+    assert stale_snapshot.status_code == 200
+    assert module.fixture_current_scenario == "home-ha-stale"
+
+    diagnostics = client.get("/api/v1/diagnostics?scenario=ha-healthy")
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["snapshotRevision"] == stale_snapshot.json()["revision"]
+    assert "service:coffee-machine" not in {
+        problem["id"] for problem in diagnostics.json()["problems"]
+    }
+    assert module.fixture_current_scenario == "home-ha-stale"
+
+    delayed_start = client.get("/api/v1/actions/home/coffee/delayed-start")
+    assert delayed_start.status_code == 200
+    assert delayed_start.json()["available"] is False
+
+
 def test_write_gate_is_rechecked_for_creation(monkeypatch, tmp_path):
     module = load_app(monkeypatch, tmp_path, writes=False)
     client = TestClient(module.app)
