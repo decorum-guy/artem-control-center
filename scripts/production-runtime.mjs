@@ -374,12 +374,38 @@ export function canPublishPanelUpdateEarlyExit({ command, state, lock, terminal 
   return (stateMatches || lockMatches) && (!state || stateMatches) && (!lock || lockMatches);
 }
 
+export const UPDATER_BOOTSTRAP_STAGES = new Set([
+  "runtime-spawn-attempted", "runtime-process-created", "script-entered", "helpers-loaded",
+  "paths-initialized", "lease-accepted", "lease-claimed", "transcript-starting",
+  "transcript-started", "authoritative-state-started"
+]);
+export const UPDATER_BOOTSTRAP_RESULTS = new Set([
+  "recorded", "helper-load-failed", "path-init-failed", "capability-apply-active",
+  "lease-accept-failed", "lease-claim-failed", "transcript-start-failed"
+]);
+
+export function readUpdaterBootstrapEvidence(path, requestId) {
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (Object.keys(value).sort().join(",") !== "requestId,result,schemaVersion,stage,updatedAt") return null;
+    if (value.schemaVersion !== 1 || value.requestId !== requestId) return null;
+    if (!UPDATER_BOOTSTRAP_STAGES.has(value.stage) || !UPDATER_BOOTSTRAP_RESULTS.has(value.result)) return null;
+    if (typeof value.updatedAt !== "string" || !Number.isFinite(Date.parse(value.updatedAt))) return null;
+    return { stage: value.stage, result: value.result };
+  } catch {
+    return null;
+  }
+}
+
 export function createPanelUpdateSpawnLifecycle({
   command,
   updater,
   isRuntimeAlive,
   hasAuthoritativeEvidence,
   publishFailure,
+  readBootstrapEvidence = () => null,
+  markProcessCreated = () => {},
   log
 }) {
   let spawned = false;
@@ -389,6 +415,12 @@ export function createPanelUpdateSpawnLifecycle({
     if (handled) return;
     spawned = true;
     updater.unref();
+    try {
+      markProcessCreated();
+    } catch {
+      // Bootstrap evidence is diagnostic only and must not affect updater ownership.
+    }
+    // spawn only proves Windows created powershell.exe; script-entered is the first body proof.
     // The PID is deliberately confined to the runtime diagnostic log.
     log("INFO", `Panel update handoff accepted requestId=${command.requestId} pid=${updater.pid ?? "unknown"}`);
   });
@@ -413,11 +445,18 @@ export function createPanelUpdateSpawnLifecycle({
       log("INFO", `Panel updater exit retained authoritative evidence requestId=${command.requestId}`);
       return;
     }
+    const bootstrap = readBootstrapEvidence();
+    const stage = !bootstrap || bootstrap.stage === "runtime-process-created"
+      ? "host_or_parameter_pre_script_exit"
+      : bootstrap.stage;
+    const result = bootstrap?.result ?? "recorded";
     const published = publishFailure("updater_early_exit", { childPid: updater.pid });
     log(
       published ? "WARN" : "INFO",
       `Panel updater exited before authoritative evidence requestId=${command.requestId} code=${code ?? "null"} signal=${signal ?? "null"}`
     );
+    // No script-entered marker truthfully leaves host/parser/parameter pre-body exit unresolved.
+    log("INFO", `Panel updater bootstrap requestId=${command.requestId} bootstrapStage=${stage} bootstrapResult=${result}`);
   });
 }
 
@@ -541,6 +580,7 @@ export async function runProductionRuntime() {
   const capabilityApplyStatePath = join(runtimeDir, "capability-apply-state.json");
   const updateLockPath = join(runtimeDir, "update-lock.json");
   const updateStatePath = join(runtimeDir, "update-state.json");
+  const updateBootstrapPath = join(runtimeDir, "update-bootstrap.json");
   const updaterPath = resolve(root, "scripts", "windows", "update-production.ps1");
   const venvPython = resolve(root, ".venv", isWindows ? "Scripts/python.exe" : "bin/python");
   const log = createLogger(logDir);
@@ -882,6 +922,13 @@ export async function runProductionRuntime() {
 
     let updater;
     try {
+      atomicWriteJson(updateBootstrapPath, {
+        schemaVersion: 1,
+        requestId: command.requestId,
+        stage: "runtime-spawn-attempted",
+        result: "recorded",
+        updatedAt: new Date().toISOString()
+      });
       updater = spawn(
         "powershell.exe",
         [
@@ -919,6 +966,14 @@ export async function runProductionRuntime() {
       isRuntimeAlive: () => !shuttingDown,
       hasAuthoritativeEvidence: () => hasTerminalPanelUpdateEvidence(command),
       publishFailure: (result, options) => publishPanelUpdateRuntimeFailure(command, result, options),
+      readBootstrapEvidence: () => readUpdaterBootstrapEvidence(updateBootstrapPath, command.requestId),
+      markProcessCreated: () => atomicWriteJson(updateBootstrapPath, {
+        schemaVersion: 1,
+        requestId: command.requestId,
+        stage: "runtime-process-created",
+        result: "recorded",
+        updatedAt: new Date().toISOString()
+      }),
       log
     });
   }

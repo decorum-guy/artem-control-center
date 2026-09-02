@@ -26,6 +26,8 @@ function Get-ArtemRuntimePaths {
         CapabilityApplyState = Join-Path $runtimeRoot "capability-apply-state.json"
         UpdateLock = Join-Path $runtimeRoot "update-lock.json"
         UpdateState = Join-Path $runtimeRoot "update-state.json"
+        # Private diagnostic evidence only; it is never updater authority or a browser contract.
+        UpdateBootstrapEvidence = Join-Path $runtimeRoot "update-bootstrap.json"
         RuntimeScript = Join-Path $repoRoot "scripts\production-runtime.mjs"
         StartScript = Join-Path $repoRoot "scripts\windows\start-production.ps1"
         OpenKioskScript = Join-Path $repoRoot "scripts\windows\open-kiosk.ps1"

@@ -9,8 +9,38 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "runtime-common.ps1")
-. (Join-Path $PSScriptRoot "updater-target-handoff.ps1")
+
+# spawn proves only that Windows created powershell.exe. This body marker is
+# deliberately before helper loading; transcript and update state happen later.
+$ArtemUpdaterBootstrapStages = @("runtime-spawn-attempted", "runtime-process-created", "script-entered", "helpers-loaded", "paths-initialized", "lease-accepted", "lease-claimed", "transcript-starting", "transcript-started", "authoritative-state-started")
+$ArtemUpdaterBootstrapResults = @("recorded", "helper-load-failed", "path-init-failed", "capability-apply-active", "lease-accept-failed", "lease-claim-failed", "transcript-start-failed")
+$ArtemBootstrapRuntimeRoot = Join-Path $env:LOCALAPPDATA "ArtemControlCenter"
+$ArtemBootstrapEvidencePath = Join-Path $ArtemBootstrapRuntimeRoot "update-bootstrap.json"
+
+function Write-ArtemUpdaterBootstrapEvidence {
+    param([string]$Stage, [string]$Result = "recorded")
+    if ($ArtemUpdaterBootstrapStages -notcontains $Stage -or $ArtemUpdaterBootstrapResults -notcontains $Result -or $RequestId -notmatch '^[0-9a-f]{24}$') { return }
+    try {
+        New-Item -ItemType Directory -Force -Path $ArtemBootstrapRuntimeRoot | Out-Null
+        $payload = @{ schemaVersion = 1; requestId = $RequestId.ToLowerInvariant(); stage = $Stage; result = $Result; updatedAt = [DateTime]::UtcNow.ToString("o") }
+        $temporary = "$ArtemBootstrapEvidencePath.$PID.tmp"
+        [IO.File]::WriteAllText($temporary, ($payload | ConvertTo-Json -Compress), [Text.Encoding]::ASCII)
+        if (Test-Path -LiteralPath $ArtemBootstrapEvidencePath) {
+            [IO.File]::Replace($temporary, $ArtemBootstrapEvidencePath, [System.Management.Automation.Language.NullString]::Value)
+        } else { [IO.File]::Move($temporary, $ArtemBootstrapEvidencePath) }
+    } catch { } finally { Remove-Item -LiteralPath "$ArtemBootstrapEvidencePath.$PID.tmp" -Force -ErrorAction SilentlyContinue }
+}
+
+Write-ArtemUpdaterBootstrapEvidence -Stage "script-entered"
+try {
+    . (Join-Path $PSScriptRoot "runtime-common.ps1")
+    . (Join-Path $PSScriptRoot "updater-target-handoff.ps1")
+    Write-ArtemUpdaterBootstrapEvidence -Stage "helpers-loaded"
+}
+catch {
+    Write-ArtemUpdaterBootstrapEvidence -Stage "script-entered" -Result "helper-load-failed"
+    throw
+}
 
 function Invoke-CheckedCommand {
     param(
@@ -656,17 +686,33 @@ function Get-ArtemRollbackCandidate {
     return $CurrentHead
 }
 
-$paths = Get-ArtemRuntimePaths
-Initialize-ArtemRuntimeDirectories -Paths $paths
-Update-ArtemProcessPath
+try {
+    $paths = Get-ArtemRuntimePaths
+    Initialize-ArtemRuntimeDirectories -Paths $paths
+    Update-ArtemProcessPath
+    Write-ArtemUpdaterBootstrapEvidence -Stage "paths-initialized"
+}
+catch {
+    Write-ArtemUpdaterBootstrapEvidence -Stage "helpers-loaded" -Result "path-init-failed"
+    throw
+}
 
 $hasExpected = [bool]$ExpectedCurrentHead -or [bool]$ExpectedTargetHead -or [bool]$RequestId
 if ($hasExpected -and (-not $ExpectedCurrentHead -or -not $ExpectedTargetHead -or -not $RequestId)) {
     throw "ExpectedCurrentHead, ExpectedTargetHead and RequestId must be supplied together"
 }
 
-if (Test-ArtemCapabilityApplyActive -Paths $paths) {
-    throw "Capability Apply is active; software update was not started"
+try {
+    if (Test-ArtemCapabilityApplyActive -Paths $paths) {
+        Write-ArtemUpdaterBootstrapEvidence -Stage "paths-initialized" -Result "capability-apply-active"
+        throw "Capability Apply is active; software update was not started"
+    }
+}
+catch {
+    if ($_.Exception.Message -ne "Capability Apply is active; software update was not started") {
+        Write-ArtemUpdaterBootstrapEvidence -Stage "paths-initialized" -Result "path-init-failed"
+    }
+    throw
 }
 
 if (-not $RequestId) {
@@ -675,12 +721,19 @@ if (-not $RequestId) {
 }
 else {
     if (-not $Continuation) {
-        New-ArtemUpdateLock `
-            -Paths $paths `
-            -LockRequestId $RequestId `
-            -Current $ExpectedCurrentHead `
-            -Target $ExpectedTargetHead `
-            -AcceptExisting
+        try {
+            New-ArtemUpdateLock `
+                -Paths $paths `
+                -LockRequestId $RequestId `
+                -Current $ExpectedCurrentHead `
+                -Target $ExpectedTargetHead `
+                -AcceptExisting
+            Write-ArtemUpdaterBootstrapEvidence -Stage "lease-accepted"
+        }
+        catch {
+            Write-ArtemUpdaterBootstrapEvidence -Stage "paths-initialized" -Result "lease-accept-failed"
+            throw
+        }
     }
 }
 
@@ -709,19 +762,33 @@ try {
             -Target $ExpectedTargetHead
     }
     else {
-        Claim-ArtemUpdateLock `
-            -Paths $paths `
-            -LockRequestId $RequestId `
-            -Current $ExpectedCurrentHead `
-            -Target $ExpectedTargetHead
+        try {
+            Claim-ArtemUpdateLock `
+                -Paths $paths `
+                -LockRequestId $RequestId `
+                -Current $ExpectedCurrentHead `
+                -Target $ExpectedTargetHead
+            Write-ArtemUpdaterBootstrapEvidence -Stage "lease-claimed"
+        }
+        catch {
+            Write-ArtemUpdaterBootstrapEvidence -Stage "lease-accepted" -Result "lease-claim-failed"
+            throw
+        }
     }
-    Start-Transcript -Path $transcriptPath -Force | Out-Null
+    Write-ArtemUpdaterBootstrapEvidence -Stage "transcript-starting"
+    try { Start-Transcript -Path $transcriptPath -Force | Out-Null }
+    catch {
+        Write-ArtemUpdaterBootstrapEvidence -Stage "transcript-starting" -Result "transcript-start-failed"
+        throw
+    }
     $transcriptStarted = $true
+    Write-ArtemUpdaterBootstrapEvidence -Stage "transcript-started"
     if ($Continuation) {
         Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "transcript-started" -Result "success"
     }
 
     Write-ArtemUpdateState -Paths $paths -Status "checking"
+    Write-ArtemUpdaterBootstrapEvidence -Stage "authoritative-state-started"
     Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $preflight = Get-ArtemUpdatePreflight -Paths $paths
     $currentHead = $preflight.Current
