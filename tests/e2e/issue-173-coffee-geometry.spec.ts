@@ -85,6 +85,28 @@ test.describe("#173 Coffee composition stabilization", () => {
     "Run with VITE_V2_VISUAL_SHELL=true and VITE_OVERVIEW_V2_ENABLED=true."
   );
 
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/v1/access", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          revision: 1,
+          baseProfile: "full",
+          effectiveProfile: "full",
+          temporaryFull: false,
+          temporaryFullExpiresAt: null,
+          confirmationPolicy: { actionConfirmationRequired: false, mode: "manual_persistent_full" },
+          pinConfigured: true,
+          lockoutUntil: null,
+          capabilities: {}
+        })
+      });
+    });
+  });
+
   test("keeps the 1280px Coffee media and footer geometry stable across states", async ({ page }, testInfo: TestInfo) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     const states = [
@@ -93,7 +115,7 @@ test.describe("#173 Coffee composition stabilization", () => {
       ["coffee-ready", "ready", "coffee-ready.png"],
       ["ha-offline-policy-available", "unavailable", "coffee-unavailable.png"]
     ] as const;
-    const imageCenters: Record<string, number> = {};
+    const imageLeftEdges: Record<string, number> = {};
     const onlineAnchors: Array<{ top: number; right: number }> = [];
 
     for (const [scenario, stage, screenshotName] of states) {
@@ -105,7 +127,8 @@ test.describe("#173 Coffee composition stabilization", () => {
       expect(panelBox.height).toBeLessThanOrEqual(330);
       const assetBox = await rect(coffee.locator(".coffee-asset"));
       const imageBox = await rect(coffee.locator(".coffee-asset__image"));
-      imageCenters[stage] = imageBox.x + imageBox.width / 2 - (assetBox.x + assetBox.width / 2);
+      imageLeftEdges[stage] = imageBox.x - assetBox.x;
+      expect(imageBox.x + imageBox.width / 2).toBeLessThan(assetBox.x + assetBox.width / 2 - 12);
       if (stage !== "unavailable") {
         const online = coffee.locator(".coffee-panel__status .health-mark--healthy");
         const onlineBox = await rect(online);
@@ -122,7 +145,7 @@ test.describe("#173 Coffee composition stabilization", () => {
     }
 
     for (const stage of ["warming", "ready", "unavailable"]) {
-      expect(Math.abs(imageCenters[stage] - imageCenters.off)).toBeLessThanOrEqual(1);
+      expect(Math.abs(imageLeftEdges[stage] - imageLeftEdges.off)).toBeLessThanOrEqual(1);
     }
     for (const anchor of onlineAnchors) {
       expect(Math.abs(anchor.top - onlineAnchors[0].top)).toBeLessThanOrEqual(1);
@@ -140,7 +163,19 @@ test.describe("#173 Coffee composition stabilization", () => {
     await expect(coffee.locator(".coffee-panel__state")).toContainText("Разогревается");
   });
 
-  test("keeps Coffee contained under narrow and 200% zoom-equivalent pressure", async ({ page }) => {
+  test("keeps Coffee contained under narrow and 200% zoom-equivalent pressure", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/home?scenario=coffee-off&theme=night");
+    const narrowCoffee = await waitForCoffee(page, "off");
+    await assertCoffeeComposition(narrowCoffee);
+    const narrowTargets = await Promise.all([
+      narrowCoffee.getByRole("button", { name: "Включить" }).boundingBox(),
+      narrowCoffee.getByTestId("coffee-delayed-start-action").boundingBox()
+    ]);
+    expect(narrowTargets.every((target) => target && target.width >= 48 && target.height >= 48)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("coffee-off-narrow.png") });
+    await expectNoOverflow(page);
+
     await page.setViewportSize({ width: 640, height: 900 });
     await page.goto("/home?scenario=coffee-warming&theme=night");
     const coffee = await waitForCoffee(page, "warming");

@@ -6,6 +6,7 @@ export type IconName =
   | "home"
   | "services"
   | "coffee"
+  | "timer"
   | "calendar"
   | "tasks"
   | "reminder"
@@ -57,6 +58,12 @@ const iconPaths: Record<IconName, ReactNode> = {
     <>
       <path d="M5 9h11v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9Z" />
       <path d="M16 11h2a3 3 0 0 1 0 6h-2M8 5c0 1 1 1 1 2M12 5c0 1 1 1 1 2M5 21h13" />
+    </>
+  ),
+  timer: (
+    <>
+      <circle cx="12" cy="13" r="8" />
+      <path d="M12 9v4l2.5 1.5M9 2h6M12 5V2" />
     </>
   ),
   calendar: (

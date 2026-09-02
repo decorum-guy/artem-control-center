@@ -13,6 +13,7 @@ import { coffeePresentation } from "./coffee";
 import { resolveWidgetAsset } from "./widgetAssets";
 import type { CoffeeAppearanceConfig } from "./features/overview/appearanceConfig";
 import { sourceOwnedCoffeeScale } from "./features/overview/appearanceConfig";
+import { Icon } from "./icons";
 
 const healthLabels = {
   healthy: "Работает",
@@ -127,6 +128,7 @@ export function CoffeeWidget({
   appearanceConfig?: CoffeeAppearanceConfig;
   overviewSizeVariant?: "compact" | "standard" | "large";
 }) {
+  const { status: accessStatus } = useAccess();
   const data = service.data as unknown as CoffeeData;
   const [presentationTime, setPresentationTime] = useState(() => Date.parse(generatedAt));
   const [overviewTransition, setOverviewTransition] = useState<CoffeeOverviewTransitionPhase>("idle");
@@ -302,6 +304,13 @@ export function CoffeeWidget({
         </div>
       )
     : null;
+  const delayedStartLabel = delayedStartPending
+    ? "Сохраняем отложенный запуск"
+    : activeDelayedStart?.status === "executing"
+      ? "Проверить отложенный запуск"
+      : activeDelayedStart
+        ? "Изменить отложенный запуск"
+        : "Отложить включение";
 
   return (
     <article
@@ -314,6 +323,7 @@ export function CoffeeWidget({
       data-progress-visible={progressVisible}
       data-overview-copy-density={variant === "overview" ? requestedDensity : undefined}
       data-overview-size-variant={variant === "overview" ? overviewSizeVariant ?? "standard" : undefined}
+      data-overview-interactive={variant === "overview" && accessStatus !== null && accessStatus.effectiveProfile !== "read_only" ? "true" : "false"}
       data-image-scale={imageScale}
       data-image-x={appearance.imageXStep}
       data-image-y={appearance.imageYStep}
@@ -371,16 +381,12 @@ export function CoffeeWidget({
                 type="button"
                 className="coffee-delayed-start-action"
                 data-testid="coffee-delayed-start-action"
+                aria-label={delayedStartLabel}
+                title={delayedStartLabel}
                 disabled={!interactive || delayedStartPending}
                 onClick={onDelayedStart}
               >
-                {delayedStartPending
-                  ? "Сохраняем…"
-                  : activeDelayedStart?.status === "executing"
-                    ? "Проверить запуск"
-                    : activeDelayedStart
-                      ? "Изменить запуск"
-                      : "Отложить"}
+                <Icon name="timer" size={22} />
               </button>
             )}
           </div>

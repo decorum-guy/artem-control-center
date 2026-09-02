@@ -329,18 +329,18 @@
 
 .coffee-action-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 56px;
   gap: 8px;
   width: 100%;
   min-width: 0;
 }
 
 .coffee-action-row--compact {
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, .85fr);
+  grid-template-columns: minmax(0, 1fr) 56px;
 }
 
 .coffee-action-row--wide {
-  grid-template-columns: minmax(0, .9fr) minmax(0, 1.25fr);
+  grid-template-columns: minmax(0, 1fr) 56px;
 }
 
 .coffee-action-row > button {
@@ -352,8 +352,13 @@
 }
 
 .coffee-delayed-start-action {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
   border: 1px solid var(--cc-accent);
-  border-radius: var(--cc-radius-control);
+  border-radius: 50%;
   color: var(--cc-accent-strong);
   background: var(--cc-surface-2);
   font-size: var(--cc-type-control-size);
@@ -401,9 +406,15 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
+  justify-self: center;
   place-items: center;
   max-width: 100%;
   max-height: 100%;
+}
+
+.coffee-panel--overview[data-overview-interactive="true"] .coffee-asset__visual {
+  width: 72%;
+  justify-self: start;
 }
 
 .coffee-panel--overview.coffee-panel--transition-moving .coffee-progress {
@@ -412,16 +423,12 @@
 
 .coffee-panel--overview .coffee-asset__image {
   width: auto;
-  height: min(220px, 100%);
-  max-width: 164px;
-  max-height: none;
+  height: min(208px, 100%);
+  max-width: min(164px, calc(100% / var(--cc-coffee-image-scale, 1)));
+  max-height: calc(100% / var(--cc-coffee-image-scale, 1));
+  justify-self: center;
   object-fit: contain;
   transform: none;
-}
-
-.coffee-panel--overview[data-overview-copy-density="dense"] .coffee-asset__image {
-  height: min(176px, 100%);
-  max-width: 128px;
 }
 
 .coffee-panel--overview[data-overview-size-variant="compact"] {
@@ -439,11 +446,6 @@
   height: min(244px, 100%);
   max-width: 184px;
 }
-.coffee-panel--overview[data-overview-size-variant="large"][data-overview-copy-density="dense"] .coffee-asset__image {
-  height: min(196px, 100%);
-  max-width: 132px;
-}
-
 /* Appearance values select only these source-owned semantic offsets. */
 .coffee-panel--overview.coffee-panel--image-x-0 .coffee-asset,
 .coffee-panel--overview.coffee-panel--image-x-1 .coffee-asset,
