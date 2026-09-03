@@ -4,6 +4,7 @@ import json
 import os
 import secrets
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -20,6 +21,9 @@ RuntimeAction = Literal["hide", "shutdown", "apply_capabilities"]
 router = APIRouter(prefix="/api/v1/system/runtime", tags=["system"])
 
 _REPLACE_LOCK_TIMEOUT_SECONDS = 5.0
+_WINDOWS_REPLACE_RETRYABLE_WINERRORS = frozenset({5, 32, 33})
+_WINDOWS_REPLACE_RETRY_DELAYS_SECONDS = (0.01, 0.025, 0.05, 0.1)
+_WINDOWS_REPLACE_RETRY_DEADLINE_SECONDS = 0.25
 _replace_locks = {}
 _replace_locks_guard = Lock()
 
@@ -71,18 +75,43 @@ def _replace_lock_for(path: Path):
         return _replace_locks.setdefault(path, Lock())
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _is_retryable_windows_replace_error(error: OSError) -> bool:
+    return (
+        _is_windows()
+        and getattr(error, "winerror", None) in _WINDOWS_REPLACE_RETRYABLE_WINERRORS
+    )
+
+
 def _atomic_replace(temporary: Path, path: Path) -> None:
     # Windows can reject simultaneous replacements of the same destination
     # even when every source is a different, closed file. Serialize only that
     # short publication step per target, with a bounded wait; temp creation and
     # JSON writes remain concurrent and private.
-    if os.name != "nt":
+    if not _is_windows():
         os.replace(temporary, path)
         return
     replace_lock = _replace_lock_for(path)
     if not replace_lock.acquire(timeout=_REPLACE_LOCK_TIMEOUT_SECONDS):
         raise OSError(f"timed out publishing runtime command: {path}")
     try:
+        deadline = time.monotonic() + _WINDOWS_REPLACE_RETRY_DEADLINE_SECONDS
+        for delay in _WINDOWS_REPLACE_RETRY_DELAYS_SECONDS:
+            try:
+                os.replace(temporary, path)
+                return
+            except OSError as error:
+                if not _is_retryable_windows_replace_error(error):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(delay, remaining))
+                if time.monotonic() >= deadline:
+                    raise
         os.replace(temporary, path)
     finally:
         replace_lock.release()
