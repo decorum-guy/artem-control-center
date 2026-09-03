@@ -60,6 +60,20 @@ def gate_private_replacements(monkeypatch, module, barrier, sources=None):
     monkeypatch.setattr(module.os, "replace", gated_replace)
 
 
+def set_deterministic_windows_retry_environment(monkeypatch):
+    monkeypatch.setattr(runtime_control, "_is_windows", lambda: True)
+    monkeypatch.setattr(runtime_control.time, "monotonic", lambda: 0.0)
+    sleeps = []
+    monkeypatch.setattr(runtime_control.time, "sleep", sleeps.append)
+    return sleeps
+
+
+def windows_error(winerror: int, message: str):
+    error = PermissionError(message)
+    error.winerror = winerror
+    return error
+
+
 def test_runtime_control_status_and_intent_gate(monkeypatch, tmp_path):
     command_path = tmp_path / "runtime-command.json"
     close_request_path = tmp_path / "kiosk-close-request.json"
@@ -154,6 +168,132 @@ def test_write_command_failure_preserves_canonical_and_cleans_only_own_temp(monk
     assert json.loads(target.read_text(encoding="utf-8")) == existing
     assert unrelated_temp.read_text(encoding="utf-8") == "unrelated"
     assert not list(tmp_path.glob(f".{target.name}.*.tmp"))
+
+
+def test_write_command_retries_transient_windows_access_denied_with_same_temp(
+    monkeypatch, tmp_path
+):
+    target = tmp_path / "kiosk-presence.json"
+    target.write_text(json.dumps({"value": "OLD"}), encoding="utf-8")
+    replacement = {"value": "NEW"}
+    attempts = []
+    sleeps = set_deterministic_windows_retry_environment(monkeypatch)
+    original_replace = runtime_control.os.replace
+
+    def replace_with_one_transient_failure(source, destination):
+        attempts.append((Path(source), Path(destination)))
+        if len(attempts) == 1:
+            raise windows_error(5, "transient access denied")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(runtime_control.os, "replace", replace_with_one_transient_failure)
+    runtime_control._write_command(target, replacement)
+
+    assert len(attempts) == 2
+    assert attempts[0][0] == attempts[1][0]
+    assert attempts[0][1] == target
+    assert json.loads(target.read_text(encoding="utf-8")) == replacement
+    assert sleeps == [runtime_control._WINDOWS_REPLACE_RETRY_DELAYS_SECONDS[0]]
+    assert not list(tmp_path.glob(f".{target.name}.*.tmp"))
+
+
+def test_kiosk_presence_endpoint_retries_transient_windows_access_denied(
+    monkeypatch, tmp_path
+):
+    command_path = tmp_path / "runtime-command.json"
+    presence_path = tmp_path / "kiosk-presence.json"
+    module = load_app(monkeypatch, command_path, enabled=True)
+    client = TestClient(module.app)
+    set_deterministic_windows_retry_environment(monkeypatch)
+    attempts = []
+    original_replace = runtime_control.os.replace
+
+    def replace_with_one_transient_failure(source, destination):
+        attempts.append((Path(source), Path(destination)))
+        if len(attempts) == 1:
+            raise windows_error(5, "transient access denied")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(runtime_control.os, "replace", replace_with_one_transient_failure)
+    response = client.post(
+        "/api/v1/system/runtime/kiosk-presence",
+        headers={"x-panel-intent": "kiosk-presence"},
+        json={"pageId": "0123456789abcdef01234567"},
+    )
+
+    assert response.status_code == 204
+    assert len(attempts) == 2
+    heartbeat = json.loads(presence_path.read_text(encoding="utf-8"))
+    assert heartbeat["schemaVersion"] == 1
+    assert heartbeat["pageId"] == "0123456789abcdef01234567"
+    assert isinstance(heartbeat["observedAt"], str)
+    assert not list(tmp_path.glob(f".{presence_path.name}.*.tmp"))
+
+
+def test_write_command_stops_after_bounded_transient_windows_failures(
+    monkeypatch, tmp_path
+):
+    target = tmp_path / "runtime-command.json"
+    existing = {"value": "OLD"}
+    target.write_text(json.dumps(existing), encoding="utf-8")
+    attempts = []
+    sleeps = set_deterministic_windows_retry_environment(monkeypatch)
+
+    def always_fail(source, destination):
+        attempts.append((Path(source), Path(destination)))
+        raise windows_error(32, "persistent sharing violation")
+
+    monkeypatch.setattr(runtime_control.os, "replace", always_fail)
+    with pytest.raises(PermissionError, match="persistent sharing violation"):
+        runtime_control._write_command(target, {"value": "NEW"})
+
+    assert len(attempts) == len(runtime_control._WINDOWS_REPLACE_RETRY_DELAYS_SECONDS) + 1
+    assert len({source for source, _ in attempts}) == 1
+    assert len(sleeps) == len(runtime_control._WINDOWS_REPLACE_RETRY_DELAYS_SECONDS)
+    assert json.loads(target.read_text(encoding="utf-8")) == existing
+    assert not list(tmp_path.glob(f".{target.name}.*.tmp"))
+
+
+def test_write_command_does_not_retry_non_retryable_windows_replace_error(
+    monkeypatch, tmp_path
+):
+    target = tmp_path / "runtime-command.json"
+    existing = {"value": "OLD"}
+    target.write_text(json.dumps(existing), encoding="utf-8")
+    attempts = []
+    set_deterministic_windows_retry_environment(monkeypatch)
+
+    def fail_non_retryably(source, destination):
+        attempts.append((Path(source), Path(destination)))
+        raise windows_error(87, "invalid parameter")
+
+    monkeypatch.setattr(runtime_control.os, "replace", fail_non_retryably)
+    with pytest.raises(PermissionError, match="invalid parameter"):
+        runtime_control._write_command(target, {"value": "NEW"})
+
+    assert len(attempts) == 1
+    assert json.loads(target.read_text(encoding="utf-8")) == existing
+    assert not list(tmp_path.glob(f".{target.name}.*.tmp"))
+
+
+def test_atomic_replace_is_one_shot_when_not_running_on_windows(monkeypatch, tmp_path):
+    temporary = tmp_path / ".runtime-command.json.tmp"
+    target = tmp_path / "runtime-command.json"
+    temporary.write_text("NEW", encoding="utf-8")
+    attempts = []
+    monkeypatch.setattr(runtime_control, "_is_windows", lambda: False)
+
+    def fail_access_denied(source, destination):
+        attempts.append((Path(source), Path(destination)))
+        raise windows_error(5, "access denied")
+
+    monkeypatch.setattr(runtime_control.os, "replace", fail_access_denied)
+    with pytest.raises(PermissionError, match="access denied"):
+        runtime_control._atomic_replace(temporary, target)
+
+    assert len(attempts) == 1
+    assert temporary.exists()
+    assert not target.exists()
 
 
 def test_kiosk_presence_endpoint_handles_deterministic_concurrent_writers(monkeypatch, tmp_path):
