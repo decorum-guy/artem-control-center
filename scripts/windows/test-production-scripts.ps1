@@ -101,6 +101,9 @@ try {
     $updaterText = Get-Content `
         -LiteralPath (Join-Path $PSScriptRoot "update-production.ps1") `
         -Raw
+    $updaterLauncherText = Get-Content `
+        -LiteralPath (Join-Path $PSScriptRoot "launch-update-production.ps1") `
+        -Raw
     $kioskPresenceText = Get-Content `
         -LiteralPath (Join-Path $PSScriptRoot "kiosk-presence.ps1") `
         -Raw
@@ -255,6 +258,21 @@ try {
     }
     if ($updaterText -notmatch 'UpdateTransactionState' -or $updaterText -notmatch 'Assert-ArtemProductionBuildIdentity') {
         throw "Updater must persist incomplete state and assert production artifact identity"
+    }
+    if (
+        $updaterLauncherText -notmatch 'Start-Process' -or
+        $updaterLauncherText -notmatch '-NoProfile' -or
+        $updaterLauncherText -notmatch '-NonInteractive' -or
+        $updaterLauncherText -notmatch '-ExecutionPolicy[\s\S]*Bypass' -or
+        $updaterLauncherText -notmatch '-WorkingDirectory\s+\$repoRoot' -or
+        $updaterLauncherText -notmatch 'runtime-process-created' -or
+        $updaterLauncherText -notmatch 'child-start-failed' -or
+        $updaterLauncherText -notmatch 'processId'
+    ) {
+        throw "Windows updater launcher is missing its fixed process and receipt contract"
+    }
+    if ($updaterLauncherText -match 'cmd\.exe|detached\s*:') {
+        throw "Windows updater launcher must not expose a generic shell or detached Node path"
     }
 
     $watcherText = Get-Content `

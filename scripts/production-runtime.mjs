@@ -296,6 +296,33 @@ export function isSafePanelUpdateCommand(command) {
   );
 }
 
+export function spawnWindowsUpdaterLauncher({ root, command }) {
+  if (!isSafePanelUpdateCommand(command)) throw new Error("invalid_update_command");
+  const launcherPath = resolve(root, "scripts", "windows", "launch-update-production.ps1");
+  return spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      launcherPath,
+      "-ExpectedCurrentHead",
+      command.expectedCurrentHead,
+      "-ExpectedTargetHead",
+      command.expectedTargetHead,
+      "-RequestId",
+      command.requestId
+    ],
+    {
+      cwd: root,
+      windowsHide: true,
+      stdio: "ignore"
+    }
+  );
+}
+
 export const UPDATE_HANDOFF_MAX_AGE_MS = 2 * 60_000;
 
 export function activePanelUpdateLease(
@@ -398,65 +425,187 @@ export function readUpdaterBootstrapEvidence(path, requestId) {
   }
 }
 
-export function createPanelUpdateSpawnLifecycle({
+export const UPDATER_LAUNCH_ACCEPTANCE_TIMEOUT_MS = 10_000;
+export const UPDATER_LAUNCH_POLL_INTERVAL_MS = 100;
+
+export function readUpdaterLaunchEvidence(path, requestId) {
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (Object.keys(value).sort().join(",") !== "processId,requestId,result,schemaVersion,stage,updatedAt") return null;
+    if (
+      value.schemaVersion !== 1
+      || value.requestId !== requestId
+      || value.stage !== "runtime-process-created"
+      || !["recorded", "child-start-failed"].includes(value.result)
+      || typeof value.updatedAt !== "string"
+      || !Number.isFinite(Date.parse(value.updatedAt))
+    ) return null;
+    if (value.result === "recorded" && (!Number.isInteger(value.processId) || value.processId <= 0)) return null;
+    if (value.result === "child-start-failed" && value.processId !== null) return null;
+    return {
+      stage: value.stage,
+      result: value.result,
+      processId: value.processId
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function createPanelUpdateLauncherLifecycle({
   command,
-  updater,
+  launcher,
   isRuntimeAlive,
   hasAuthoritativeEvidence,
   publishFailure,
   readBootstrapEvidence = () => null,
-  markProcessCreated = () => {},
-  log
+  readLaunchEvidence = () => null,
+  isUpdaterProcessAlive = () => false,
+  acceptanceTimeoutMs = UPDATER_LAUNCH_ACCEPTANCE_TIMEOUT_MS,
+  pollIntervalMs = UPDATER_LAUNCH_POLL_INTERVAL_MS,
+  log = () => {}
 }) {
-  let spawned = false;
+  let launcherSpawned = false;
+  let launcherExited = false;
+  let launcherExitCode = null;
+  let actualUpdaterAccepted = false;
+  let actualUpdaterPid = null;
   let handled = false;
+  let timer = null;
+  let acceptanceDeadline = null;
 
-  updater.once("spawn", () => {
-    if (handled) return;
-    spawned = true;
-    updater.unref();
-    try {
-      markProcessCreated();
-    } catch {
-      // Bootstrap evidence is diagnostic only and must not affect updater ownership.
-    }
-    // spawn only proves Windows created powershell.exe; script-entered is the first body proof.
-    // The PID is deliberately confined to the runtime diagnostic log.
-    log("INFO", `Panel update handoff accepted requestId=${command.requestId} pid=${updater.pid ?? "unknown"}`);
-  });
+  const bodyProofStages = new Set([
+    "script-entered",
+    "helpers-loaded",
+    "paths-initialized",
+    "lease-accepted",
+    "lease-claimed",
+    "transcript-starting",
+    "transcript-started",
+    "authoritative-state-started"
+  ]);
 
-  updater.once("error", (error) => {
-    if (spawned || handled) {
-      log("ERROR", `Panel updater process error requestId=${command.requestId}: ${error?.message || error}`);
-      return;
-    }
+  function clearTimer() {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  }
+
+  function publishBoundedFailure(result, options = {}) {
+    if (handled || !isRuntimeAlive()) return false;
     handled = true;
-    const published = publishFailure("updater_spawn_failed");
-    log(
-      published ? "ERROR" : "WARN",
-      `Panel updater spawn failed requestId=${command.requestId}: ${error?.message || error}`
-    );
-  });
-
-  updater.once("exit", (code, signal) => {
-    if (!spawned || handled || !isRuntimeAlive()) return;
-    handled = true;
-    if (hasAuthoritativeEvidence()) {
-      log("INFO", `Panel updater exit retained authoritative evidence requestId=${command.requestId}`);
-      return;
-    }
-    const bootstrap = readBootstrapEvidence();
-    const stage = !bootstrap || bootstrap.stage === "runtime-process-created"
-      ? "host_or_parameter_pre_script_exit"
-      : bootstrap.stage;
-    const result = bootstrap?.result ?? "recorded";
-    const published = publishFailure("updater_early_exit", { childPid: updater.pid });
+    clearTimer();
+    const published = publishFailure(result, options);
     log(
       published ? "WARN" : "INFO",
-      `Panel updater exited before authoritative evidence requestId=${command.requestId} code=${code ?? "null"} signal=${signal ?? "null"}`
+      `Panel updater launch failure requestId=${command.requestId} result=${result}`
     );
-    // No script-entered marker truthfully leaves host/parser/parameter pre-body exit unresolved.
-    log("INFO", `Panel updater bootstrap requestId=${command.requestId} bootstrapStage=${stage} bootstrapResult=${result}`);
+    if (result === "updater_early_exit") {
+      const bootstrap = readBootstrapEvidence();
+      const stage = !bootstrap || bootstrap.stage === "runtime-process-created"
+        ? "host_or_parameter_pre_script_exit"
+        : bootstrap.stage;
+      const bootstrapResult = bootstrap?.result ?? "recorded";
+      log(
+        "INFO",
+        `Panel updater bootstrap requestId=${command.requestId} bootstrapStage=${stage} bootstrapResult=${bootstrapResult}`
+      );
+    }
+    return published;
+  }
+
+  function observeLaunch() {
+    if (handled) return;
+    if (!isRuntimeAlive()) {
+      clearTimer();
+      return;
+    }
+    if (hasAuthoritativeEvidence()) {
+      handled = true;
+      clearTimer();
+      log("INFO", `Panel updater retained authoritative evidence requestId=${command.requestId}`);
+      return;
+    }
+
+    const launch = readLaunchEvidence();
+    if (launch?.result === "child-start-failed") {
+      publishBoundedFailure("updater_spawn_failed");
+      return;
+    }
+    if (launch?.result === "recorded") {
+      actualUpdaterPid = actualUpdaterPid ?? launch.processId;
+      const bootstrap = readBootstrapEvidence();
+      if (bootstrap && bodyProofStages.has(bootstrap.stage)) {
+        if (!actualUpdaterAccepted) {
+          actualUpdaterAccepted = true;
+          log(
+            "INFO",
+            `Panel updater body accepted requestId=${command.requestId} pid=${actualUpdaterPid}`
+          );
+        }
+      }
+
+      let processAlive = true;
+      try {
+        processAlive = isUpdaterProcessAlive(actualUpdaterPid, command.requestId);
+      } catch {
+        processAlive = false;
+      }
+      if (!processAlive) {
+        publishBoundedFailure("updater_early_exit", { childPid: actualUpdaterPid });
+        return;
+      }
+    }
+
+    if (actualUpdaterAccepted) {
+      timer = setTimeout(observeLaunch, pollIntervalMs);
+      timer.unref?.();
+      return;
+    }
+
+    if (acceptanceDeadline === null) acceptanceDeadline = Date.now() + acceptanceTimeoutMs;
+    if (Date.now() >= acceptanceDeadline) {
+      const spawnFailed = launcherExited && launcherExitCode !== 0 && !launch;
+      publishBoundedFailure(spawnFailed ? "updater_spawn_failed" : "updater_early_exit");
+      return;
+    }
+    timer = setTimeout(observeLaunch, pollIntervalMs);
+    timer.unref?.();
+  }
+
+  launcher.once("spawn", () => {
+    if (handled) return;
+    launcherSpawned = true;
+    acceptanceDeadline = Date.now() + acceptanceTimeoutMs;
+    launcher.unref?.();
+    // This PID belongs only to the short-lived bootstrap.  The actual updater
+    // process is accepted later from its private launch receipt and body proof.
+    log("INFO", `Panel updater launcher created requestId=${command.requestId} pid=${launcher.pid ?? "unknown"}`);
+    observeLaunch();
+  });
+
+  launcher.once("error", (error) => {
+    if (launcherSpawned || handled) {
+      log("ERROR", `Panel updater launcher error requestId=${command.requestId}: ${error?.message || error}`);
+      observeLaunch();
+      return;
+    }
+    publishBoundedFailure("updater_spawn_failed");
+  });
+
+  launcher.once("exit", (code, signal) => {
+    if (handled) return;
+    if (!launcherSpawned) {
+      publishBoundedFailure("updater_spawn_failed");
+      return;
+    }
+    launcherExited = true;
+    launcherExitCode = code;
+    log(
+      "INFO",
+      `Panel updater launcher exited requestId=${command.requestId} code=${code ?? "null"} signal=${signal ?? "null"}`
+    );
+    observeLaunch();
   });
 }
 
@@ -581,7 +730,8 @@ export async function runProductionRuntime() {
   const updateLockPath = join(runtimeDir, "update-lock.json");
   const updateStatePath = join(runtimeDir, "update-state.json");
   const updateBootstrapPath = join(runtimeDir, "update-bootstrap.json");
-  const updaterPath = resolve(root, "scripts", "windows", "update-production.ps1");
+  const updateLaunchPath = join(runtimeDir, "update-launch.json");
+  const updaterLauncherPath = resolve(root, "scripts", "windows", "launch-update-production.ps1");
   const venvPython = resolve(root, ".venv", isWindows ? "Scripts/python.exe" : "bin/python");
   const log = createLogger(logDir);
 
@@ -901,7 +1051,7 @@ export async function runProductionRuntime() {
       rejectUpdateHandoff(command, "invalid_update_command");
       return;
     }
-    if (!isWindows || !existsSync(updaterPath)) {
+    if (!isWindows || !existsSync(updaterLauncherPath)) {
       rejectUpdateHandoff(command, "updater_unavailable");
       return;
     }
@@ -920,7 +1070,7 @@ export async function runProductionRuntime() {
       return;
     }
 
-    let updater;
+    let launcher;
     try {
       atomicWriteJson(updateBootstrapPath, {
         schemaVersion: 1,
@@ -929,29 +1079,11 @@ export async function runProductionRuntime() {
         result: "recorded",
         updatedAt: new Date().toISOString()
       });
-      updater = spawn(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          updaterPath,
-          "-ExpectedCurrentHead",
-          command.expectedCurrentHead,
-          "-ExpectedTargetHead",
-          command.expectedTargetHead,
-          "-RequestId",
-          command.requestId
-        ],
-        {
-          cwd: root,
-          detached: true,
-          windowsHide: true,
-          stdio: "ignore"
-        }
-      );
+      rmSync(updateLaunchPath, { force: true });
+      // This child is only the short-lived Windows bootstrap.  The actual
+      // updater is created by it and is observed through the private receipt,
+      // body marker, and owner lease rather than through this child's exit.
+      launcher = spawnWindowsUpdaterLauncher({ root, command });
     } catch (error) {
       const published = publishPanelUpdateRuntimeFailure(command, "updater_spawn_failed");
       log(
@@ -960,20 +1092,15 @@ export async function runProductionRuntime() {
       );
       return;
     }
-    createPanelUpdateSpawnLifecycle({
+    createPanelUpdateLauncherLifecycle({
       command,
-      updater,
+      launcher,
       isRuntimeAlive: () => !shuttingDown,
       hasAuthoritativeEvidence: () => hasTerminalPanelUpdateEvidence(command),
       publishFailure: (result, options) => publishPanelUpdateRuntimeFailure(command, result, options),
       readBootstrapEvidence: () => readUpdaterBootstrapEvidence(updateBootstrapPath, command.requestId),
-      markProcessCreated: () => atomicWriteJson(updateBootstrapPath, {
-        schemaVersion: 1,
-        requestId: command.requestId,
-        stage: "runtime-process-created",
-        result: "recorded",
-        updatedAt: new Date().toISOString()
-      }),
+      readLaunchEvidence: () => readUpdaterLaunchEvidence(updateLaunchPath, command.requestId),
+      isUpdaterProcessAlive: (pid, requestId) => updaterOwnerProcessAlive(pid, requestId),
       log
     });
   }

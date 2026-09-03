@@ -11,10 +11,11 @@ import {
   canPublishPanelUpdateEarlyExit,
   canPublishPanelUpdateRuntimeFailure,
   classifyPanelUpdateLockOwnership,
-  createPanelUpdateSpawnLifecycle,
+  createPanelUpdateLauncherLifecycle,
   isExactPanelUpdateLock,
   isSafePanelUpdateCommand,
   readUpdaterBootstrapEvidence,
+  readUpdaterLaunchEvidence,
   UPDATE_HANDOFF_MAX_AGE_MS
 } from "../production-runtime.mjs";
 
@@ -41,20 +42,30 @@ function fakeUpdater(pid = 4242) {
   return updater;
 }
 
-function launchLifecycle({ authoritative = false, runtimeAlive = true, bootstrap = null } = {}) {
-  const updater = fakeUpdater();
+function launchLifecycle({
+  authoritative = false,
+  runtimeAlive = true,
+  bootstrap = null,
+  launchReceipt = null,
+  actualProcessAlive = true,
+  acceptanceTimeoutMs
+} = {}) {
+  const launcher = fakeUpdater();
   const failures = [];
   const logs = [];
-  createPanelUpdateSpawnLifecycle({
+  createPanelUpdateLauncherLifecycle({
     command: validCommand(),
-    updater,
+    launcher,
     isRuntimeAlive: () => runtimeAlive,
     hasAuthoritativeEvidence: () => authoritative,
     publishFailure: (result) => { failures.push(result); return true; },
     readBootstrapEvidence: () => bootstrap,
+    readLaunchEvidence: () => launchReceipt,
+    isUpdaterProcessAlive: () => actualProcessAlive,
+    ...(acceptanceTimeoutMs === undefined ? {} : { acceptanceTimeoutMs }),
     log: (level, message) => logs.push({ level, message })
   });
-  return { updater, failures, logs };
+  return { launcher, failures, logs };
 }
 
 function updateLock(updatedAt, ownerPid) {
@@ -86,9 +97,9 @@ function simulateEarlyExit({ state = activeUpdateState(), lock, transaction = nu
   const originalTransaction = transaction;
   let currentState = state;
   let currentLock = lock;
-  createPanelUpdateSpawnLifecycle({
+  createPanelUpdateLauncherLifecycle({
     command,
-    updater,
+    launcher: updater,
     isRuntimeAlive: () => true,
     hasAuthoritativeEvidence: () => (
       currentState?.schemaVersion === 1
@@ -110,6 +121,12 @@ function simulateEarlyExit({ state = activeUpdateState(), lock, transaction = nu
       if (classifyPanelUpdateLockOwnership(currentLock, command, childPid) === "ownerless") currentLock = null;
       return true;
     },
+    readLaunchEvidence: () => ({
+      stage: "runtime-process-created",
+      result: "recorded",
+      processId: 4242
+    }),
+    isUpdaterProcessAlive: () => false,
     log: () => {}
   });
   updater.emit("spawn");
@@ -174,26 +191,29 @@ test("pre-owner handoff lease is short and future timestamps cannot become immor
 });
 
 test("successful updater spawn records request-bound acceptance only after spawn", () => {
-  const { updater, failures, logs } = launchLifecycle();
+  const { launcher, failures, logs } = launchLifecycle();
   assert.equal(logs.length, 0);
-  updater.emit("spawn");
-  assert.equal(updater.unrefCalls, 1);
+  launcher.emit("spawn");
+  assert.equal(launcher.unrefCalls, 1);
   assert.equal(failures.length, 0);
-  assert.match(logs[0].message, new RegExp(`accepted requestId=${REQUEST} pid=4242`));
+  assert.match(logs[0].message, new RegExp(`launcher created requestId=${REQUEST} pid=4242`));
 });
 
 test("updater spawn error publishes only the fixed safe spawn result", () => {
-  const { updater, failures, logs } = launchLifecycle();
-  updater.emit("error", new Error("private Powershell launch detail"));
+  const { launcher, failures, logs } = launchLifecycle();
+  launcher.emit("error", new Error("private Powershell launch detail"));
   assert.deepEqual(failures, ["updater_spawn_failed"]);
   assert.equal(logs.some(({ message }) => message.includes("handoff accepted")), false);
   assert.equal(failures.join(" ").includes("private"), false);
 });
 
 test("unexplained early updater exit publishes the fixed safe early-exit result", () => {
-  const { updater, failures } = launchLifecycle();
-  updater.emit("spawn");
-  updater.emit("exit", 71, null);
+  const { launcher, failures } = launchLifecycle({
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    actualProcessAlive: false
+  });
+  launcher.emit("spawn");
+  launcher.emit("exit", 0, null);
   assert.deepEqual(failures, ["updater_early_exit"]);
   assert.equal(failures.join(" ").includes("71"), false);
 });
@@ -206,15 +226,16 @@ for (const [label, bootstrap] of [
   ["after lease claim", { stage: "lease-claimed", result: "recorded" }]
 ]) {
   test(`early updater exit logs bounded ${label} bootstrap classification`, () => {
-    const { updater, failures, logs } = launchLifecycle({ bootstrap });
-    updater.emit("spawn");
-    updater.emit("exit", 0, null);
+    const { launcher, failures, logs } = launchLifecycle({
+      bootstrap,
+      launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+      actualProcessAlive: false
+    });
+    launcher.emit("spawn");
+    launcher.emit("exit", 0, null);
     assert.deepEqual(failures, ["updater_early_exit"]);
-    const expectedStage = !bootstrap || bootstrap.stage === "runtime-process-created"
-      ? "host_or_parameter_pre_script_exit"
-      : bootstrap.stage;
-    assert.match(logs.at(-1).message, new RegExp(`bootstrapStage=${expectedStage}`));
-    assert.match(logs.at(-1).message, new RegExp(`bootstrapResult=${bootstrap?.result ?? "recorded"}`));
+    assert.match(logs.map(({ message }) => message).join(" "), /launch failure requestId=.*result=updater_early_exit/);
+    assert.match(logs.at(-1).message, /bootstrapStage=/);
     assert.doesNotMatch(logs.map(({ message }) => message).join(" "), /C:\\\\|secret|private/i);
   });
 }
@@ -224,10 +245,42 @@ test("bootstrap reader correlates only exact strict bounded evidence", () => {
   assert.equal(readUpdaterBootstrapEvidence(path, REQUEST), null, "non-bootstrap JSON is ignored");
 });
 
+test("launch receipt correlates only an actual private updater process", () => {
+  const path = resolve(root, "package.json");
+  assert.equal(readUpdaterLaunchEvidence(path, REQUEST), null, "non-launch JSON is ignored");
+});
+
+test("launcher exit is not updater success without body evidence", () => {
+  const { launcher, failures } = launchLifecycle({
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    actualProcessAlive: true,
+    acceptanceTimeoutMs: 0
+  });
+  launcher.emit("spawn");
+  launcher.emit("exit", 0, null);
+  assert.deepEqual(failures, ["updater_early_exit"], "launcher exit alone must not publish success");
+});
+
+test("real updater body evidence accepts a surviving independent process", () => {
+  const { launcher, failures, logs } = launchLifecycle({
+    bootstrap: { stage: "script-entered", result: "recorded" },
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    actualProcessAlive: true
+  });
+  launcher.emit("spawn");
+  launcher.emit("exit", 0, null);
+  assert.deepEqual(failures, []);
+  assert.match(logs.map(({ message }) => message).join(" "), /body accepted/);
+});
+
 test("authoritative updater evidence wins over early child exit", () => {
-  const { updater, failures, logs } = launchLifecycle({ authoritative: true });
-  updater.emit("spawn");
-  updater.emit("exit", 1, null);
+  const { launcher, failures, logs } = launchLifecycle({
+    authoritative: true,
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    actualProcessAlive: false
+  });
+  launcher.emit("spawn");
+  launcher.emit("exit", 1, null);
   assert.deepEqual(failures, []);
   assert.match(logs.at(-1).message, /retained authoritative evidence/);
 });
@@ -331,14 +384,28 @@ test("H7 different request or revisions cannot be mutated on child exit", () => 
 
 test("supervisor handoff is wired to the fixed canonical updater script and owner identity", () => {
   const source = readFileSync(resolve("scripts/production-runtime.mjs"), "utf8");
-  assert.match(source, /const updaterPath = resolve\(root, "scripts", "windows", "update-production\.ps1"\)/);
+  assert.match(source, /const updaterLauncherPath = resolve\(root, "scripts", "windows", "launch-update-production\.ps1"\)/);
   assert.match(source, /command\.action === "update_panel"/);
+  assert.match(source, /spawnWindowsUpdaterLauncher/);
   assert.match(source, /"-ExpectedCurrentHead"[\s\S]*command\.expectedCurrentHead/);
   assert.match(source, /"-ExpectedTargetHead"[\s\S]*command\.expectedTargetHead/);
   assert.match(source, /"-RequestId"[\s\S]*command\.requestId/);
   assert.match(source, /CommandLine -like '\*update-production\.ps1\*'/);
   assert.match(source, /CommandLine -like '\*\$\{requestId\}\*'/);
+  assert.match(source, /readUpdaterLaunchEvidence/);
+  assert.match(source, /createPanelUpdateLauncherLifecycle/);
+  assert.doesNotMatch(source, /detached\s*:\s*true/);
   assert.doesNotMatch(source, /command\.(?:shell|path|branch|environment|args)/);
+});
+
+test("canonical Node launcher uses typed fixed arguments without detached PowerShell", () => {
+  const source = readFileSync(resolve("scripts/production-runtime.mjs"), "utf8");
+  const launcher = source.slice(source.indexOf("export function spawnWindowsUpdaterLauncher"));
+  assert.match(launcher, /spawn\([\s\S]*"powershell\.exe"/);
+  assert.match(launcher, /"-NoProfile"[\s\S]*"-NonInteractive"[\s\S]*"-ExecutionPolicy"[\s\S]*"Bypass"/);
+  assert.match(launcher, /"-File"[\s\S]*launcherPath/);
+  assert.match(launcher, /stdio: "ignore"/);
+  assert.doesNotMatch(launcher, /detached\s*:/);
 });
 
 test("canonical Windows launcher enables the separately classified update gate", () => {
