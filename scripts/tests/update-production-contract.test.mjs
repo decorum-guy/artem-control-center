@@ -115,7 +115,18 @@ test("Windows PowerShell atomic state publication passes a true CLR null backup 
 test("private updater bootstrap evidence is bounded and precedes helpers/transcript", () => {
   const runtime = readFileSync(resolve(root, "scripts/production-runtime.mjs"), "utf8");
   const common = readFileSync(resolve(root, "scripts/windows/runtime-common.ps1"), "utf8");
+  const launcher = readFileSync(resolve(root, "scripts/windows/launch-update-production.ps1"), "utf8");
   assert.match(common, /UpdateBootstrapEvidence = Join-Path \$runtimeRoot "update-bootstrap\.json"/);
+  assert.match(common, /UpdateLaunchReceipt = Join-Path \$runtimeRoot "update-launch\.json"/);
+  assert.match(common, /UpdaterLauncherScript = Join-Path \$repoRoot "scripts\\windows\\launch-update-production\.ps1"/);
+  assert.match(launcher, /Start-Process/);
+  assert.match(launcher, /-NoProfile/);
+  assert.match(launcher, /-NonInteractive/);
+  assert.match(launcher, /-ExecutionPolicy[\s\S]*Bypass/);
+  assert.match(launcher, /-WorkingDirectory \$repoRoot/);
+  assert.match(launcher, /processId/);
+  assert.match(launcher, /child-start-failed/);
+  assert.doesNotMatch(launcher, /cmd\.exe|Command\s*=/i);
   assert.match(updater, /\$ArtemUpdaterBootstrapStages = @\(/);
   assert.match(updater, /\$ArtemUpdaterBootstrapResults = @\(/);
   assert.match(updater, /Write-ArtemUpdaterBootstrapEvidence -Stage "script-entered"/);
@@ -129,8 +140,22 @@ test("private updater bootstrap evidence is bounded and precedes helpers/transcr
   assert.match(updater, /NullString\]::Value/);
   assert.doesNotMatch(updater, /\$\(\$_\.Exception\.Message\).*bootstrap/i);
   assert.match(runtime, /readUpdaterBootstrapEvidence/);
+  assert.match(runtime, /readUpdaterLaunchEvidence/);
   assert.match(runtime, /update-bootstrap\.json/);
+  assert.match(runtime, /update-launch\.json/);
   assert.doesNotMatch(runtime, /stdio:\s*"pipe"/);
+  assert.doesNotMatch(runtime, /detached\s*:\s*true/);
+});
+
+test("Windows launch regressions are part of canonical CI", () => {
+  const regression = readFileSync(resolve(root, "scripts/windows/test-update-production-launch.ps1"), "utf8");
+  const ci = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
+  assert.match(regression, /ExpectedCurrentHead/);
+  assert.match(regression, /survived-runtime-stop/);
+  assert.match(regression, /taskkill\.exe \/PID[\s\S]*\/T[\s\S]*\/F/);
+  assert.match(regression, /updater_spawn_failed/);
+  assert.match(regression, /lockExists/);
+  assert.match(ci, /test-update-production-launch\.ps1/);
 });
 
 test("target continuation has a bounded private lease handoff and executable Windows regression", () => {

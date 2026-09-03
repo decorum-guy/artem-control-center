@@ -28,11 +28,16 @@ function Get-ArtemRuntimePaths {
         UpdateState = Join-Path $runtimeRoot "update-state.json"
         # Private diagnostic evidence only; it is never updater authority or a browser contract.
         UpdateBootstrapEvidence = Join-Path $runtimeRoot "update-bootstrap.json"
+        # The short launcher records actual updater process creation here.  The
+        # receipt is private evidence; script entry and ownership remain in the
+        # updater bootstrap/lock/state artifacts.
+        UpdateLaunchReceipt = Join-Path $runtimeRoot "update-launch.json"
         RuntimeScript = Join-Path $repoRoot "scripts\production-runtime.mjs"
         StartScript = Join-Path $repoRoot "scripts\windows\start-production.ps1"
         OpenKioskScript = Join-Path $repoRoot "scripts\windows\open-kiosk.ps1"
         KioskWatchScript = Join-Path $repoRoot "scripts\windows\watch-kiosk.ps1"
         StopScript = Join-Path $repoRoot "scripts\windows\stop-production.ps1"
+        UpdaterLauncherScript = Join-Path $repoRoot "scripts\windows\launch-update-production.ps1"
         UpdateScript = Join-Path $repoRoot "scripts\windows\update-production.ps1"
         DashboardDist = Join-Path $repoRoot "apps\dashboard\dist"
         DashboardBuildMetadata = Join-Path $repoRoot "apps\dashboard\dist\dashboard-build.json"
@@ -361,7 +366,7 @@ function Get-ArtemSoftwareUpdateLock {
         return $null
     }
 
-    # Before the detached updater claims the lease there is deliberately no PID.
+    # Before the independent updater claims the lease there is deliberately no PID.
     # Keep that handoff window short. A future timestamp is never allowed to turn
     # this pre-owner lease into an immortal maintenance block.
     $age = [DateTimeOffset]::UtcNow - $updated
