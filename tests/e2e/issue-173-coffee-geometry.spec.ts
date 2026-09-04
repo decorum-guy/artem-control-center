@@ -79,6 +79,38 @@ async function assertCoffeeComposition(coffee: Locator) {
   }
 }
 
+async function assertHomeCoffeeProportions(coffee: Locator, timerExpected: boolean) {
+  const panelBox = await rect(coffee);
+  expect(panelBox.width).toBeGreaterThanOrEqual(520);
+  expect(panelBox.width).toBeLessThanOrEqual(570);
+
+  const primary = coffee.locator(".primary-action");
+  const primaryBox = await rect(primary);
+  expect(primaryBox.width).toBeGreaterThanOrEqual(180);
+  expect(primaryBox.width).toBeLessThanOrEqual(230);
+  expect(primaryBox.height).toBe(56);
+
+  const title = coffee.locator(".coffee-panel__heading h2");
+  await expect(title).toHaveCSS("font-size", "26px");
+
+  const online = coffee.locator(".coffee-panel__status .health-mark--healthy");
+  const onlineBox = await rect(online);
+  expect(onlineBox.y - panelBox.y).toBeGreaterThanOrEqual(10);
+  expect(onlineBox.y - panelBox.y).toBeLessThanOrEqual(14);
+  expect(panelBox.right - onlineBox.right).toBeGreaterThanOrEqual(10);
+  expect(panelBox.right - onlineBox.right).toBeLessThanOrEqual(14);
+
+  const timer = coffee.locator(".coffee-delayed-start-action");
+  await expect(timer).toHaveCount(timerExpected ? 1 : 0);
+  if (timerExpected) {
+    const timerBox = await rect(timer);
+    expect(timerBox.width).toBe(56);
+    expect(timerBox.height).toBe(56);
+    expect(timerBox.width).toBeGreaterThanOrEqual(48);
+    expect(timerBox.height).toBeGreaterThanOrEqual(48);
+  }
+}
+
 test.describe("#173 Coffee composition stabilization", () => {
   test.skip(
     !visualShellEnabled || !overviewV2Enabled,
@@ -151,6 +183,37 @@ test.describe("#173 Coffee composition stabilization", () => {
       expect(Math.abs(anchor.top - onlineAnchors[0].top)).toBeLessThanOrEqual(1);
       expect(Math.abs(anchor.right - onlineAnchors[0].right)).toBeLessThanOrEqual(1);
     }
+  });
+
+  test("keeps Home V2 Coffee proportions compact across the canonical states", async ({ page }, testInfo: TestInfo) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const states = [
+      ["coffee-off", "off", "home-coffee-off-1280x720.png"],
+      ["coffee-warming", "warming", "home-coffee-warming-1280x720.png"],
+      ["coffee-ready", "ready", "home-coffee-ready-1280x720.png"]
+    ] as const;
+
+    for (const [scenario, stage, screenshotName] of states) {
+      await page.goto(`/home?scenario=${scenario}&theme=night`);
+      const coffee = await waitForCoffee(page, stage);
+      await assertCoffeeComposition(coffee);
+      await assertHomeCoffeeProportions(coffee, stage === "off");
+      await page.screenshot({ path: testInfo.outputPath(screenshotName), animations: "disabled", scale: "css" });
+      await expectNoOverflow(page);
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/home?scenario=coffee-off&theme=night");
+    const narrowCoffee = await waitForCoffee(page, "off");
+    await assertCoffeeComposition(narrowCoffee);
+    const narrowPrimary = await rect(narrowCoffee.locator(".primary-action"));
+    const narrowTimer = await rect(narrowCoffee.locator(".coffee-delayed-start-action"));
+    expect(narrowPrimary.width).toBeGreaterThanOrEqual(48);
+    expect(narrowPrimary.height).toBeGreaterThanOrEqual(48);
+    expect(narrowTimer.width).toBeGreaterThanOrEqual(48);
+    expect(narrowTimer.height).toBeGreaterThanOrEqual(48);
+    await page.screenshot({ path: testInfo.outputPath("home-coffee-off-390x844.png"), animations: "disabled", scale: "css" });
+    await expectNoOverflow(page);
   });
 
   test("reserves a separate warming activity region", async ({ page }) => {
