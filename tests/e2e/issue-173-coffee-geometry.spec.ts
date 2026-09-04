@@ -284,6 +284,8 @@ test.describe("#173 Coffee composition stabilization", () => {
       expect(accent.borderBottomRightRadius).toBe("2px");
       await expect(coffee.locator(".coffee-activity")).toHaveCount(stage === "warming" ? 1 : 0);
       await expect(coffee.getByTestId("coffee-progress")).toHaveCount(stage === "warming" ? 1 : 0);
+      await expect(coffee.locator(".coffee-asset__image")).toHaveCSS("transition-duration", "0.36s");
+      await expect(coffee.locator(".coffee-asset__visual")).toHaveCSS("transition-duration", "0.36s");
       if (stage === "warming") {
         await expect(coffee.locator(".coffee-activity")).toBeHidden();
       }
@@ -293,10 +295,10 @@ test.describe("#173 Coffee composition stabilization", () => {
     }
 
     expect(imageBoxes.warming.x).toBeGreaterThan(imageBoxes.off.x + 8);
-    expect(imageBoxes.ready.x).toBeGreaterThan(imageBoxes.off.x + 8);
+    expect(imageBoxes.ready.x).toBeLessThan(imageBoxes.warming.x - 8);
     expect(imageBoxes.warming.width).toBeGreaterThan(imageBoxes.off.width + 5);
     expect(imageBoxes.warming.height).toBeGreaterThan(imageBoxes.off.height + 5);
-    expect(Math.abs(imageBoxes.warming.x - imageBoxes.ready.x)).toBeLessThanOrEqual(1);
+    expect(imageBoxes.warming.x - imageBoxes.ready.x).toBeGreaterThan(8);
     expect(Math.abs(imageBoxes.warming.y - imageBoxes.ready.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(imageBoxes.warming.width - imageBoxes.ready.width)).toBeLessThanOrEqual(1);
     expect(Math.abs(imageBoxes.warming.height - imageBoxes.ready.height)).toBeLessThanOrEqual(1);
@@ -327,6 +329,34 @@ test.describe("#173 Coffee composition stabilization", () => {
     await expect(visual).toHaveCSS("transition-duration", "0.001s");
     const reducedMotion = await rect(image);
     expect(reducedMotion.x).toBeGreaterThan(resting.x + 8);
+    await expectNoOverflow(page);
+  });
+
+  test("animates the Home V2 image from OFF to warming and back left on ready", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/home?scenario=coffee-off&theme=night");
+    const coffee = await waitForCoffee(page, "off");
+    const image = coffee.locator(".coffee-asset__image");
+    const resting = await rect(image);
+
+    await coffee.evaluate((element) => element.classList.add("coffee-panel--warming"));
+    await page.waitForTimeout(140);
+    const warmingMid = await rect(image);
+    await page.waitForTimeout(280);
+    const warming = await rect(image);
+    expect(warmingMid.x).toBeGreaterThan(resting.x + 1);
+    expect(warmingMid.x).toBeLessThan(warming.x - 1);
+    expect(warmingMid.width).toBeGreaterThan(resting.width + 1);
+
+    await coffee.evaluate((element) => element.classList.replace("coffee-panel--warming", "coffee-panel--ready"));
+    await page.waitForTimeout(140);
+    const readyMid = await rect(image);
+    await page.waitForTimeout(280);
+    const ready = await rect(image);
+    expect(readyMid.x).toBeLessThan(warming.x - 1);
+    expect(readyMid.x).toBeGreaterThan(ready.x + 1);
+    expect(ready.width).toBeGreaterThan(resting.width + 5);
+    expect(Math.abs(ready.width - warming.width)).toBeLessThanOrEqual(1);
     await expectNoOverflow(page);
   });
 

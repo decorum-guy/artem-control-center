@@ -99,6 +99,9 @@
 .home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--transition-revealing .coffee-asset__image {
   --cc-home-coffee-shift: 10px;
 }
+.home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--ready .coffee-asset__image {
+  --cc-home-coffee-shift: -8px;
+}
 .home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--turning_on .coffee-asset__visual,
 .home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--warming .coffee-asset__visual,
 .home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--ready .coffee-asset__visual,
