@@ -42,7 +42,7 @@
   border-radius: var(--cc-radius-zone);
 }
 .home-v2-primary-grid > .coffee-panel--home-v2.coffee-panel--ready {
-  border-left-width: 1px;
+  border-left: 1px solid var(--cc-border);
 }
 
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-panel__copy { min-height: 0; padding: 12px; }
@@ -68,12 +68,17 @@
   box-sizing: border-box;
 }
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-asset__visual {
+  --cc-home-coffee-state-scale: .9;
   grid-row: 1;
   width: 100%;
   height: 100%;
   place-items: center start;
+  transform: scale(var(--cc-coffee-image-scale, 1)) scale(var(--cc-home-coffee-state-scale));
+  transform-origin: center;
+  transition: transform 360ms cubic-bezier(.2,.75,.25,1);
 }
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-activity {
+  display: none;
   position: absolute;
   z-index: 2;
   top: 10px;
@@ -83,7 +88,7 @@
   align-items: flex-end;
 }
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-asset__image {
-  --cc-home-coffee-shift: -8px;
+  --cc-home-coffee-shift: -16px;
   transform: translateX(var(--cc-home-coffee-shift));
   transition: transform 360ms cubic-bezier(.2,.75,.25,1);
 }
@@ -94,17 +99,28 @@
 .home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--transition-revealing .coffee-asset__image {
   --cc-home-coffee-shift: 10px;
 }
+.home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--turning_on .coffee-asset__visual,
+.home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--warming .coffee-asset__visual,
+.home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--ready .coffee-asset__visual,
+.home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--transition-moving .coffee-asset__visual,
+.home-v2-primary-grid .coffee-panel--home-v2.coffee-panel--transition-revealing .coffee-asset__visual {
+  --cc-home-coffee-state-scale: 1;
+}
 .home-v2-primary-grid > .coffee-panel--home-v2::before {
   position: absolute;
   z-index: 1;
-  inset: 14px auto 14px 0;
-  width: 3px;
-  border-radius: 2px;
+  inset: 14px auto 14px -1px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
   background: var(--cc-accent);
-  box-shadow: 0 0 16px 2px color-mix(in srgb, var(--cc-accent) 36%, transparent);
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--cc-accent) 36%, transparent);
   content: "";
   opacity: .7;
   pointer-events: none;
+}
+.home-v2-primary-grid > .coffee-panel--home-v2.coffee-panel--ready::before {
+  background: var(--success);
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--success) 36%, transparent);
 }
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-asset__image {
   align-self: center;

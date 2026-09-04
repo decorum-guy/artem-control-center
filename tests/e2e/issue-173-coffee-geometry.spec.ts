@@ -241,7 +241,7 @@ test.describe("#173 Coffee composition stabilization", () => {
     await expectNoOverflow(page);
   });
 
-  test("keeps Home V2 Coffee states coherent and places warming activity above the machine", async ({ page }, testInfo: TestInfo) => {
+  test("keeps Home V2 Coffee states coherent with a disabled warming activity", async ({ page }, testInfo: TestInfo) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     const states = [
       ["coffee-off", "off", "home-coffee-motion-off-1280x720.png"],
@@ -259,11 +259,33 @@ test.describe("#173 Coffee composition stabilization", () => {
       assetBoxes[stage] = await rect(coffee.locator(".coffee-asset"));
       imageBoxes[stage] = await rect(coffee.locator(".coffee-asset__image"));
       await expect(coffee.locator(".coffee-asset")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      const accent = await coffee.evaluate((element, cssVariable) => {
+        const pseudo = getComputedStyle(element, "::before");
+        const probe = document.createElement("span");
+        probe.style.color = getComputedStyle(element).getPropertyValue(cssVariable).trim();
+        document.body.appendChild(probe);
+        const resolvedColor = getComputedStyle(probe).color;
+        probe.remove();
+        return {
+          width: pseudo.width,
+          color: pseudo.backgroundColor,
+          expectedColor: resolvedColor,
+          borderTopLeftRadius: pseudo.borderTopLeftRadius,
+          borderBottomLeftRadius: pseudo.borderBottomLeftRadius,
+          borderTopRightRadius: pseudo.borderTopRightRadius,
+          borderBottomRightRadius: pseudo.borderBottomRightRadius
+        };
+      }, stage === "ready" ? "--success" : "--cc-accent");
+      expect(accent.width).toBe("2px");
+      expect(accent.color).toBe(accent.expectedColor);
+      expect(accent.borderTopLeftRadius).toBe("0px");
+      expect(accent.borderBottomLeftRadius).toBe("0px");
+      expect(accent.borderTopRightRadius).toBe("2px");
+      expect(accent.borderBottomRightRadius).toBe("2px");
       await expect(coffee.locator(".coffee-activity")).toHaveCount(stage === "warming" ? 1 : 0);
       await expect(coffee.getByTestId("coffee-progress")).toHaveCount(stage === "warming" ? 1 : 0);
       if (stage === "warming") {
-        const activityBox = await rect(coffee.locator(".coffee-activity"));
-        expect(activityBox.bottom).toBeLessThanOrEqual(imageBoxes[stage].y + 1);
+        await expect(coffee.locator(".coffee-activity")).toBeHidden();
       }
       expectVerticallyCentered(imageBoxes[stage], assetBoxes[stage]);
       await page.screenshot({ path: testInfo.outputPath(screenshotName), animations: "disabled", scale: "css" });
@@ -272,6 +294,8 @@ test.describe("#173 Coffee composition stabilization", () => {
 
     expect(imageBoxes.warming.x).toBeGreaterThan(imageBoxes.off.x + 8);
     expect(imageBoxes.ready.x).toBeGreaterThan(imageBoxes.off.x + 8);
+    expect(imageBoxes.warming.width).toBeGreaterThan(imageBoxes.off.width + 5);
+    expect(imageBoxes.warming.height).toBeGreaterThan(imageBoxes.off.height + 5);
     expect(Math.abs(imageBoxes.warming.x - imageBoxes.ready.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(imageBoxes.warming.y - imageBoxes.ready.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(imageBoxes.warming.width - imageBoxes.ready.width)).toBeLessThanOrEqual(1);
@@ -283,20 +307,24 @@ test.describe("#173 Coffee composition stabilization", () => {
     await page.goto("/home?scenario=coffee-off&theme=night");
     const coffee = await waitForCoffee(page, "off");
     const image = coffee.locator(".coffee-asset__image");
+    const visual = coffee.locator(".coffee-asset__visual");
     const resting = await rect(image);
     await expect(coffee).toHaveAttribute("data-transition", "idle");
     await expect(image).toHaveCSS("transition-duration", "0.36s");
+    await expect(visual).toHaveCSS("transition-duration", "0.36s");
 
     await coffee.evaluate((element) => element.classList.add("coffee-panel--transition-moving"));
     await page.waitForTimeout(420);
     const moving = await rect(image);
     expect(moving.x).toBeGreaterThan(resting.x + 8);
+    expect(moving.width).toBeGreaterThan(resting.width + 5);
     await coffee.evaluate((element) => element.classList.replace("coffee-panel--transition-moving", "coffee-panel--transition-revealing"));
     await expect(coffee).toHaveAttribute("data-transition", "idle");
 
     await page.emulateMedia({ reducedMotion: "reduce" });
     await coffee.evaluate((element) => element.classList.add("coffee-panel--transition-moving"));
     await expect(image).toHaveCSS("transition-duration", "0.001s");
+    await expect(visual).toHaveCSS("transition-duration", "0.001s");
     const reducedMotion = await rect(image);
     expect(reducedMotion.x).toBeGreaterThan(resting.x + 8);
     await expectNoOverflow(page);
