@@ -137,6 +137,25 @@ test.describe("#173 Coffee composition stabilization", () => {
         })
       });
     });
+    await page.route("**/api/v1/snapshot**", async (route) => {
+      const response = await route.fetch();
+      const snapshot = await response.json() as { services: Array<Record<string, any>> };
+      for (const service of snapshot.services) {
+        if (service.id !== "coffee-machine") continue;
+        const machine = service.data?.machine as Record<string, any> | undefined;
+        if (!machine) continue;
+        for (const action of service.actions as Array<Record<string, any>>) {
+          action.enabled = action.id === "home.coffee.turn_on"
+            ? machine.state === "off"
+            : machine.state === "on";
+        }
+      }
+      await route.fulfill({
+        response,
+        body: JSON.stringify(snapshot),
+        headers: { ...response.headers(), "content-type": "application/json" }
+      });
+    });
   });
 
   test("keeps the 1280px Coffee media and footer geometry stable across states", async ({ page }, testInfo: TestInfo) => {
@@ -213,6 +232,60 @@ test.describe("#173 Coffee composition stabilization", () => {
     expect(narrowTimer.width).toBeGreaterThanOrEqual(48);
     expect(narrowTimer.height).toBeGreaterThanOrEqual(48);
     await page.screenshot({ path: testInfo.outputPath("home-coffee-off-390x844.png"), animations: "disabled", scale: "css" });
+    await expectNoOverflow(page);
+  });
+
+  test("keeps Home V2 Coffee states coherent and places warming activity above the machine", async ({ page }, testInfo: TestInfo) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const states = [
+      ["coffee-off", "off", "home-coffee-motion-off-1280x720.png"],
+      ["coffee-warming", "warming", "home-coffee-motion-warming-1280x720.png"],
+      ["coffee-ready", "ready", "home-coffee-motion-ready-1280x720.png"]
+    ] as const;
+    const imageBoxes: Record<string, Rect> = {};
+
+    for (const [scenario, stage, screenshotName] of states) {
+      await page.goto(`/home?scenario=${scenario}&theme=night`);
+      const coffee = await waitForCoffee(page, stage);
+      await assertCoffeeComposition(coffee);
+      await assertHomeCoffeeProportions(coffee, stage === "off");
+      imageBoxes[stage] = await rect(coffee.locator(".coffee-asset__image"));
+      await expect(coffee.locator(".coffee-asset")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expect(coffee.locator(".coffee-activity")).toHaveCount(stage === "warming" ? 1 : 0);
+      await expect(coffee.getByTestId("coffee-progress")).toHaveCount(stage === "warming" ? 1 : 0);
+      if (stage === "warming") {
+        const activityBox = await rect(coffee.locator(".coffee-activity"));
+        expect(activityBox.bottom).toBeLessThanOrEqual(imageBoxes[stage].y + 1);
+      }
+      await page.screenshot({ path: testInfo.outputPath(screenshotName), animations: "disabled", scale: "css" });
+      await expectNoOverflow(page);
+    }
+
+    expect(imageBoxes.warming.x).toBeGreaterThan(imageBoxes.off.x + 8);
+    expect(imageBoxes.ready.x).toBeGreaterThan(imageBoxes.off.x + 8);
+  });
+
+  test("supports the Home V2 moving-to-revealing class path and reduced-motion landing", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/home?scenario=coffee-off&theme=night");
+    const coffee = await waitForCoffee(page, "off");
+    const image = coffee.locator(".coffee-asset__image");
+    const resting = await rect(image);
+    await expect(coffee).toHaveAttribute("data-transition", "idle");
+    await expect(image).toHaveCSS("transition-duration", "0.36s");
+
+    await coffee.evaluate((element) => element.classList.add("coffee-panel--transition-moving"));
+    await page.waitForTimeout(420);
+    const moving = await rect(image);
+    expect(moving.x).toBeGreaterThan(resting.x + 8);
+    await coffee.evaluate((element) => element.classList.replace("coffee-panel--transition-moving", "coffee-panel--transition-revealing"));
+    await expect(coffee).toHaveAttribute("data-transition", "idle");
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await coffee.evaluate((element) => element.classList.add("coffee-panel--transition-moving"));
+    await expect(image).toHaveCSS("transition-duration", "0.001s");
+    const reducedMotion = await rect(image);
+    expect(reducedMotion.x).toBeGreaterThan(resting.x + 8);
     await expectNoOverflow(page);
   });
 

@@ -22,7 +22,7 @@ const healthLabels = {
   stale: "Данные устарели"
 } as const;
 
-type CoffeeOverviewTransitionPhase = "idle" | "moving" | "revealing";
+type CoffeeTransitionPhase = "idle" | "moving" | "revealing";
 
 export function HealthMark({
   health,
@@ -131,7 +131,7 @@ export function CoffeeWidget({
   const { status: accessStatus } = useAccess();
   const data = service.data as unknown as CoffeeData;
   const [presentationTime, setPresentationTime] = useState(() => Date.parse(generatedAt));
-  const [overviewTransition, setOverviewTransition] = useState<CoffeeOverviewTransitionPhase>("idle");
+  const [coffeeTransition, setCoffeeTransition] = useState<CoffeeTransitionPhase>("idle");
   const [reducedMotion, setReducedMotion] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
@@ -143,7 +143,7 @@ export function CoffeeWidget({
   const latestMachineState = useRef(data.machine.state);
   const latestMachineAvailable = useRef(data.machine.available);
   const latestMachineStale = useRef(data.machine.stale);
-  const overviewTransitionTimer = useRef<number | null>(null);
+  const coffeeTransitionTimer = useRef<number | null>(null);
   const clockEnabled =
     data.machine.state === "on" &&
     data.machine.available &&
@@ -168,7 +168,7 @@ export function CoffeeWidget({
   }, []);
 
   useEffect(() => () => {
-    if (overviewTransitionTimer.current !== null) window.clearTimeout(overviewTransitionTimer.current);
+    if (coffeeTransitionTimer.current !== null) window.clearTimeout(coffeeTransitionTimer.current);
   }, []);
 
   useEffect(() => {
@@ -177,29 +177,30 @@ export function CoffeeWidget({
     previousMachineState.current = currentState;
 
     const clearTransition = () => {
-      if (overviewTransitionTimer.current !== null) {
-        window.clearTimeout(overviewTransitionTimer.current);
-        overviewTransitionTimer.current = null;
+      if (coffeeTransitionTimer.current !== null) {
+        window.clearTimeout(coffeeTransitionTimer.current);
+        coffeeTransitionTimer.current = null;
       }
-      setOverviewTransition("idle");
+      setCoffeeTransition("idle");
     };
     const confirmedTurningOn = currentState === "turning_on" || currentState === "on";
     const confirmedAvailable = data.machine.available && !data.machine.stale;
+    const transitionEnabled = variant === "overview" || variant === "home-v2";
 
-    if (variant !== "overview" || reducedMotion) {
+    if (!transitionEnabled || reducedMotion) {
       clearTransition();
       return;
     }
     if (previousState === "off" && confirmedTurningOn && confirmedAvailable) {
-      if (overviewTransitionTimer.current !== null) window.clearTimeout(overviewTransitionTimer.current);
-      setOverviewTransition("moving");
-      overviewTransitionTimer.current = window.setTimeout(() => {
-        overviewTransitionTimer.current = null;
+      if (coffeeTransitionTimer.current !== null) window.clearTimeout(coffeeTransitionTimer.current);
+      setCoffeeTransition("moving");
+      coffeeTransitionTimer.current = window.setTimeout(() => {
+        coffeeTransitionTimer.current = null;
         const latestState = latestMachineState.current;
         if ((latestState === "turning_on" || latestState === "on") && latestMachineAvailable.current && !latestMachineStale.current) {
-          setOverviewTransition("revealing");
+          setCoffeeTransition("revealing");
         } else {
-          setOverviewTransition("idle");
+          setCoffeeTransition("idle");
         }
       }, 360);
       return;
@@ -234,8 +235,8 @@ export function CoffeeWidget({
   const duration = formatDuration(view.runningSeconds);
   const remaining = formatDuration(view.remainingSeconds);
   const warming = view.stage === "warming" && view.progress !== null;
-  const progressVisible = variant === "overview"
-    ? (warming || view.stage === "ready") && view.progress !== null && overviewTransition !== "moving"
+  const progressVisible = variant === "overview" || variant === "home-v2"
+    ? (warming || variant === "overview" && view.stage === "ready") && view.progress !== null && coffeeTransition !== "moving"
     : warming;
   const activeAction = service.actions.find((action) =>
     view.stage === "off" ? action.id.endsWith("turn_on") : action.id.endsWith("turn_off")
@@ -314,11 +315,11 @@ export function CoffeeWidget({
 
   return (
     <article
-      className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} coffee-panel--density-${requestedDensity} coffee-panel--image-x-${appearance.imageXStep + 3} coffee-panel--image-y-${appearance.imageYStep + 2}${overviewTransition === "idle" ? "" : ` coffee-panel--transition-${overviewTransition}`} ${view.warning ? "surface--warning" : ""}`}
+      className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} coffee-panel--density-${requestedDensity} coffee-panel--image-x-${appearance.imageXStep + 3} coffee-panel--image-y-${appearance.imageYStep + 2}${coffeeTransition === "idle" ? "" : ` coffee-panel--transition-${coffeeTransition}`} ${view.warning ? "surface--warning" : ""}`}
       data-testid="widget-coffee-machine"
       data-stage={view.stage}
       data-canonical-state={data.machine.state}
-      data-transition={overviewTransition}
+      data-transition={coffeeTransition}
       data-progress-tone={view.progressTone ?? "unknown"}
       data-progress-visible={progressVisible}
       data-overview-copy-density={variant === "overview" ? requestedDensity : undefined}
