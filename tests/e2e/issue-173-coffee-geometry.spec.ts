@@ -44,6 +44,12 @@ function expectNoIntersection(first: Rect, second: Rect, tolerance = 1) {
   ).toBe(true);
 }
 
+function expectVerticallyCentered(inner: Rect, outer: Rect, tolerance = 1) {
+  const innerCenter = inner.y + inner.height / 2;
+  const outerCenter = outer.y + outer.height / 2;
+  expect(Math.abs(innerCenter - outerCenter)).toBeLessThanOrEqual(tolerance);
+}
+
 async function expectNoOverflow(page: Page) {
   const size = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
@@ -242,6 +248,7 @@ test.describe("#173 Coffee composition stabilization", () => {
       ["coffee-warming", "warming", "home-coffee-motion-warming-1280x720.png"],
       ["coffee-ready", "ready", "home-coffee-motion-ready-1280x720.png"]
     ] as const;
+    const assetBoxes: Record<string, Rect> = {};
     const imageBoxes: Record<string, Rect> = {};
 
     for (const [scenario, stage, screenshotName] of states) {
@@ -249,6 +256,7 @@ test.describe("#173 Coffee composition stabilization", () => {
       const coffee = await waitForCoffee(page, stage);
       await assertCoffeeComposition(coffee);
       await assertHomeCoffeeProportions(coffee, stage === "off");
+      assetBoxes[stage] = await rect(coffee.locator(".coffee-asset"));
       imageBoxes[stage] = await rect(coffee.locator(".coffee-asset__image"));
       await expect(coffee.locator(".coffee-asset")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       await expect(coffee.locator(".coffee-activity")).toHaveCount(stage === "warming" ? 1 : 0);
@@ -257,12 +265,17 @@ test.describe("#173 Coffee composition stabilization", () => {
         const activityBox = await rect(coffee.locator(".coffee-activity"));
         expect(activityBox.bottom).toBeLessThanOrEqual(imageBoxes[stage].y + 1);
       }
+      expectVerticallyCentered(imageBoxes[stage], assetBoxes[stage]);
       await page.screenshot({ path: testInfo.outputPath(screenshotName), animations: "disabled", scale: "css" });
       await expectNoOverflow(page);
     }
 
     expect(imageBoxes.warming.x).toBeGreaterThan(imageBoxes.off.x + 8);
     expect(imageBoxes.ready.x).toBeGreaterThan(imageBoxes.off.x + 8);
+    expect(Math.abs(imageBoxes.warming.x - imageBoxes.ready.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(imageBoxes.warming.y - imageBoxes.ready.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(imageBoxes.warming.width - imageBoxes.ready.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(imageBoxes.warming.height - imageBoxes.ready.height)).toBeLessThanOrEqual(1);
   });
 
   test("supports the Home V2 moving-to-revealing class path and reduced-motion landing", async ({ page }) => {
