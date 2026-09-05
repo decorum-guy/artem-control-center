@@ -54,11 +54,15 @@ def _png_with_dimensions(width: int, height: int) -> bytes:
     return bytes(payload)
 
 
-def _api_module(monkeypatch, tmp_path):
+def _api_module(monkeypatch, tmp_path, *, upload_origin: str | None = "http://coffee-upload.test:8788"):
     monkeypatch.setenv("PANEL_AGENT_MODE", "integration_test")
     monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
     monkeypatch.setenv("PANEL_COFFEE_DIARY_PATH", str(tmp_path / "coffee.json"))
     monkeypatch.setenv("PANEL_COFFEE_DIARY_IMAGE_DIR", str(tmp_path / "images"))
+    if upload_origin is None:
+        monkeypatch.delenv("PANEL_COFFEE_DIARY_UPLOAD_ORIGIN", raising=False)
+    else:
+        monkeypatch.setenv("PANEL_COFFEE_DIARY_UPLOAD_ORIGIN", upload_origin)
     import importlib
     import panel_agent.main as module
     return importlib.reload(module)
@@ -743,3 +747,40 @@ def test_csv_and_zip_exports_are_safe_and_resolvable(monkeypatch, tmp_path):
                 assert hashlib.sha256(archive.read(entry["path"])).hexdigest() == entry["sha256"]
                 assert ".." not in entry["path"] and not entry["path"].startswith("/")
             assert not any(secret in archive_response.content for secret in (b"X-Coffee-Upload-Token", b"PANEL_COFFEE_DIARY_IMAGE_DIR"))
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://127.0.0.1:8788",
+        "http://localhost:8788",
+        "http://user:password@coffee-upload.test:8788",
+        "http://coffee-upload.test:8788/upload",
+        "http://coffee-upload.test:8788?token=secret",
+        "ftp://coffee-upload.test:8788",
+    ],
+)
+def test_unsafe_or_missing_upload_origin_fails_closed_before_session_creation(monkeypatch, tmp_path, origin):
+    module = _api_module(monkeypatch, tmp_path, upload_origin=origin)
+    with TestClient(module.app) as client:
+        response = client.post("/api/v1/coffee-diary/photo-upload-sessions", json={"intent": "bean_create"})
+        assert response.status_code == 503
+        assert response.json() == {"detail": "coffee_diary_upload_origin_invalid"}
+        assert module.coffee_upload_registry.sessions == {}
+
+    missing = _api_module(monkeypatch, tmp_path / "missing", upload_origin=None)
+    with TestClient(missing.app) as client:
+        response = client.post("/api/v1/coffee-diary/photo-upload-sessions", json={"intent": "bean_create"})
+        assert response.status_code == 503
+        assert response.json() == {"detail": "coffee_diary_upload_origin_required"}
+        assert missing.coffee_upload_registry.sessions == {}
+
+
+def test_configured_upload_origin_is_used_exactly_without_host_fallback(monkeypatch, tmp_path):
+    module = _api_module(monkeypatch, tmp_path, upload_origin="https://coffee-upload.example:443")
+    with TestClient(module.app) as client:
+        response = client.post("/api/v1/coffee-diary/photo-upload-sessions", json={"intent": "bean_create"})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["uploadUrl"].startswith("https://coffee-upload.example:443/coffee-upload#token=")
+        assert "127.0.0.1" not in payload["uploadUrl"]

@@ -10,6 +10,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { isIP } from "node:net";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -250,6 +251,72 @@ export function buildAgentEnvironment({
     PANEL_CAPABILITY_APPLY_STATE_PATH: capabilityApplyStatePath,
     PANEL_CAPABILITY_APPLY_ENABLED: "true"
   };
+}
+
+function unreachableCoffeeUploadOriginHost(hostname) {
+  const normalized = hostname.toLowerCase();
+  if (["localhost", "localhost.localdomain"].includes(normalized)) return true;
+  if (isIP(normalized) === 4) return normalized.startsWith("127.") || normalized === "0.0.0.0";
+  if (isIP(normalized) === 6) return normalized === "::1" || normalized === "::" || normalized.startsWith("::ffff:127.");
+  return false;
+}
+
+function validCoffeeUploadHostname(hostname) {
+  if (isIP(hostname)) return true;
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$/.test(hostname);
+}
+
+export function coffeeUploadIngressLaunchConfig(env = process.env) {
+  const rawOrigin = String(env.PANEL_COFFEE_DIARY_UPLOAD_ORIGIN || "");
+  const rawBindHost = String(env.PANEL_COFFEE_DIARY_UPLOAD_INGRESS_BIND_HOST || "");
+  const rawPortText = String(env.PANEL_COFFEE_DIARY_UPLOAD_INGRESS_PORT || "");
+  const origin = rawOrigin.trim();
+  const bindHost = rawBindHost.trim();
+  const portText = rawPortText.trim();
+  if (!bindHost && !portText) return null;
+  if (
+    !origin
+    || !bindHost
+    || !portText
+    || rawOrigin !== origin
+    || rawBindHost !== bindHost
+    || rawPortText !== portText
+  ) return { error: "incomplete_configuration" };
+
+  let parsed;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return { error: "invalid_origin" };
+  }
+  const hostname = parsed.hostname.replace(/^\[/, "").replace(/\]$/, "").toLowerCase();
+  const port = Number(portText);
+  if (
+    !["http:", "https:"].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+    || !["", "/"].includes(parsed.pathname)
+    || parsed.search
+    || parsed.hash
+    || !hostname
+    || unreachableCoffeeUploadOriginHost(hostname)
+    || !validCoffeeUploadHostname(hostname)
+    || !Number.isInteger(port)
+    || port < 1024
+    || port > 65535
+    || port === 8787
+    || parsed.protocol !== "http:"
+    || Number(parsed.port || 80) !== port
+    || /[\s\x00-\x1f]/.test(bindHost)
+    || bindHost === "127.0.0.1"
+    || bindHost === "::1"
+    || bindHost.toLowerCase() === "localhost"
+    || (isIP(bindHost) && unreachableCoffeeUploadOriginHost(bindHost) && !["0.0.0.0", "::"].includes(bindHost))
+    || (bindHost !== "0.0.0.0" && bindHost !== "::" && !validCoffeeUploadHostname(bindHost) && !isIP(bindHost))
+  ) {
+    return { error: "invalid_configuration" };
+  }
+  return { bindHost, port };
 }
 
 export function isSafeCapabilityApplyCommand(command) {
@@ -642,7 +709,7 @@ export function restoreDashboardBackup({ active, backup }) {
   renameSync(backup, active);
 }
 
-function stopProcessTree(child, log) {
+function stopProcessTree(child, log, label = "agent") {
   if (!child?.pid || child.killed) return;
   if (process.platform === "win32") {
     const result = spawnSync(
@@ -651,7 +718,7 @@ function stopProcessTree(child, log) {
       { encoding: "utf8", windowsHide: true }
     );
     if (result.status !== 0) {
-      log("WARN", `taskkill for agent ${child.pid} returned ${result.status}`);
+      log("WARN", `taskkill for ${label} ${child.pid} returned ${result.status}`);
     }
   } else {
     child.kill("SIGTERM");
@@ -770,6 +837,7 @@ export async function runProductionRuntime() {
     capabilityOverridesPath,
     capabilityApplyStatePath
   });
+  const coffeeUploadIngress = coffeeUploadIngressLaunchConfig(agentEnv);
 
   process.title = "artem-control-center-runtime";
   rmSync(commandPath, { force: true });
@@ -784,6 +852,9 @@ export async function runProductionRuntime() {
   let commandTimer = null;
   let healthTimer = null;
   let restartTimer = null;
+  let coffeeUploadIngressProcess = null;
+  let coffeeUploadIngressRestartTimer = null;
+  let coffeeUploadIngressRestartAttempts = 0;
   let applyingCapabilities = false;
 
   function writeCapabilityApplyState(status, extra = {}) {
@@ -931,6 +1002,57 @@ export async function runProductionRuntime() {
     });
   }
 
+  function spawnCoffeeUploadIngress() {
+    if (shuttingDown || coffeeUploadIngressProcess || !coffeeUploadIngress || coffeeUploadIngress.error) return;
+    const child = spawn(
+      venvPython,
+      [
+        "-m",
+        "uvicorn",
+        "panel_agent.coffee_upload_ingress:configured_app",
+        "--factory",
+        "--app-dir",
+        "apps/panel-agent/src",
+        "--host",
+        coffeeUploadIngress.bindHost,
+        "--port",
+        String(coffeeUploadIngress.port),
+        "--no-access-log",
+        "--log-level",
+        "warning"
+      ],
+      {
+        cwd: root,
+        env: agentEnv,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+    coffeeUploadIngressProcess = child;
+    attachStream(child.stdout, "[coffee-upload-ingress]", log);
+    attachStream(child.stderr, "[coffee-upload-ingress:error]", log);
+    log("INFO", `Coffee upload ingress started with pid=${child.pid}`);
+    child.once("error", (error) => {
+      log("ERROR", `Coffee upload ingress process error: ${error?.message || error}`);
+    });
+    child.once("exit", (code, signal) => {
+      if (coffeeUploadIngressProcess === child) coffeeUploadIngressProcess = null;
+      const expected = expectedExitPids.delete(child.pid);
+      log(
+        expected ? "INFO" : "ERROR",
+        `Coffee upload ingress exited pid=${child.pid} code=${code ?? "null"} signal=${signal ?? "none"}`
+      );
+      if (!shuttingDown && !expected && coffeeUploadIngressRestartAttempts < 3) {
+        coffeeUploadIngressRestartAttempts += 1;
+        const delay = Math.min(5_000, 1_000 * coffeeUploadIngressRestartAttempts);
+        coffeeUploadIngressRestartTimer = setTimeout(() => {
+          coffeeUploadIngressRestartTimer = null;
+          spawnCoffeeUploadIngress();
+        }, delay);
+      }
+    });
+  }
+
   function requestRestart(reason, { allowBeyondBudget = false } = {}) {
     if (shuttingDown || restartPending) return;
     const restartPlan = planRestart(restartBudget, { allowBeyondBudget });
@@ -982,8 +1104,12 @@ export async function runProductionRuntime() {
     if (commandTimer) clearInterval(commandTimer);
     if (healthTimer) clearInterval(healthTimer);
     if (restartTimer) clearTimeout(restartTimer);
+    if (coffeeUploadIngressRestartTimer) clearTimeout(coffeeUploadIngressRestartTimer);
     rmSync(commandPath, { force: true });
     closeKioskWindow(edgeProfileDir, log);
+    if (coffeeUploadIngressProcess?.pid) expectedExitPids.add(coffeeUploadIngressProcess.pid);
+    stopProcessTree(coffeeUploadIngressProcess, log, "coffee upload ingress");
+    coffeeUploadIngressProcess = null;
     if (agent?.pid) expectedExitPids.add(agent.pid);
     stopProcessTree(agent, log);
     agent = null;
@@ -1161,7 +1287,11 @@ export async function runProductionRuntime() {
   });
 
   log("INFO", `Production runtime starting root=${root}`);
+  if (coffeeUploadIngress?.error) {
+    log("WARN", `Coffee upload ingress disabled: ${coffeeUploadIngress.error}`);
+  }
   spawnAgent();
+  spawnCoffeeUploadIngress();
   commandTimer = setInterval(consumeRuntimeCommand, 250);
   healthTimer = setInterval(async () => {
     if (shuttingDown || restartPending || healthCheckRunning || !agent) return;
