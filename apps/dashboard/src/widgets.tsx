@@ -238,6 +238,7 @@ export function CoffeeWidget({
   const progressVisible = variant === "overview" || variant === "home-v2"
     ? (warming || variant === "overview" && view.stage === "ready") && view.progress !== null && coffeeTransition !== "moving"
     : warming;
+  const progressMounted = variant === "home-v2" || progressVisible;
   const activeAction = service.actions.find((action) =>
     view.stage === "off" ? action.id.endsWith("turn_on") : action.id.endsWith("turn_off")
   );
@@ -346,8 +347,14 @@ export function CoffeeWidget({
           <span>{stateDetail}</span>
         </div>
 
-        {progressVisible && (
-          <div className="coffee-progress" data-testid="coffee-progress" aria-label={`Разогрев ${view.progressText}`}>
+        {progressMounted && (
+          <div
+            className="coffee-progress"
+            data-testid="coffee-progress"
+            data-progress-visible={progressVisible}
+            aria-hidden={!progressVisible}
+            aria-label={progressVisible ? `Разогрев ${view.progressText}` : undefined}
+          >
             <div className="coffee-progress__track">
               <span style={{ width: `${view.progress! * 100}%`, backgroundColor: "var(--cc-coffee-progress-color)" }} />
             </div>

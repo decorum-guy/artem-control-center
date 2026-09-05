@@ -52,7 +52,37 @@
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-panel__state { gap: 3px; margin: auto 0 8px; }
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-panel__state strong { font-size: var(--cc-type-primary-state-size); line-height: var(--cc-type-primary-state-line); letter-spacing: -.025em; }
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-panel__state span { font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); }
-.home-v2-primary-grid .coffee-panel--home-v2 .coffee-progress { grid-template-columns: 1fr 34px; gap: 8px; width: 100%; margin-bottom: 8px; }
+.home-v2-primary-grid .coffee-panel--home-v2 .coffee-progress {
+  grid-template-columns: 1fr 34px;
+  gap: 8px;
+  width: 100%;
+  max-height: 2.25rem;
+  margin-bottom: 8px;
+  overflow: hidden;
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition:
+    max-height 220ms cubic-bezier(.2,.75,.25,1),
+    margin-bottom 220ms cubic-bezier(.2,.75,.25,1),
+    opacity 200ms ease,
+    transform 220ms cubic-bezier(.2,.75,.25,1),
+    visibility 0s linear 0s;
+}
+.home-v2-primary-grid .coffee-panel--home-v2 .coffee-progress[data-progress-visible="false"] {
+  max-height: 0;
+  margin-bottom: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    max-height 220ms cubic-bezier(.2,.75,.25,1),
+    margin-bottom 220ms cubic-bezier(.2,.75,.25,1),
+    opacity 200ms ease,
+    transform 220ms cubic-bezier(.2,.75,.25,1),
+    visibility 0s linear 220ms;
+}
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-policy-note { max-width: none; margin-bottom: 8px; font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); }
 .home-v2-primary-grid .coffee-panel--home-v2 .coffee-action-row { grid-template-columns: 208px 56px; }
 .home-v2-primary-grid .coffee-panel--home-v2 .primary-action { min-width: 0; width: 100%; min-height: 56px; padding: 0 10px; }
@@ -191,4 +221,11 @@
     height: auto;
   }
   .home-v2-primary-grid > .device-row--primary { grid-row: span 2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-v2-primary-grid .coffee-panel--home-v2 .coffee-progress,
+  .home-v2-primary-grid .coffee-panel--home-v2 .coffee-progress[data-progress-visible="false"] {
+    transition: none;
+  }
 }

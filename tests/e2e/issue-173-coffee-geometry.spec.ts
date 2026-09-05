@@ -4,6 +4,9 @@ const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 const overviewV2Enabled = process.env.VITE_OVERVIEW_V2_ENABLED === "true";
 
 type Rect = { x: number; y: number; width: number; height: number; right: number; bottom: number };
+type CoffeeTransitionFixture = "off" | "warming" | "ready" | null;
+
+let coffeeTransitionFixture: CoffeeTransitionFixture = null;
 
 async function waitForCoffee(page: Page, stage: string) {
   const coffee = page.getByTestId("widget-coffee-machine");
@@ -28,6 +31,46 @@ async function rect(locator: Locator): Promise<Rect> {
     right: box!.x + box!.width,
     bottom: box!.y + box!.height
   };
+}
+
+type ProgressPresentation = { opacity: number; height: number; marginBottom: number; visibility: string };
+
+async function progressPresentation(locator: Locator): Promise<ProgressPresentation> {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    return {
+      opacity: Number.parseFloat(style.opacity),
+      height: box.height,
+      marginBottom: Number.parseFloat(style.marginBottom),
+      visibility: style.visibility
+    };
+  });
+}
+
+async function sampleProgressTransition(page: Page, triggerSnapshot = false): Promise<ProgressPresentation[]> {
+  return page.evaluate((shouldTriggerSnapshot) => new Promise<ProgressPresentation[]>((resolve) => {
+    const element = document.querySelector<HTMLElement>('[data-testid="coffee-progress"]');
+    if (!element) throw new Error("Expected Home V2 progress shell");
+    const samples: ProgressPresentation[] = [];
+    const startedAt = performance.now();
+    const sample = () => {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      samples.push({
+        opacity: Number.parseFloat(style.opacity),
+        height: box.height,
+        marginBottom: Number.parseFloat(style.marginBottom),
+        visibility: style.visibility
+      });
+      if (performance.now() - startedAt < 600) requestAnimationFrame(sample);
+      else resolve(samples);
+    };
+    sample();
+    if (shouldTriggerSnapshot) {
+      (window as unknown as { emitSnapshot: () => void }).emitSnapshot();
+    }
+  }), triggerSnapshot);
 }
 
 function expectContained(inner: Rect, outer: Rect, tolerance = 1) {
@@ -124,6 +167,7 @@ test.describe("#173 Coffee composition stabilization", () => {
   );
 
   test.beforeEach(async ({ page }) => {
+    coffeeTransitionFixture = null;
     await page.route("**/api/v1/access", async (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       await route.fulfill({
@@ -145,7 +189,7 @@ test.describe("#173 Coffee composition stabilization", () => {
     });
     await page.route("**/api/v1/snapshot**", async (route) => {
       const response = await route.fetch();
-      const snapshot = await response.json() as { services: Array<Record<string, any>> };
+      const snapshot = await response.json() as { generatedAt?: string; services: Array<Record<string, any>> };
       for (const service of snapshot.services) {
         if (service.id !== "coffee-machine") continue;
         const machine = service.data?.machine as Record<string, any> | undefined;
@@ -154,6 +198,28 @@ test.describe("#173 Coffee composition stabilization", () => {
           action.enabled = action.id === "home.coffee.turn_on"
             ? machine.state === "off"
             : machine.state === "on";
+        }
+      }
+      if (coffeeTransitionFixture) {
+        const coffee = snapshot.services.find((service) => service.id === "coffee-machine");
+        const coffeeData = coffee?.data as { machine?: Record<string, any>; timingPolicy?: Record<string, any> } | undefined;
+        if (coffee && coffeeData?.machine && coffeeData.timingPolicy) {
+          coffeeData.machine.available = true;
+          coffeeData.machine.stale = false;
+          if (coffeeTransitionFixture === "off") {
+            coffeeData.machine.state = "off";
+            coffeeData.machine.turnedOnAt = null;
+          } else {
+            coffeeData.machine.state = "on";
+            const warmupSeconds = Number(coffeeData.timingPolicy.warmupDurationSeconds ?? 780);
+            const longRunningSeconds = Number(coffeeData.timingPolicy.longRunningThresholdSeconds ?? Number.POSITIVE_INFINITY);
+            const elapsed = coffeeTransitionFixture === "warming"
+              ? Math.min(warmupSeconds * 0.45, longRunningSeconds * 0.45)
+              : warmupSeconds + 1;
+            const snapshotTime = Date.parse(snapshot.generatedAt ?? "");
+            const baseTime = Number.isFinite(snapshotTime) ? snapshotTime : Date.now();
+            coffeeData.machine.turnedOnAt = new Date(baseTime - elapsed * 1000).toISOString();
+          }
         }
       }
       await route.fulfill({
@@ -283,11 +349,14 @@ test.describe("#173 Coffee composition stabilization", () => {
       expect(accent.borderTopRightRadius).toBe("2px");
       expect(accent.borderBottomRightRadius).toBe("2px");
       await expect(coffee.locator(".coffee-activity")).toHaveCount(stage === "warming" ? 1 : 0);
-      await expect(coffee.getByTestId("coffee-progress")).toHaveCount(stage === "warming" ? 1 : 0);
+      await expect(coffee.getByTestId("coffee-progress")).toHaveCount(1);
       await expect(coffee.locator(".coffee-asset__image")).toHaveCSS("transition-duration", "0.36s");
       await expect(coffee.locator(".coffee-asset__visual")).toHaveCSS("transition-duration", "0.36s");
       if (stage === "warming") {
         await expect(coffee.locator(".coffee-activity")).toBeHidden();
+        await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
+      } else {
+        await expect(coffee.getByTestId("coffee-progress")).toBeHidden();
       }
       expectVerticallyCentered(imageBoxes[stage], assetBoxes[stage]);
       await page.screenshot({ path: testInfo.outputPath(screenshotName), animations: "disabled", scale: "css" });
@@ -357,6 +426,109 @@ test.describe("#173 Coffee composition stabilization", () => {
     expect(readyMid.x).toBeGreaterThan(ready.x + 1);
     expect(ready.width).toBeGreaterThan(resting.width + 5);
     expect(Math.abs(ready.width - warming.width)).toBeLessThanOrEqual(1);
+    await expectNoOverflow(page);
+  });
+
+  test("fades and collapses Home V2 warmup progress across a real state transition", async ({ page }) => {
+    await page.addInitScript(() => {
+      type Handler = (event: Event) => void;
+      const sources: Array<{ handlers: Map<string, Handler[]> }> = [];
+      class FakeEventSource {
+        handlers = new Map<string, Handler[]>();
+        constructor() {
+          sources.push(this);
+        }
+        addEventListener(type: string, handler: Handler) {
+          this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler]);
+        }
+        close() {}
+      }
+      Object.defineProperty(window, "EventSource", { configurable: true, value: FakeEventSource });
+      (window as unknown as { emitSnapshot: () => void }).emitSnapshot = () => {
+        for (const source of sources) {
+          for (const handler of source.handlers.get("snapshot") ?? []) {
+            handler(new MessageEvent("snapshot", { data: "{}" }));
+          }
+        }
+      };
+    });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    coffeeTransitionFixture = "off";
+    await page.goto("/home?scenario=coffee-off&theme=night");
+    const coffee = await waitForCoffee(page, "off");
+    const progress = coffee.getByTestId("coffee-progress");
+    await expect(progress).toHaveCount(1);
+    await expect(progress).toBeHidden();
+    const off = await progressPresentation(progress);
+    expect(off.opacity).toBe(0);
+    expect(off.height).toBeLessThanOrEqual(1);
+    expect(off.marginBottom).toBe(0);
+    await expect(coffee).toHaveAttribute("data-progress-visible", "false");
+
+    coffeeTransitionFixture = "warming";
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await expect(coffee).toHaveAttribute("data-stage", "warming");
+    await expect(coffee).toHaveAttribute("data-transition", "moving");
+    await expect(progress).toHaveAttribute("data-progress-visible", "false");
+    const moving = await progressPresentation(progress);
+    expect(moving.height).toBeLessThanOrEqual(1);
+
+    const fadeInSamplesPromise = sampleProgressTransition(page);
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    await expect(progress).toHaveAttribute("data-progress-visible", "true");
+    const transitionMs = await progress.evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration.split(",")[0]) * 1000);
+    const fadeInSamples = await fadeInSamplesPromise;
+    const warmingFull = await progressPresentation(progress);
+    expect(warmingFull.opacity).toBeGreaterThan(0.99);
+    const fadeInMid = fadeInSamples.find((sample) => sample.opacity > 0.05 && sample.opacity < 0.95);
+    expect(fadeInMid, "Expected an intermediate fade-in opacity sample").toBeDefined();
+    expect(fadeInMid!.height).toBeGreaterThan(off.height + 1);
+    expect(fadeInMid!.height).toBeLessThan(warmingFull.height - 1);
+    await expect(progress.locator("output")).toHaveText(/\d+%/);
+
+    coffeeTransitionFixture = "ready";
+    const fadeOutSamplesPromise = sampleProgressTransition(page, true);
+    await expect(coffee).toHaveAttribute("data-stage", "ready");
+    await expect(progress).toHaveAttribute("data-progress-visible", "false");
+    await expect(progress).toHaveAttribute("aria-hidden", "true");
+    const fadeOutSamples = await fadeOutSamplesPromise;
+    const fadeOutMid = fadeOutSamples.find((sample) =>
+      sample.opacity > 0.05 && sample.opacity < 0.95 && sample.height > 1 && sample.height < warmingFull.height - 1
+    );
+    expect(fadeOutMid, "Expected an intermediate fade-out opacity and geometry sample").toBeDefined();
+    expect(fadeOutMid!.marginBottom).toBeGreaterThan(0);
+
+    expect(transitionMs).toBeGreaterThanOrEqual(180);
+    expect(transitionMs).toBeLessThanOrEqual(240);
+    await expect(progress).toBeHidden();
+    const ready = await progressPresentation(progress);
+    expect(ready.opacity).toBeLessThanOrEqual(0.01);
+    expect(ready.height).toBeLessThanOrEqual(1);
+    expect(ready.marginBottom).toBe(0);
+    await expectNoOverflow(page);
+  });
+
+  test("lands Home V2 warmup progress directly with reduced motion", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/home?scenario=coffee-warming&theme=night");
+    const coffee = await waitForCoffee(page, "warming");
+    const progress = coffee.getByTestId("coffee-progress");
+    await expect(progress).toHaveCount(1);
+    await expect(progress).toBeVisible();
+    await expect(progress).toHaveAttribute("aria-hidden", "false");
+    const warming = await progressPresentation(progress);
+    expect(warming.opacity).toBe(1);
+    expect(warming.height).toBeGreaterThan(1);
+
+    await page.goto("/home?scenario=coffee-ready&theme=night");
+    const readyProgress = page.getByTestId("widget-coffee-machine").getByTestId("coffee-progress");
+    await expect(readyProgress).toHaveCount(1);
+    await expect(readyProgress).toBeHidden();
+    const ready = await progressPresentation(readyProgress);
+    expect(ready.opacity).toBe(0);
+    expect(ready.height).toBeLessThanOrEqual(1);
+    expect(ready.marginBottom).toBe(0);
     await expectNoOverflow(page);
   });
 
