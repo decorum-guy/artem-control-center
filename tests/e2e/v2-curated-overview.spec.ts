@@ -793,8 +793,28 @@ test.describe("PR4 curated Overview", () => {
     await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
     await expect(coffee).toHaveAttribute("data-canonical-state", "on");
     await expect(coffee).toHaveAttribute("data-transition", "moving");
-    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(1);
-    await expect(coffee.getByTestId("coffee-progress")).toBeHidden();
+    const movingProgress = coffee.getByTestId("coffee-progress");
+    await expect(movingProgress).toHaveCount(1);
+    const movingPresentation = await movingProgress.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return {
+        dataProgressVisible: element.getAttribute("data-progress-visible"),
+        ariaHidden: element.getAttribute("aria-hidden"),
+        opacity: Number.parseFloat(style.opacity),
+        visibility: style.visibility,
+        height: box.height,
+        maxHeight: Number.parseFloat(style.maxHeight),
+        marginBottom: Number.parseFloat(style.marginBottom)
+      };
+    });
+    expect(movingPresentation.dataProgressVisible).toBe("false");
+    expect(movingPresentation.ariaHidden).toBe("true");
+    expect(movingPresentation.opacity).toBeLessThanOrEqual(0.01);
+    expect(movingPresentation.visibility).toBe("hidden");
+    expect(movingPresentation.height).toBeLessThanOrEqual(1);
+    expect(movingPresentation.maxHeight).toBeLessThanOrEqual(1);
+    expect(movingPresentation.marginBottom).toBe(0);
     const adjacentDuring = await item(page, "fixture.health").boundingBox();
     expect(adjacentDuring?.x).toBeCloseTo(adjacentBefore?.x ?? Number.NaN, 1);
     expect(adjacentDuring?.y).toBeCloseTo(adjacentBefore?.y ?? Number.NaN, 1);
