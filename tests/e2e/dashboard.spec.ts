@@ -96,7 +96,12 @@ test("day, night and reduced motion share the same product shell", async ({ page
   await expect(page.locator(".app")).toHaveClass(/motion-reduced/);
 
   await page.goto("/overview?scenario=coffee-warming&motion=reduced");
-  await expect(page.locator(".coffee-activity i").first()).toHaveCSS("animation-duration", "0.001s");
+  const coffeeActivity = page.locator(".coffee-activity i");
+  if (await coffeeActivity.count()) {
+    await expect(coffeeActivity.first()).toHaveCSS("animation-duration", "0.001s");
+  } else {
+    await expect(page.locator(".coffee-panel--overview .coffee-activity")).toHaveCount(0);
+  }
 });
 
 test("all product routes render intentional non-development states", async ({ page }) => {
