@@ -12,6 +12,7 @@ import {
 import { spawn, spawnSync } from "node:child_process";
 import { isIP } from "node:net";
 import { join, resolve } from "node:path";
+import { resolveRevisionScopedVenvRoot, resolveVenvPython } from "./runtime-venv.mjs";
 import { pathToFileURL } from "node:url";
 
 export function parseEnvText(text) {
@@ -803,7 +804,7 @@ export async function runProductionRuntime() {
   if (!/^[a-f0-9]{40}$/.test(revision)) {
     throw new Error("Unable to resolve the production checkout revision");
   }
-  const venvPython = resolve(runtimeDir, "venvs", revision, isWindows ? "Scripts/python.exe" : "bin/python");
+  const venvPython = resolveVenvPython(resolveRevisionScopedVenvRoot(runtimeDir, revision), process.platform);
   const log = createLogger(logDir);
 
   mkdirSync(runtimeDir, { recursive: true });

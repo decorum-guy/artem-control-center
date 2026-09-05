@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { resolveSetupVenvRoot, resolveVenvPython } from "./runtime-venv.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const isWindows = process.platform === "win32";
@@ -8,10 +9,8 @@ const isWindows = process.platform === "win32";
 // root before cutover.  It is deliberately outside the checkout: a venv embeds
 // its creation path and cannot safely be moved from a worktree afterwards.
 const configuredVenv = process.env.PANEL_RUNTIME_VENV;
-const venvRoot = configuredVenv
-  ? resolve(configuredVenv)
-  : resolve(root, ".venv");
-const venvPython = resolve(venvRoot, isWindows ? "Scripts/python.exe" : "bin/python");
+const venvRoot = resolveSetupVenvRoot(root, configuredVenv);
+const venvPython = resolveVenvPython(venvRoot, process.platform);
 
 function run(command, args, env = {}) {
   const result = spawnSync(command, args, {
