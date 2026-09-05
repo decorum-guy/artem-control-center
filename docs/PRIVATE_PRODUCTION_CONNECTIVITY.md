@@ -14,6 +14,44 @@ The VPS ports must be published only on `127.0.0.1`. They must not bind to
 Mac administration key and has no shell, PTY, agent forwarding, X11 forwarding
 or access to arbitrary destinations.
 
+## Coffee Diary phone upload ingress
+
+The Panel Agent remains bound only to `127.0.0.1:8787`. The Coffee Diary QR
+does not use the kiosk Host header and does not guess a network adapter. It is
+created only when `PANEL_COFFEE_DIARY_UPLOAD_ORIGIN` is explicitly configured
+with a non-loopback `http` or `https` origin. Missing, malformed, credentialed,
+path-bearing, query-bearing, fragment-bearing and loopback origins fail closed
+before an upload session is created.
+
+When no existing narrow reverse proxy is maintained, the production runtime can
+start the dedicated Coffee ingress with:
+
+```text
+PANEL_COFFEE_DIARY_UPLOAD_ORIGIN=http://<samsung-lan-address>:8788
+PANEL_COFFEE_DIARY_UPLOAD_INGRESS_BIND_HOST=0.0.0.0
+PANEL_COFFEE_DIARY_UPLOAD_INGRESS_PORT=8788
+```
+
+That listener serves only `GET /coffee-upload` and
+`POST /api/v1/coffee-diary/photo-upload`. The page is a small inline mobile
+page; the POST is forwarded only to the fixed loopback upload route. No
+dashboard assets, snapshot, settings, planning, runtime controls, general API
+proxy, arbitrary upstream path or shell is exposed. The token remains in the
+URL fragment until the page removes it from browser history and sends it in the
+intended request header. Token, image, intent and storage validation stay in
+the Panel Agent.
+
+The Windows firewall rule is separate and explicit:
+
+```powershell
+.\scripts\windows\install-coffee-upload-ingress.ps1 -Port 8788
+.\scripts\windows\uninstall-coffee-upload-ingress.ps1
+```
+
+It is limited to the dedicated bridge program, TCP port, Private profile and
+the local subnet. The implementation does not apply this rule or change
+`runtime.env` on a Samsung during development.
+
 ## Windows runtime
 
 `install-connectivity-tunnel.ps1` creates:
