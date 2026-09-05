@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type {
   CoffeeData,
   CoffeeDelayedStartRecord,
@@ -171,7 +171,7 @@ export function CoffeeWidget({
     if (coffeeTransitionTimer.current !== null) window.clearTimeout(coffeeTransitionTimer.current);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const currentState = data.machine.state;
     const previousState = previousMachineState.current;
     previousMachineState.current = currentState;

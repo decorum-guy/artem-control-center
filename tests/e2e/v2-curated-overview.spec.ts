@@ -788,9 +788,64 @@ test.describe("PR4 curated Overview", () => {
     await expect(coffee).toHaveAttribute("data-transition", "idle");
     await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
     const adjacentBefore = await item(page, "fixture.health").boundingBox();
+    const coffeeImage = coffee.locator(".coffee-asset__image");
 
     coffeeFixtureOverride = "warming";
-    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    const firstTransitionFrames = await page.evaluate(() => new Promise<Array<{
+      canonicalState: string;
+      transition: string;
+      progressVisible: string;
+      ariaHidden: string | null;
+      opacity: number | null;
+      imageX: number | null;
+      imageWidth: number | null;
+    }>>((resolve) => {
+      const samples: Array<{
+        canonicalState: string;
+        transition: string;
+        progressVisible: string;
+        ariaHidden: string | null;
+        opacity: number | null;
+        imageX: number | null;
+        imageWidth: number | null;
+      }> = [];
+      let frames = 0;
+      const sample = () => {
+        const panel = document.querySelector<HTMLElement>('[data-testid="widget-coffee-machine"]');
+        const progress = panel?.querySelector<HTMLElement>('[data-testid="coffee-progress"]') ?? null;
+        const image = panel?.querySelector<HTMLElement>(".coffee-asset__image") ?? null;
+        const style = progress ? getComputedStyle(progress) : null;
+        const imageBox = image?.getBoundingClientRect() ?? null;
+        const frame = {
+          canonicalState: panel?.dataset.canonicalState ?? "",
+          transition: panel?.dataset.transition ?? "",
+          progressVisible: panel?.dataset.progressVisible ?? "",
+          ariaHidden: progress?.getAttribute("aria-hidden") ?? null,
+          opacity: style ? Number.parseFloat(style.opacity) : null,
+          imageX: imageBox?.x ?? null,
+          imageWidth: imageBox?.width ?? null
+        };
+        samples.push(frame);
+        if (frame.transition === "moving" || frames >= 32) {
+          resolve(samples);
+          return;
+        }
+        frames += 1;
+        requestAnimationFrame(sample);
+      };
+      (window as unknown as { emitSnapshot: () => void }).emitSnapshot();
+      sample();
+    }));
+    const activeFrames = firstTransitionFrames.filter((frame) => frame.canonicalState === "on");
+    expect(activeFrames.length, "Expected sampled frames after the warming snapshot").toBeGreaterThan(0);
+    expect(firstTransitionFrames.some((frame) => frame.canonicalState === "on" && frame.transition === "idle"))
+      .toBe(false);
+    const firstActiveFrame = activeFrames[0];
+    expect(firstActiveFrame.transition).toBe("moving");
+    expect(firstActiveFrame.progressVisible).toBe("false");
+    expect(firstActiveFrame.ariaHidden).toBe("true");
+    expect(firstActiveFrame.opacity).not.toBeNull();
+    expect(firstActiveFrame.opacity!).toBeLessThanOrEqual(0.01);
     await expect(coffee).toHaveAttribute("data-canonical-state", "on");
     await expect(coffee).toHaveAttribute("data-transition", "moving");
     const movingProgress = coffee.getByTestId("coffee-progress");
@@ -822,6 +877,12 @@ test.describe("PR4 curated Overview", () => {
     await expect(coffee).toHaveAttribute("data-transition", "revealing");
     await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
     await expect(coffee.getByTestId("coffee-progress")).toContainText("45%");
+    const warmingImage = await coffeeImage.boundingBox();
+    expect(warmingImage).not.toBeNull();
+    expect(firstActiveFrame.imageX).not.toBeNull();
+    expect(firstActiveFrame.imageWidth).not.toBeNull();
+    expect(firstActiveFrame.imageX!).toBeLessThan(warmingImage!.x - 0.05);
+    expect(firstActiveFrame.imageWidth!).toBeLessThan(warmingImage!.width - 0.05);
     const adjacentSettled = await item(page, "fixture.health").boundingBox();
     expect(adjacentSettled?.x).toBeCloseTo(adjacentBefore?.x ?? Number.NaN, 1);
     expect(adjacentSettled?.y).toBeCloseTo(adjacentBefore?.y ?? Number.NaN, 1);
