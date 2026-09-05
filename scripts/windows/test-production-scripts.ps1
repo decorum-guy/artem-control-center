@@ -430,6 +430,8 @@ try {
     $ArtemUpdateActivityMax = 32
     $ArtemUpdateActivityCodes = @(
         "started",
+        "preparing",
+        "installing",
         "stopping",
         "checkout",
         "handoff",

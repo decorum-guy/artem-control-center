@@ -41,6 +41,8 @@ SAFE_OWNER_RESULTS = frozenset({
 })
 UPDATE_PHASES = frozenset({
     "started",
+    "preparing",
+    "installing",
     "stopping",
     "checkout",
     "handoff",
@@ -56,13 +58,15 @@ UPDATE_ACTIVITY_MAX = 32
 UPDATE_ACTIVITY_CODES = frozenset((*UPDATE_PHASES, "completed"))
 UPDATE_ACTIVITY_COPY = {
     "started": "Проверяем обновление",
+    "preparing": "Готовим изолированную новую версию",
+    "installing": "Устанавливаем зависимости новой версии",
     "stopping": "Останавливаем текущую панель",
-    "checkout": "Получаем новую версию",
+    "checkout": "Переключаем подготовленную версию",
     "handoff": "Передаём управление новой версии обновлятора",
-    "target-authoritative": "Получаем новую версию",
+    "target-authoritative": "Новая версия обновлятора приняла управление",
     "validating": "Проверяем проект",
     "building": "Собираем панель",
-    "artifact-ready": "Готовим новую сборку",
+    "artifact-ready": "Новая сборка готова к переключению",
     "restarting": "Перезапускаем Control Center",
     "verifying": "Проверяем запущенную версию",
     "rollback": "Восстанавливаем предыдущую версию",
@@ -70,14 +74,16 @@ UPDATE_ACTIVITY_COPY = {
 }
 UPDATE_PHASE_PROGRESS = {
     "started": 5,
-    "stopping": 12,
-    "checkout": 24,
-    "handoff": 30,
-    "target-authoritative": 36,
+    "preparing": 15,
+    "installing": 30,
+    "stopping": 80,
+    "checkout": 84,
+    "handoff": 86,
+    "target-authoritative": 88,
     "validating": 50,
     "building": 66,
-    "artifact-ready": 76,
-    "restarting": 86,
+    "artifact-ready": 78,
+    "restarting": 91,
     "verifying": 95,
     # Rollback is deliberately visible as its own phase rather than being
     # presented as forward progress toward a successful update.

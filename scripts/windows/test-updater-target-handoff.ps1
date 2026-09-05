@@ -91,6 +91,7 @@ try {
         throw "Parent did not publish a bounded ownerless target handoff lease"
     }
     $process = Start-ArtemTargetContinuation -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript
+    $process.WaitForExit()
     if ($process.ExitCode -ne 0) { throw "Target continuation child failed" }
     $receipt = Get-ArtemJsonPayload -Path (Join-Path $root "child-receipt.json")
     if ($null -eq $receipt -or [string]$receipt.current -ne $current -or [string]$receipt.target -ne $target -or [string]$receipt.requestId -ne $request -or -not [bool]$receipt.continuation) {
@@ -126,6 +127,7 @@ try {
     Publish-ArtemTargetHandoffLease -Paths $paths -LockRequestId $request -Current $current -Target $target
     $env:ARTEM_TARGET_HANDOFF_TEST_FAIL = "1"
     $failed = Start-ArtemTargetContinuation -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript
+    $failed.WaitForExit()
     if ($failed.ExitCode -eq 0) { throw "Target handoff failure fixture unexpectedly succeeded" }
     Reclaim-ArtemTargetHandoffLease -Paths $paths -LockRequestId $request -Current $current -Target $target -ExitedChildPid $failed.Id
     $reclaimed = Get-ArtemJsonPayload -Path $paths.UpdateLock

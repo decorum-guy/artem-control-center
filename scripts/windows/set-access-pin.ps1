@@ -74,7 +74,8 @@ foreach ($line in (Get-Content -LiteralPath $paths.RuntimeEnv)) {
 $previousPythonPath = $env:PYTHONPATH
 try {
     $env:PYTHONPATH = Join-Path $paths.RepoRoot "apps\panel-agent\src"
-    & $paths.Python -m panel_agent.access_setup --profile $Profile
+    $revision = Get-ArtemCheckoutRevision -Paths $paths
+    & (Get-ArtemRuntimePythonPath -Paths $paths -Revision $revision) -m panel_agent.access_setup --profile $Profile
     if ($LASTEXITCODE -ne 0) {
         throw "Access PIN configuration failed with exit code $LASTEXITCODE"
     }

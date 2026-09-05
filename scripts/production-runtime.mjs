@@ -12,6 +12,7 @@ import {
 import { spawn, spawnSync } from "node:child_process";
 import { isIP } from "node:net";
 import { join, resolve } from "node:path";
+import { resolveRevisionScopedVenvRoot, resolveVenvPython } from "./runtime-venv.mjs";
 import { pathToFileURL } from "node:url";
 
 export function parseEnvText(text) {
@@ -799,7 +800,11 @@ export async function runProductionRuntime() {
   const updateBootstrapPath = join(runtimeDir, "update-bootstrap.json");
   const updateLaunchPath = join(runtimeDir, "update-launch.json");
   const updaterLauncherPath = resolve(root, "scripts", "windows", "launch-update-production.ps1");
-  const venvPython = resolve(root, ".venv", isWindows ? "Scripts/python.exe" : "bin/python");
+  const revision = currentRevision(root);
+  if (!/^[a-f0-9]{40}$/.test(revision)) {
+    throw new Error("Unable to resolve the production checkout revision");
+  }
+  const venvPython = resolveVenvPython(resolveRevisionScopedVenvRoot(runtimeDir, revision), process.platform);
   const log = createLogger(logDir);
 
   mkdirSync(runtimeDir, { recursive: true });
@@ -823,7 +828,6 @@ export async function runProductionRuntime() {
     throw new Error(`Unsupported PANEL_AGENT_MODE in runtime.env: ${mode}`);
   }
 
-  const revision = currentRevision(root);
   const agentEnv = buildAgentEnvironment({
     baseEnv: process.env,
     fileEnv,

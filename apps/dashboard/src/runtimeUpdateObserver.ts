@@ -1,6 +1,8 @@
 export type UpdateOwnerStatus = "idle" | "checking" | "updating" | "success" | "failed";
 export type UpdateOwnerPhase =
   | "started"
+  | "preparing"
+  | "installing"
   | "stopping"
   | "checkout"
   | "handoff"
@@ -54,13 +56,15 @@ export interface UpdateOwnerState {
 
 export const UPDATE_ACTIVITY_COPY: Record<UpdateActivityCode, string> = {
   started: "Проверяем обновление",
+  preparing: "Готовим изолированную новую версию",
+  installing: "Устанавливаем зависимости новой версии",
   stopping: "Останавливаем текущую панель",
-  checkout: "Получаем новую версию",
+  checkout: "Переключаем подготовленную версию",
   handoff: "Передаём управление новой версии обновлятора",
-  "target-authoritative": "Получаем новую версию",
+  "target-authoritative": "Новая версия обновлятора приняла управление",
   validating: "Проверяем проект",
   building: "Собираем панель",
-  "artifact-ready": "Готовим новую сборку",
+  "artifact-ready": "Новая сборка готова к переключению",
   restarting: "Перезапускаем Control Center",
   verifying: "Проверяем запущенную версию",
   rollback: "Восстанавливаем предыдущую версию",
@@ -69,14 +73,16 @@ export const UPDATE_ACTIVITY_COPY: Record<UpdateActivityCode, string> = {
 
 const UPDATE_PHASE_PROGRESS: Record<UpdateOwnerPhase, number> = {
   started: 5,
-  stopping: 12,
-  checkout: 24,
-  handoff: 30,
-  "target-authoritative": 36,
+  preparing: 15,
+  installing: 30,
+  stopping: 80,
+  checkout: 84,
+  handoff: 86,
+  "target-authoritative": 88,
   validating: 50,
   building: 66,
-  "artifact-ready": 76,
-  restarting: 86,
+  "artifact-ready": 78,
+  restarting: 91,
   verifying: 95,
   rollback: 60
 };

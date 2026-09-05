@@ -807,6 +807,46 @@ def test_status_returns_only_bounded_activity_codes_and_phase_progress(monkeypat
     assert "private" not in json.dumps(payload)
 
 
+def test_status_exposes_staging_before_cutover_without_claiming_a_restart(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "updating",
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "phase": "stopping",
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "events": [
+                {"code": "preparing"},
+                {"code": "installing"},
+                {"code": "validating"},
+                {"code": "building"},
+                {"code": "artifact-ready"},
+                {"code": "stopping"},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["phase"] == "stopping"
+    assert payload["progressPercent"] == 80
+    assert payload["events"] == [
+        {"code": "preparing"},
+        {"code": "installing"},
+        {"code": "validating"},
+        {"code": "building"},
+        {"code": "artifact-ready"},
+        {"code": "stopping"},
+    ]
+
+
 def test_success_reaches_100_only_after_accepted_v2_artifact_is_verified(monkeypatch, tmp_path):
     client, service = make_client(monkeypatch, tmp_path, FakeGit())
     service.runtime_root.mkdir(parents=True, exist_ok=True)
