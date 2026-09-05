@@ -359,7 +359,13 @@ async function assertCoffeeContentGeometry(page: Page, scenarioLabel = "current 
       ".coffee-panel__copy .primary-action",
       ".coffee-authority"
     ].map((selector) => ({ selector, rect: rectFor(coffee?.querySelector(selector) ?? null) })).filter(({ rect }) => rect);
-    return { asset, image, activity, activityBars, semanticContent };
+    return {
+      asset,
+      image,
+      activity,
+      activityBars,
+      semanticContent
+    };
   });
 
   expect(geometry.image).not.toBeNull();
@@ -396,18 +402,6 @@ async function assertCoffeeContentGeometry(page: Page, scenarioLabel = "current 
 async function assertCoffeeActivityHidden(page: Page): Promise<void> {
   await expect(page.locator(".coffee-panel--overview .coffee-activity")).toHaveCount(0);
   await expect(page.locator(".coffee-panel--overview .coffee-panel__state strong")).toHaveText("Разогревается");
-}
-
-async function assertCoffeeActivityPhases(page: Page): Promise<void> {
-  for (const phase of [0.1, 0.8, 1.5]) {
-    await page.evaluate((phaseOffset) => {
-      document.querySelectorAll(".coffee-activity i").forEach((element, index) => {
-        (element as HTMLElement).style.animationDelay = `${-(phaseOffset + index * 0.18)}s`;
-      });
-    }, phase);
-    await page.waitForTimeout(20);
-    await assertCoffeeContentGeometry(page);
-  }
 }
 
 async function setCoffeeScale(page: Page, value: string): Promise<void> {
@@ -598,7 +592,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await captureArtifact(page, testInfo, "overview-edit-selected-health.png");
   });
 
-  test("keeps Coffee imagery and warming activity in the asset safe zone", async ({ page }, testInfo) => {
+  test("keeps Coffee imagery and warming activity bars hidden in the asset safe zone", async ({ page }, testInfo) => {
     const routeState = await installLayoutRoute(page);
     for (const [scale, screenshot] of [
       [70, "overview-coffee-warming-scale-70.png"],
@@ -652,14 +646,14 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await page.goto("/overview?scenario=coffee-warming&theme=night");
     await expect(page.getByTestId("widget-coffee-machine")).toHaveAttribute("data-stage", "warming");
     await assertCoffeeContentGeometry(page, "coffee-warming");
-    await assertCoffeeActivityPhases(page);
+    await assertCoffeeActivityHidden(page);
     await captureArtifact(page, testInfo, "overview-coffee-warming.png");
 
     await page.getByTestId("overview-configure").click();
     await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
     await selectFrame(page, "fixture.coffee");
     await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
-    await assertCoffeeActivityPhases(page);
+    await assertCoffeeActivityHidden(page);
     await captureArtifact(page, testInfo, "overview-edit-coffee-warming-selected.png");
 
     await setCoffeeScale(page, "70");

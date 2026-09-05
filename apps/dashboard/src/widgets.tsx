@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type {
   CoffeeData,
   CoffeeDelayedStartRecord,
@@ -171,7 +171,7 @@ export function CoffeeWidget({
     if (coffeeTransitionTimer.current !== null) window.clearTimeout(coffeeTransitionTimer.current);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const currentState = data.machine.state;
     const previousState = previousMachineState.current;
     previousMachineState.current = currentState;
@@ -236,9 +236,11 @@ export function CoffeeWidget({
   const remaining = formatDuration(view.remainingSeconds);
   const warming = view.stage === "warming" && view.progress !== null;
   const progressVisible = variant === "overview" || variant === "home-v2"
-    ? (warming || variant === "overview" && view.stage === "ready") && view.progress !== null && coffeeTransition !== "moving"
+    ? warming && view.progress !== null && coffeeTransition !== "moving"
     : warming;
-  const progressMounted = variant === "home-v2" || progressVisible;
+  const progressMounted = variant === "home-v2"
+    || variant === "overview" && (view.progress !== null || coffeeTransition !== "idle")
+    || progressVisible;
   const activeAction = service.actions.find((action) =>
     view.stage === "off" ? action.id.endsWith("turn_on") : action.id.endsWith("turn_off")
   );
@@ -287,7 +289,7 @@ export function CoffeeWidget({
   const coffeeImage = appearance.showImage
     ? <CoffeeAsset manifest={manifest} scale={imageScale} />
     : null;
-  const coffeeActivity = view.stage === "warming" && (variant !== "overview" || appearance.showImage)
+  const coffeeActivity = view.stage === "warming" && variant !== "overview" && appearance.showImage
     ? (
         <span className="coffee-activity" aria-hidden="true">
           <i />
@@ -297,14 +299,25 @@ export function CoffeeWidget({
       )
     : null;
   const coffeeVisual = appearance.showImage
-    ? (
-        <div
-          className="coffee-asset__visual"
-          style={{ "--cc-coffee-image-scale": imageScale / 100 } as CSSProperties}
-        >
-          {coffeeImage}
-        </div>
-      )
+    ? variant === "overview"
+      ? (
+          <div className="coffee-asset__motion">
+            <div
+              className="coffee-asset__visual"
+              style={{ "--cc-coffee-image-scale": imageScale / 100 } as CSSProperties}
+            >
+              {coffeeImage}
+            </div>
+          </div>
+        )
+      : (
+          <div
+            className="coffee-asset__visual"
+            style={{ "--cc-coffee-image-scale": imageScale / 100 } as CSSProperties}
+          >
+            {coffeeImage}
+          </div>
+        )
     : null;
   const delayedStartLabel = delayedStartPending
     ? "Сохраняем отложенный запуск"

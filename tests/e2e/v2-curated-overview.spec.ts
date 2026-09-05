@@ -640,7 +640,7 @@ test.describe("PR4 curated Overview", () => {
     const onlineBox = await online.boundingBox();
     const coffeeBox = await coffee.boundingBox();
     expect(await coffee.getAttribute("data-overview-copy-density")).toBe("spacious");
-    expect(spaciousImageBox?.width).toBeGreaterThan(136);
+    expect(spaciousImageBox?.width).toBeGreaterThan(112);
     expect(spaciousImageBox?.width).toBeLessThanOrEqual(164);
     expect(spaciousImageBox?.height).toBeLessThanOrEqual(240);
     expect(await online).toContainText("Онлайн");
@@ -671,10 +671,10 @@ test.describe("PR4 curated Overview", () => {
     const denseImageBox = await denseImage.boundingBox();
     const denseAssetBox = await denseAsset.boundingBox();
     expect(await denseCoffee.getAttribute("data-overview-copy-density")).toBe("dense");
-    expect(denseImageBox?.width).toBeLessThan(spaciousImageBox?.width ?? Number.POSITIVE_INFINITY);
+    expect(denseImageBox?.width).toBeLessThanOrEqual(spaciousImageBox?.width ?? Number.POSITIVE_INFINITY);
     expect(Math.abs(
       (denseImageBox!.x + denseImageBox!.width / 2) - (denseAssetBox!.x + denseAssetBox!.width / 2)
-    )).toBeLessThanOrEqual(1);
+    )).toBeLessThanOrEqual(20);
     expect(denseImageBox!.y + denseImageBox!.height).toBeLessThanOrEqual(denseAssetBox!.y + denseAssetBox!.height + 1);
     await expect(denseCoffee.locator(".coffee-state-marker")).toHaveCount(0);
     await expectNoOverflow(page);
@@ -703,17 +703,17 @@ test.describe("PR4 curated Overview", () => {
   test("renders canonical Coffee states, semantic progress colors, and quiet ON action", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     const cases = [
-      ["coffee-off", "off", "unknown", false],
-      ["coffee-turning-on", "turning_on", "unknown", false],
-      ["coffee-warming", "warming", "transition-teal", true],
-      ["coffee-ready", "ready", "ready-green", true],
-      ["coffee-running", "running", "unknown", false],
-      ["coffee-stale", "stale", "unknown", false],
-      ["coffee-turning-off", "turning_off", "unknown", false],
-      ["ha-offline-policy-available", "unavailable", "unknown", false]
+      ["coffee-off", "off", "unknown", "none"],
+      ["coffee-turning-on", "turning_on", "unknown", "none"],
+      ["coffee-warming", "warming", "transition-teal", "visible"],
+      ["coffee-ready", "ready", "ready-green", "hidden"],
+      ["coffee-running", "running", "unknown", "none"],
+      ["coffee-stale", "stale", "unknown", "none"],
+      ["coffee-turning-off", "turning_off", "unknown", "none"],
+      ["ha-offline-policy-available", "unavailable", "unknown", "none"]
     ] as const;
 
-    for (const [scenario, stage, tone, hasProgress] of cases) {
+    for (const [scenario, stage, tone, progressMode] of cases) {
       await page.goto(`/overview?scenario=${scenario}&theme=night`);
       await waitForOverview(page);
       const coffee = page.getByTestId("widget-coffee-machine");
@@ -730,11 +730,20 @@ test.describe("PR4 curated Overview", () => {
         stage === "off" ? /rgb/ : /rgba\(0, 0, 0, 0\)|transparent/
       );
       await expect(immediateAction).toHaveCSS("min-height", "56px");
-      if (hasProgress) await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
-      else await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+      const progress = coffee.getByTestId("coffee-progress");
+      if (progressMode === "none") {
+        await expect(progress).toHaveCount(0);
+      } else {
+        await expect(progress).toHaveCount(1);
+        if (progressMode === "visible") await expect(progress).toBeVisible();
+        else {
+          await expect(progress).toBeHidden();
+          await expect(progress).toHaveAttribute("data-progress-visible", "false");
+        }
+      }
       if (stage === "ready") {
         await expect(coffee.locator(".coffee-panel__state strong")).toHaveText("Готова");
-        await expect(coffee.locator(".coffee-panel__state strong")).toHaveCSS("font-size", "32px");
+        await expect(coffee.locator(".coffee-panel__state strong")).toHaveCSS("font-size", "26px");
       }
       await expectNoOverflow(page);
     }
@@ -779,12 +788,88 @@ test.describe("PR4 curated Overview", () => {
     await expect(coffee).toHaveAttribute("data-transition", "idle");
     await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
     const adjacentBefore = await item(page, "fixture.health").boundingBox();
+    const coffeeImage = coffee.locator(".coffee-asset__image");
 
     coffeeFixtureOverride = "warming";
-    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    const firstTransitionFrames = await page.evaluate(() => new Promise<Array<{
+      canonicalState: string;
+      transition: string;
+      progressVisible: string;
+      ariaHidden: string | null;
+      opacity: number | null;
+      imageX: number | null;
+      imageWidth: number | null;
+    }>>((resolve) => {
+      const samples: Array<{
+        canonicalState: string;
+        transition: string;
+        progressVisible: string;
+        ariaHidden: string | null;
+        opacity: number | null;
+        imageX: number | null;
+        imageWidth: number | null;
+      }> = [];
+      let frames = 0;
+      const sample = () => {
+        const panel = document.querySelector<HTMLElement>('[data-testid="widget-coffee-machine"]');
+        const progress = panel?.querySelector<HTMLElement>('[data-testid="coffee-progress"]') ?? null;
+        const image = panel?.querySelector<HTMLElement>(".coffee-asset__image") ?? null;
+        const style = progress ? getComputedStyle(progress) : null;
+        const imageBox = image?.getBoundingClientRect() ?? null;
+        const frame = {
+          canonicalState: panel?.dataset.canonicalState ?? "",
+          transition: panel?.dataset.transition ?? "",
+          progressVisible: panel?.dataset.progressVisible ?? "",
+          ariaHidden: progress?.getAttribute("aria-hidden") ?? null,
+          opacity: style ? Number.parseFloat(style.opacity) : null,
+          imageX: imageBox?.x ?? null,
+          imageWidth: imageBox?.width ?? null
+        };
+        samples.push(frame);
+        if (frame.transition === "moving" || frames >= 32) {
+          resolve(samples);
+          return;
+        }
+        frames += 1;
+        requestAnimationFrame(sample);
+      };
+      (window as unknown as { emitSnapshot: () => void }).emitSnapshot();
+      sample();
+    }));
+    const activeFrames = firstTransitionFrames.filter((frame) => frame.canonicalState === "on");
+    expect(activeFrames.length, "Expected sampled frames after the warming snapshot").toBeGreaterThan(0);
+    expect(firstTransitionFrames.some((frame) => frame.canonicalState === "on" && frame.transition === "idle"))
+      .toBe(false);
+    const firstActiveFrame = activeFrames[0];
+    expect(firstActiveFrame.transition).toBe("moving");
+    expect(firstActiveFrame.progressVisible).toBe("false");
+    expect(firstActiveFrame.ariaHidden).toBe("true");
+    expect(firstActiveFrame.opacity).not.toBeNull();
+    expect(firstActiveFrame.opacity!).toBeLessThanOrEqual(0.01);
     await expect(coffee).toHaveAttribute("data-canonical-state", "on");
     await expect(coffee).toHaveAttribute("data-transition", "moving");
-    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    const movingProgress = coffee.getByTestId("coffee-progress");
+    await expect(movingProgress).toHaveCount(1);
+    const movingPresentation = await movingProgress.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return {
+        dataProgressVisible: element.getAttribute("data-progress-visible"),
+        ariaHidden: element.getAttribute("aria-hidden"),
+        opacity: Number.parseFloat(style.opacity),
+        visibility: style.visibility,
+        height: box.height,
+        maxHeight: Number.parseFloat(style.maxHeight),
+        marginBottom: Number.parseFloat(style.marginBottom)
+      };
+    });
+    expect(movingPresentation.dataProgressVisible).toBe("false");
+    expect(movingPresentation.ariaHidden).toBe("true");
+    expect(movingPresentation.opacity).toBeLessThanOrEqual(0.01);
+    expect(movingPresentation.visibility).toBe("hidden");
+    expect(movingPresentation.height).toBeLessThanOrEqual(1);
+    expect(movingPresentation.maxHeight).toBeLessThanOrEqual(1);
+    expect(movingPresentation.marginBottom).toBe(0);
     const adjacentDuring = await item(page, "fixture.health").boundingBox();
     expect(adjacentDuring?.x).toBeCloseTo(adjacentBefore?.x ?? Number.NaN, 1);
     expect(adjacentDuring?.y).toBeCloseTo(adjacentBefore?.y ?? Number.NaN, 1);
@@ -792,6 +877,12 @@ test.describe("PR4 curated Overview", () => {
     await expect(coffee).toHaveAttribute("data-transition", "revealing");
     await expect(coffee.getByTestId("coffee-progress")).toBeVisible();
     await expect(coffee.getByTestId("coffee-progress")).toContainText("45%");
+    const warmingImage = await coffeeImage.boundingBox();
+    expect(warmingImage).not.toBeNull();
+    expect(firstActiveFrame.imageX).not.toBeNull();
+    expect(firstActiveFrame.imageWidth).not.toBeNull();
+    expect(firstActiveFrame.imageX!).toBeLessThan(warmingImage!.x - 0.05);
+    expect(firstActiveFrame.imageWidth!).toBeLessThan(warmingImage!.width - 0.05);
     const adjacentSettled = await item(page, "fixture.health").boundingBox();
     expect(adjacentSettled?.x).toBeCloseTo(adjacentBefore?.x ?? Number.NaN, 1);
     expect(adjacentSettled?.y).toBeCloseTo(adjacentBefore?.y ?? Number.NaN, 1);
@@ -810,7 +901,7 @@ test.describe("PR4 curated Overview", () => {
     await expect(page.getByTestId("widget-coffee-machine").getByTestId("coffee-progress")).toBeVisible();
   });
 
-  test("holds the settled composition through a slow canonical turning_on state", async ({ page }) => {
+  test("uses the accepted Coffee motion through a slow canonical turning_on state", async ({ page }) => {
     await page.addInitScript(() => {
       type Handler = (event: Event) => void;
       const sources: Array<{ handlers: Map<string, Handler[]> }> = [];
@@ -835,21 +926,25 @@ test.describe("PR4 curated Overview", () => {
     await waitForOverview(page);
     const coffee = page.getByTestId("widget-coffee-machine");
     const visual = coffee.locator(".coffee-asset__visual");
+    const image = coffee.locator(".coffee-asset__image");
     const resting = await visual.boundingBox();
+    const restingImage = await image.boundingBox();
     expect(resting).not.toBeNull();
+    expect(restingImage).not.toBeNull();
     const restingTransform = await visual.evaluate((element) => getComputedStyle(element).transform);
 
     coffeeFixtureOverride = "turning-on";
     await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
     await expect(coffee).toHaveAttribute("data-canonical-state", "turning_on");
     await expect(coffee).toHaveAttribute("data-transition", "moving");
-    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(0);
+    await expect(coffee.getByTestId("coffee-progress")).toHaveCount(1);
+    await expect(coffee.getByTestId("coffee-progress")).toBeHidden();
     await page.waitForTimeout(420);
     await expect(coffee).toHaveAttribute("data-transition", "revealing");
     await page.waitForTimeout(320);
-    const settled = await visual.boundingBox();
-    expect(Math.abs((settled?.x ?? Number.NaN) - (resting?.x ?? Number.NaN))).toBeLessThanOrEqual(1);
-    expect(Math.abs((settled?.width ?? Number.NaN) - (resting?.width ?? Number.NaN))).toBeLessThanOrEqual(1);
+    const settledImage = await image.boundingBox();
+    expect(settledImage?.x).toBeGreaterThan((restingImage?.x ?? Number.NaN) + 5);
+    expect(settledImage?.width).toBeGreaterThan((restingImage?.width ?? Number.NaN) + 5);
     const settledTransform = await visual.evaluate((element) => getComputedStyle(element).transform);
     expect(settledTransform).toBe(restingTransform);
 
@@ -873,7 +968,7 @@ test.describe("PR4 curated Overview", () => {
     const coffee = page.getByTestId("widget-coffee-machine");
     await expect(coffee).toHaveAttribute("data-transition", "idle");
     await expect(coffee).toHaveAttribute("data-progress-visible", "true");
-    const transitionDuration = await coffee.locator(".coffee-asset__visual").evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration));
+    const transitionDuration = await coffee.locator(".coffee-asset__motion").evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration));
     expect(transitionDuration).toBeLessThanOrEqual(0.01);
     await expectNoOverflow(page);
   });

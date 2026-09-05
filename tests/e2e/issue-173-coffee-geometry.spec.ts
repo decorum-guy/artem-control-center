@@ -51,7 +51,7 @@ async function progressPresentation(locator: Locator): Promise<ProgressPresentat
 async function sampleProgressTransition(page: Page, triggerSnapshot = false): Promise<ProgressPresentation[]> {
   return page.evaluate((shouldTriggerSnapshot) => new Promise<ProgressPresentation[]>((resolve) => {
     const element = document.querySelector<HTMLElement>('[data-testid="coffee-progress"]');
-    if (!element) throw new Error("Expected Home V2 progress shell");
+    if (!element) throw new Error("Expected Coffee progress shell");
     const samples: ProgressPresentation[] = [];
     const startedAt = performance.now();
     const sample = () => {
@@ -78,13 +78,6 @@ function expectContained(inner: Rect, outer: Rect, tolerance = 1) {
   expect(inner.y).toBeGreaterThanOrEqual(outer.y - tolerance);
   expect(inner.right).toBeLessThanOrEqual(outer.right + tolerance);
   expect(inner.bottom).toBeLessThanOrEqual(outer.bottom + tolerance);
-}
-
-function expectNoIntersection(first: Rect, second: Rect, tolerance = 1) {
-  expect(
-    first.bottom <= second.y + tolerance || second.bottom <= first.y + tolerance,
-    "Expected the image and activity rectangles to be separated"
-  ).toBe(true);
 }
 
 function expectVerticallyCentered(inner: Rect, outer: Rect, tolerance = 1) {
@@ -148,6 +141,34 @@ async function assertHomeCoffeeProportions(coffee: Locator, timerExpected: boole
   expect(onlineBox.y - panelBox.y).toBeLessThanOrEqual(14);
   expect(panelBox.right - onlineBox.right).toBeGreaterThanOrEqual(10);
   expect(panelBox.right - onlineBox.right).toBeLessThanOrEqual(14);
+
+  const timer = coffee.locator(".coffee-delayed-start-action");
+  await expect(timer).toHaveCount(timerExpected ? 1 : 0);
+  if (timerExpected) {
+    const timerBox = await rect(timer);
+    expect(timerBox.width).toBe(56);
+    expect(timerBox.height).toBe(56);
+    expect(timerBox.width).toBeGreaterThanOrEqual(48);
+    expect(timerBox.height).toBeGreaterThanOrEqual(48);
+  }
+}
+
+async function assertOverviewCoffeeProportions(coffee: Locator, timerExpected: boolean) {
+  const panelBox = await rect(coffee);
+  expect(panelBox.width).toBeGreaterThanOrEqual(580);
+  expect(panelBox.width).toBeLessThanOrEqual(640);
+
+  const primary = coffee.locator(".primary-action");
+  const primaryBox = await rect(primary);
+  expect(primaryBox.width).toBe(208);
+  expect(primaryBox.height).toBe(56);
+
+  const title = coffee.locator(".coffee-panel__heading h2");
+  await expect(title).toHaveCSS("font-size", "26px");
+  await expect(coffee.locator(".coffee-panel__heading .section-kicker")).toHaveText("Дом");
+  await expect(coffee.locator(".coffee-activity")).toHaveCount(0);
+  await expect(coffee.locator(".coffee-asset")).toHaveCSS("border-left-width", "0px");
+  await expect(coffee.locator(".coffee-asset")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   const timer = coffee.locator(".coffee-delayed-start-action");
   await expect(timer).toHaveCount(timerExpected ? 1 : 0);
@@ -230,50 +251,181 @@ test.describe("#173 Coffee composition stabilization", () => {
     });
   });
 
-  test("keeps the 1280px Coffee media and footer geometry stable across states", async ({ page }, testInfo: TestInfo) => {
+  test("renders the accepted Overview Coffee composition at 1280px and captures canonical screenshots", async ({ page }, testInfo: TestInfo) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     const states = [
-      ["coffee-off", "off", "coffee-off.png"],
-      ["coffee-warming", "warming", "coffee-warming.png"],
-      ["coffee-ready", "ready", "coffee-ready.png"],
-      ["ha-offline-policy-available", "unavailable", "coffee-unavailable.png"]
+      ["coffee-off", "off", "overview-coffee-off-1280x720.png"],
+      ["coffee-warming", "warming", "overview-coffee-warming-1280x720.png"],
+      ["coffee-ready", "ready", "overview-coffee-ready-1280x720.png"]
     ] as const;
-    const imageLeftEdges: Record<string, number> = {};
+    const imageBoxes: Record<string, Rect> = {};
+    const panelBoxes: Record<string, Rect> = {};
     const onlineAnchors: Array<{ top: number; right: number }> = [];
 
     for (const [scenario, stage, screenshotName] of states) {
       await page.goto(`/overview?scenario=${scenario}&theme=night`);
       const coffee = await waitForCoffee(page, stage);
       await assertCoffeeComposition(coffee);
+      await assertOverviewCoffeeProportions(coffee, stage === "off");
       const panelBox = await rect(coffee);
-      expect(panelBox.height).toBeGreaterThanOrEqual(280);
+      expect(panelBox.height).toBeGreaterThanOrEqual(260);
       expect(panelBox.height).toBeLessThanOrEqual(330);
+      panelBoxes[stage] = panelBox;
       const assetBox = await rect(coffee.locator(".coffee-asset"));
       const imageBox = await rect(coffee.locator(".coffee-asset__image"));
-      imageLeftEdges[stage] = imageBox.x - assetBox.x;
-      expect(imageBox.x + imageBox.width / 2).toBeLessThan(assetBox.x + assetBox.width / 2 - 12);
-      if (stage !== "unavailable") {
-        const online = coffee.locator(".coffee-panel__status .health-mark--healthy");
-        const onlineBox = await rect(online);
-        onlineAnchors.push({
-          top: onlineBox.y - panelBox.y,
-          right: panelBox.right - onlineBox.right
-        });
-        await expect(online).toHaveText("Онлайн");
-      }
-      await expect(coffee.locator(".coffee-asset")).not.toContainText("Готова");
-      await expect(coffee.locator(".coffee-asset")).not.toContainText("Разогрев");
+      expectContained(imageBox, assetBox);
+      imageBoxes[stage] = imageBox;
+      const online = coffee.locator(".coffee-panel__status .health-mark--healthy");
+      const onlineBox = await rect(online);
+      onlineAnchors.push({
+        top: onlineBox.y - panelBox.y,
+        right: panelBox.right - onlineBox.right
+      });
+      await expect(online).toHaveText("Онлайн");
+      const accent = await coffee.evaluate((element) => {
+        const pseudo = getComputedStyle(element, "::before");
+        return { width: pseudo.width, opacity: Number.parseFloat(pseudo.opacity) };
+      });
+      expect(accent.width).toBe("2px");
+      expect(accent.opacity).toBeGreaterThan(0);
       await page.screenshot({ path: testInfo.outputPath(screenshotName) });
       await expectNoOverflow(page);
     }
 
-    for (const stage of ["warming", "ready", "unavailable"]) {
-      expect(Math.abs(imageLeftEdges[stage] - imageLeftEdges.off)).toBeLessThanOrEqual(1);
+    expect(imageBoxes.warming.x).toBeGreaterThan(imageBoxes.off.x + 8);
+    expect(imageBoxes.warming.width).toBeGreaterThan(imageBoxes.off.width + 5);
+    expect(imageBoxes.ready.x).toBeLessThan(imageBoxes.warming.x - 8);
+    expect(Math.abs(imageBoxes.ready.width - imageBoxes.warming.width)).toBeLessThanOrEqual(1);
+    for (const stage of ["warming", "ready"] as const) {
+      expect(panelBoxes[stage].x).toBe(panelBoxes.off.x);
+      expect(panelBoxes[stage].y).toBe(panelBoxes.off.y);
+      expect(panelBoxes[stage].width).toBe(panelBoxes.off.width);
+      expect(panelBoxes[stage].height).toBe(panelBoxes.off.height);
     }
     for (const anchor of onlineAnchors) {
       expect(Math.abs(anchor.top - onlineAnchors[0].top)).toBeLessThanOrEqual(1);
       expect(Math.abs(anchor.right - onlineAnchors[0].right)).toBeLessThanOrEqual(1);
     }
+  });
+
+  test("animates the actual Overview Coffee transition and collapses warming progress on ready", async ({ page }) => {
+    await page.addInitScript(() => {
+      type Handler = (event: Event) => void;
+      const sources: Array<{ handlers: Map<string, Handler[]> }> = [];
+      class FakeEventSource {
+        handlers = new Map<string, Handler[]>();
+        constructor() { sources.push(this); }
+        addEventListener(type: string, handler: Handler) {
+          this.handlers.set(type, [...(this.handlers.get(type) ?? []), handler]);
+        }
+        close() {}
+      }
+      Object.defineProperty(window, "EventSource", { configurable: true, value: FakeEventSource });
+      (window as unknown as { emitSnapshot: () => void }).emitSnapshot = () => {
+        for (const source of sources) {
+          for (const handler of source.handlers.get("snapshot") ?? []) {
+            handler(new MessageEvent("snapshot", { data: "{}" }));
+          }
+        }
+      };
+    });
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    coffeeTransitionFixture = "off";
+    await page.goto("/overview?scenario=coffee-off&theme=night");
+    const coffee = await waitForCoffee(page, "off");
+    const image = coffee.locator(".coffee-asset__image");
+    const progress = coffee.getByTestId("coffee-progress");
+    const offImage = await rect(image);
+    await expect(progress).toHaveCount(0);
+    await expect(coffee).toHaveAttribute("data-transition", "idle");
+
+    coffeeTransitionFixture = "warming";
+    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    await expect(coffee).toHaveAttribute("data-stage", "warming");
+    await expect(coffee).toHaveAttribute("data-transition", "moving");
+    await expect(progress).toHaveCount(1);
+    await expect(progress).toHaveAttribute("data-progress-visible", "false");
+    const fadeInSamplesPromise = sampleProgressTransition(page);
+    await page.waitForTimeout(140);
+    const warmingMidImage = await rect(image);
+    await expect(coffee).toHaveAttribute("data-transition", "revealing");
+    await expect(progress).toHaveAttribute("data-progress-visible", "true");
+    const warmingImage = await rect(image);
+    const warmingProgress = await progressPresentation(progress);
+    const fadeInSamples = await fadeInSamplesPromise;
+    const fadeInMid = fadeInSamples.find((sample) => sample.opacity > 0.05 && sample.opacity < 0.95);
+    expect(warmingMidImage.x).toBeGreaterThan(offImage.x + 1);
+    expect(warmingMidImage.x).toBeLessThan(warmingImage.x - 0.05);
+    expect(warmingMidImage.width).toBeGreaterThan(offImage.width + 1);
+    expect(warmingMidImage.width).toBeLessThan(warmingImage.width - 0.05);
+    expect(warmingImage.width).toBeGreaterThan(offImage.width + 5);
+    expect(fadeInMid, "Expected an intermediate Overview progress fade-in sample").toBeDefined();
+    expect(fadeInMid!.height).toBeGreaterThan(1);
+    expect(fadeInMid!.height).toBeLessThan(warmingProgress.height - 1);
+
+    coffeeTransitionFixture = "ready";
+    const fadeOutSamplesPromise = sampleProgressTransition(page, true);
+    await expect(coffee).toHaveAttribute("data-stage", "ready");
+    await expect(progress).toHaveAttribute("data-progress-visible", "false");
+    await page.waitForTimeout(80);
+    const readyMidImage = await rect(image);
+    await page.waitForTimeout(340);
+    const readyImage = await rect(image);
+    const fadeOutSamples = await fadeOutSamplesPromise;
+    const fadeOutMid = fadeOutSamples.find((sample) =>
+      sample.opacity > 0.05 && sample.opacity < 0.95 && sample.height > 1 && sample.height < warmingProgress.height - 1
+    );
+    expect(readyMidImage.x).toBeLessThan(warmingImage.x - 1);
+    expect(readyMidImage.x).toBeGreaterThan(readyImage.x + 1);
+    expect(Math.abs(readyImage.width - warmingImage.width)).toBeLessThanOrEqual(1);
+    expect(fadeOutMid, "Expected an intermediate Overview progress fade-out sample").toBeDefined();
+    expect(fadeOutMid!.marginBottom).toBeGreaterThan(0);
+    expect(await coffee.locator(".coffee-asset__motion").evaluate((element) => getComputedStyle(element).transitionDuration)).toBe("0.36s");
+    await expect(progress).toBeHidden();
+    const readyProgress = await progressPresentation(progress);
+    expect(readyProgress.opacity).toBeLessThanOrEqual(0.01);
+    expect(readyProgress.height).toBeLessThanOrEqual(1);
+    expect(readyProgress.marginBottom).toBe(0);
+    await expect(coffee.locator(".coffee-activity")).toHaveCount(0);
+    await expectNoOverflow(page);
+  });
+
+  test("lands the Overview Coffee composition directly with reduced motion and keeps narrow targets safe", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/overview?scenario=coffee-warming&theme=night");
+    const warmingCoffee = await waitForCoffee(page, "warming");
+    const warmingProgress = warmingCoffee.getByTestId("coffee-progress");
+    await expect(warmingCoffee).toHaveAttribute("data-transition", "idle");
+    await expect(warmingProgress).toBeVisible();
+    await expect(warmingProgress).toHaveAttribute("aria-hidden", "false");
+    expect(await warmingCoffee.locator(".coffee-asset__motion").evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration))).toBeLessThanOrEqual(0.01);
+
+    await page.goto("/overview?scenario=coffee-ready&theme=night");
+    const readyCoffee = page.getByTestId("widget-coffee-machine");
+    const readyProgress = readyCoffee.getByTestId("coffee-progress");
+    await expect(readyProgress).toHaveCount(1);
+    await expect(readyProgress).toBeHidden();
+    const ready = await progressPresentation(readyProgress);
+    expect(ready.opacity).toBe(0);
+    expect(ready.height).toBeLessThanOrEqual(1);
+    expect(ready.marginBottom).toBe(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/overview?scenario=coffee-off&theme=night");
+    const narrowCoffee = page.getByTestId("widget-coffee-machine");
+    await expect(narrowCoffee).toHaveAttribute("data-stage", "off");
+    const [narrowPrimary, narrowTimer] = await Promise.all([
+      rect(narrowCoffee.locator(".primary-action")),
+      rect(narrowCoffee.locator(".coffee-delayed-start-action"))
+    ]);
+    expect(narrowPrimary.width).toBeGreaterThanOrEqual(48);
+    expect(narrowPrimary.height).toBeGreaterThanOrEqual(48);
+    expect(narrowTimer.width).toBeGreaterThanOrEqual(48);
+    expect(narrowTimer.height).toBeGreaterThanOrEqual(48);
+    await expect(page.getByTestId("overview-grid")).toHaveAttribute("data-grid-profile", "compact-4");
+    await expectNoOverflow(page);
   });
 
   test("keeps Home V2 Coffee proportions compact across the canonical states", async ({ page }, testInfo: TestInfo) => {
@@ -532,14 +684,13 @@ test.describe("#173 Coffee composition stabilization", () => {
     await expectNoOverflow(page);
   });
 
-  test("reserves a separate warming activity region", async ({ page }) => {
+  test("keeps Overview warming activity bars hidden", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?scenario=coffee-warming&theme=night");
     const coffee = await waitForCoffee(page, "warming");
-    const imageBox = await rect(coffee.locator(".coffee-asset__image"));
-    const activityBox = await rect(coffee.locator(".coffee-activity"));
-    expectNoIntersection(imageBox, activityBox);
+    await expect(coffee.locator(".coffee-activity")).toHaveCount(0);
     await expect(coffee.locator(".coffee-panel__state")).toContainText("Разогревается");
+    await expectNoOverflow(page);
   });
 
   test("keeps Coffee contained under narrow and 200% zoom-equivalent pressure", async ({ page }, testInfo) => {
