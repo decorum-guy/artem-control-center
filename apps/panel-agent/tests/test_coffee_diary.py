@@ -454,6 +454,7 @@ def _api_module(monkeypatch, tmp_path):
     monkeypatch.setenv("PANEL_AGENT_MODE", "integration_test")
     monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
     monkeypatch.setenv("PANEL_COFFEE_DIARY_PATH", str(tmp_path / "api-coffee.json"))
+    monkeypatch.setenv("PANEL_COFFEE_DIARY_UPLOAD_ORIGIN", "http://coffee-upload.test:8788")
     import panel_agent.main as module
     return importlib.reload(module)
 

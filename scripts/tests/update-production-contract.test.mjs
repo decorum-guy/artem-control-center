@@ -7,21 +7,58 @@ const root = resolve(import.meta.dirname, "../..");
 const updater = readFileSync(resolve(root, "scripts/windows/update-production.ps1"), "utf8");
 const recovery = readFileSync(resolve(root, "scripts/windows/updater-recovery.ps1"), "utf8");
 
-test("target-dependent update work is below the explicit target continuation", () => {
+test("target preparation is isolated before cutover and target continuation promotes only accepted staging", () => {
   const continuation = updater.indexOf("if ($Continuation)");
   const targetProof = updater.indexOf("Assert-ArtemTargetUpdaterLogic", continuation);
-  const build = updater.indexOf("Invoke-IsolatedValidation", targetProof);
-  const restart = updater.indexOf("Ensure-ArtemHealthyVisiblePanel", build);
+  const staging = updater.indexOf("Invoke-ArtemTargetStaging");
+  const stagingBuild = updater.indexOf("Invoke-IsolatedValidation", staging);
+  const bootstrap = updater.indexOf('elseif ($decision.Action -eq "bootstrap")');
+  const stageCall = updater.indexOf("$stagedTarget = Invoke-ArtemTargetStaging", bootstrap);
+  const stop = updater.indexOf("Stop-ArtemRuntime", stageCall);
+  const merge = updater.indexOf('Arguments @("merge", "--ff-only", $targetHead)', stop);
+  const stagedReuse = updater.indexOf("Get-ArtemStagedUpdatePaths", targetProof);
+  const promotion = updater.indexOf("Promote-ArtemProductionBuild", stagedReuse);
+  const restart = updater.indexOf("Ensure-ArtemHealthyVisiblePanel", promotion);
   assert.ok(continuation >= 0);
   assert.ok(targetProof > continuation);
-  assert.ok(build > targetProof);
-  assert.ok(restart > build);
+  assert.ok(stagingBuild > staging);
+  assert.ok(stageCall > bootstrap && stop > stageCall && merge > stop);
+  assert.ok(stagedReuse > targetProof && promotion > stagedReuse && restart > promotion);
+  assert.match(updater, /git\.exe"\s+-Arguments @\("worktree", "add", "--detach", \$stage\.Source, \$TargetHead\)/);
+  assert.match(updater, /staged npm ci/);
+  assert.match(updater, /staged project setup/);
+  assert.match(updater, /PANEL_RUNTIME_VENV = Get-ArtemRuntimeVenvPath/);
+  assert.match(updater, /-Phase "artifact-ready"[\s\S]*?-StagingRoot \$stage\.Root/);
   assert.match(updater, /Publish-ArtemTargetHandoffLease/);
   assert.match(updater, /Start-ArtemTargetContinuation/);
   const handoff = readFileSync(resolve(root, "scripts/windows/updater-target-handoff.ps1"), "utf8");
   assert.match(handoff, /"-File", \('\"\{0\}\"' -f \$TargetScript\)/);
   assert.match(handoff, /"-Continuation"/);
   assert.match(handoff, /Claim-ArtemTargetHandoffLease/);
+});
+
+test("staging has truthful pre-cutover progress and staging failure preserves production", () => {
+  const staging = updater.indexOf("function Invoke-ArtemTargetStaging");
+  const artifactReady = updater.indexOf('-Phase "artifact-ready"', staging);
+  const bootstrap = updater.indexOf('elseif ($decision.Action -eq "bootstrap")');
+  const stop = updater.indexOf("Stop-ArtemRuntime", bootstrap);
+  const failure = updater.indexOf("Get-ArtemProductionFailureState");
+  assert.ok(staging >= 0 && artifactReady > staging && stop > artifactReady);
+  assert.match(updater, /\$ArtemUpdateActivityCodes\s*=\s*@\([\s\S]*?"preparing"[\s\S]*?"installing"[\s\S]*?"artifact-ready"[\s\S]*?"stopping"/);
+  assert.match(updater, /\$runtimeStoppedForTransaction\s*=\s*\$true[\s\S]*?Get-ArtemProductionFailureState/);
+  assert.match(recovery, /RuntimePreserved = -not \$RuntimeStopped/);
+  assert.ok(failure >= 0);
+});
+
+test("bootstrap exits after durable child lease acceptance instead of waiting for terminal completion", () => {
+  const handoff = readFileSync(resolve(root, "scripts/windows/updater-target-handoff.ps1"), "utf8");
+  const start = handoff.indexOf("function Start-ArtemTargetContinuation");
+  const wait = handoff.indexOf("function Wait-ArtemTargetContinuationAcceptance");
+  assert.ok(start >= 0 && wait > start);
+  assert.doesNotMatch(handoff.slice(start, wait), /-Wait/);
+  assert.match(updater, /Wait-ArtemTargetContinuationAcceptance/);
+  assert.match(handoff, /\[int\]\$lock\.ownerPid -eq \[int\]\$TargetProcess\.Id/);
+  assert.match(handoff, /\$null -eq \$lock\.handoff/);
 });
 
 test("same-SHA updates require artifact and served-runtime proof", () => {

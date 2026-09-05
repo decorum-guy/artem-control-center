@@ -15,6 +15,7 @@ function Get-ArtemRuntimePaths {
         Knowledge = Join-Path $runtimeRoot "knowledge"
         Logs = Join-Path $runtimeRoot "logs"
         RuntimeEnv = Join-Path $runtimeRoot "runtime.env"
+        Venvs = Join-Path $runtimeRoot "venvs"
         State = Join-Path $runtimeRoot "runtime-state.json"
         Command = Join-Path $runtimeRoot "runtime-command.json"
         ManualStop = Join-Path $runtimeRoot "manual-stop.json"
@@ -42,11 +43,35 @@ function Get-ArtemRuntimePaths {
         DashboardDist = Join-Path $repoRoot "apps\dashboard\dist"
         DashboardBuildMetadata = Join-Path $repoRoot "apps\dashboard\dist\dashboard-build.json"
         DashboardIndex = Join-Path $repoRoot "apps\dashboard\dist\index.html"
-        Python = Join-Path $repoRoot ".venv\Scripts\python.exe"
         PanelUrl = "http://127.0.0.1:8787/overview"
         ReadyUrl = "http://127.0.0.1:8787/health/ready"
         ProductionBuildUrl = "http://127.0.0.1:8787/api/v1/system/production-build"
     }
+}
+
+function Get-ArtemRuntimeVenvPath {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Revision
+    )
+    return Join-Path $Paths.Venvs $Revision.ToLowerInvariant()
+}
+
+function Get-ArtemRuntimePythonPath {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Revision
+    )
+    return Join-Path (Get-ArtemRuntimeVenvPath -Paths $Paths -Revision $Revision) "Scripts\python.exe"
+}
+
+function Get-ArtemCheckoutRevision {
+    param([Parameter(Mandatory)]$Paths)
+    $revision = (& git.exe -C $Paths.RepoRoot rev-parse HEAD).Trim().ToLowerInvariant()
+    if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') {
+        throw "Unable to resolve the production checkout revision"
+    }
+    return $revision
 }
 
 function Initialize-ArtemRuntimeDirectories {
@@ -55,6 +80,7 @@ function Initialize-ArtemRuntimeDirectories {
     New-Item -ItemType Directory -Force -Path $Paths.Knowledge | Out-Null
     New-Item -ItemType Directory -Force -Path $Paths.Logs | Out-Null
     New-Item -ItemType Directory -Force -Path $Paths.EdgeProfile | Out-Null
+    New-Item -ItemType Directory -Force -Path $Paths.Venvs | Out-Null
 }
 
 function Get-ArtemJsonPayload {
@@ -647,10 +673,12 @@ function Stop-ArtemRuntime {
 function Assert-ArtemProductionPrerequisites {
     param([Parameter(Mandatory)]$Paths)
     Update-ArtemProcessPath
+    $revision = Get-ArtemCheckoutRevision -Paths $Paths
+    $python = Get-ArtemRuntimePythonPath -Paths $Paths -Revision $revision
     if (-not (Test-Path -LiteralPath $Paths.RuntimeScript)) {
         throw "Production runtime script is missing: $($Paths.RuntimeScript)"
     }
-    if (-not (Test-Path -LiteralPath $Paths.Python)) {
+    if (-not (Test-Path -LiteralPath $python)) {
         throw "Python environment is missing. Run npm run setup."
     }
     if (-not (Test-Path -LiteralPath $Paths.DashboardIndex)) {

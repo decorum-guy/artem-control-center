@@ -6,6 +6,7 @@ import {
   RestartBudget,
   shouldCreateManualStop,
   buildAgentEnvironment,
+  coffeeUploadIngressLaunchConfig,
   activateStagedDashboard,
   restoreDashboardBackup,
   capabilityStoreRevision,
@@ -64,6 +65,50 @@ test("Windows launcher retains readiness, rather than liveness, as its deploymen
   assert.match(common, /ReadyUrl = "http:\/\/127\.0\.0\.1:8787\/health\/ready"/);
   assert.match(launcher, /Wait-ArtemPanelReady\s+-Paths\s+\$paths\s+-TimeoutSeconds\s+60/);
   assert.doesNotMatch(launcher, /health\/live/);
+});
+
+test("Coffee upload ingress starts only from an explicit dedicated non-Agent port", () => {
+  assert.equal(coffeeUploadIngressLaunchConfig({ PANEL_COFFEE_DIARY_UPLOAD_ORIGIN: "http://coffee-upload.test:8788" }), null, "an external maintained proxy needs no local bridge");
+  assert.deepEqual(
+    coffeeUploadIngressLaunchConfig({
+      PANEL_COFFEE_DIARY_UPLOAD_ORIGIN: "http://192.0.2.10:8788",
+      PANEL_COFFEE_DIARY_UPLOAD_INGRESS_BIND_HOST: "0.0.0.0",
+      PANEL_COFFEE_DIARY_UPLOAD_INGRESS_PORT: "8788"
+    }),
+    { bindHost: "0.0.0.0", port: 8788 }
+  );
+  assert.equal(
+    coffeeUploadIngressLaunchConfig({
+      PANEL_COFFEE_DIARY_UPLOAD_ORIGIN: "http://127.0.0.1:8788",
+      PANEL_COFFEE_DIARY_UPLOAD_INGRESS_BIND_HOST: "0.0.0.0",
+      PANEL_COFFEE_DIARY_UPLOAD_INGRESS_PORT: "8788"
+    }).error,
+    "invalid_configuration"
+  );
+  assert.equal(
+    coffeeUploadIngressLaunchConfig({
+      PANEL_COFFEE_DIARY_UPLOAD_ORIGIN: "http://127.0.0.2:8788",
+      PANEL_COFFEE_DIARY_UPLOAD_INGRESS_BIND_HOST: "0.0.0.0",
+      PANEL_COFFEE_DIARY_UPLOAD_INGRESS_PORT: "8788"
+    }).error,
+    "invalid_configuration"
+  );
+  assert.equal(
+    coffeeUploadIngressLaunchConfig({
+      PANEL_COFFEE_DIARY_UPLOAD_ORIGIN: "http://192.0.2.10:8787",
+      PANEL_COFFEE_DIARY_UPLOAD_INGRESS_BIND_HOST: "0.0.0.0",
+      PANEL_COFFEE_DIARY_UPLOAD_INGRESS_PORT: "8787"
+    }).error,
+    "invalid_configuration"
+  );
+  const runtime = readFileSync(new URL("../production-runtime.mjs", import.meta.url), "utf8");
+  const ingress = readFileSync(new URL("../../apps/panel-agent/src/panel_agent/coffee_upload_ingress.py", import.meta.url), "utf8");
+  assert.match(runtime, /panel_agent\.coffee_upload_ingress:configured_app/);
+  assert.match(runtime, /--no-access-log/);
+  assert.match(ingress, /COFFEE_UPLOAD_UPSTREAM_URL/);
+  assert.match(ingress, /\/coffee-upload/);
+  assert.match(ingress, /photo-upload/);
+  assert.doesNotMatch(ingress, /reverse_proxy|shell=True|subprocess/);
 });
 
 test("accepted capability apply closes before a later ordinary Agent exit", () => {
