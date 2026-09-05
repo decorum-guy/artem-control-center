@@ -62,7 +62,7 @@ function Invoke-IsolatedValidation {
         [Parameter(Mandatory)][string]$BuildRoot
     )
 
-    $validationRoot = Join-Path $Paths.RuntimeRoot ("validation-temp\{0}" -f $Timestamp)
+    $validationRoot = Join-Path $BuildRoot ("validation-temp\{0}" -f $Timestamp)
     $pytestTemp = Join-Path $validationRoot "pytest"
     $checkDist = Join-Path $BuildRoot "check-dist"
     $productionDist = Join-Path $BuildRoot "production-dist"
@@ -126,9 +126,98 @@ function Invoke-IsolatedValidation {
     }
 }
 
+function Get-ArtemUpdateStagingPaths {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId
+    )
+    $root = Join-Path $Paths.RuntimeRoot ("update-staging-{0}" -f $LockRequestId)
+    $runtimeRoot = [IO.Path]::GetFullPath($Paths.RuntimeRoot).TrimEnd('\') + '\'
+    $fullRoot = [IO.Path]::GetFullPath($root)
+    if (-not $fullRoot.StartsWith($runtimeRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($fullRoot) -ne ("update-staging-{0}" -f $LockRequestId)) {
+        throw "Update staging root is outside the bounded runtime transaction path"
+    }
+    return [pscustomobject]@{
+        Root = $fullRoot
+        Source = Join-Path $fullRoot "source"
+        Build = Join-Path $fullRoot "build"
+    }
+}
+
+function Get-ArtemStagedUpdatePaths {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][string]$StagingRoot
+    )
+    $expected = Get-ArtemUpdateStagingPaths -Paths $Paths -LockRequestId $LockRequestId
+    if (-not [string]::Equals([IO.Path]::GetFullPath($StagingRoot), $expected.Root, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Update staging evidence is not owned by this transaction"
+    }
+    return $expected
+}
+
+function Invoke-ArtemTargetStaging {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$PreviousHead,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$TargetHead,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][string]$Timestamp
+    )
+    $stage = Get-ArtemUpdateStagingPaths -Paths $Paths -LockRequestId $LockRequestId
+    if (Test-Path -LiteralPath $stage.Root) {
+        Remove-Item -LiteralPath $stage.Root -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $stage.Root, $stage.Build | Out-Null
+    Write-ArtemUpdateTransaction -Paths $Paths -Phase "preparing" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+    Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
+    Invoke-CheckedCommand -FilePath "git.exe" -Arguments @("worktree", "add", "--detach", $stage.Source, $TargetHead) -Description "target staging worktree"
+    try {
+        Push-Location -LiteralPath $stage.Source
+        try {
+            Write-ArtemUpdateTransaction -Paths $Paths -Phase "installing" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+            Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("ci") -Description "staged npm ci"
+            Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
+            $previousRuntimeVenv = $env:PANEL_RUNTIME_VENV
+            try {
+                $env:PANEL_RUNTIME_VENV = Get-ArtemRuntimeVenvPath -Paths $Paths -Revision $TargetHead
+                Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("run", "setup") -Description "staged project setup"
+            }
+            finally {
+                if ($null -eq $previousRuntimeVenv) { Remove-Item Env:PANEL_RUNTIME_VENV -ErrorAction SilentlyContinue }
+                else { $env:PANEL_RUNTIME_VENV = $previousRuntimeVenv }
+            }
+            Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
+            $env:PANEL_AGENT_MODE = "read_only"
+            $env:PANEL_WRITES_ENABLED = "false"
+            $env:PANEL_COFFEE_TIMING_WRITES_ENABLED = "false"
+            $env:PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED = "false"
+            $env:PANEL_COFFEE_ACTIONS_ENABLED = "false"
+            $env:PANEL_KIOSK_CONTROLS_ENABLED = "false"
+            Write-ArtemUpdateTransaction -Paths $Paths -Phase "validating" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+            Write-ArtemUpdateTransaction -Paths $Paths -Phase "building" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+            $buildPaths = Invoke-IsolatedValidation -Paths $Paths -Timestamp $Timestamp -LockRequestId $LockRequestId -BuildRoot $stage.Build
+            Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
+            Assert-ArtemStagedProductionBuild -DashboardRoot $buildPaths.ProductionDist -ExpectedRevision $TargetHead
+            Write-ArtemUpdateTransaction -Paths $Paths -Phase "artifact-ready" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+            return [pscustomobject]@{ Stage = $stage; BuildPaths = $buildPaths }
+        }
+        finally { Pop-Location }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stage.Source) {
+            & git.exe -C $Paths.RepoRoot worktree remove --force $stage.Source
+        }
+    }
+}
+
 $ArtemUpdateActivityMax = 32
 $ArtemUpdateActivityCodes = @(
     "started",
+    "preparing",
+    "installing",
     "stopping",
     "checkout",
     "handoff",
@@ -239,7 +328,7 @@ function Write-ArtemUpdateState {
     if ($CurrentHead -match '^[0-9a-f]{40}$') { $payload.currentHead = $CurrentHead.ToLowerInvariant() }
     if ($TargetHead -match '^[0-9a-f]{40}$') { $payload.targetHead = $TargetHead.ToLowerInvariant() }
     if ($RequestId -match '^[0-9a-f]{24}$') { $payload.requestId = $RequestId.ToLowerInvariant() }
-    if ($Phase -in @("started", "stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying", "rollback")) {
+    if ($Phase -in @("started", "preparing", "installing", "stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying", "rollback")) {
         $payload.phase = $Phase
     }
     if ($StartedAt) { $payload.startedAt = $StartedAt }
@@ -437,12 +526,13 @@ function Remove-ArtemUpdateLock {
 function Write-ArtemUpdateTransaction {
     param(
         [Parameter(Mandatory)]$Paths,
-        [Parameter(Mandatory)][ValidateSet("started", "stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying", "rollback")][string]$Phase,
+        [Parameter(Mandatory)][ValidateSet("started", "preparing", "installing", "stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying", "rollback")][string]$Phase,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$PreviousHead,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$TargetHead,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [string]$StagingRoot
     )
-    Write-ArtemUpdateJson -Path $Paths.UpdateTransactionState -Payload @{
+    $payload = @{
         schemaVersion = 1
         status = "incomplete"
         phase = $Phase
@@ -451,6 +541,8 @@ function Write-ArtemUpdateTransaction {
         requestId = $LockRequestId.ToLowerInvariant()
         updatedAt = [DateTime]::UtcNow.ToString("o")
     }
+    if ($StagingRoot) { $payload.stagingRoot = $StagingRoot }
+    Write-ArtemUpdateJson -Path $Paths.UpdateTransactionState -Payload $payload
     Write-ArtemUpdateState -Paths $Paths -Status "updating" -Phase $Phase
 }
 
@@ -458,7 +550,7 @@ function Get-ArtemUpdateTransaction {
     param([Parameter(Mandatory)]$Paths)
     if (-not (Test-Path -LiteralPath $Paths.UpdateTransactionState)) { return $null }
     $payload = Get-ArtemJsonPayload -Path $Paths.UpdateTransactionState
-    $validPhases = @("started", "stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying", "rollback")
+    $validPhases = @("started", "preparing", "installing", "stopping", "checkout", "handoff", "target-authoritative", "validating", "building", "artifact-ready", "restarting", "verifying", "rollback")
     $updatedAt = $null
     try {
         $updatedAt = [DateTimeOffset]::Parse([string]$payload.updatedAt).ToUniversalTime()
@@ -512,7 +604,15 @@ function Invoke-ArtemRollback {
     Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
     Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("ci") -Description "rollback npm ci"
     Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
-    Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("run", "setup") -Description "rollback setup"
+    $previousRuntimeVenv = $env:PANEL_RUNTIME_VENV
+    try {
+        $env:PANEL_RUNTIME_VENV = Get-ArtemRuntimeVenvPath -Paths $Paths -Revision $RollbackHead
+        Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("run", "setup") -Description "rollback setup"
+    }
+    finally {
+        if ($null -eq $previousRuntimeVenv) { Remove-Item Env:PANEL_RUNTIME_VENV -ErrorAction SilentlyContinue }
+        else { $env:PANEL_RUNTIME_VENV = $previousRuntimeVenv }
+    }
     Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
 
     $rollbackIdentity = Get-ArtemProductionBuildIdentity -DashboardRoot $Paths.RollbackDashboard
@@ -624,14 +724,16 @@ function Invoke-ArtemTargetUpdater {
         [Parameter(Mandatory)]$Paths,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$PreviousHead,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$TargetHead,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][string]$StagingRoot
     )
     Write-ArtemUpdateTransaction `
         -Paths $Paths `
         -Phase "handoff" `
         -PreviousHead $PreviousHead `
         -TargetHead $TargetHead `
-        -LockRequestId $LockRequestId
+        -LockRequestId $LockRequestId `
+        -StagingRoot $StagingRoot
     # Transfer the active parent lease to a bounded, ownerless handoff record
     # before the child starts. The child atomically claims this exact record;
     # it never needs to infer whether the waiting parent remains observable.
@@ -656,16 +758,22 @@ function Invoke-ArtemTargetUpdater {
             -Target $TargetHead
         throw
     }
-    if ($null -eq $targetProcess -or $targetProcess.ExitCode -ne 0) {
+    if ($null -eq $targetProcess -or -not (Wait-ArtemTargetContinuationAcceptance `
+            -Paths $Paths `
+            -TargetProcess $targetProcess `
+            -LockRequestId $LockRequestId `
+            -Current $PreviousHead `
+            -Target $TargetHead)) {
         Reclaim-ArtemTargetHandoffLease `
             -Paths $Paths `
             -LockRequestId $LockRequestId `
             -Current $PreviousHead `
             -Target $TargetHead `
-            -ExitedChildPid $targetProcess.Id
+            -ExitedChildPid $(if ($null -ne $targetProcess) { $targetProcess.Id } else { 0 })
         Complete-ArtemTargetHandoffFailure -Paths $Paths -LockRequestId $LockRequestId
-        throw "Target updater continuation failed"
+        throw "Target updater continuation did not accept ownership"
     }
+    return $targetProcess
 }
 
 function Get-ArtemRollbackCandidate {
@@ -749,6 +857,7 @@ $rollbackHead = $null
 $buildRoot = $null
 $rollbackRestored = $false
 $targetHandoffClaim = $null
+$stagingRoot = $null
 
 try {
     # From the first instruction after lock acquisition onward, every exit is
@@ -841,13 +950,15 @@ try {
         $rollbackHead = $decision.RollbackHead
         $transactionStarted = $true
         $runtimeStoppedForTransaction = $true
+        $stagingRoot = [string]$transaction.stagingRoot
         Write-ArtemUpdateState -Paths $paths -Status "updating"
         Write-ArtemUpdateTransaction `
             -Paths $paths `
             -Phase "target-authoritative" `
             -PreviousHead $rollbackHead `
             -TargetHead $targetHead `
-            -LockRequestId $RequestId
+            -LockRequestId $RequestId `
+            -StagingRoot $stagingRoot
         $targetPhase = $true
     }
     else {
@@ -917,12 +1028,22 @@ try {
                 -TargetHead $targetHead `
                 -LockRequestId $RequestId
             Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
+            # All target-dependent expensive work happens in a detached exact
+            # worktree.  The canonical checkout, its dashboard, runtime and
+            # kiosk stay authoritative until this returns artifact-ready.
+            $stagedTarget = Invoke-ArtemTargetStaging `
+                -Paths $paths `
+                -PreviousHead $rollbackHead `
+                -TargetHead $targetHead `
+                -LockRequestId $RequestId `
+                -Timestamp $timestamp
             Write-ArtemUpdateTransaction `
                 -Paths $paths `
                 -Phase "stopping" `
                 -PreviousHead $rollbackHead `
                 -TargetHead $targetHead `
-                -LockRequestId $RequestId
+                -LockRequestId $RequestId `
+                -StagingRoot $stagedTarget.Stage.Root
             Stop-ArtemRuntime -Paths $paths -Manual $false
             $runtimeStoppedForTransaction = $true
             Set-Content -LiteralPath $paths.RollbackHead -Value $rollbackHead -Encoding ASCII
@@ -938,14 +1059,16 @@ try {
                 -Phase "checkout" `
                 -PreviousHead $rollbackHead `
                 -TargetHead $targetHead `
-                -LockRequestId $RequestId
+                -LockRequestId $RequestId `
+                -StagingRoot $stagedTarget.Stage.Root
 
             $handoffStarted = $true
             Invoke-ArtemTargetUpdater `
                 -Paths $paths `
                 -PreviousHead $rollbackHead `
                 -TargetHead $targetHead `
-                -LockRequestId $RequestId
+                -LockRequestId $RequestId `
+                -StagingRoot $stagedTarget.Stage.Root
             return
         }
         else {
@@ -954,51 +1077,34 @@ try {
     }
 
     if ($targetPhase) {
-        $buildRoot = Join-Path $paths.RuntimeRoot ("update-build-{0}" -f $RequestId)
-        if (Test-Path -LiteralPath $buildRoot) {
-            Remove-Item -LiteralPath $buildRoot -Recurse -Force
+        if ($Continuation -and -not [string]::IsNullOrWhiteSpace($stagingRoot)) {
+            $stage = Get-ArtemStagedUpdatePaths -Paths $paths -LockRequestId $RequestId -StagingRoot $stagingRoot
+            $buildRoot = $stage.Root
+            $buildPaths = [pscustomobject]@{
+                CheckDist = Join-Path $stage.Build "check-dist"
+                ProductionDist = Join-Path $stage.Build "production-dist"
+            }
+            Assert-ArtemStagedProductionBuild -DashboardRoot $buildPaths.ProductionDist -ExpectedRevision $targetHead
+            $targetPython = Get-ArtemRuntimePythonPath -Paths $paths -Revision $targetHead
+            if (-not (Test-Path -LiteralPath $targetPython)) {
+                throw "Target versioned Python environment is missing after staging"
+            }
         }
-        New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
-        Write-ArtemUpdateTransaction `
-            -Paths $paths `
-            -Phase "validating" `
-            -PreviousHead $rollbackHead `
-            -TargetHead $targetHead `
-            -LockRequestId $RequestId
-        Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
-        Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("ci") -Description "npm ci"
-        Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
-        Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("run", "setup") -Description "project setup"
-        Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
-
-        $env:PANEL_AGENT_MODE = "read_only"
-        $env:PANEL_WRITES_ENABLED = "false"
-        $env:PANEL_COFFEE_TIMING_WRITES_ENABLED = "false"
-        $env:PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED = "false"
-        $env:PANEL_COFFEE_ACTIONS_ENABLED = "false"
-        $env:PANEL_KIOSK_CONTROLS_ENABLED = "false"
-
-        Write-ArtemUpdateTransaction `
-            -Paths $paths `
-            -Phase "building" `
-            -PreviousHead $rollbackHead `
-            -TargetHead $targetHead `
-            -LockRequestId $RequestId
-        $buildPaths = Invoke-IsolatedValidation `
-            -Paths $paths `
-            -Timestamp $timestamp `
-            -LockRequestId $RequestId `
-            -BuildRoot $buildRoot
-        Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
-        Assert-ArtemStagedProductionBuild `
-            -DashboardRoot $buildPaths.ProductionDist `
-            -ExpectedRevision $targetHead
-        Write-ArtemUpdateTransaction `
-            -Paths $paths `
-            -Phase "artifact-ready" `
-            -PreviousHead $rollbackHead `
-            -TargetHead $targetHead `
-            -LockRequestId $RequestId
+        else {
+            # Same-SHA repair/recovery uses staging too. A continuation from a
+            # pre-staging updater has no durable stagingRoot; it takes this
+            # bounded compatibility path after its already-existing cutover so
+            # this updater can be introduced without breaking #197 handoff.
+            $stagedTarget = Invoke-ArtemTargetStaging `
+                -Paths $paths `
+                -PreviousHead $rollbackHead `
+                -TargetHead $targetHead `
+                -LockRequestId $RequestId `
+                -Timestamp $timestamp
+            $stagingRoot = $stagedTarget.Stage.Root
+            $buildRoot = $stagingRoot
+            $buildPaths = $stagedTarget.BuildPaths
+        }
 
         if (-not $runtimeStoppedForTransaction) {
             Stop-ArtemRuntime -Paths $paths -Manual $false

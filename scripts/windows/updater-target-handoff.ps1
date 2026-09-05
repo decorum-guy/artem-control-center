@@ -320,10 +320,34 @@ function Start-ArtemTargetContinuation {
     )
     Write-ArtemTargetHandoffEvidence -Paths $Paths -LockRequestId $LockRequestId -Stage "launched" -Result "success"
     try {
-        return Start-Process -FilePath "powershell.exe" -ArgumentList (New-ArtemTargetContinuationArguments -TargetScript $TargetScript -Current $Current -Target $Target -LockRequestId $LockRequestId) -WorkingDirectory $Paths.RepoRoot -WindowStyle Hidden -Wait -PassThru
+        return Start-Process -FilePath "powershell.exe" -ArgumentList (New-ArtemTargetContinuationArguments -TargetScript $TargetScript -Current $Current -Target $Target -LockRequestId $LockRequestId) -WorkingDirectory $Paths.RepoRoot -WindowStyle Hidden -PassThru
     }
     catch {
         Write-ArtemTargetHandoffEvidence -Paths $Paths -LockRequestId $LockRequestId -Stage "launched" -Result "child-start-failed"
         throw
     }
+}
+
+function Wait-ArtemTargetContinuationAcceptance {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)]$TargetProcess,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target,
+        [int]$TimeoutSeconds = 20
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $TargetProcess.Refresh()
+        if ($TargetProcess.HasExited) { return $false }
+        $lock = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+        if (
+            (Test-ArtemTargetHandoffLease -Existing $lock -LockRequestId $LockRequestId -Current $Current -Target $Target) -and
+            [int]$lock.ownerPid -eq [int]$TargetProcess.Id -and
+            $null -eq $lock.handoff
+        ) { return $true }
+        Start-Sleep -Milliseconds 100
+    }
+    return $false
 }

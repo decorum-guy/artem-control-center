@@ -4,7 +4,14 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const isWindows = process.platform === "win32";
-const venvPython = resolve(root, ".venv", isWindows ? "Scripts/python.exe" : "bin/python");
+// Production updates prepare an exact-revision virtualenv beneath the runtime
+// root before cutover.  It is deliberately outside the checkout: a venv embeds
+// its creation path and cannot safely be moved from a worktree afterwards.
+const configuredVenv = process.env.PANEL_RUNTIME_VENV;
+const venvRoot = configuredVenv
+  ? resolve(configuredVenv)
+  : resolve(root, ".venv");
+const venvPython = resolve(venvRoot, isWindows ? "Scripts/python.exe" : "bin/python");
 
 function run(command, args, env = {}) {
   const result = spawnSync(command, args, {
@@ -34,7 +41,7 @@ if (!existsSync(resolve(root, "node_modules"))) {
 }
 
 if (!existsSync(venvPython)) {
-  run(isWindows ? "py" : "python3", ["-m", "venv", ".venv"]);
+  run(isWindows ? "py" : "python3", ["-m", "venv", venvRoot]);
 }
 
 run(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);

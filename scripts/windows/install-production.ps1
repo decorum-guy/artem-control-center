@@ -31,11 +31,19 @@ if (Test-Path -LiteralPath $legacyStop) {
 
 Stop-ArtemRuntime -Paths $paths -Manual $false
 Set-Location -LiteralPath $paths.RepoRoot
-
-Invoke-CheckedCommand `
-    -FilePath "npm.cmd" `
-    -Arguments @("run", "setup") `
-    -Description "project setup"
+ $revision = Get-ArtemCheckoutRevision -Paths $paths
+ $previousRuntimeVenv = $env:PANEL_RUNTIME_VENV
+ try {
+    $env:PANEL_RUNTIME_VENV = Get-ArtemRuntimeVenvPath -Paths $paths -Revision $revision
+    Invoke-CheckedCommand `
+        -FilePath "npm.cmd" `
+        -Arguments @("run", "setup") `
+        -Description "project setup"
+ }
+ finally {
+    if ($null -eq $previousRuntimeVenv) { Remove-Item Env:PANEL_RUNTIME_VENV -ErrorAction SilentlyContinue }
+    else { $env:PANEL_RUNTIME_VENV = $previousRuntimeVenv }
+ }
 Invoke-CheckedCommand `
     -FilePath "npm.cmd" `
     -Arguments @("run", "build:production") `
