@@ -18,6 +18,16 @@ type BeanRecord = {
 type BeanDetail = { bean: BeanRecord; extractions: Array<{ id: string; version: number }> };
 type UploadSession = { sessionId: string; uploadUrl: string; pendingAttachmentId: string | null; photoId: string | null };
 
+function browserUploadUrl(uploadUrl: string): string {
+  if (process.env.PLAYWRIGHT_EXTERNAL_SERVER === "true") return uploadUrl;
+  const target = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5173");
+  const source = new URL(uploadUrl);
+  target.pathname = source.pathname;
+  target.search = source.search;
+  target.hash = source.hash;
+  return target.toString();
+}
+
 function artifactDirectory(testInfo: TestInfo): string {
   const directory = process.env.COFFEE_DIARY_SLICE2_ARTIFACT_DIR ?? testInfo.outputPath("coffee-diary-slice2-review");
   mkdirSync(directory, { recursive: true });
@@ -49,7 +59,7 @@ async function uploadFromMobile(page: Page, uploadUrl: string, browser: Browser)
   const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const mobilePage = await mobileContext.newPage();
   try {
-    await mobilePage.goto(uploadUrl);
+    await mobilePage.goto(browserUploadUrl(uploadUrl));
     await expect.poll(() => new URL(mobilePage.url()).hash).toBe("");
     await expect(mobilePage.getByRole("heading", { name: "Фото кофе" })).toBeVisible();
     const overflow = await mobilePage.evaluate(() => ({
@@ -83,7 +93,7 @@ async function uploadFromMobileWithResponseLoss(uploadUrl: string, browser: Brow
     await route.abort("failed");
   });
   try {
-    await mobilePage.goto(uploadUrl);
+    await mobilePage.goto(browserUploadUrl(uploadUrl));
     await expect.poll(() => new URL(mobilePage.url()).hash).toBe("");
     await expect(mobilePage.getByRole("heading", { name: "Фото кофе" })).toBeVisible();
     await mobilePage.getByTestId("coffee-upload-file").setInputFiles({ name: "coffee.png", mimeType: "image/png", buffer: PNG_FIXTURE });

@@ -59,6 +59,12 @@ PANEL_COFFEE_TIMING_WRITES_ENABLED=false
 PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED=false
 PANEL_COFFEE_ACTIONS_ENABLED=false
 
+# Coffee Diary phone upload stays disabled until a real phone-reachable origin
+# and the dedicated narrow ingress are configured explicitly.
+# PANEL_COFFEE_DIARY_UPLOAD_ORIGIN=http://<samsung-lan-address>:8788
+# PANEL_COFFEE_DIARY_UPLOAD_INGRESS_BIND_HOST=0.0.0.0
+# PANEL_COFFEE_DIARY_UPLOAD_INGRESS_PORT=8788
+
 # AVALAR public monitoring can be enabled without credentials.
 PANEL_AVALAR_MAIN_URL=https://avalar.pro
 PANEL_AVALAR_STAGE_URL=https://stage.avalar.pro

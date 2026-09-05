@@ -124,6 +124,9 @@ function uploadSessionErrorCopy(reason: unknown): string {
   if (code === "coffee_diary_upload_token_cancelled") return "QR-ссылка отменена.";
   if (code === "coffee_diary_upload_token_consumed") return "Фото уже принято.";
   if (code === "coffee_diary_upload_sessions_full") return "Слишком много активных QR-ссылок. Повторите позже.";
+  if (code === "coffee_diary_upload_origin_required" || code === "coffee_diary_upload_origin_invalid" || code === "coffee_diary_upload_ingress_invalid") {
+    return "Загрузка фото с телефона недоступна: требуется настроить безопасный адрес.";
+  }
   return "Не удалось создать QR-ссылку. Повторите попытку.";
 }
 

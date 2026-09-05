@@ -8,7 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Literal
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
@@ -117,6 +117,7 @@ from .coffee_delayed_start import (
     CoffeeDelayedStartError,
     CoffeeDelayedStartScheduler,
 )
+from .coffee_upload_config import CoffeeUploadConfigurationError, configured_coffee_upload_origin
 from .knowledge import KnowledgeReader, build_knowledge_router
 
 
@@ -608,36 +609,27 @@ async def _stream_bounded_photo_body(request: Request, destination) -> int:
     return total
 
 
-def _coffee_upload_origin(request: Request) -> str:
-    configured = os.getenv("PANEL_COFFEE_DIARY_UPLOAD_ORIGIN", "").strip()
-    candidate = configured or f"{request.url.scheme}://{request.headers.get('host', '')}"
-    parsed = urlsplit(candidate)
+def _coffee_upload_origin(request: Request | None = None) -> str:
+    """Resolve only the explicitly configured phone-reachable origin.
+
+    `request` remains accepted for the narrow internal call seam, but the
+    request Host is deliberately never used as a fallback.
+    """
+
     try:
-        port = parsed.port
-    except ValueError as exc:
-        raise HTTPException(status_code=500, detail="coffee_diary_upload_origin_invalid") from exc
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.path not in {"", "/"}
-        or parsed.query
-        or parsed.fragment
-        or port is None and ":" in parsed.netloc.rsplit("]", 1)[-1]
-    ):
-        raise HTTPException(status_code=500, detail="coffee_diary_upload_origin_invalid")
-    return f"{parsed.scheme}://{parsed.netloc}"
+        return configured_coffee_upload_origin()
+    except CoffeeUploadConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=exc.code) from exc
 
 
-def _coffee_upload_session_response(request: Request, response: Response, session, token: str) -> dict[str, object]:
+def _coffee_upload_session_response(response: Response, session, token: str, origin: str) -> dict[str, object]:
     response.headers["Cache-Control"] = "no-store"
     return {
         "sessionId": str(session.session_id),
         "state": session.state,
         "expiresAt": session.expires_at.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "remainingSeconds": max(0, int(session.deadline - time.monotonic())),
-        "uploadUrl": f"{_coffee_upload_origin(request)}/coffee-upload#token={quote(token, safe='-_')}",
+        "uploadUrl": f"{origin}/coffee-upload#token={quote(token, safe='-_')}",
         "pendingAttachmentId": None,
         "photoId": None,
     }
@@ -710,7 +702,9 @@ _COFFEE_DIARY_PUBLIC_CODES = {
     "coffee_diary_staged_attachment_not_found",
     "coffee_diary_photo_file_missing",
     "coffee_diary_export_too_large",
+    "coffee_diary_upload_origin_required",
     "coffee_diary_upload_origin_invalid",
+    "coffee_diary_upload_ingress_invalid",
     "if_match_invalid",
     "if_match_required",
     "idempotency_key_invalid",
@@ -788,10 +782,11 @@ def get_coffee_diary_bean(bean_id: str) -> CoffeeDiaryBeanDetail:
 def create_coffee_diary_photo_upload_session(bean_id: str, request: Request, response: Response) -> dict[str, object]:
     _require_coffee_diary_write()
     try:
+        origin = _coffee_upload_origin(request)
         parsed_bean_id = validate_uuid4(bean_id)
         coffee_diary_store.bean_detail(parsed_bean_id)
         session, token = coffee_upload_registry.create(intent="bean", bean_id=parsed_bean_id)
-        return _coffee_upload_session_response(request, response, session, token)
+        return _coffee_upload_session_response(response, session, token, origin)
     except Exception as exc:
         if isinstance(exc, HTTPException):
             raise
@@ -804,6 +799,7 @@ def create_coffee_diary_photo_upload_session(bean_id: str, request: Request, res
 @app.post("/api/v1/coffee-diary/photo-upload-sessions")
 async def create_coffee_diary_staged_upload_session(request: Request, response: Response) -> dict[str, object]:
     _require_coffee_diary_write()
+    origin = _coffee_upload_origin(request)
     raw_body = await _read_bounded_coffee_diary_body(request)
     try:
         payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
@@ -813,7 +809,7 @@ async def create_coffee_diary_staged_upload_session(request: Request, response: 
         raise HTTPException(status_code=422, detail="coffee_diary_upload_staged_attachment_invalid")
     try:
         session, token = coffee_upload_registry.create(intent="bean_create", bean_id=None)
-        return _coffee_upload_session_response(request, response, session, token)
+        return _coffee_upload_session_response(response, session, token, origin)
     except Exception as exc:
         _coffee_upload_error(exc)
         raise AssertionError("unreachable")
