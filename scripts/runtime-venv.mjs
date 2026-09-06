@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const revisionPattern = /^[a-f0-9]{40}$/;
@@ -15,4 +16,16 @@ export function resolveRevisionScopedVenvRoot(runtimeRoot, revision) {
 
 export function resolveVenvPython(venvRoot, platform = process.platform) {
   return resolve(venvRoot, platform === "win32" ? "Scripts/python.exe" : "bin/python");
+}
+
+export function resolvePythonExecutable(root, configuredVenv, platform = process.platform, exists = existsSync) {
+  const venvPython = resolveVenvPython(resolveSetupVenvRoot(root, configuredVenv), platform);
+  if (configuredVenv) {
+    if (!exists(venvPython)) {
+      throw new Error("PANEL_RUNTIME_VENV is configured but its Python executable is missing");
+    }
+    return venvPython;
+  }
+
+  return exists(venvPython) ? venvPython : platform === "win32" ? "py" : "python3";
 }
