@@ -76,7 +76,16 @@ finally {
     else {
         $env:PANEL_RUNTIME_VENV = $previousRuntimeVenv
     }
+    $restoredRuntimeVenv = [Environment]::GetEnvironmentVariable("PANEL_RUNTIME_VENV", "Process")
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ($null -eq $previousRuntimeVenv) {
+        if ($null -ne $restoredRuntimeVenv) {
+            throw "PANEL_RUNTIME_VENV was not removed after the detached runtime regression"
+        }
+    }
+    elseif ($restoredRuntimeVenv -cne $previousRuntimeVenv) {
+        throw "PANEL_RUNTIME_VENV was not restored after the detached runtime regression"
+    }
 }
 
 Write-Host "Validated detached-source setup and pytest execution through the configured revision-scoped runtime environment."

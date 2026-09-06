@@ -50,6 +50,34 @@ test("staging has truthful pre-cutover progress and staging failure preserves pr
   assert.ok(failure >= 0);
 });
 
+test("staged setup keeps the target runtime Python configured through validation", () => {
+  const staging = updater.indexOf("function Invoke-ArtemTargetStaging");
+  const stagingEnd = updater.indexOf("\n}\n\n$ArtemUpdateActivityMax", staging);
+  const stagingSource = updater.slice(staging, stagingEnd);
+  const targetVenv = stagingSource.indexOf("$targetRuntimeVenv = Get-ArtemRuntimeVenvPath");
+  const previousVenv = stagingSource.indexOf("$previousRuntimeVenv = $env:PANEL_RUNTIME_VENV");
+  const configuredVenv = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $targetRuntimeVenv");
+  const setup = stagingSource.indexOf('Description "staged project setup"');
+  const validation = stagingSource.indexOf("Invoke-IsolatedValidation");
+  const firstRestore = stagingSource.indexOf("Remove-Item Env:PANEL_RUNTIME_VENV");
+  const firstRestorePrevious = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $previousRuntimeVenv");
+  const restore = stagingSource.indexOf("Remove-Item Env:PANEL_RUNTIME_VENV", validation);
+  const restorePrevious = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $previousRuntimeVenv", validation);
+
+  assert.ok(targetVenv >= 0);
+  assert.ok(previousVenv >= 0 && previousVenv < targetVenv);
+  assert.ok(configuredVenv > targetVenv);
+  assert.ok(setup > configuredVenv);
+  assert.ok(validation > setup);
+  assert.equal(firstRestore, restore);
+  assert.equal(firstRestorePrevious, restorePrevious);
+  assert.ok(restore > validation);
+  assert.ok(restorePrevious > validation);
+  assert.equal((stagingSource.match(/Get-ArtemRuntimeVenvPath/g) ?? []).length, 1);
+  const ci = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
+  assert.match(ci, /test-python-runtime-venv\.ps1/);
+});
+
 test("bootstrap exits after durable child lease acceptance instead of waiting for terminal completion", () => {
   const handoff = readFileSync(resolve(root, "scripts/windows/updater-target-handoff.ps1"), "utf8");
   const start = handoff.indexOf("function Start-ArtemTargetContinuation");
