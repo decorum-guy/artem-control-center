@@ -50,6 +50,44 @@ test("staging has truthful pre-cutover progress and staging failure preserves pr
   assert.ok(failure >= 0);
 });
 
+test("staged setup keeps the target runtime Python configured through validation", () => {
+  const sources = [
+    ["LF", updater.replace(/\r\n/g, "\n")],
+    ["CRLF", updater.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n")],
+  ];
+
+  for (const [lineEnding, source] of sources) {
+    const staging = source.indexOf("function Invoke-ArtemTargetStaging");
+    const stagingEnd = source.indexOf("$ArtemUpdateActivityMax", staging);
+    assert.ok(staging >= 0, `${lineEnding}: staging function is present`);
+    assert.ok(stagingEnd > staging, `${lineEnding}: staging function boundary is present`);
+    const stagingSource = source.slice(staging, stagingEnd);
+    const targetVenv = stagingSource.indexOf("$targetRuntimeVenv = Get-ArtemRuntimeVenvPath");
+    const previousVenv = stagingSource.indexOf("$previousRuntimeVenv = $env:PANEL_RUNTIME_VENV");
+    const configuredVenv = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $targetRuntimeVenv");
+    const setup = stagingSource.indexOf('Description "staged project setup"');
+    const validation = stagingSource.indexOf("Invoke-IsolatedValidation");
+    const firstRestore = stagingSource.indexOf("Remove-Item Env:PANEL_RUNTIME_VENV");
+    const firstRestorePrevious = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $previousRuntimeVenv");
+    const restore = stagingSource.indexOf("Remove-Item Env:PANEL_RUNTIME_VENV", validation);
+    const restorePrevious = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $previousRuntimeVenv", validation);
+
+    assert.ok(targetVenv >= 0, `${lineEnding}: target venv is resolved`);
+    assert.ok(previousVenv >= 0 && previousVenv < targetVenv, `${lineEnding}: caller venv is saved first`);
+    assert.ok(configuredVenv > targetVenv, `${lineEnding}: target venv is configured`);
+    assert.ok(setup > configuredVenv, `${lineEnding}: setup follows configuration`);
+    assert.ok(validation > setup, `${lineEnding}: validation follows setup`);
+    assert.equal(firstRestore, restore, `${lineEnding}: removal restore follows validation`);
+    assert.equal(firstRestorePrevious, restorePrevious, `${lineEnding}: value restore follows validation`);
+    assert.ok(restore > validation, `${lineEnding}: removal restore follows validation`);
+    assert.ok(restorePrevious > validation, `${lineEnding}: value restore follows validation`);
+    assert.equal((stagingSource.match(/Get-ArtemRuntimeVenvPath/g) ?? []).length, 1, `${lineEnding}: one target resolution`);
+  }
+
+  const ci = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
+  assert.match(ci, /test-python-runtime-venv\.ps1/);
+});
+
 test("bootstrap exits after durable child lease acceptance instead of waiting for terminal completion", () => {
   const handoff = readFileSync(resolve(root, "scripts/windows/updater-target-handoff.ps1"), "utf8");
   const start = handoff.indexOf("function Start-ArtemTargetContinuation");

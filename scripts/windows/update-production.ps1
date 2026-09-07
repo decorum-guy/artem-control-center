@@ -174,37 +174,40 @@ function Invoke-ArtemTargetStaging {
     Write-ArtemUpdateTransaction -Paths $Paths -Phase "preparing" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
     Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
     Invoke-CheckedCommand -FilePath "git.exe" -Arguments @("worktree", "add", "--detach", $stage.Source, $TargetHead) -Description "target staging worktree"
+    $previousRuntimeVenv = $env:PANEL_RUNTIME_VENV
     try {
-        Push-Location -LiteralPath $stage.Source
+        $targetRuntimeVenv = Get-ArtemRuntimeVenvPath -Paths $Paths -Revision $TargetHead
+        $env:PANEL_RUNTIME_VENV = $targetRuntimeVenv
         try {
-            Write-ArtemUpdateTransaction -Paths $Paths -Phase "installing" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
-            Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("ci") -Description "staged npm ci"
-            Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
-            $previousRuntimeVenv = $env:PANEL_RUNTIME_VENV
+            Push-Location -LiteralPath $stage.Source
             try {
-                $env:PANEL_RUNTIME_VENV = Get-ArtemRuntimeVenvPath -Paths $Paths -Revision $TargetHead
+                Write-ArtemUpdateTransaction -Paths $Paths -Phase "installing" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+                Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("ci") -Description "staged npm ci"
+                Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
                 Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("run", "setup") -Description "staged project setup"
+                Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
+                $env:PANEL_AGENT_MODE = "read_only"
+                $env:PANEL_WRITES_ENABLED = "false"
+                $env:PANEL_COFFEE_TIMING_WRITES_ENABLED = "false"
+                $env:PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED = "false"
+                $env:PANEL_COFFEE_ACTIONS_ENABLED = "false"
+                $env:PANEL_KIOSK_CONTROLS_ENABLED = "false"
+                Write-ArtemUpdateTransaction -Paths $Paths -Phase "validating" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+                Write-ArtemUpdateTransaction -Paths $Paths -Phase "building" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+                $buildPaths = Invoke-IsolatedValidation -Paths $Paths -Timestamp $Timestamp -LockRequestId $LockRequestId -BuildRoot $stage.Build
+                Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
+                Assert-ArtemStagedProductionBuild -DashboardRoot $buildPaths.ProductionDist -ExpectedRevision $TargetHead
+                Write-ArtemUpdateTransaction -Paths $Paths -Phase "artifact-ready" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+                return [pscustomobject]@{ Stage = $stage; BuildPaths = $buildPaths }
             }
             finally {
-                if ($null -eq $previousRuntimeVenv) { Remove-Item Env:PANEL_RUNTIME_VENV -ErrorAction SilentlyContinue }
-                else { $env:PANEL_RUNTIME_VENV = $previousRuntimeVenv }
+                Pop-Location
             }
-            Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
-            $env:PANEL_AGENT_MODE = "read_only"
-            $env:PANEL_WRITES_ENABLED = "false"
-            $env:PANEL_COFFEE_TIMING_WRITES_ENABLED = "false"
-            $env:PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED = "false"
-            $env:PANEL_COFFEE_ACTIONS_ENABLED = "false"
-            $env:PANEL_KIOSK_CONTROLS_ENABLED = "false"
-            Write-ArtemUpdateTransaction -Paths $Paths -Phase "validating" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
-            Write-ArtemUpdateTransaction -Paths $Paths -Phase "building" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
-            $buildPaths = Invoke-IsolatedValidation -Paths $Paths -Timestamp $Timestamp -LockRequestId $LockRequestId -BuildRoot $stage.Build
-            Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
-            Assert-ArtemStagedProductionBuild -DashboardRoot $buildPaths.ProductionDist -ExpectedRevision $TargetHead
-            Write-ArtemUpdateTransaction -Paths $Paths -Phase "artifact-ready" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
-            return [pscustomobject]@{ Stage = $stage; BuildPaths = $buildPaths }
         }
-        finally { Pop-Location }
+        finally {
+            if ($null -eq $previousRuntimeVenv) { Remove-Item Env:PANEL_RUNTIME_VENV -ErrorAction SilentlyContinue }
+            else { $env:PANEL_RUNTIME_VENV = $previousRuntimeVenv }
+        }
     }
     finally {
         if (Test-Path -LiteralPath $stage.Source) {
