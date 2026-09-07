@@ -92,6 +92,14 @@ exit `$child.ExitCode
     if ($updaterText -notmatch 'Invoke-ArtemTargetUpdater' -or $handoffText -notmatch 'Start-Process[\s\S]*-Continuation') {
         throw "Canonical updater is missing the explicit target continuation handoff"
     }
+    $bodyMarker = $updaterText.IndexOf('Write-ArtemUpdaterBootstrapEvidence -Stage "script-entered"')
+    $helperLoad = $updaterText.IndexOf('runtime-common.ps1')
+    if ($bodyMarker -lt 0 -or $helperLoad -lt 0 -or $bodyMarker -ge $helperLoad) {
+        throw "Updater must publish its first durable body marker before helper loading"
+    }
+    if ($updaterText -notmatch 'schemaVersion = 2' -or $updaterText -notmatch 'processId = \[int\]\$PID') {
+        throw "Updater body proof must use the strict request and PID-bound bootstrap schema"
+    }
     if ($baseHead -eq $targetHead) { throw "Bootstrap fixture did not create two revisions" }
 }
 finally {

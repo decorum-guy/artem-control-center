@@ -88,6 +88,27 @@ test("staged setup keeps the target runtime Python configured through validation
   assert.match(ci, /test-python-runtime-venv\.ps1/);
 });
 
+test("first rollout from an older updater rediscovers only its exact target revision environment", () => {
+  const runtimeVenv = readFileSync(resolve(root, "scripts/runtime-venv.mjs"), "utf8");
+  const setup = readFileSync(resolve(root, "scripts/setup.mjs"), "utf8");
+  const migration = readFileSync(resolve(root, "scripts/windows/test-first-rollout-venv-migration.ps1"), "utf8");
+  const ci = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
+  assert.match(runtimeVenv, /panel-staged-runtime-venv\.v1/);
+  assert.match(runtimeVenv, /revision-runtime-venv\.json/);
+  assert.match(runtimeVenv, /basename\(dirname\(normalized\)\).*"venvs"/s);
+  assert.match(runtimeVenv, /basename\(dirname\(dirname\(normalized\)\)\).*"artemcontrolcenter"/s);
+  assert.match(runtimeVenv, /marker\.revision !== revision/);
+  assert.match(setup, /writeStagedRuntimeVenvMarker\(root, configuredVenv\)/);
+  assert.match(migration, /OLD-UPDATER setup env restoration to NEW-TARGET check\/build/);
+  assert.match(migration, /npm\.cmd run setup/);
+  assert.match(migration, /Remove-Item Env:PANEL_RUNTIME_VENV/);
+  assert.match(migration, /npm\.cmd run check/);
+  assert.match(migration, /npm\.cmd run build:production/);
+  assert.match(migration, /worktree add --detach/);
+  assert.doesNotMatch(migration, /Stop-ArtemRuntime|update-production\.ps1/);
+  assert.match(ci, /test-first-rollout-venv-migration\.ps1/);
+});
+
 test("bootstrap exits after durable child lease acceptance instead of waiting for terminal completion", () => {
   const handoff = readFileSync(resolve(root, "scripts/windows/updater-target-handoff.ps1"), "utf8");
   const start = handoff.indexOf("function Start-ArtemTargetContinuation");
@@ -204,6 +225,8 @@ test("private updater bootstrap evidence is bounded and precedes helpers/transcr
   assert.doesNotMatch(launcher, /cmd\.exe|Command\s*=/i);
   assert.match(updater, /\$ArtemUpdaterBootstrapStages = @\(/);
   assert.match(updater, /\$ArtemUpdaterBootstrapResults = @\(/);
+  assert.match(updater, /schemaVersion = 2/);
+  assert.match(updater, /processId = \[int\]\$PID/);
   assert.match(updater, /Write-ArtemUpdaterBootstrapEvidence -Stage "script-entered"/);
   assert.ok(updater.indexOf('Write-ArtemUpdaterBootstrapEvidence -Stage "script-entered"') < updater.indexOf('runtime-common.ps1'));
   for (const stage of ["helpers-loaded", "paths-initialized", "lease-accepted", "lease-claimed", "transcript-starting", "transcript-started", "authoritative-state-started"]) {
@@ -216,6 +239,12 @@ test("private updater bootstrap evidence is bounded and precedes helpers/transcr
   assert.doesNotMatch(updater, /\$\(\$_\.Exception\.Message\).*bootstrap/i);
   assert.match(runtime, /readUpdaterBootstrapEvidence/);
   assert.match(runtime, /readUpdaterLaunchEvidence/);
+  assert.match(runtime, /UPDATER_EARLY_EXIT_MIN_NEGATIVE_OBSERVATIONS = 3/);
+  assert.match(runtime, /UPDATER_EARLY_EXIT_MIN_NEGATIVE_DURATION_MS = 500/);
+  assert.match(runtime, /accepted durable evidence/);
+  assert.match(runtime, /cim_invocation_failed/);
+  assert.match(runtime, /command_line_unavailable/);
+  assert.match(runtime, /request_mismatch/);
   assert.match(runtime, /update-bootstrap\.json/);
   assert.match(runtime, /update-launch\.json/);
   assert.doesNotMatch(runtime, /stdio:\s*"pipe"/);
@@ -229,6 +258,9 @@ test("Windows launch regressions are part of canonical CI", () => {
   assert.match(regression, /survived-runtime-stop/);
   assert.match(regression, /taskkill\.exe \/PID[\s\S]*\/T[\s\S]*\/F/);
   assert.match(regression, /updater_spawn_failed/);
+  assert.match(regression, /updater_early_exit/);
+  assert.match(regression, /Transient-recognition race harness/);
+  assert.match(regression, /Get-CimInstance Win32_Process/);
   assert.match(regression, /lockExists/);
   assert.match(ci, /test-update-production-launch\.ps1/);
 });

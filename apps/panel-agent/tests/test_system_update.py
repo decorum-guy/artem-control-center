@@ -945,7 +945,7 @@ def test_terminal_success_wins_during_updater_lock_cleanup(monkeypatch, tmp_path
     assert payload["result"] == "updated"
 
 
-@pytest.mark.parametrize("result", ["updater_spawn_failed", "updater_early_exit"])
+@pytest.mark.parametrize("result", ["updater_spawn_failed", "updater_early_exit", "updater_stale"])
 def test_runtime_spawn_failure_results_are_exact_owner_safe_codes(monkeypatch, tmp_path, result):
     client, service = make_client(monkeypatch, tmp_path, FakeGit())
     service.runtime_root.mkdir(parents=True, exist_ok=True)

@@ -12,6 +12,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  writeStagedRuntimeVenvMarker,
   resolvePythonExecutable,
   resolveRevisionScopedVenvRoot,
   resolveSetupVenvRoot,
@@ -101,6 +102,34 @@ test("setup and the Python launcher share the configured venv root contract", ()
     resolvePythonExecutable(checkoutRoot, configuredVenv, "linux", (candidate) => candidate === expectedPython),
     expectedPython
   );
+});
+
+test("OLD-UPDATER to NEW-TARGET staging resolves the setup venv after the parent restores its environment", () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), "artem-first-rollout-target-"));
+  const runtimeRoot = join(sourceRoot, "ArtemControlCenter");
+  try {
+    writeFileSync(join(sourceRoot, "target.txt"), "target\n", "utf8");
+    assert.equal(spawnSync("git", ["init", "--quiet"], { cwd: sourceRoot }).status, 0);
+    assert.equal(spawnSync("git", ["add", "target.txt"], { cwd: sourceRoot }).status, 0);
+    assert.equal(spawnSync(
+      "git",
+      ["-c", "user.email=fixture@example.invalid", "-c", "user.name=fixture", "commit", "--quiet", "-m", "target"],
+      { cwd: sourceRoot }
+    ).status, 0);
+    const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: sourceRoot, encoding: "utf8" }).stdout.trim();
+    const targetVenv = resolveRevisionScopedVenvRoot(runtimeRoot, revision);
+    const expectedPython = resolveVenvPython(targetVenv, "win32");
+    // This is the old updater's only usable handoff: it runs target setup with
+    // PANEL_RUNTIME_VENV, then restores/removes it before target check/build.
+    writeStagedRuntimeVenvMarker(sourceRoot, targetVenv, revision);
+    assert.equal(
+      resolvePythonExecutable(sourceRoot, undefined, "win32", (candidate) => candidate === expectedPython),
+      expectedPython,
+      "target validation uses the same revision environment recorded by setup"
+    );
+  } finally {
+    rmSync(sourceRoot, { recursive: true, force: true });
+  }
 });
 
 test("detached source runs pytest through the configured environment", (t) => {
