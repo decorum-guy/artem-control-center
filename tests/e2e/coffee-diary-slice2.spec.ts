@@ -178,10 +178,11 @@ test.describe("Coffee Diary Slice 2", () => {
     await page.getByTestId("coffee-diary-input-name").fill("Эфиопия · staged QR");
 
     const sessionResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/coffee-diary/photo-upload-sessions") && response.request().method() === "POST");
-    await page.getByTestId("coffee-diary-bean-sheet").getByRole("button", { name: "Прикрепить фото" }).click();
+    await page.getByTestId("coffee-diary-bean-sheet").getByRole("button", { name: "Добавить: лицевая сторона" }).click();
     const session = await (await sessionResponse).json() as UploadSession;
     await uploadFromMobile(page, session.uploadUrl, browser);
     await expect(page.getByTestId("coffee-diary-staged-previews")).toHaveCount(1);
+    await expect(page.getByTestId("coffee-diary-bean-sheet").getByRole("button", { name: "Добавить: оборотная сторона" })).toBeEnabled();
 
     await page.getByRole("button", { name: "Сохранить" }).click();
     await expect(page.getByTestId("coffee-diary-detail")).toContainText("Эфиопия · staged QR");
@@ -204,7 +205,7 @@ test.describe("Coffee Diary Slice 2", () => {
     await page.getByTestId("coffee-diary-input-name").fill("Эфиопия · потеря ответа");
 
     const sessionResponse = page.waitForResponse((response) => response.url().endsWith("/api/v1/coffee-diary/photo-upload-sessions") && response.request().method() === "POST");
-    await page.getByTestId("coffee-diary-bean-sheet").getByRole("button", { name: "Прикрепить фото" }).click();
+    await page.getByTestId("coffee-diary-bean-sheet").getByRole("button", { name: "Добавить: лицевая сторона" }).click();
     const session = await (await sessionResponse).json() as UploadSession;
     await uploadFromMobileWithResponseLoss(session.uploadUrl, browser);
     await expect(page.getByTestId("coffee-diary-staged-previews")).toHaveCount(1);
