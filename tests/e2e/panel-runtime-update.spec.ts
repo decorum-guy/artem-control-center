@@ -48,6 +48,7 @@ type UpdateOwnerState = {
   phase?: string;
   progressPercent?: number;
   events?: Array<{ code: string }>;
+  recoveryAvailable?: boolean;
 };
 
 type ProductionBuild = {
@@ -108,6 +109,9 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
   let checkCount = 0;
   let statusCount = 0;
   let applyCount = 0;
+  let resetCount = 0;
+  let lastResetBody: Record<string, unknown> | null = null;
+  let resetResponse: { accepted: boolean; status?: "idle"; reason?: string } = { accepted: true, status: "idle" };
   let shutdownCount = 0;
   let hideCount = 0;
   let lastApplyBody: Record<string, unknown> | null = null;
@@ -194,6 +198,12 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
       });
       return;
     }
+    if (path === "/api/v1/system/update/reset-recovery" && request.method() === "POST") {
+      resetCount += 1;
+      lastResetBody = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(resetResponse) });
+      return;
+    }
     if (path === "/api/v1/system/runtime/shutdown" && request.method() === "POST") {
       shutdownCount += 1;
       await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ accepted: true, action: "shutdown" }) });
@@ -221,9 +231,12 @@ async function installRuntimeFixtures(page: Page, profile: "standard" | "full" =
     setProductionBuild: (next: ProductionBuild) => { productionBuild = next; },
     setCheckDelay: (milliseconds: number) => { checkDelayMs = milliseconds; },
     conflictNextApply: () => { applyConflictOnce = true; },
+    setResetResponse: (next: { accepted: boolean; status?: "idle"; reason?: string }) => { resetResponse = next; },
     getCheckCount: () => checkCount,
     getStatusCount: () => statusCount,
     getApplyCount: () => applyCount,
+    getResetCount: () => resetCount,
+    getLastResetBody: () => lastResetBody,
     getShutdownCount: () => shutdownCount,
     getHideCount: () => hideCount,
     getLastApplyBody: () => lastApplyBody
@@ -397,6 +410,59 @@ test.describe("Control Center runtime update UX", () => {
     await expect(progress).toContainText("Проверяем обновление");
     await expect(progress).not.toContainText("SECRET");
     await expect(progress).not.toContainText("C:/private/repo");
+  });
+
+  test("eligible stale recovery is touch-safe, clears stale activity, and starts a fresh check", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    api.queueStatuses(
+      { schemaVersion: 1, status: "updating", currentHead: CURRENT, targetHead: TARGET, progressPercent: 5, events: [{ code: "started" }] },
+      { schemaVersion: 1, status: "failed", result: "updater_stale", currentHead: CURRENT, targetHead: TARGET, recoveryAvailable: true, progressPercent: 0, events: [] }
+    );
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+    const reset = dialog.getByTestId("runtime-update-reset");
+    await expect(reset).toBeVisible();
+    await expect(dialog.getByTestId("runtime-update-percent")).toHaveText("0%");
+    await expect(dialog).not.toContainText("Собираем панель");
+    const box = await reset.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(48);
+
+    await reset.click();
+    await expect.poll(api.getResetCount).toBe(1);
+    expect(api.getLastResetBody()).toEqual({});
+    await expect(dialog.getByRole("button", { name: "Обновить", exact: true })).toBeEnabled();
+    await expect(reset).toHaveCount(0);
+    await expect(zone).not.toContainText("Собираем панель");
+  });
+
+  test("refused stale recovery keeps a bounded Russian explanation and never exposes diagnostics", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    api.setResetResponse({ accepted: false, reason: "rollback_recovery_required" });
+    api.queueStatuses(
+      { schemaVersion: 1, status: "updating", currentHead: CURRENT, targetHead: TARGET },
+      { schemaVersion: 1, status: "failed", result: "updater_stale", recoveryAvailable: true, progressPercent: 0, events: [] }
+    );
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+    await dialog.getByTestId("runtime-update-reset").click();
+    await expect(dialog).toContainText("требуется восстановление после отката");
+    expect(await dialog.textContent()).not.toMatch(/C:\\|\/home\/|powershell|stderr|update-production/i);
+  });
+
+  test("reset affordance remains hidden when stale recovery is not server-approved", async ({ page }) => {
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    api.queueStatuses(
+      { schemaVersion: 1, status: "updating", currentHead: CURRENT, targetHead: TARGET },
+      { schemaVersion: 1, status: "failed", result: "updater_stale", progressPercent: 0, events: [] }
+    );
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    await page.getByTestId("runtime-update-dialog").getByRole("button", { name: "Обновить", exact: true }).click();
+    await expect(page.getByTestId("runtime-update-dialog").getByTestId("runtime-update-reset")).toHaveCount(0);
   });
 
   test("rollback remains distinct from reconnecting and reports the restored version", async ({ page }) => {

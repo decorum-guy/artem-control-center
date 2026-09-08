@@ -74,6 +74,15 @@ const updateFailureReasonCopy: Record<UpdateFailureResult, string> = {
   updater_stale: "Обновление остановилось без подтверждённого результата. Нужна проверка установки."
 };
 
+const updateRecoveryReasonCopy: Record<string, string> = {
+  update_in_progress: "Сброс недоступен: обновление ещё выполняется.",
+  capability_apply_active: "Сброс недоступен: сейчас применяется конфигурация панели.",
+  rollback_recovery_required: "Сброс недоступен: требуется восстановление после отката.",
+  recovery_checkout_unhealthy: "Сброс недоступен: текущая версия панели не подтверждена.",
+  recovery_artifact_unhealthy: "Сброс недоступен: запущенная сборка панели не подтверждена.",
+  recovery_not_available: "Сброс сейчас недоступен. Нужна проверка установки панели."
+};
+
 function updateFailureCopy(result?: string): string {
   if (typeof result === "string" && Object.prototype.hasOwnProperty.call(updateFailureReasonCopy, result)) {
     return updateFailureReasonCopy[result as UpdateFailureResult];
@@ -281,6 +290,14 @@ export function RuntimeControls({
           if (!active) return;
           if (event.type === "idle") return;
           if (event.type === "failure") {
+            setUpdateOwnerState(event.state);
+            setUpdateDialog("error");
+            setUpdateAccepted(false);
+            setUpdateMessage(
+              event.reason === "served_mismatch" || event.reason === "served_unverified"
+                ? updateObserverFailureCopy(event.reason)
+                : updateFailureCopy(event.state.result)
+            );
             setNotice(
               event.reason === "served_mismatch" || event.reason === "served_unverified"
                 ? updateObserverFailureCopy(event.reason)
@@ -483,6 +500,35 @@ export function RuntimeControls({
     }
   }
 
+  async function resetUpdateRecovery() {
+    if (!guardMutation() || !updateOwnerState?.recoveryAvailable) return;
+    const freshAccess = await refreshAccess();
+    if (!guardMutation()) return;
+    if (!freshAccess || freshAccess.effectiveProfile !== "full") {
+      setUpdateMessage("Для сброса нужен Полный доступ.");
+      return;
+    }
+    setUpdateMessage("Проверяем, можно ли безопасно очистить состояние…");
+    try {
+      const response = await fetch("/api/v1/system/update/reset-recovery", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-panel-intent": "panel-update" },
+        body: "{}"
+      });
+      const payload = await response.json() as { accepted?: boolean; reason?: string };
+      if (!response.ok || !payload.accepted) {
+        setUpdateMessage(updateRecoveryReasonCopy[payload.reason ?? ""] ?? updateRecoveryReasonCopy.recovery_not_available);
+        return;
+      }
+      setUpdateOwnerState(null);
+      setUpdateAccepted(false);
+      setUpdateMessage("Состояние обновления очищено. Проверяем доступную версию…");
+      await checkForUpdate();
+    } catch {
+      setUpdateMessage("Не удалось безопасно очистить состояние обновления.");
+    }
+  }
+
   const disabled = availability !== "available" || pending !== null || updateDialog !== "closed";
   const fullAccess = accessStatus?.effectiveProfile === "full";
   const canApplyUpdate = Boolean(
@@ -496,6 +542,7 @@ export function RuntimeControls({
   const updateProgress = updateProgressPercent(updateOwnerState);
   const updateActivity = safeActivityEvents(updateOwnerState?.events);
   const showUpdateProgress = ["applying", "reconnecting", "error"].includes(updateDialog) || updateOwnerState !== null;
+  const canResetRecovery = Boolean(updateOwnerState?.recoveryAvailable && fullAccess && updateDialog === "error");
 
   return (
     <>
@@ -617,6 +664,17 @@ export function RuntimeControls({
               >
                 {updateDialog === "applying" ? "Запускаем…" : "Обновить"}
               </button>
+              {updateOwnerState?.recoveryAvailable && (
+                <button
+                  type="button"
+                  className="runtime-update-reset-button"
+                  data-testid="runtime-update-reset"
+                  disabled={!canResetRecovery}
+                  onClick={() => void resetUpdateRecovery()}
+                >
+                  Очистить ошибку и попробовать заново
+                </button>
+              )}
             </div>
           </section>
         </div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -660,17 +661,39 @@ def test_status_rejects_wrong_or_malformed_handoff_evidence(monkeypatch, tmp_pat
     assert "private" not in json.dumps(payload)
 
 
-def write_update_transaction(path: Path, *, updated_at: str) -> None:
+def write_update_transaction(
+    path: Path,
+    *,
+    updated_at: str,
+    previous: str = CURRENT,
+    target: str = TARGET,
+    phase: str = "building",
+    request_id: str = REQUEST,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({
             "schemaVersion": 1,
             "status": "incomplete",
-            "phase": "building",
-            "previousHead": CURRENT,
-            "targetHead": TARGET,
-            "requestId": REQUEST,
+            "phase": phase,
+            "previousHead": previous,
+            "targetHead": target,
+            "requestId": request_id,
             "updatedAt": updated_at,
+        }),
+        encoding="utf-8",
+    )
+
+
+def write_accepted_artifact(service: PanelUpdateService, revision: str) -> None:
+    service.dashboard_dist.mkdir(parents=True, exist_ok=True)
+    service.dashboard_dist.joinpath("index.html").write_text("<!doctype html>", encoding="utf-8")
+    service.dashboard_dist.joinpath("dashboard-build.json").write_text(
+        json.dumps({
+            "schemaVersion": "dashboard-build.v1",
+            "revision": revision,
+            "profile": "accepted-v2",
+            "buildId": f"{revision}:accepted-v2",
         }),
         encoding="utf-8",
     )
@@ -991,3 +1014,261 @@ def test_runtime_owner_state_rejects_arbitrary_spawn_failure_result(monkeypatch,
     payload = client.get("/api/v1/system/update/status").json()
     assert payload["status"] == "failed"
     assert "result" not in payload
+
+
+def test_safe_recovery_resets_only_obsolete_transaction_and_next_check_is_fresh(monkeypatch, tmp_path):
+    authoritative = "c" * 40
+    requested = "d" * 40
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(current=authoritative, target=requested))
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        previous=CURRENT,
+        target=TARGET,
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    write_accepted_artifact(service, authoritative)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "failed",
+            "requestId": REQUEST,
+            "phase": "building",
+            "events": [{"code": "building"}],
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": "updater_stale",
+        }),
+        encoding="utf-8",
+    )
+
+    before = client.get("/api/v1/system/update/status").json()
+    assert before["recoveryAvailable"] is True
+    reset = client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert reset.status_code == 200
+    assert reset.json() == {"accepted": True, "status": "idle"}
+    assert not service.runtime_root.joinpath("update-transaction.json").exists()
+    assert json.loads(service.state_path.read_text(encoding="utf-8"))["status"] == "idle"
+
+    checked = client.post("/api/v1/system/update/check", headers={"x-panel-intent": "panel-update"}).json()
+    assert checked["currentHead"] == authoritative
+    assert checked["targetHead"] == requested
+    assert checked["status"] == "update_available"
+
+
+@pytest.mark.parametrize(
+    ("current", "phase", "artifact", "expected"),
+    [
+        (CURRENT, "building", True, "recovery_not_available"),
+        (TARGET, "building", True, "recovery_not_available"),
+        ("c" * 40, "rollback", True, "rollback_recovery_required"),
+        ("c" * 40, "building", False, "recovery_artifact_unhealthy"),
+    ],
+)
+def test_recovery_refuses_active_transaction_endpoints_rollback_and_unhealthy_deployment(
+    monkeypatch, tmp_path, current, phase, artifact, expected
+):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(current=current, target="d" * 40))
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        phase=phase,
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    if artifact:
+        write_accepted_artifact(service, current)
+    response = client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert response.status_code == 200
+    assert response.json() == {"accepted": False, "reason": expected}
+    assert service.runtime_root.joinpath("update-transaction.json").exists()
+
+
+def test_recovery_refuses_active_lease_and_enforces_intent_full_access_and_empty_body(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(current="c" * 40))
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(service.runtime_root / "update-transaction.json", updated_at=datetime.now(timezone.utc).isoformat())
+    write_accepted_artifact(service, "c" * 40)
+    write_update_lock(service.lock_path, updated_at=datetime.now(timezone.utc).isoformat())
+    active = client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert active.json() == {"accepted": False, "reason": "update_in_progress"}
+    assert service.runtime_root.joinpath("update-transaction.json").exists()
+
+    missing_intent = client.post("/api/v1/system/update/reset-recovery", json={})
+    assert missing_intent.status_code == 403
+    arbitrary = client.post(
+        "/api/v1/system/update/reset-recovery",
+        headers={"x-panel-intent": "panel-update"},
+        json={
+            "path": "C:/private",
+            "command": "Remove-Item",
+            "filename": "update-lock.json",
+            "ownerPid": 123,
+            "ownerInstanceToken": "browser-controlled",
+            "sha": CURRENT,
+        },
+    )
+    assert arbitrary.status_code == 422
+
+    standard_client, _ = make_client(monkeypatch, tmp_path / "standard", FakeGit(), profile="standard")
+    denied = standard_client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "full_access_required"
+
+
+def test_recovery_refuses_marker_only_deployment(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(current="c" * 40, target="d" * 40))
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    write_accepted_artifact(service, "c" * 40)
+    service.dashboard_dist.joinpath("index.html").unlink()
+    response = client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert response.json() == {"accepted": False, "reason": "recovery_artifact_unhealthy"}
+
+
+def test_new_request_state_does_not_inherit_historical_transaction_building(monkeypatch, tmp_path):
+    new_request = "1" * 24
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        phase="building",
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "failed",
+            "requestId": new_request,
+            "currentHead": "c" * 40,
+            "targetHead": "d" * 40,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": "updater_stale",
+            "events": [],
+        }),
+        encoding="utf-8",
+    )
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["requestId"] == new_request
+    assert payload["events"] == []
+    assert payload["progressPercent"] == 0
+    assert "phase" not in payload
+
+
+def test_live_recovery_reservation_is_exclusive_for_current_service_instance(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    request_id = "1" * 24
+    assert service._acquire_recovery_lock(request_id)
+    before = json.loads(service.lock_path.read_text(encoding="utf-8"))
+
+    concurrent = client.post(
+        "/api/v1/system/update/reset-recovery",
+        headers={"x-panel-intent": "panel-update"},
+        json={},
+    )
+    assert concurrent.status_code == 200
+    assert concurrent.json() == {"accepted": False, "reason": "update_in_progress"}
+    assert json.loads(service.lock_path.read_text(encoding="utf-8")) == before
+
+
+def test_live_recovery_reservation_blocks_normal_apply_without_overwrite(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    request_id = "1" * 24
+    assert service._acquire_recovery_lock(request_id)
+    before = json.loads(service.lock_path.read_text(encoding="utf-8"))
+
+    response = client.post(
+        "/api/v1/system/update/apply",
+        headers={"x-panel-intent": "panel-update"},
+        json={"expectedCurrentHead": CURRENT, "expectedTargetHead": TARGET},
+    )
+    assert response.status_code == 409
+    assert response.json() == {"detail": "update_in_progress"}
+    assert json.loads(service.lock_path.read_text(encoding="utf-8")) == before
+    assert not service.command_path.exists()
+
+
+def test_recovery_reservation_is_reclaimed_after_service_restart_even_with_pid_reuse(tmp_path):
+    first = make_service(tmp_path, FakeGit())
+    assert first._acquire_recovery_lock("1" * 24)
+    abandoned = json.loads(first.lock_path.read_text(encoding="utf-8"))
+    second = make_service(tmp_path, FakeGit())
+
+    # Both test services run in the same PID. Only the per-instance token
+    # changes, so this exercises the PID-reuse case without elapsed time.
+    assert abandoned["ownerPid"] == os.getpid()
+    assert abandoned["ownerInstanceToken"] != second._recovery_owner_token
+    second._clear_stale_lock()
+    assert not second.lock_path.exists()
+
+
+def test_abandoned_recovery_reservation_can_reset_a_proven_obsolete_transaction(monkeypatch, tmp_path):
+    authoritative = "c" * 40
+    requested = "d" * 40
+    first = make_service(tmp_path, FakeGit(current=authoritative, target=requested))
+    assert first._acquire_recovery_lock("1" * 24)
+    first.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        first.runtime_root / "update-transaction.json",
+        previous=CURRENT,
+        target=TARGET,
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    write_accepted_artifact(first, authoritative)
+
+    client, second = make_client(monkeypatch, tmp_path, FakeGit(current=authoritative, target=requested))
+    response = client.post(
+        "/api/v1/system/update/reset-recovery",
+        headers={"x-panel-intent": "panel-update"},
+        json={},
+    )
+    assert response.json() == {"accepted": True, "status": "idle"}
+    assert not second.lock_path.exists()
+    assert not second.runtime_root.joinpath("update-transaction.json").exists()
+    state = json.loads(second.state_path.read_text(encoding="utf-8"))
+    assert state["status"] == "idle"
+    assert state["currentHead"] == authoritative
+
+
+def test_abandoned_recovery_reservation_allows_normal_apply(monkeypatch, tmp_path):
+    first = make_service(tmp_path, FakeGit())
+    assert first._acquire_recovery_lock("1" * 24)
+
+    client, second = make_client(monkeypatch, tmp_path, FakeGit())
+    response = client.post(
+        "/api/v1/system/update/apply",
+        headers={"x-panel-intent": "panel-update"},
+        json={"expectedCurrentHead": CURRENT, "expectedTargetHead": TARGET},
+    )
+    assert response.status_code == 202
+    assert json.loads(second.lock_path.read_text(encoding="utf-8"))["status"] == "updating"
+    assert json.loads(second.command_path.read_text(encoding="utf-8"))["action"] == "update_panel"
+
+
+def test_malformed_recovery_reservation_is_not_live_authority(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    service.lock_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "recovering",
+            "requestId": REQUEST,
+            "ownerPid": "not-an-int",
+            "ownerInstanceToken": "untrusted",
+            "updatedAt": "2999-01-01T00:00:00+00:00",
+            "private": "C:/private/recovery",
+        }),
+        encoding="utf-8",
+    )
+    owner_state = client.get("/api/v1/system/update/status")
+    assert "private" not in owner_state.text
+    assert "recovery" not in owner_state.text
+
+    response = client.post(
+        "/api/v1/system/update/apply",
+        headers={"x-panel-intent": "panel-update"},
+        json={"expectedCurrentHead": CURRENT, "expectedTargetHead": TARGET},
+    )
+    assert response.status_code == 202
+    assert json.loads(service.lock_path.read_text(encoding="utf-8"))["status"] == "updating"

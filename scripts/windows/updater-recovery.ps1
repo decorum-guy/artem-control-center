@@ -81,6 +81,32 @@ function Get-ArtemProductionUpdateDecision {
     }
 }
 
+function Get-ArtemObsoleteUpdateTransactionDecision {
+    param(
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$CurrentHead,
+        [Parameter(Mandatory)]$Transaction,
+        [bool]$NoActivePriorLease = $false,
+        [bool]$DeploymentHealthy = $false
+    )
+
+    # This is intentionally narrower than a target mismatch.  A transaction
+    # remains authoritative while the checkout is either endpoint of that
+    # transaction, and rollback is never self-cleared.
+    if ([string]$Transaction.phase -eq "rollback") {
+        return [pscustomobject]@{ Action = "preserve"; Reason = "rollback-recovery-required" }
+    }
+    if ($CurrentHead -eq [string]$Transaction.previousHead -or $CurrentHead -eq [string]$Transaction.targetHead) {
+        return [pscustomobject]@{ Action = "preserve"; Reason = "transaction-endpoint-current" }
+    }
+    if (-not $NoActivePriorLease) {
+        return [pscustomobject]@{ Action = "blocked"; Reason = "transaction-lease-active" }
+    }
+    if (-not $DeploymentHealthy) {
+        return [pscustomobject]@{ Action = "blocked"; Reason = "obsolete-transaction-unverified" }
+    }
+    return [pscustomobject]@{ Action = "recover"; Reason = "obsolete-transaction" }
+}
+
 function Get-ArtemProductionFailureState {
     param(
         [Parameter(Mandatory)][ValidateSet("build", "artifact-assertion", "restart", "served-verification")][string]$Stage,

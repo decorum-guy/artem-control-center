@@ -594,6 +594,24 @@ try {
     if ($statePayload.events[-1].code -ne "completed") {
         throw "Terminal update state did not retain the completed activity event"
     }
+    # A new request is an identity boundary: it may not display phase/history
+    # from the previous incomplete transaction while its preflight is failing.
+    $newRequestId = "1" * 24
+    Write-ArtemUpdateState `
+        -Paths $stateRegressionPaths `
+        -Status "checking" `
+        -CurrentHead $currentHead `
+        -TargetHead $targetHead `
+        -RequestId $newRequestId `
+        -StartedAt ([DateTime]::UtcNow.ToString("o"))
+    $freshState = Get-ArtemJsonPayload -Path $stateRegressionPaths.UpdateState
+    if (
+        [string]$freshState.requestId -ne $newRequestId -or
+        $null -ne $freshState.phase -or
+        $freshState.events.Count -ne 0
+    ) {
+        throw "New update request inherited phase or activity from an unrelated transaction"
+    }
 }
 finally {
     Remove-Item -LiteralPath $stateRegressionRoot -Recurse -Force -ErrorAction SilentlyContinue
