@@ -39,6 +39,14 @@ SAFE_OWNER_RESULTS = frozenset({
     "updater_early_exit",
     "updater_stale",
 })
+SAFE_RECOVERY_REASONS = frozenset({
+    "recovery_not_available",
+    "update_in_progress",
+    "capability_apply_active",
+    "rollback_recovery_required",
+    "recovery_checkout_unhealthy",
+    "recovery_artifact_unhealthy",
+})
 UPDATE_PHASES = frozenset({
     "started",
     "preparing",
@@ -313,6 +321,12 @@ class PanelUpdateApplyRequest(BaseModel):
     expectedTargetHead: str = Field(pattern=r"^[0-9a-f]{40}$")
 
 
+class PanelUpdateRecoveryRequest(BaseModel):
+    """Deliberately empty: the server owns every recovery target."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
 class PanelUpdateService:
     def __init__(
         self,
@@ -407,6 +421,65 @@ class PanelUpdateService:
             and payload.get("buildId") == f"{revision}:accepted-v2"
         )
 
+    def _valid_transaction(self) -> dict | None:
+        transaction = _read_json(self.runtime_root / "update-transaction.json")
+        if not (
+            transaction
+            and transaction.get("schemaVersion") == 1
+            and transaction.get("status") == "incomplete"
+            and transaction.get("phase") in UPDATE_PHASES
+            and _safe_revision(transaction.get("previousHead"))
+            and _safe_revision(transaction.get("targetHead"))
+            and _safe_request_id(transaction.get("requestId"))
+            and _safe_timestamp(transaction.get("updatedAt"))
+        ):
+            return None
+        return transaction
+
+    def _authoritative_current_checkout(self) -> tuple[str | None, str | None]:
+        """Return a verified current SHA without accepting browser input."""
+        inside = self._git("rev-parse", "--is-inside-work-tree")
+        branch = self._git("branch", "--show-current")
+        dirty = self._git("status", "--porcelain", "--untracked-files=no")
+        current = self._git("rev-parse", "HEAD")
+        current_head = current.stdout.strip().lower()
+        if (
+            inside.returncode != 0 or inside.stdout.strip() != "true"
+            or branch.returncode != 0 or branch.stdout.strip() != "main"
+            or dirty.returncode != 0 or dirty.stdout.strip()
+            or current.returncode != 0 or not SHA_PATTERN.fullmatch(current_head)
+        ):
+            return None, "recovery_checkout_unhealthy"
+        return current_head, None
+
+    def _recovery_assessment(self) -> tuple[bool, str, str | None]:
+        """Prove whether one obsolete marker may be removed safely.
+
+        The live panel serving this request is the runtime liveness proof; the
+        accepted-v2 marker is the served artifact identity proof. This never
+        treats age or a target mismatch as authority.
+        """
+        if software_update_active(self.runtime_root, owner_alive=self._update_owner_alive):
+            return False, "update_in_progress", None
+        if capability_apply_active(self.capability_apply_state_path):
+            return False, "capability_apply_active", None
+        transaction = self._valid_transaction()
+        if transaction is None:
+            return False, "recovery_not_available", None
+        if transaction.get("phase") == "rollback":
+            return False, "rollback_recovery_required", None
+        current_head, checkout_reason = self._authoritative_current_checkout()
+        if current_head is None:
+            return False, checkout_reason or "recovery_checkout_unhealthy", None
+        if current_head in {transaction.get("previousHead"), transaction.get("targetHead")}:
+            return False, "recovery_not_available", None
+        if (
+            not self._production_artifact_matches_revision(current_head)
+            or not self.dashboard_dist.joinpath("index.html").is_file()
+        ):
+            return False, "recovery_artifact_unhealthy", None
+        return True, "recovered", current_head
+
     def _blocked(
         self,
         reason: str,
@@ -499,17 +572,8 @@ class PanelUpdateService:
         if state_status not in {"idle", "checking", "updating", "success", "failed"}:
             state_status = "idle"
 
-        transaction = _read_json(self.runtime_root / "update-transaction.json")
-        transaction_valid = bool(
-            transaction
-            and transaction.get("schemaVersion") == 1
-            and transaction.get("status") == "incomplete"
-            and transaction.get("phase") in UPDATE_PHASES
-            and _safe_revision(transaction.get("previousHead"))
-            and _safe_revision(transaction.get("targetHead"))
-            and _safe_request_id(transaction.get("requestId"))
-            and _safe_timestamp(transaction.get("updatedAt"))
-        )
+        transaction = self._valid_transaction()
+        transaction_valid = transaction is not None
         lock_payload = _read_json(self.lock_path)
         lock_active = _update_lock_active(
             lock_payload,
@@ -538,7 +602,7 @@ class PanelUpdateService:
                 or (_safe_request_id(transaction.get("requestId")) if transaction_valid else None)
                 or _safe_request_id(lock_payload.get("requestId") if lock_payload else None)
             )
-            return self._owner_state_payload(
+            output = self._owner_state_payload(
                 status="failed",
                 payload=payload,
                 transaction=transaction if transaction_valid else None,
@@ -548,6 +612,10 @@ class PanelUpdateService:
                 lock_updated_at=_safe_timestamp(lock_payload.get("updatedAt") if lock_payload else None),
                 result=self._handoff_failure_result(evidence_request_id) or "updater_stale",
             )
+            eligible, _reason, _current = self._recovery_assessment()
+            if eligible:
+                output["recoveryAvailable"] = True
+            return output
 
         if state_status in {"success", "failed"}:
             # The canonical updater records its terminal result immediately
@@ -558,7 +626,7 @@ class PanelUpdateService:
             status = state_status if active_state else "updating"
         else:
             status = state_status
-        return self._owner_state_payload(
+        output = self._owner_state_payload(
             status=status,
             payload=payload,
             transaction=transaction if transaction_valid else None,
@@ -571,6 +639,10 @@ class PanelUpdateService:
             lock_request_id=_safe_request_id(lock_payload.get("requestId") if lock_payload else None),
             lock_updated_at=_safe_timestamp(lock_payload.get("updatedAt") if lock_payload else None),
         )
+        eligible, _reason, _current = self._recovery_assessment()
+        if eligible:
+            output["recoveryAvailable"] = True
+        return output
 
     def _owner_state_payload(
         self,
@@ -597,6 +669,10 @@ class PanelUpdateService:
         if started_at is not None:
             output["startedAt"] = started_at
         request_id = _safe_request_id(payload.get("requestId"))
+        transaction_matches_state = bool(
+            transaction is not None
+            and (request_id is None or request_id == _safe_request_id(transaction.get("requestId")))
+        )
         if request_id is None and transaction is not None:
             request_id = _safe_request_id(transaction.get("requestId"))
         if request_id is None:
@@ -606,7 +682,7 @@ class PanelUpdateService:
         phase = payload.get("phase")
         if not isinstance(phase, str) or phase not in UPDATE_PHASES:
             phase = None
-        if phase is None and transaction is not None:
+        if phase is None and transaction_matches_state:
             phase = transaction.get("phase")
         if not isinstance(phase, str) or phase not in UPDATE_PHASES:
             phase = None
@@ -623,6 +699,8 @@ class PanelUpdateService:
         safe_result = result or payload.get("result")
         if isinstance(safe_result, str) and safe_result in SAFE_OWNER_RESULTS:
             output["result"] = safe_result
+        # A request can only see its own event history. In particular, a new
+        # preflight request must never inherit a historical building phase.
         output["events"] = _safe_activity_events(payload.get("events"))
 
         progress = UPDATE_PHASE_PROGRESS.get(phase, 0)
@@ -641,6 +719,8 @@ class PanelUpdateService:
 
     def _clear_stale_lock(self) -> None:
         payload = _read_json(self.lock_path)
+        if payload and payload.get("status") == "recovering":
+            return
         if not _update_lock_active(payload, owner_alive=self._update_owner_alive):
             try:
                 self.lock_path.unlink(missing_ok=True)
@@ -682,6 +762,51 @@ class PanelUpdateService:
                 self.lock_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    def _acquire_recovery_lock(self, request_id: str) -> bool:
+        self.runtime_root.mkdir(parents=True, exist_ok=True)
+        self._clear_stale_lock()
+        payload = {
+            "schemaVersion": 1,
+            "status": "recovering",
+            "requestId": request_id,
+            "updatedAt": _iso_now(),
+        }
+        try:
+            descriptor = os.open(self.lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return False
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        return True
+
+    def _release_recovery_lock(self, request_id: str) -> None:
+        payload = _read_json(self.lock_path)
+        if payload and payload.get("status") == "recovering" and payload.get("requestId") == request_id:
+            try:
+                self.lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def reset_recovery(self) -> dict:
+        request_id = secrets.token_hex(12)
+        if not self._acquire_recovery_lock(request_id):
+            return {"accepted": False, "reason": "update_in_progress"}
+        try:
+            eligible, reason, current_head = self._recovery_assessment()
+            if not eligible:
+                safe_reason = reason if reason in SAFE_RECOVERY_REASONS else "recovery_not_available"
+                return {"accepted": False, "reason": safe_reason}
+            # This path is fixed and server-owned. It clears only the valid
+            # obsolete transaction and replaces public state with a fresh idle
+            # baseline; no browser-controlled file or command is accepted.
+            self.runtime_root.joinpath("update-transaction.json").unlink(missing_ok=True)
+            self._write_state("idle", current_head=current_head)
+            return {"accepted": True, "status": "idle"}
+        finally:
+            self._release_recovery_lock(request_id)
 
     def apply(self, expected_current: str, expected_target: str) -> dict:
         request_id = secrets.token_hex(12)
@@ -788,6 +913,22 @@ def build_system_update_router(
             raise HTTPException(status_code=403, detail="full_access_required")
         result = current.apply(payload.expectedCurrentHead, payload.expectedTargetHead)
         access_policy.audit_capability("system.panel.update", result="accepted")
+        response.headers["Cache-Control"] = "no-store"
+        return result
+
+    @router.post("/reset-recovery")
+    def reset_update_recovery(
+        payload: PanelUpdateRecoveryRequest,
+        response: Response,
+        x_panel_intent: str = Header(default=""),
+    ) -> dict:
+        _require_intent(x_panel_intent)
+        current = require_service()
+        if access_policy.effective_profile() != "full":
+            access_policy.audit_capability("system.panel.update", result="full_access_required")
+            raise HTTPException(status_code=403, detail="full_access_required")
+        result = current.reset_recovery()
+        access_policy.audit_capability("system.panel.update", result="recovery_reset" if result["accepted"] else result["reason"])
         response.headers["Cache-Control"] = "no-store"
         return result
 

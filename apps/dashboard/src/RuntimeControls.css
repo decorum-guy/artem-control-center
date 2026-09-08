@@ -180,6 +180,20 @@
   min-height: 56px;
 }
 
+.runtime-update-reset-button {
+  min-height: 56px;
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 56%, var(--border));
+  border-radius: var(--radius-control);
+  background: var(--surface-inline);
+  font-weight: 700;
+}
+
+.runtime-update-reset-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
 @media (max-width: 760px) {
   .runtime-control-actions {
     width: 100%;

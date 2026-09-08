@@ -660,17 +660,39 @@ def test_status_rejects_wrong_or_malformed_handoff_evidence(monkeypatch, tmp_pat
     assert "private" not in json.dumps(payload)
 
 
-def write_update_transaction(path: Path, *, updated_at: str) -> None:
+def write_update_transaction(
+    path: Path,
+    *,
+    updated_at: str,
+    previous: str = CURRENT,
+    target: str = TARGET,
+    phase: str = "building",
+    request_id: str = REQUEST,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({
             "schemaVersion": 1,
             "status": "incomplete",
-            "phase": "building",
-            "previousHead": CURRENT,
-            "targetHead": TARGET,
-            "requestId": REQUEST,
+            "phase": phase,
+            "previousHead": previous,
+            "targetHead": target,
+            "requestId": request_id,
             "updatedAt": updated_at,
+        }),
+        encoding="utf-8",
+    )
+
+
+def write_accepted_artifact(service: PanelUpdateService, revision: str) -> None:
+    service.dashboard_dist.mkdir(parents=True, exist_ok=True)
+    service.dashboard_dist.joinpath("index.html").write_text("<!doctype html>", encoding="utf-8")
+    service.dashboard_dist.joinpath("dashboard-build.json").write_text(
+        json.dumps({
+            "schemaVersion": "dashboard-build.v1",
+            "revision": revision,
+            "profile": "accepted-v2",
+            "buildId": f"{revision}:accepted-v2",
         }),
         encoding="utf-8",
     )
@@ -991,3 +1013,136 @@ def test_runtime_owner_state_rejects_arbitrary_spawn_failure_result(monkeypatch,
     payload = client.get("/api/v1/system/update/status").json()
     assert payload["status"] == "failed"
     assert "result" not in payload
+
+
+def test_safe_recovery_resets_only_obsolete_transaction_and_next_check_is_fresh(monkeypatch, tmp_path):
+    authoritative = "c" * 40
+    requested = "d" * 40
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(current=authoritative, target=requested))
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        previous=CURRENT,
+        target=TARGET,
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    write_accepted_artifact(service, authoritative)
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "failed",
+            "requestId": REQUEST,
+            "phase": "building",
+            "events": [{"code": "building"}],
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": "updater_stale",
+        }),
+        encoding="utf-8",
+    )
+
+    before = client.get("/api/v1/system/update/status").json()
+    assert before["recoveryAvailable"] is True
+    reset = client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert reset.status_code == 200
+    assert reset.json() == {"accepted": True, "status": "idle"}
+    assert not service.runtime_root.joinpath("update-transaction.json").exists()
+    assert json.loads(service.state_path.read_text(encoding="utf-8"))["status"] == "idle"
+
+    checked = client.post("/api/v1/system/update/check", headers={"x-panel-intent": "panel-update"}).json()
+    assert checked["currentHead"] == authoritative
+    assert checked["targetHead"] == requested
+    assert checked["status"] == "update_available"
+
+
+@pytest.mark.parametrize(
+    ("current", "phase", "artifact", "expected"),
+    [
+        (CURRENT, "building", True, "recovery_not_available"),
+        (TARGET, "building", True, "recovery_not_available"),
+        ("c" * 40, "rollback", True, "rollback_recovery_required"),
+        ("c" * 40, "building", False, "recovery_artifact_unhealthy"),
+    ],
+)
+def test_recovery_refuses_active_transaction_endpoints_rollback_and_unhealthy_deployment(
+    monkeypatch, tmp_path, current, phase, artifact, expected
+):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(current=current, target="d" * 40))
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        phase=phase,
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    if artifact:
+        write_accepted_artifact(service, current)
+    response = client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert response.status_code == 200
+    assert response.json() == {"accepted": False, "reason": expected}
+    assert service.runtime_root.joinpath("update-transaction.json").exists()
+
+
+def test_recovery_refuses_active_lease_and_enforces_intent_full_access_and_empty_body(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(current="c" * 40))
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(service.runtime_root / "update-transaction.json", updated_at=datetime.now(timezone.utc).isoformat())
+    write_accepted_artifact(service, "c" * 40)
+    write_update_lock(service.lock_path, updated_at=datetime.now(timezone.utc).isoformat())
+    active = client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert active.json() == {"accepted": False, "reason": "update_in_progress"}
+    assert service.runtime_root.joinpath("update-transaction.json").exists()
+
+    missing_intent = client.post("/api/v1/system/update/reset-recovery", json={})
+    assert missing_intent.status_code == 403
+    arbitrary = client.post(
+        "/api/v1/system/update/reset-recovery",
+        headers={"x-panel-intent": "panel-update"},
+        json={"path": "C:/private", "command": "Remove-Item"},
+    )
+    assert arbitrary.status_code == 422
+
+    standard_client, _ = make_client(monkeypatch, tmp_path / "standard", FakeGit(), profile="standard")
+    denied = standard_client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "full_access_required"
+
+
+def test_recovery_refuses_marker_only_deployment(monkeypatch, tmp_path):
+    client, service = make_client(monkeypatch, tmp_path, FakeGit(current="c" * 40, target="d" * 40))
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    write_accepted_artifact(service, "c" * 40)
+    service.dashboard_dist.joinpath("index.html").unlink()
+    response = client.post("/api/v1/system/update/reset-recovery", headers={"x-panel-intent": "panel-update"}, json={})
+    assert response.json() == {"accepted": False, "reason": "recovery_artifact_unhealthy"}
+
+
+def test_new_request_state_does_not_inherit_historical_transaction_building(monkeypatch, tmp_path):
+    new_request = "1" * 24
+    client, service = make_client(monkeypatch, tmp_path, FakeGit())
+    service.runtime_root.mkdir(parents=True, exist_ok=True)
+    write_update_transaction(
+        service.runtime_root / "update-transaction.json",
+        phase="building",
+        updated_at=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    )
+    service.state_path.write_text(
+        json.dumps({
+            "schemaVersion": 1,
+            "status": "failed",
+            "requestId": new_request,
+            "currentHead": "c" * 40,
+            "targetHead": "d" * 40,
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "result": "updater_stale",
+            "events": [],
+        }),
+        encoding="utf-8",
+    )
+    payload = client.get("/api/v1/system/update/status").json()
+    assert payload["requestId"] == new_request
+    assert payload["events"] == []
+    assert payload["progressPercent"] == 0
+    assert "phase" not in payload

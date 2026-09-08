@@ -320,12 +320,14 @@ function Write-ArtemUpdateState {
     if (-not $RequestId -and $null -ne $lock) { $RequestId = [string]$lock.requestId }
     if (-not $RequestId -and $null -ne $transaction) { $RequestId = [string]$transaction.requestId }
     if (-not $CurrentHead -and $null -ne $lock) { $CurrentHead = [string]$lock.expectedCurrentHead }
-    if (-not $CurrentHead -and $null -ne $transaction) { $CurrentHead = [string]$transaction.previousHead }
+    $transactionMatchesRequest = $null -ne $transaction -and $RequestId -and [string]$transaction.requestId -eq $RequestId
+    $previousMatchesRequest = $null -ne $previousState -and $RequestId -and [string]$previousState.requestId -eq $RequestId
+    if (-not $CurrentHead -and $transactionMatchesRequest) { $CurrentHead = [string]$transaction.previousHead }
     if (-not $TargetHead -and $null -ne $lock) { $TargetHead = [string]$lock.expectedTargetHead }
-    if (-not $TargetHead -and $null -ne $transaction) { $TargetHead = [string]$transaction.targetHead }
-    if (-not $Phase -and $null -ne $transaction) { $Phase = [string]$transaction.phase }
-    if (-not $Phase -and $null -ne $previousState) { $Phase = [string]$previousState.phase }
-    if (-not $StartedAt -and $null -ne $previousState) { $StartedAt = [string]$previousState.startedAt }
+    if (-not $TargetHead -and $transactionMatchesRequest) { $TargetHead = [string]$transaction.targetHead }
+    if (-not $Phase -and $transactionMatchesRequest) { $Phase = [string]$transaction.phase }
+    if (-not $Phase -and $previousMatchesRequest) { $Phase = [string]$previousState.phase }
+    if (-not $StartedAt -and $previousMatchesRequest) { $StartedAt = [string]$previousState.startedAt }
     $payload = @{
         schemaVersion = 1
         status = $Status
@@ -340,7 +342,7 @@ function Write-ArtemUpdateState {
     }
     if ($StartedAt) { $payload.startedAt = $StartedAt }
     if ($ServedRevision -match '^[0-9a-f]{40}$') { $payload.servedRevision = $ServedRevision.ToLowerInvariant() }
-    $history = if ($null -ne $previousState) {
+    $history = if ($previousMatchesRequest) {
         Get-ArtemUpdateActivityHistory -Value $previousState.events
     }
     else {
@@ -923,6 +925,27 @@ try {
     }
     Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
     $existingTransaction = Get-ArtemUpdateTransaction -Paths $paths
+
+    if ($null -ne $existingTransaction) {
+        $currentIsTransactionEndpoint = $currentHead -eq [string]$existingTransaction.previousHead -or $currentHead -eq [string]$existingTransaction.targetHead
+        $healthyAuthoritativeDeployment = $false
+        if (-not $currentIsTransactionEndpoint) {
+            # The current request owns a freshly claimed lease. The old lease
+            # had to be absent for that claim to succeed; health is still
+            # required before an unrelated historical marker can be cleared.
+            $healthyAuthoritativeDeployment = Test-ArtemProductionDeploymentHealthy -Paths $paths -ExpectedRevision $currentHead
+        }
+        $obsoleteDecision = Get-ArtemObsoleteUpdateTransactionDecision `
+            -CurrentHead $currentHead `
+            -Transaction $existingTransaction `
+            -NoActivePriorLease:$true `
+            -DeploymentHealthy $healthyAuthoritativeDeployment
+        if ($obsoleteDecision.Action -eq "recover") {
+            Remove-ArtemUpdateTransaction -Paths $paths
+            $existingTransaction = $null
+            Write-ArtemUpdateState -Paths $paths -Status "checking" -CurrentHead $currentHead -TargetHead $targetHead -RequestId $RequestId -StartedAt ([DateTime]::UtcNow.ToString("o"))
+        }
+    }
 
     if ($null -ne $existingTransaction -and [string]$existingTransaction.phase -eq "rollback") {
         throw "An incomplete production rollback requires recovery before another update"

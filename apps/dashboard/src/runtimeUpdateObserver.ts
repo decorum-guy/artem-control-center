@@ -52,6 +52,7 @@ export interface UpdateOwnerState {
   servedRevision?: string;
   progressPercent?: number;
   events?: UpdateActivityEvent[];
+  recoveryAvailable?: boolean;
 }
 
 export const UPDATE_ACTIVITY_COPY: Record<UpdateActivityCode, string> = {

@@ -189,6 +189,46 @@ try {
     }
     Assert-RecoveryTrue -Condition $wrongMarkerRejected -Message "Staged artifact assertion must reject a wrong target marker"
 
+    # #210: an A -> B marker may be recovered only when a healthy authoritative
+    # C is neither transaction endpoint. Endpoint and rollback recovery remain
+    # owned by the original transaction.
+    $historicalTransaction = [pscustomobject]@{
+        phase = "building"
+        previousHead = $revisionA
+        targetHead = $revisionB
+    }
+    $obsolete = Get-ArtemObsoleteUpdateTransactionDecision `
+        -CurrentHead ("c" * 40) `
+        -Transaction $historicalTransaction `
+        -NoActivePriorLease:$true `
+        -DeploymentHealthy $true
+    Assert-RecoveryEqual -Actual $obsolete.Action -Expected "recover" -Message "Healthy authoritative C may recover obsolete A-to-B marker"
+    foreach ($endpoint in @($revisionA, $revisionB)) {
+        $preserved = Get-ArtemObsoleteUpdateTransactionDecision `
+            -CurrentHead $endpoint `
+            -Transaction $historicalTransaction `
+            -NoActivePriorLease:$true `
+            -DeploymentHealthy $true
+        Assert-RecoveryEqual -Actual $preserved.Action -Expected "preserve" -Message "Transaction endpoint must preserve recovery semantics"
+    }
+    $rollbackTransaction = [pscustomobject]@{
+        phase = "rollback"
+        previousHead = $revisionA
+        targetHead = $revisionB
+    }
+    $rollbackPreserved = Get-ArtemObsoleteUpdateTransactionDecision `
+        -CurrentHead ("c" * 40) `
+        -Transaction $rollbackTransaction `
+        -NoActivePriorLease:$true `
+        -DeploymentHealthy $true
+    Assert-RecoveryEqual -Actual $rollbackPreserved.Action -Expected "preserve" -Message "Rollback marker must never be silently reset"
+    $unhealthyHistorical = Get-ArtemObsoleteUpdateTransactionDecision `
+        -CurrentHead ("c" * 40) `
+        -Transaction $historicalTransaction `
+        -NoActivePriorLease:$true `
+        -DeploymentHealthy $false
+    Assert-RecoveryEqual -Actual $unhealthyHistorical.Action -Expected "blocked" -Message "Unverified deployment must refuse obsolete transaction recovery"
+
     # D. Pre-promotion failures remain incomplete and preserve the old runtime
     # when it has not yet been stopped.
     $buildFailure = Get-ArtemProductionFailureState -Stage "build" -RuntimeStopped $false
