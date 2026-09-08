@@ -62,8 +62,13 @@ try {
         $resolvedVenv = (& node.exe -e "import('./scripts/runtime-venv.mjs').then(({readStagedRuntimeVenvRoot}) => console.log(readStagedRuntimeVenvRoot(process.cwd()) || ''))").Trim()
         Assert-ArtemFirstRollout -Condition ($resolvedVenv -eq $targetVenv) -Message "Target validation could not rediscover the setup revision venv after environment restoration"
 
-        & npm.cmd run check
+        $checkOutput = @(& npm.cmd run check 2>&1)
         if ($LASTEXITCODE -ne 0) { throw "First-rollout target check failed after old updater environment restoration" }
+        $checkText = $checkOutput -join "`n"
+        Assert-ArtemFirstRollout -Condition ($checkText -match "Production update preflight passed") -Message "Old updater target check did not use the proven narrow preflight"
+        foreach ($unexpected in @("npm run test", "npm run lint", "npm run typecheck", "pytest", "npm run build")) {
+            Assert-ArtemFirstRollout -Condition (-not $checkText.Contains($unexpected)) -Message "Old updater target check repeated full validation: $unexpected"
+        }
         & npm.cmd run build:production
         if ($LASTEXITCODE -ne 0) { throw "First-rollout target production build failed after old updater environment restoration" }
     }

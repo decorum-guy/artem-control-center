@@ -41,6 +41,7 @@ describe("server-owned panel update observer", () => {
     expect(updateProgressPercent({ schemaVersion: 1, status: "updating", phase: "rollback" })).toBe(60);
     expect(updateProgressPercent({ schemaVersion: 1, status: "updating", phase: "preparing" })).toBe(15);
     expect(updateProgressPercent({ schemaVersion: 1, status: "updating", phase: "artifact-ready" })).toBe(78);
+    expect(updateActivityCopy("validating")).toBe("Проверяем готовность новой версии");
     expect(updateActivityCopy("building")).toBe("Собираем панель");
     expect(updateActivityCopy("stopping")).toBe("Останавливаем текущую панель");
     expect(updateActivityCopy("C:\\private\\repo")).toBeNull();

@@ -58,46 +58,18 @@ function Invoke-CheckedCommand {
     }
 }
 
-function Invoke-IsolatedValidation {
+function Invoke-StagedProductionBuild {
     param(
         [Parameter(Mandatory)]$Paths,
-        [Parameter(Mandatory)][string]$Timestamp,
         [Parameter(Mandatory)][string]$LockRequestId,
         [Parameter(Mandatory)][string]$BuildRoot
     )
 
-    $validationRoot = Join-Path $BuildRoot ("validation-temp\{0}" -f $Timestamp)
-    $pytestTemp = Join-Path $validationRoot "pytest"
-    $checkDist = Join-Path $BuildRoot "check-dist"
     $productionDist = Join-Path $BuildRoot "production-dist"
-    New-Item -ItemType Directory -Force -Path $pytestTemp | Out-Null
-    New-Item -ItemType Directory -Force -Path $checkDist | Out-Null
     New-Item -ItemType Directory -Force -Path $productionDist | Out-Null
 
-    $previousTemp = $env:TEMP
-    $previousTmp = $env:TMP
-    $previousPytestAddopts = $env:PYTEST_ADDOPTS
-    $previousDashboardBuildOutDir = $env:PANEL_DASHBOARD_BUILD_OUT_DIR
     $previousProductionBuildOutDir = $env:PANEL_PRODUCTION_BUILD_OUT_DIR
     try {
-        $env:TEMP = $validationRoot
-        $env:TMP = $validationRoot
-        $pytestTempForPytest = $pytestTemp.Replace('\', '/')
-        $isolatedArgs = "--basetemp=`"$pytestTempForPytest`" -p no:cacheprovider"
-        $env:PYTEST_ADDOPTS = if ([string]::IsNullOrWhiteSpace($previousPytestAddopts)) {
-            $isolatedArgs
-        }
-        else {
-            "$previousPytestAddopts $isolatedArgs"
-        }
-
-        Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
-        $env:PANEL_DASHBOARD_BUILD_OUT_DIR = $checkDist
-        Remove-Item Env:PANEL_PRODUCTION_BUILD_OUT_DIR -ErrorAction SilentlyContinue
-        Invoke-CheckedCommand `
-            -FilePath "npm.cmd" `
-            -Arguments @("run", "check") `
-            -Description "full validation"
         Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
         $env:PANEL_PRODUCTION_BUILD_OUT_DIR = $productionDist
         Invoke-CheckedCommand `
@@ -106,27 +78,16 @@ function Invoke-IsolatedValidation {
             -Description "accepted V2 production dashboard build"
         Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
         return [pscustomobject]@{
-            CheckDist = $checkDist
             ProductionDist = $productionDist
         }
     }
     finally {
-        $env:TEMP = $previousTemp
-        $env:TMP = $previousTmp
-        $env:PYTEST_ADDOPTS = $previousPytestAddopts
-        if ($null -eq $previousDashboardBuildOutDir) {
-            Remove-Item Env:PANEL_DASHBOARD_BUILD_OUT_DIR -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:PANEL_DASHBOARD_BUILD_OUT_DIR = $previousDashboardBuildOutDir
-        }
         if ($null -eq $previousProductionBuildOutDir) {
             Remove-Item Env:PANEL_PRODUCTION_BUILD_OUT_DIR -ErrorAction SilentlyContinue
         }
         else {
             $env:PANEL_PRODUCTION_BUILD_OUT_DIR = $previousProductionBuildOutDir
         }
-        Remove-Item -LiteralPath $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -167,8 +128,7 @@ function Invoke-ArtemTargetStaging {
         [Parameter(Mandatory)]$Paths,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$PreviousHead,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$TargetHead,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
-        [Parameter(Mandatory)][string]$Timestamp
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId
     )
     $stage = Get-ArtemUpdateStagingPaths -Paths $Paths -LockRequestId $LockRequestId
     if (Test-Path -LiteralPath $stage.Root) {
@@ -197,8 +157,13 @@ function Invoke-ArtemTargetStaging {
                 $env:PANEL_COFFEE_ACTIONS_ENABLED = "false"
                 $env:PANEL_KIOSK_CONTROLS_ENABLED = "false"
                 Write-ArtemUpdateTransaction -Paths $Paths -Phase "validating" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+                Invoke-CheckedCommand `
+                    -FilePath "npm.cmd" `
+                    -Arguments @("run", "production-update-preflight") `
+                    -Description "target production update preflight"
+                Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
                 Write-ArtemUpdateTransaction -Paths $Paths -Phase "building" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
-                $buildPaths = Invoke-IsolatedValidation -Paths $Paths -Timestamp $Timestamp -LockRequestId $LockRequestId -BuildRoot $stage.Build
+                $buildPaths = Invoke-StagedProductionBuild -Paths $Paths -LockRequestId $LockRequestId -BuildRoot $stage.Build
                 Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
                 Assert-ArtemStagedProductionBuild -DashboardRoot $buildPaths.ProductionDist -ExpectedRevision $TargetHead
                 Write-ArtemUpdateTransaction -Paths $Paths -Phase "artifact-ready" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
@@ -1065,8 +1030,7 @@ try {
                 -Paths $paths `
                 -PreviousHead $rollbackHead `
                 -TargetHead $targetHead `
-                -LockRequestId $RequestId `
-                -Timestamp $timestamp
+                -LockRequestId $RequestId
             Write-ArtemUpdateTransaction `
                 -Paths $paths `
                 -Phase "stopping" `
@@ -1111,7 +1075,6 @@ try {
             $stage = Get-ArtemStagedUpdatePaths -Paths $paths -LockRequestId $RequestId -StagingRoot $stagingRoot
             $buildRoot = $stage.Root
             $buildPaths = [pscustomobject]@{
-                CheckDist = Join-Path $stage.Build "check-dist"
                 ProductionDist = Join-Path $stage.Build "production-dist"
             }
             Assert-ArtemStagedProductionBuild -DashboardRoot $buildPaths.ProductionDist -ExpectedRevision $targetHead
@@ -1129,8 +1092,7 @@ try {
                 -Paths $paths `
                 -PreviousHead $rollbackHead `
                 -TargetHead $targetHead `
-                -LockRequestId $RequestId `
-                -Timestamp $timestamp
+                -LockRequestId $RequestId
             $stagingRoot = $stagedTarget.Stage.Root
             $buildRoot = $stagingRoot
             $buildPaths = $stagedTarget.BuildPaths
