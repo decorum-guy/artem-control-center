@@ -24,8 +24,17 @@ foreach ($forbidden in @(
 if (-not $updaterText.Contains('Arguments @("run", "production-update-preflight")')) {
     throw "Production staging must invoke the fixed narrow host preflight"
 }
+$stagedBuildStart = $updaterText.IndexOf("function Invoke-StagedProductionBuild")
+if ($stagedBuildStart -lt 0) {
+    throw "Unable to locate staged production build helper"
+}
+$stagedBuildEnd = $updaterText.IndexOf("function Get-ArtemUpdateStagingPaths", $stagedBuildStart)
+if ($stagedBuildEnd -le $stagedBuildStart) {
+    throw "Unable to locate staged production build helper boundary"
+}
+$stagedBuildSource = $updaterText.Substring($stagedBuildStart, $stagedBuildEnd - $stagedBuildStart)
 $productionBuildInvocation = 'Arguments @("run", "build:production")'
-$productionBuildCount = ([regex]::Matches($updaterText, [regex]::Escape($productionBuildInvocation))).Count
+$productionBuildCount = ([regex]::Matches($stagedBuildSource, [regex]::Escape($productionBuildInvocation))).Count
 if ($productionBuildCount -ne 1) {
     throw "Production staging must perform exactly one accepted-v2 production build"
 }
