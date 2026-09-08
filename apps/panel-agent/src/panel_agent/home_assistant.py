@@ -147,10 +147,6 @@ class HomeAssistantAdapter:
 
         sanitized = _sanitize_state(entity_id, payload)
         self._states[entity_id] = sanitized
-        self._observed_at = self._clock()
-        self._last_successful_rest_at = self._clock()
-        self._snapshot_confirmed_for_transport = True
-        self._source = "live"
         self._save_cache()
         await self._notify_change()
         return dict(sanitized)
