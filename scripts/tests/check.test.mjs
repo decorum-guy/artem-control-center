@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { checkCommandPlan, runCheck } from "../check.mjs";
 
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+
 test("ordinary check retains the complete historical test and dashboard-build gate", () => {
   const plan = checkCommandPlan({ getTrustedStaging: () => null });
   assert.equal(plan.kind, "full");
-  assert.deepEqual(plan.commands, [["npm", ["run", "test"]], ["npm", ["run", "build"]]]);
+  assert.deepEqual(plan.commands, [[npmCommand, ["run", "test"]], [npmCommand, ["run", "build"]]]);
 });
 
 test("only proven exact production staging routes old updater check to its narrow preflight", () => {
