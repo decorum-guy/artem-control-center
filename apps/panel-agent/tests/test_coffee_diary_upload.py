@@ -89,6 +89,46 @@ def upload_existing_photo(client: TestClient, bean_id: str, payload: bytes, medi
     )
 
 
+def test_existing_photo_replacement_is_slot_bound_and_tombstones_the_old_export_record(monkeypatch, tmp_path):
+    module = _api_module(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        bean = create_bean(client, "Замена упаковки")
+        first = upload_existing_photo(client, bean["id"], image_bytes("JPEG"), "image/jpeg")
+        assert first.status_code == 200
+        first_photo_id = first.json()["photoId"]
+
+        session = client.post(
+            f"/api/v1/coffee-diary/beans/{bean['id']}/photo-upload-sessions",
+            json={"replacePhotoId": first_photo_id},
+        )
+        assert session.status_code == 200
+        token = session.json()["uploadUrl"].split("#token=", 1)[1]
+        replacement = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"},
+            content=image_bytes("JPEG", size=(48, 32)),
+        )
+        assert replacement.status_code == 200
+        replacement_photo_id = replacement.json()["photoId"]
+        assert replacement_photo_id != first_photo_id
+
+        collection = client.get("/api/v1/coffee-diary").json()
+        saved = next(item for item in collection["beans"] if item["id"] == bean["id"])
+        assert saved["photoIds"] == [replacement_photo_id]
+        exported = client.get("/api/v1/coffee-diary/export").json()
+        old = next(item for item in exported["photos"] if item["id"] == first_photo_id)
+        assert old["deletedAt"] is not None
+        assert {item["id"] for item in exported["photos"]} == {first_photo_id, replacement_photo_id}
+
+        replay = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"},
+            content=image_bytes("JPEG"),
+        )
+        assert replay.status_code == 200
+        assert replay.json()["photoId"] == replacement_photo_id
+
+
 def stored_image_files(module) -> list[str]:
     root = module.coffee_photo_storage.root
     return sorted(path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file())

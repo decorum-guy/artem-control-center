@@ -63,6 +63,21 @@ async function fillShot(page: Page, dose: string, seconds: string, yieldAmount: 
   if (favorite) await page.getByTestId("coffee-diary-make-favorite").check();
 }
 
+function relaxedAccessStatus() {
+  return {
+    schemaVersion: 1,
+    revision: 1,
+    baseProfile: "full",
+    effectiveProfile: "full",
+    temporaryFull: false,
+    temporaryFullExpiresAt: null,
+    confirmationPolicy: { actionConfirmationRequired: false, mode: "manual_persistent_full" },
+    pinConfigured: true,
+    lockoutUntil: null,
+    capabilities: {}
+  };
+}
+
 test.describe("Coffee Diary Slice 1", () => {
   test.beforeEach(async ({ page }) => {
     await clearDiary(page);
@@ -85,6 +100,7 @@ test.describe("Coffee Diary Slice 1", () => {
     await expect(page.getByTestId("coffee-diary-detail")).toContainText("Чуть мельче среднего");
     await expect(page.getByTestId("coffee-diary-detail")).toContainText("Эспрессо");
     await expect(page.getByTestId("coffee-diary-detail")).toContainText("Шоколад и ягоды");
+    await expect(page.getByTestId("coffee-diary-best-recipe")).toHaveCount(0);
 
     await page.getByTestId("coffee-diary-add-bean").click();
     await page.getByTestId("coffee-diary-input-name").fill("Эфиопия");
@@ -99,23 +115,29 @@ test.describe("Coffee Diary Slice 1", () => {
     expect(beanA.id).not.toBe(beanB.id);
 
     await page.locator(".coffee-diary-bean-card").first().click();
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить" }).click();
+    await page.getByTestId("coffee-diary-add-extraction").click();
     await fillShot(page, "17.5", "27", "36.0", "Сладко, хороший баланс", true);
     await page.getByRole("button", { name: "Сохранить" }).last().click();
-    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("17.5 г · 27 с · 36.0 г");
+    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("Вход");
+    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("17.5 г");
+    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("Время");
+    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("27 с");
+    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("Выход");
+    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("36.0 г");
     await expect(page.getByTestId("coffee-diary-favorite-marker")).toHaveText("Лучший");
 
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить" }).click();
+    await page.getByTestId("coffee-diary-add-extraction").click();
     await fillShot(page, "18.0", "30", "38.0", "Стабильно, плотнее");
     await page.getByRole("button", { name: "Сохранить" }).last().click();
     await expect(page.getByTestId("coffee-diary-history").getByTestId("coffee-diary-extraction")).toHaveCount(2);
-    await expect(page.getByTestId("coffee-diary-history")).toContainText("17.5 г · 27 с · 36.0 г");
-    await expect(page.getByTestId("coffee-diary-history")).toContainText("18.0 г · 30 с · 38.0 г");
+    await expect(page.getByTestId("coffee-diary-history")).toContainText("Вход");
+    await expect(page.getByTestId("coffee-diary-history")).toContainText("17.5 г");
+    await expect(page.getByTestId("coffee-diary-history")).toContainText("18.0 г");
 
-    const second = page.getByTestId("coffee-diary-extraction").filter({ hasText: "18.0 г · 30 с · 38.0 г" });
+    const second = page.getByTestId("coffee-diary-extraction").filter({ hasText: "18.0 г" });
     await second.getByRole("button", { name: "Сделать лучшим" }).click();
-    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("18.0 г · 30 с · 38.0 г");
-    await expect(page.getByTestId("coffee-diary-history")).toContainText("17.5 г · 27 с · 36.0 г");
+    await expect(page.getByTestId("coffee-diary-best-recipe")).toContainText("18.0 г");
+    await expect(page.getByTestId("coffee-diary-history")).toContainText("17.5 г");
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByTestId("coffee-diary-export").click();
@@ -145,6 +167,46 @@ test.describe("Coffee Diary Slice 1", () => {
     });
     expect(response.status()).toBe(422);
     expect(await response.json()).toEqual({ detail: "coffee_diary_grams_precision_invalid" });
+  });
+
+  test("uses one dismissible numeric editor and a clearable discrete rating", async ({ page }) => {
+    await seedBean(page, "Редактор значений", "e2e-numeric-editor-bean");
+    await page.goto("/coffee-diary");
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const overflow = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, viewportWidth: document.documentElement.clientWidth }));
+    expect(overflow.documentWidth).toBeLessThanOrEqual(overflow.viewportWidth + 1);
+    await page.getByTestId("coffee-diary-add-extraction").click();
+    await page.getByTestId("coffee-diary-dose-trigger").click();
+    await expect(page.getByTestId("coffee-diary-dose-keypad")).toBeVisible();
+    expect(await page.locator('[data-testid$="-keypad"]').count()).toBe(1);
+    await page.getByTestId("coffee-diary-dose-keypad").getByRole("button", { name: "Очистить" }).click();
+    await page.getByTestId("coffee-diary-dose-keypad").getByRole("button", { name: "Готово" }).click();
+    await expect(page.getByTestId("coffee-diary-dose-keypad")).toHaveCount(0);
+    await page.getByTestId("coffee-diary-rating-picker").getByRole("button", { name: "8", exact: true }).click();
+    await expect(page.getByTestId("coffee-diary-rating-picker").getByRole("button", { name: "8", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByTestId("coffee-diary-rating-picker").getByRole("button", { name: "Без оценки" }).click();
+    await expect(page.getByTestId("coffee-diary-rating-picker").getByRole("button", { name: "Без оценки" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("always confirms preparation deletion even under relaxed global confirmation policy", async ({ page }) => {
+    const bean = await seedBean(page, "Обязательное подтверждение", "e2e-delete-confirm-bean");
+    const created = await page.request.post(`/api/v1/coffee-diary/beans/${bean.id}/extractions`, {
+      headers: { "Idempotency-Key": "e2e-delete-confirm-extraction" },
+      data: { brewedAt: "2026-09-08T10:00:00Z", doseGrams: 17.5, extractionSeconds: 27, yieldGrams: 36, notes: null, rating: null, makeFavorite: false }
+    });
+    expect(created.status()).toBe(201);
+    await page.route("**/api/v1/access", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(relaxedAccessStatus()) });
+        return;
+      }
+      await route.fallback();
+    });
+    await page.goto("/coffee-diary");
+    await page.getByRole("button", { name: /Обязательное подтверждение/ }).click();
+    await page.getByTestId("coffee-diary-extraction").getByRole("button", { name: "Удалить" }).click();
+    await expect(page.getByTestId("action-confirmation")).toBeVisible();
+    await expect(page.getByTestId("action-confirmation")).toContainText("Удалить запись приготовления?");
   });
 
   test("blocks a rapid bean double-submit with one POST", async ({ page }) => {
@@ -207,7 +269,7 @@ test.describe("Coffee Diary Slice 1", () => {
   test("blocks rapid extraction submit and retains an extraction key after response loss", async ({ page }) => {
     const bean = await seedBean(page, "Приготовление", "e2e-extraction-bean-0001");
     await page.goto("/coffee-diary");
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить" }).click();
+    await page.getByTestId("coffee-diary-add-extraction").click();
     await fillShot(page, "17.5", "27", "36.0", "Тестовый шот");
 
     const doubleTapKeys: string[] = [];
@@ -231,7 +293,7 @@ test.describe("Coffee Diary Slice 1", () => {
 
     await page.unroute("**/api/v1/coffee-diary/beans/*/extractions");
     await page.goto("/coffee-diary");
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить" }).click();
+    await page.getByTestId("coffee-diary-add-extraction").click();
     await fillShot(page, "18.0", "30", "38.0", "Потерянный ответ");
     const lossKeys: string[] = [];
     await page.route("**/api/v1/coffee-diary/beans/*/extractions", async (route) => {

@@ -205,6 +205,7 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     target: "Приготовление кофе",
     environment: "Кофейный дневник",
     description: "Запись будет скрыта из истории, но останется в полном JSON-экспорте.",
-    confirmLabel: "Удалить запись"
+    confirmLabel: "Удалить запись",
+    alwaysConfirm: true
   }
 };

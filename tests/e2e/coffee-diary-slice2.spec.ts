@@ -58,10 +58,14 @@ async function seedBean(page: Page, name: string): Promise<BeanRecord> {
 async function uploadFromMobile(page: Page, uploadUrl: string, browser: Browser): Promise<void> {
   const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const mobilePage = await mobileContext.newPage();
+  let uploads = 0;
+  mobilePage.on("request", (request) => { if (request.url().includes("/api/v1/coffee-diary/photo-upload") && request.method() === "POST") uploads += 1; });
   try {
     await mobilePage.goto(browserUploadUrl(uploadUrl));
     await expect.poll(() => new URL(mobilePage.url()).hash).toBe("");
     await expect(mobilePage.getByRole("heading", { name: "Фото кофе" })).toBeVisible();
+    await expect(mobilePage.getByRole("status")).toBeHidden();
+    await expect(mobilePage.getByTestId("coffee-upload-file")).not.toHaveAttribute("capture");
     const overflow = await mobilePage.evaluate(() => ({
       documentWidth: document.documentElement.scrollWidth,
       viewportWidth: document.documentElement.clientWidth,
@@ -71,6 +75,8 @@ async function uploadFromMobile(page: Page, uploadUrl: string, browser: Browser)
     expect(overflow.bodyWidth).toBeLessThanOrEqual(overflow.viewportWidth + 1);
     await mobilePage.getByTestId("coffee-upload-file").setInputFiles({ name: "coffee.png", mimeType: "image/png", buffer: PNG_FIXTURE });
     await expect(mobilePage.getByTestId("coffee-upload-preview")).toBeVisible();
+    await expect(mobilePage.getByText("Выбрать другое фото")).toBeVisible();
+    expect(uploads).toBe(0);
     await mobilePage.getByTestId("coffee-upload-submit").click();
     await expect(mobilePage.getByRole("status")).toContainText("Фото загружено");
   } finally {
@@ -120,7 +126,7 @@ test.describe("Coffee Diary Slice 2", () => {
     await expect(page.getByTestId("coffee-diary-detail")).toContainText(bean.name);
 
     const sessionResponse = page.waitForResponse((response) => response.url().includes("/photo-upload-sessions") && response.request().method() === "POST");
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Прикрепить фото" }).click();
+    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить: Лицевая сторона" }).click();
     const session = await (await sessionResponse).json() as UploadSession;
     expect(new URL(session.uploadUrl).search).toBe("");
     expect(new URL(session.uploadUrl).hash).toMatch(/^#token=[A-Za-z0-9_-]{43,}$/);
@@ -130,6 +136,10 @@ test.describe("Coffee Diary Slice 2", () => {
     await uploadFromMobile(page, session.uploadUrl, browser);
     await expect(page.getByTestId("coffee-diary-photo-upload-dialog")).toContainText("Фото прикреплено");
     await expect(page.getByTestId("coffee-diary-photos").locator("img")).toHaveCount(1);
+    await page.getByTestId("coffee-diary-photos").locator("button").filter({ has: page.locator("img") }).click();
+    await expect(page.getByTestId("coffee-diary-photo-viewer")).toBeVisible();
+    await expect(page.getByTestId("coffee-diary-photo-viewer").getByRole("button", { name: "Закрыть" })).toBeVisible();
+    await page.getByTestId("coffee-diary-photo-viewer").getByRole("button", { name: "Закрыть" }).click();
     await page.reload();
     await expect(page.getByTestId("coffee-diary-photos").locator("img")).toHaveCount(1);
 
@@ -145,7 +155,7 @@ test.describe("Coffee Diary Slice 2", () => {
     const before = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { photos: Array<{ id: string; beanId: string }> };
     await page.goto("/coffee-diary");
     const sessionResponse = page.waitForResponse((response) => response.url().includes("/photo-upload-sessions") && response.request().method() === "POST");
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Прикрепить фото" }).click();
+    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить: Лицевая сторона" }).click();
     const session = await (await sessionResponse).json() as UploadSession;
     await uploadFromMobileWithResponseLoss(session.uploadUrl, browser);
 
@@ -215,7 +225,7 @@ test.describe("Coffee Diary Slice 2", () => {
     await page.waitForTimeout(1_100);
     await page.mouse.up();
     await expect(page.getByTestId("interaction-lock-status")).toBeVisible();
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Прикрепить фото" }).click();
+    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить: Лицевая сторона" }).click();
     expect(requests).toEqual([]);
   });
 });

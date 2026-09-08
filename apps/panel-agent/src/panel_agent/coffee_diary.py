@@ -905,6 +905,46 @@ class CoffeeDiaryStore:
 
         return self._mutate(operation)
 
+    def replace_photo(self, bean_id: UUID, replaced_photo_id: UUID, photo: CoffeeDiaryPhoto) -> CoffeeDiaryPhoto:
+        """Replace one ordered active reference while retaining the old record in exports."""
+        if photo.beanId != bean_id or photo.deletedAt is not None:
+            raise CoffeeDiaryValidationError("coffee_diary_photo_relationship_invalid")
+
+        def operation(document: CoffeeDiaryDocument):
+            bean_index = next((index for index, bean in enumerate(document.beans) if bean.id == bean_id), None)
+            if bean_index is None or document.beans[bean_index].deletedAt is not None:
+                raise CoffeeDiaryNotFound("coffee_diary_upload_target_not_found")
+            if len(document.photos) >= MAX_PHOTOS or any(candidate.id == photo.id for candidate in document.photos):
+                raise CoffeeDiaryValidationError("coffee_diary_photo_relationship_invalid")
+            bean = document.beans[bean_index]
+            try:
+                slot_index = bean.photoIds.index(replaced_photo_id)
+            except ValueError as exc:
+                raise CoffeeDiaryValidationError("coffee_diary_photo_relationship_invalid") from exc
+            old_index = next((index for index, candidate in enumerate(document.photos) if candidate.id == replaced_photo_id), None)
+            if old_index is None or document.photos[old_index].deletedAt is not None:
+                raise CoffeeDiaryValidationError("coffee_diary_photo_relationship_invalid")
+            now = _canonical_now()
+            updated = bean.model_copy(update={
+                "version": bean.version + 1,
+                "photoIds": [*bean.photoIds[:slot_index], photo.id, *bean.photoIds[slot_index + 1:]],
+                "updatedAt": now,
+            })
+            old_photo = document.photos[old_index].model_copy(update={"deletedAt": now})
+            next_beans = [*document.beans]
+            next_beans[bean_index] = updated
+            next_photos = [*document.photos, photo]
+            next_photos[old_index] = old_photo
+            next_document = document.model_copy(update={
+                "revision": document.revision + 1,
+                "updatedAt": now,
+                "beans": next_beans,
+                "photos": next_photos,
+            })
+            return photo, next_document
+
+        return self._mutate(operation)
+
     def set_favorite_extraction(self, bean_id: UUID, extraction_id: UUID | None, expected_version: int) -> CoffeeDiaryBean:
         def operation(document: CoffeeDiaryDocument):
             bean_index = next((index for index, bean in enumerate(document.beans) if bean.id == bean_id), None)

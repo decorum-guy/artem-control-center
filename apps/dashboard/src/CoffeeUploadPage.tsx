@@ -72,7 +72,7 @@ export function CoffeeUploadPage() {
           <>
             <p className="coffee-upload-description">Выберите или сделайте фотографию</p>
             <label className="coffee-upload-file-button">
-              <span>Выбрать фото</span>
+              <span>{file ? "Выбрать другое фото" : "Выбрать фото"}</span>
               <input
                 type="file"
                 accept="image/*"

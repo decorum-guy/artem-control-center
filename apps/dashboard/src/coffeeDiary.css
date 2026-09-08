@@ -26,37 +26,58 @@
 .coffee-diary-bean-card.is-selected { border-color: var(--accent); background: var(--accent-soft); }
 .coffee-diary-bean-card strong, .coffee-diary-bean-card span { overflow-wrap: anywhere; }
 .coffee-diary-bean-card span { color: var(--text-secondary); font-size: 12px; line-height: 1.35; }
-.coffee-diary-detail { padding: 20px; }
-.coffee-diary-detail__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 18px; border-bottom: 1px solid var(--border-soft); }
+.coffee-diary-detail { padding: 16px; }
+.coffee-diary-detail__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
 .coffee-diary-detail__header h2 { margin: 3px 0 4px; font-size: 24px; overflow-wrap: anywhere; }
 .coffee-diary-detail__header p:last-child { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
 .coffee-diary-detail__actions { justify-content: flex-end; flex: 0 0 auto; }
-.coffee-diary-metadata { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 20px; margin: 18px 0; }
+.coffee-diary-detail__summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .85fr); gap: 16px; align-items: start; padding: 12px 0; }
+.coffee-diary-metadata { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 14px; margin: 0; }
 .coffee-diary-metadata div { min-width: 0; }
 .coffee-diary-metadata dt { color: var(--text-muted); font-size: 12px; }
 .coffee-diary-metadata dd { margin: 3px 0 0; color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
-.coffee-diary-long-text, .coffee-diary-extraction p { margin: 0 0 16px; color: var(--text-secondary); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.coffee-diary-long-text, .coffee-diary-extraction p { margin: 0; color: var(--text-secondary); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .coffee-diary-recipe-card, .coffee-diary-history { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border-soft); }
-.coffee-diary-best { margin-top: 18px; padding: 18px; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--accent-soft); }
+.coffee-diary-best { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--accent-soft); }
 .coffee-diary-best h3 { margin: 2px 0 0; font-size: 19px; }
-.coffee-diary-best strong { display: block; margin-top: 14px; color: var(--text); font-size: 22px; font-variant-numeric: tabular-nums; }
-.coffee-diary-best p { margin: 14px 0 0; color: var(--text-secondary); }
+.coffee-diary-best .coffee-diary-metrics { margin-top: 10px; }
 .coffee-diary-recipe-card ul, .coffee-diary-snapshot { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 0; padding: 0; list-style: none; }
 .coffee-diary-recipe-card li, .coffee-diary-snapshot li { max-width: 100%; padding: 7px 10px; border-radius: 6px; color: var(--text-secondary); background: var(--surface-secondary); overflow-wrap: anywhere; }
 .coffee-diary-recipe-card p, .coffee-diary-muted { color: var(--text-muted); }
-.coffee-diary-history__items { display: grid; gap: 10px; margin-top: 12px; }
-.coffee-diary-extraction { min-width: 0; padding: 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-secondary); }
+.coffee-diary-history__items { display: grid; gap: 8px; margin-top: 10px; }
+.coffee-diary-extraction { min-width: 0; padding: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-secondary); }
 .coffee-diary-extraction.is-favorite { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .coffee-diary-extraction__header { display: flex; justify-content: space-between; gap: 12px; }
-.coffee-diary-extraction__header > div:first-child { min-width: 0; display: grid; gap: 4px; }
+.coffee-diary-extraction__header > div:first-child { min-width: 0; display: grid; gap: 7px; }
 .coffee-diary-extraction time { color: var(--text-muted); font-size: 12px; }
-.coffee-diary-extraction__tools { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.coffee-diary-extraction__tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .coffee-diary-rating { color: var(--accent-strong); font-weight: 700; white-space: nowrap; }
-.coffee-diary-link-button { min-height: 48px; border: 0; padding: 10px 4px; color: var(--accent-strong); background: transparent; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
-.coffee-diary-photos { margin-top: 18px; padding: 18px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-secondary); }
-.coffee-diary-photos h3 { margin: 2px 0 0; font-size: 19px; }
-.coffee-diary-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-top: 14px; }
-.coffee-diary-photo-grid img { display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; object-fit: cover; background: var(--surface-primary); }
+.coffee-diary-status-badge { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 9px; border-radius: 999px; color: var(--cc-on-accent, #17130e); background: var(--accent); font-size: 12px; font-weight: 800; white-space: nowrap; }
+.coffee-diary-secondary-action, .coffee-diary-delete-action { min-height: 48px; border: 0; border-radius: var(--radius-control); padding: 10px 12px; background: transparent; font-weight: 700; }
+.coffee-diary-secondary-action { color: var(--accent-strong); }
+.coffee-diary-delete-action { color: var(--danger); background: var(--danger-soft); }
+.coffee-diary-package-photos { margin-top: 2px; padding: 12px 0 14px; border-bottom: 1px solid var(--border-soft); }
+.coffee-diary-package-photos h3 { margin: 2px 0 0; font-size: 19px; }
+.coffee-diary-package-photos__slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.coffee-diary-package-photo { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; min-width: 0; }
+.coffee-diary-package-photo > strong { grid-column: 1 / -1; color: var(--text-secondary); font-size: 12px; }
+.coffee-diary-package-photo__image, .coffee-diary-package-photo__empty { min-height: 112px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface-secondary); }
+.coffee-diary-package-photo__image { padding: 0; }
+.coffee-diary-package-photo__image img { display: block; width: 100%; height: 112px; object-fit: cover; }
+.coffee-diary-package-photo__empty { width: 100%; padding: 10px; color: var(--accent-strong); font-weight: 750; text-align: left; }
+.coffee-diary-package-photo__replace { min-height: 48px; border: 0; border-radius: var(--radius-control); padding: 8px; color: var(--accent-strong); background: transparent; font-weight: 700; }
+.coffee-diary-extra-photos { margin-top: 10px; }
+.coffee-diary-extra-photos summary { min-height: 48px; padding: 14px 0; color: var(--text-secondary); cursor: pointer; font-weight: 700; }
+.coffee-diary-extra-photos > div { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.coffee-diary-extra-photos button { flex: 0 0 92px; min-height: 72px; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-secondary); }
+.coffee-diary-extra-photos img { display: block; width: 100%; height: 72px; object-fit: cover; }
+.coffee-diary-photo-viewer { width: min(960px, calc(100vw - 24px)); }
+.coffee-diary-photo-viewer .cc-overlay__body { display: grid; place-items: center; padding: 10px; }
+.coffee-diary-photo-viewer img { display: block; width: 100%; max-height: min(68svh, 640px); object-fit: contain; background: #130f0d; }
+.coffee-diary-metrics { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 0; }
+.coffee-diary-metrics div { display: flex; align-items: baseline; gap: 5px; }
+.coffee-diary-metrics dt { color: var(--text-muted); font-size: 11px; }
+.coffee-diary-metrics dd { margin: 0; color: var(--text); font-size: 15px; font-weight: 780; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .coffee-diary-photo-staging { display: grid; gap: 14px; padding: 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-control); background: var(--surface-secondary); }
 .coffee-diary-photo-staging__header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .coffee-diary-photo-staging__header strong, .coffee-diary-photo-staging__header p { margin: 0; }
@@ -86,11 +107,21 @@
 .coffee-diary-recipe__field:last-child { border-bottom: 0; padding-bottom: 0; }
 .coffee-diary-recipe__field .coffee-diary-link-button { white-space: nowrap; }
 .coffee-diary-numeric-trigger { width: 100%; min-height: 48px; border: 1px solid var(--border); border-radius: var(--radius-control); padding: 10px 12px; color: var(--text); background: var(--surface-secondary); text-align: left; }
+.coffee-diary-numeric-trigger.is-active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.coffee-diary-rating-picker { min-width: 0; margin: 0; border: 0; padding: 0; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
+.coffee-diary-rating-picker legend { padding: 0; }
+.coffee-diary-rating-picker legend span { color: var(--text-muted); font-weight: 500; }
+.coffee-diary-rating-picker > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.coffee-diary-rating-picker button { min-width: 48px; min-height: 48px; border: 1px solid var(--border); border-radius: var(--radius-control); padding: 8px 10px; color: var(--text); background: var(--surface-secondary); font-weight: 750; }
+.coffee-diary-rating-picker .coffee-diary-rating-clear { flex: 1 1 132px; color: var(--text-secondary); }
+.coffee-diary-rating-picker button.is-selected { border-color: var(--accent); color: var(--cc-on-accent, #17130e); background: var(--accent); }
 .coffee-diary-form__error { margin: 0; color: var(--danger); line-height: 1.4; }
 .coffee-diary-secondary-fields { border-top: 1px solid var(--border-soft); padding-top: 14px; }
 .coffee-diary-secondary-fields summary { min-height: 48px; padding: 14px 0; color: var(--text-secondary); cursor: pointer; font-weight: 700; }
 .coffee-diary-secondary-fields[open] summary { color: var(--text); }
 .coffee-diary-keypad { display: grid; gap: 8px; max-width: 360px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-control); background: var(--surface-primary); }
+.coffee-diary-numeric-dialog { width: min(390px, calc(100vw - 24px)); }
+.coffee-diary-numeric-dialog .coffee-diary-keypad { max-width: none; }
 .coffee-diary-keypad__display { min-height: 48px; border-radius: 6px; padding: 12px; color: var(--text); background: var(--surface-secondary); font-size: 20px; font-variant-numeric: tabular-nums; text-align: right; }
 .coffee-diary-keypad__grid { display: grid; grid-template-columns: repeat(3, minmax(48px, 1fr)); gap: 6px; }
 .coffee-diary-keypad__grid button, .coffee-diary-keypad__done { min-height: 48px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface-inline); font-size: 17px; font-weight: 700; }
@@ -106,13 +137,16 @@
   .coffee-diary-bean-list__items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .coffee-diary-recipe__field { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .coffee-diary-recipe__field .coffee-diary-link-button { justify-self: start; }
+  .coffee-diary-detail__summary { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) {
   .coffee-diary-page__actions, .coffee-diary-detail__actions, .coffee-diary-sheet-actions { width: 100%; }
   .coffee-diary-page__actions > button, .coffee-diary-detail__actions > button, .coffee-diary-sheet-actions > button { flex: 1 1 100%; }
   .coffee-diary-detail { padding: 14px; }
-  .coffee-diary-bean-list__items, .coffee-diary-form__grid, .coffee-diary-metadata { grid-template-columns: 1fr; }
+  .coffee-diary-bean-list__items, .coffee-diary-form__grid, .coffee-diary-metadata, .coffee-diary-package-photos__slots { grid-template-columns: 1fr; }
   .coffee-diary-form__field--wide { grid-column: auto; }
   .coffee-diary-recipe__field { grid-template-columns: 1fr; }
   .coffee-diary-photo-staging__header { align-items: stretch; flex-direction: column; }
+  .coffee-diary-extraction__header { display: grid; }
+  .coffee-diary-extraction__tools { justify-content: flex-start; }
 }

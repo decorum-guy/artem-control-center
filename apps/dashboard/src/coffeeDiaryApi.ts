@@ -274,8 +274,11 @@ function parsePhotoUploadResult(value: unknown): CoffeeDiaryPhotoUploadResult {
   };
 }
 
-export function createCoffeeDiaryPhotoUploadSession(beanId: string): Promise<CoffeeDiaryUploadSession> {
-  return requestJson(`/api/v1/coffee-diary/beans/${encodeURIComponent(beanId)}/photo-upload-sessions`, parseUploadSession, { method: "POST" });
+export function createCoffeeDiaryPhotoUploadSession(beanId: string, replacePhotoId?: string): Promise<CoffeeDiaryUploadSession> {
+  return requestJson(`/api/v1/coffee-diary/beans/${encodeURIComponent(beanId)}/photo-upload-sessions`, parseUploadSession, {
+    method: "POST",
+    body: JSON.stringify(replacePhotoId ? { replacePhotoId } : {})
+  });
 }
 
 export function createCoffeeDiaryBeanPhotoUploadSession(): Promise<CoffeeDiaryUploadSession> {

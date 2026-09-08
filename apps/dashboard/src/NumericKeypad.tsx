@@ -1,4 +1,4 @@
-import { applyNumericKey, numericInputValue } from "./coffeeDiaryNumeric";
+import { applyNumericKey } from "./coffeeDiaryNumeric";
 import { numericKeyLabel, numericKeyOrder, type NumericKey } from "./numericKeypadShared";
 import "./coffeeDiary.css";
 
@@ -74,7 +74,7 @@ export function NumericKeypad({
     <section className="coffee-diary-keypad" data-testid={testId} aria-label={label}>
       <div className="coffee-diary-keypad__display" aria-live="polite">{value || "0"}</div>
       <NumericKeypadButtons decimal={decimal} onKey={press} clearLabel={clearLabel} backspaceLabel="⌫" />
-      <button type="button" className="coffee-diary-keypad__done" disabled={numericInputValue(value) === null} onClick={onDone}>Готово</button>
+      <button type="button" className="coffee-diary-keypad__done" onClick={onDone}>Готово</button>
     </section>
   );
 }

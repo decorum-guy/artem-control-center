@@ -199,16 +199,30 @@ function PhotoUploadDialog({
   );
 }
 
-function NumericField({ label, value, onChange, decimal, testId }: { label: string; value: string; onChange: (value: string) => void; decimal: boolean; testId: string }) {
-  const [open, setOpen] = useState(false);
+function NumericField({ label, value, testId, active, onOpen }: { label: string; value: string; testId: string; active: boolean; onOpen: () => void }) {
   return (
     <div className="coffee-diary-form__field">
       <span>{label}</span>
-      <button type="button" className="coffee-diary-numeric-trigger" data-testid={`${testId}-trigger`} onClick={() => setOpen(true)}>{value || "Введите число"}</button>
-      {open && <NumericKeypad value={value} onChange={onChange} onDone={() => setOpen(false)} decimal={decimal} maxLength={decimal ? 8 : 4} maxDecimalPlaces={decimal ? 1 : 0} label={label} testId={`${testId}-keypad`} />}
+      <button type="button" className={`coffee-diary-numeric-trigger${active ? " is-active" : ""}`} data-testid={`${testId}-trigger`} aria-pressed={active} onClick={onOpen}>{value || "Введите число"}</button>
     </div>
   );
 }
+
+function CoffeeMetrics({ extraction }: { extraction: Pick<CoffeeDiaryExtraction, "doseGrams" | "extractionSeconds" | "yieldGrams"> }) {
+  return <dl className="coffee-diary-metrics" data-testid="coffee-diary-metrics">
+    <div><dt>Вход</dt><dd>{extraction.doseGrams.toFixed(1)} г</dd></div>
+    <div><dt>Время</dt><dd>{extraction.extractionSeconds} с</dd></div>
+    <div><dt>Выход</dt><dd>{extraction.yieldGrams.toFixed(1)} г</dd></div>
+  </dl>;
+}
+
+function PhotoViewerDialog({ beanName, photoId, onClose }: { beanName: string; photoId: string; onClose: () => void }) {
+  return <DialogFrame testId="coffee-diary-photo-viewer" className="coffee-diary-photo-viewer" eyebrow={beanName} title="Фото упаковки" description="Увеличенный снимок для чтения информации на упаковке." onClose={onClose}>
+    <img src={coffeeDiaryPhotoContentUrl(photoId)} alt={`Упаковка кофе ${beanName}`} />
+  </DialogFrame>;
+}
+
+type NumericEditor = "dose" | "seconds" | "yield";
 
 function BeanSheet({ bean, onClose, onSaved, onConflict }: { bean?: CoffeeDiaryBean; onClose: () => void; onSaved: (bean: CoffeeDiaryBean) => void; onConflict: () => Promise<void> }) {
   const { guardMutation } = useInteractionLock();
@@ -300,8 +314,8 @@ function BeanSheet({ bean, onClose, onSaved, onConflict }: { bean?: CoffeeDiaryB
           <label className="coffee-diary-form__field"><span>Лучше подходит для</span><select value={draft.preferredDrink} onChange={(event) => setDraft({ ...draft, preferredDrink: event.target.value as BeanDraft["preferredDrink"] })} data-testid="coffee-diary-input-preferred-drink">{preferredDrinkOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           <label className="coffee-diary-form__field coffee-diary-form__field--wide"><span>Общий комментарий</span><textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} rows={3} data-testid="coffee-diary-input-notes" placeholder="Например, шоколад и ягоды" /></label>
         </div>
-        {!bean && <section className="coffee-diary-photo-staging" aria-label="Фотография кофе">
-          <div className="coffee-diary-photo-staging__header"><div><strong>Фотография</strong><p>Можно прикрепить фото до сохранения кофе.</p></div><button type="button" className="coffee-diary-secondary-button" onClick={() => void openStagedPhotoUpload()} disabled={photoSessionBusy || photoSession !== null}>{photoSessionBusy ? "Готовим…" : "Прикрепить фото"}</button></div>
+        {!bean && <section className="coffee-diary-photo-staging" aria-label="Фото упаковки">
+          <div className="coffee-diary-photo-staging__header"><div><strong>Фото упаковки</strong><p>Сначала добавьте лицевую сторону, затем оборотную. Их можно заменить после сохранения.</p></div><button type="button" className="coffee-diary-secondary-button" onClick={() => void openStagedPhotoUpload()} disabled={photoSessionBusy || photoSession !== null}>{photoSessionBusy ? "Готовим…" : `Добавить: ${pendingPhotoIds.length === 0 ? "лицевая сторона" : pendingPhotoIds.length === 1 ? "оборотная сторона" : "ещё фото"}`}</button></div>
           {pendingPhotoIds.length > 0 && <div className="coffee-diary-staged-previews" data-testid="coffee-diary-staged-previews">{pendingPhotoIds.map((pendingId) => <img key={pendingId} src={coffeeDiaryPendingPhotoContentUrl(pendingId)} alt="Предпросмотр фотографии кофе" />)}</div>}
         </section>}
         <details className="coffee-diary-secondary-fields">
@@ -332,6 +346,7 @@ function ExtractionSheet({ bean, onClose, onSaved }: { bean: CoffeeDiaryBean; on
   const [rating, setRating] = useState("");
   const [notes, setNotes] = useState("");
   const [makeFavorite, setMakeFavorite] = useState(false);
+  const [activeNumericEditor, setActiveNumericEditor] = useState<NumericEditor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -370,15 +385,18 @@ function ExtractionSheet({ bean, onClose, onSaved }: { bean: CoffeeDiaryBean; on
       <form id="coffee-diary-extraction-form" className="coffee-diary-form" onSubmit={(event) => void submit(event)}>
         <label className="coffee-diary-form__field"><span>Когда приготовлено</span><input type="datetime-local" value={brewedAt} onChange={(event) => setBrewedAt(event.target.value)} /></label>
         <div className="coffee-diary-form__grid">
-          <NumericField label="Доза, г" value={dose} onChange={setDose} decimal testId="coffee-diary-dose" />
-          <NumericField label="Время пролива, с" value={seconds} onChange={setSeconds} decimal={false} testId="coffee-diary-seconds" />
-          <NumericField label="Выход напитка, г" value={yieldAmount} onChange={setYieldAmount} decimal testId="coffee-diary-yield" />
-          <NumericField label="Оценка (1–10, необязательно)" value={rating} onChange={setRating} decimal={false} testId="coffee-diary-rating" />
+          <NumericField label="Доза, г" value={dose} testId="coffee-diary-dose" active={activeNumericEditor === "dose"} onOpen={() => setActiveNumericEditor("dose")} />
+          <NumericField label="Время пролива, с" value={seconds} testId="coffee-diary-seconds" active={activeNumericEditor === "seconds"} onOpen={() => setActiveNumericEditor("seconds")} />
+          <NumericField label="Выход напитка, г" value={yieldAmount} testId="coffee-diary-yield" active={activeNumericEditor === "yield"} onOpen={() => setActiveNumericEditor("yield")} />
+          <fieldset className="coffee-diary-rating-picker" data-testid="coffee-diary-rating-picker"><legend>Оценка <span>необязательно</span></legend><div>{Array.from({ length: 10 }, (_, index) => String(index + 1)).map((option) => <button key={option} type="button" className={rating === option ? "is-selected" : ""} aria-pressed={rating === option} onClick={() => setRating(option)}>{option}</button>)}<button type="button" className={`coffee-diary-rating-clear${!rating ? " is-selected" : ""}`} aria-pressed={!rating} onClick={() => setRating("")}>Без оценки</button></div></fieldset>
         </div>
         <label className="coffee-diary-form__field"><span>Комментарий</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={4} data-testid="coffee-diary-input-extraction-notes" placeholder="Что получилось?" /></label>
         <label className="coffee-diary-checkbox"><input type="checkbox" checked={makeFavorite} onChange={(event) => setMakeFavorite(event.target.checked)} data-testid="coffee-diary-make-favorite" /> Сделать лучшим рецептом</label>
         {error && <p className="coffee-diary-form__error" role="alert">{error}</p>}
       </form>
+      {activeNumericEditor && <DialogFrame testId={`coffee-diary-${activeNumericEditor}-keypad`} className="coffee-diary-numeric-dialog" eyebrow="Приготовление" title={activeNumericEditor === "dose" ? "Доза, г" : activeNumericEditor === "seconds" ? "Время пролива, с" : "Выход напитка, г"} description="Введите значение и нажмите «Готово». Очистка не блокирует закрытие." onClose={() => setActiveNumericEditor(null)}>
+        <NumericKeypad value={activeNumericEditor === "dose" ? dose : activeNumericEditor === "seconds" ? seconds : yieldAmount} onChange={activeNumericEditor === "dose" ? setDose : activeNumericEditor === "seconds" ? setSeconds : setYieldAmount} onDone={() => setActiveNumericEditor(null)} decimal={activeNumericEditor !== "seconds"} maxLength={activeNumericEditor === "seconds" ? 4 : 8} maxDecimalPlaces={activeNumericEditor === "seconds" ? 0 : 1} label="Числовой ввод" testId={`coffee-diary-${activeNumericEditor}-keypad-buttons`} />
+      </DialogFrame>}
     </Sheet>
   );
 }
@@ -400,6 +418,10 @@ export function CoffeeDiaryPage() {
 
   const selectedBean = useMemo(() => collection?.beans.find((bean) => bean.id === selectedId) ?? null, [collection, selectedId]);
   const favorite = selectedBean && selectedDetail ? bestCoffeeDiaryExtraction(selectedBean, selectedDetail.extractions) : null;
+  const selectedPhotos = useMemo(() => selectedBean
+    ? selectedBean.photoIds.map((photoId) => collection?.photos.find((photo) => photo.id === photoId && photo.deletedAt === null)).filter((photo): photo is NonNullable<typeof photo> => Boolean(photo))
+    : [], [collection?.photos, selectedBean]);
+  const [viewedPhotoId, setViewedPhotoId] = useState<string | null>(null);
 
   async function reload(): Promise<boolean> {
     setLoading(true);
@@ -459,13 +481,13 @@ export function CoffeeDiaryPage() {
     } finally { setFavoriteSavingId(null); }
   }
 
-  async function openExistingPhotoUpload() {
+  async function openExistingPhotoUpload(replacePhotoId?: string) {
     if (!selectedBean || !guardMutation() || photoSessionBusyRef.current) return;
     photoSessionBusyRef.current = true;
     setPhotoSessionBusy(true);
     setError(null);
     try {
-      setPhotoSession(await createCoffeeDiaryPhotoUploadSession(selectedBean.id));
+      setPhotoSession(await createCoffeeDiaryPhotoUploadSession(selectedBean.id, replacePhotoId));
     } catch (reason) {
       setError(uploadSessionErrorCopy(reason));
     } finally {
@@ -507,18 +529,18 @@ export function CoffeeDiaryPage() {
           <div className="coffee-diary-section-heading"><div><p className="section-kicker">Коллекция</p><h2>Зёрна</h2></div><span>{collection.beanCount}</span></div>
           <div className="coffee-diary-bean-list__items">{collection.beans.map((bean) => <button key={bean.id} type="button" className={`coffee-diary-bean-card${bean.id === selectedId ? " is-selected" : ""}`} onClick={() => setSelectedId(bean.id)}><strong>{bean.name}</strong><span>{[preferredDrinkLabel(bean.preferredDrink), bean.grindDescription].filter((value) => value && value !== "Не указано").join(" · ") || "Описание не заполнено"}</span></button>)}</div>
         </section>
-        {selectedBean && <section className="coffee-diary-detail" data-testid="coffee-diary-detail"><div className="coffee-diary-detail__header"><div><p className="section-kicker">Зерно</p><h2>{selectedBean.name}</h2><p>{preferredDrinkLabel(selectedBean.preferredDrink)}{selectedBean.grindDescription ? ` · ${selectedBean.grindDescription}` : ""}</p></div><div className="coffee-diary-detail__actions"><button type="button" className="coffee-diary-secondary-button" onClick={() => void openExistingPhotoUpload()} disabled={photoSessionBusy}>{photoSessionBusy ? "Готовим QR…" : "Прикрепить фото"}</button><button type="button" className="coffee-diary-secondary-button" onClick={() => setSheet("edit-bean")}>Изменить</button><button type="button" className="coffee-diary-danger-button" onClick={() => void deleteBean()}>Удалить</button></div></div>
-          <dl className="coffee-diary-metadata"><div><dt>Помол</dt><dd>{selectedBean.grindDescription || "—"}</dd></div><div><dt>Лучше подходит для</dt><dd>{preferredDrinkLabel(selectedBean.preferredDrink)}</dd></div><div><dt>Фотографии</dt><dd>{selectedBean.photoIds.length}</dd></div><div><dt>Обжарщик</dt><dd>{selectedBean.roaster || "—"}</dd></div><div><dt>Происхождение</dt><dd>{selectedBean.origin || "—"}</dd></div><div><dt>Обработка</dt><dd>{selectedBean.processing || "—"}</dd></div></dl>
-          {selectedBean.notes && <p className="coffee-diary-long-text">{selectedBean.notes}</p>}
-          <section className="coffee-diary-photos" aria-label="Фотографии кофе" data-testid="coffee-diary-photos"><div className="coffee-diary-section-heading"><div><p className="section-kicker">Архив</p><h3>Фотографии</h3></div><span>{selectedBean.photoIds.length}</span></div>{collection?.photos.filter((photo) => photo.beanId === selectedBean.id && photo.deletedAt === null).length ? <div className="coffee-diary-photo-grid">{collection?.photos.filter((photo) => photo.beanId === selectedBean.id && photo.deletedAt === null).map((photo) => <img key={photo.id} src={coffeeDiaryPhotoContentUrl(photo.id)} alt={`Фото кофе ${selectedBean.name}`} />)}</div> : <p className="coffee-diary-muted">Фотографий пока нет.</p>}</section>
-          <section className="coffee-diary-best" data-testid="coffee-diary-best-recipe"><div className="coffee-diary-section-heading"><div><p className="section-kicker">Избранное</p><h3>Лучший рецепт</h3></div>{favorite && <span>Лучший</span>}</div>{favorite ? <strong>{coffeeDiaryShotSummary(favorite)}</strong> : <p>Лучший рецепт не выбран</p>}</section>
-          <section className="coffee-diary-history" data-testid="coffee-diary-history"><div className="coffee-diary-section-heading"><div><p className="section-kicker">История</p><h3>Приготовления</h3></div><button type="button" className="coffee-diary-primary-button" onClick={() => setSheet("add-extraction")}>Добавить</button></div>{selectedDetail?.extractions.length ? <div className="coffee-diary-history__items">{selectedDetail.extractions.map((extraction) => { const isFavorite = selectedBean.favoriteExtractionId === extraction.id; return <article className={`coffee-diary-extraction${isFavorite ? " is-favorite" : ""}`} data-testid="coffee-diary-extraction" key={extraction.id}><div className="coffee-diary-extraction__header"><div><strong>{coffeeDiaryShotSummary(extraction)}</strong><time dateTime={extraction.brewedAt}>{new Date(extraction.brewedAt).toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" })}</time></div><div className="coffee-diary-extraction__tools">{isFavorite && <span className="coffee-diary-rating" data-testid="coffee-diary-favorite-marker">Лучший</span>}{extraction.rating !== null && <span className="coffee-diary-rating">Оценка {extraction.rating}/10</span>}<button type="button" className="coffee-diary-link-button" disabled={favoriteSavingId !== null} onClick={() => void chooseFavorite(isFavorite ? null : extraction.id)}>{isFavorite ? "Снять лучший" : "Сделать лучшим"}</button><button type="button" className="coffee-diary-link-button" onClick={() => void deleteExtraction(extraction)}>Удалить</button></div></div>{extraction.notes && <p>{extraction.notes}</p>}</article>; })}</div> : <p className="coffee-diary-muted">Приготовлений пока нет.</p>}</section>
+        {selectedBean && <section className="coffee-diary-detail" data-testid="coffee-diary-detail"><div className="coffee-diary-detail__header"><div><p className="section-kicker">Зерно</p><h2>{selectedBean.name}</h2><p>{preferredDrinkLabel(selectedBean.preferredDrink)}{selectedBean.grindDescription ? ` · ${selectedBean.grindDescription}` : ""}</p></div><div className="coffee-diary-detail__actions"><button type="button" className="coffee-diary-secondary-button" onClick={() => setSheet("edit-bean")}>Изменить</button><button type="button" className="coffee-diary-danger-button" onClick={() => void deleteBean()}>Удалить</button></div></div>
+          <div className="coffee-diary-detail__summary"><dl className="coffee-diary-metadata"><div><dt>Помол</dt><dd>{selectedBean.grindDescription || "—"}</dd></div><div><dt>Обжарщик</dt><dd>{selectedBean.roaster || "—"}</dd></div><div><dt>Происхождение</dt><dd>{selectedBean.origin || "—"}</dd></div></dl>{selectedBean.notes && <p className="coffee-diary-long-text">{selectedBean.notes}</p>}</div>
+          <section className="coffee-diary-package-photos" aria-label="Фото упаковки" data-testid="coffee-diary-photos"><div className="coffee-diary-section-heading"><div><p className="section-kicker">Упаковка</p><h3>Фото для заказа</h3></div></div><div className="coffee-diary-package-photos__slots">{["Лицевая сторона", "Оборотная сторона"].map((label, index) => { const photo = selectedPhotos[index]; return <div className="coffee-diary-package-photo" key={label}>{photo ? <><button type="button" className="coffee-diary-package-photo__image" onClick={() => setViewedPhotoId(photo.id)} aria-label={`${label}: открыть увеличенное фото`}><img src={coffeeDiaryPhotoContentUrl(photo.id)} alt={`${label} упаковки ${selectedBean.name}`} /></button><button type="button" className="coffee-diary-package-photo__replace" disabled={photoSessionBusy} onClick={() => void openExistingPhotoUpload(photo.id)}>{photoSessionBusy ? "Готовим QR…" : "Заменить"}</button></> : <button type="button" className="coffee-diary-package-photo__empty" disabled={photoSessionBusy} onClick={() => void openExistingPhotoUpload()}>{photoSessionBusy ? "Готовим QR…" : `Добавить: ${label}`}</button>}<strong>{label}</strong></div>; })}</div>{selectedPhotos.slice(2).length > 0 && <details className="coffee-diary-extra-photos"><summary>Другие фото упаковки</summary><div>{selectedPhotos.slice(2).map((photo) => <button type="button" key={photo.id} onClick={() => setViewedPhotoId(photo.id)}><img src={coffeeDiaryPhotoContentUrl(photo.id)} alt={`Дополнительное фото упаковки ${selectedBean.name}`} /></button>)}</div></details>}</section>
+          {favorite && <section className="coffee-diary-best" data-testid="coffee-diary-best-recipe"><div className="coffee-diary-section-heading"><div><p className="section-kicker">Лучший рецепт</p><h3>{coffeeDiaryShotSummary(favorite)}</h3></div><span className="coffee-diary-status-badge">Лучший</span></div><CoffeeMetrics extraction={favorite} /></section>}
+          <section className="coffee-diary-history" data-testid="coffee-diary-history"><div className="coffee-diary-section-heading"><div><p className="section-kicker">История</p><h3>Приготовления</h3></div><button type="button" className="coffee-diary-primary-button" data-testid="coffee-diary-add-extraction" onClick={() => setSheet("add-extraction")}>Добавить</button></div>{selectedDetail?.extractions.length ? <div className="coffee-diary-history__items">{selectedDetail.extractions.map((extraction) => { const isFavorite = selectedBean.favoriteExtractionId === extraction.id; return <article className={`coffee-diary-extraction${isFavorite ? " is-favorite" : ""}`} data-testid="coffee-diary-extraction" key={extraction.id}><div className="coffee-diary-extraction__header"><div><time dateTime={extraction.brewedAt}>{new Date(extraction.brewedAt).toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" })}</time><CoffeeMetrics extraction={extraction} /></div><div className="coffee-diary-extraction__tools">{isFavorite && <span className="coffee-diary-status-badge" data-testid="coffee-diary-favorite-marker">Лучший</span>}{extraction.rating !== null && <span className="coffee-diary-rating">Оценка {extraction.rating}/10</span>}<button type="button" className="coffee-diary-secondary-action" disabled={favoriteSavingId !== null} onClick={() => void chooseFavorite(isFavorite ? null : extraction.id)}>{isFavorite ? "Снять лучший" : "Сделать лучшим"}</button><button type="button" className="coffee-diary-delete-action" onClick={() => void deleteExtraction(extraction)}>Удалить</button></div></div>{extraction.notes && <p>{extraction.notes}</p>}</article>; })}</div> : <p className="coffee-diary-muted">Приготовлений пока нет.</p>}</section>
         </section>}
       </div>}
       {sheet === "add-bean" && <BeanSheet onClose={() => setSheet(null)} onSaved={(bean) => { setSheet(null); setSelectedId(bean.id); void reload(); }} onConflict={reconcileConflict} />}
       {sheet === "edit-bean" && selectedBean && <BeanSheet bean={selectedBean} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void reload(); }} onConflict={reconcileConflict} />}
       {sheet === "add-extraction" && selectedBean && <ExtractionSheet bean={selectedBean} onClose={() => setSheet(null)} onSaved={() => { setSheet(null); void reload(); }} />}
       {photoSession && <PhotoUploadDialog session={photoSession} onClose={() => void closeExistingPhotoUpload()} onSessionUpdate={(next) => setPhotoSession((current) => current ? { ...next, uploadUrl: next.uploadUrl ?? current.uploadUrl } : next)} onUploaded={(next) => { setPhotoSession(next); void reload(); }} />}
+      {viewedPhotoId && selectedBean && <PhotoViewerDialog beanName={selectedBean.name} photoId={viewedPhotoId} onClose={() => setViewedPhotoId(null)} />}
     </div>
   );
 }
