@@ -83,15 +83,21 @@ foreach ($required in @(
     }
 }
 
-foreach ($required in @(
-    "validation-temp",
-    "--basetemp=",
-    "-p no:cacheprovider",
-    "PYTEST_ADDOPTS",
-    "Invoke-IsolatedValidation"
+if ($updater -notlike '*Arguments @("run", "production-update-preflight")*') {
+    throw "Production updater must invoke the narrow production update preflight"
+}
+foreach ($forbidden in @(
+    'Invoke-IsolatedValidation',
+    'Arguments @("run", "check")',
+    'PYTEST_ADDOPTS',
+    'validation-temp',
+    '--basetemp=',
+    '-p no:cacheprovider',
+    'check-dist',
+    'PANEL_DASHBOARD_BUILD_OUT_DIR'
 )) {
-    if ($updater -notlike "*$required*") {
-        throw "Production updater must isolate pytest temp/cache state: $required"
+    if ($updater -like "*$forbidden*") {
+        throw "Production updater must not restore obsolete full validation: $forbidden"
     }
 }
 
@@ -265,4 +271,4 @@ foreach ($required in @(
     }
 }
 
-Write-Host "Validated resilient private connectivity, startup recovery, clean desktop helpers and isolated update validation."
+Write-Host "Validated resilient private connectivity, startup recovery, clean desktop helpers and narrow production update validation."
