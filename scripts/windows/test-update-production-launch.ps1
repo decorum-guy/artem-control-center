@@ -433,8 +433,12 @@ try {
         -PassThru
     Wait-ArtemFixtureFile -Path $raceResultPath
     $raceResult = Get-Content -LiteralPath $raceResultPath -Raw | ConvertFrom-Json
+    $acceptedEvidenceLog = @(
+        $raceResult.logs.message |
+            Where-Object { $_ -match "accepted durable evidence" }
+    ).Count -gt 0
     Assert-ArtemFixture -Condition ($raceResult.failures.Count -eq 0) -Message "Fixture race published updater_early_exit"
-    Assert-ArtemFixture -Condition ($raceResult.logs.message -match "accepted durable evidence") -Message "Fixture race did not accept durable body evidence"
+    Assert-ArtemFixture -Condition $acceptedEvidenceLog -Message "Fixture race did not accept durable body evidence"
     Assert-ArtemFixture -Condition ([int]$raceResult.receipt.processId -gt 0 -and [int]$raceResult.bootstrap.processId -eq [int]$raceResult.receipt.processId) -Message "Fixture race evidence did not bind the real child PID"
     $raceChildPid = [int]$raceResult.receipt.processId
     Wait-ArtemProcessExit -Process $raceParent -Description "transient-recognition race Node harness"
