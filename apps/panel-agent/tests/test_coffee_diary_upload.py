@@ -96,37 +96,67 @@ def test_existing_photo_replacement_is_slot_bound_and_tombstones_the_old_export_
         first = upload_existing_photo(client, bean["id"], image_bytes("JPEG"), "image/jpeg")
         assert first.status_code == 200
         first_photo_id = first.json()["photoId"]
+        second = upload_existing_photo(client, bean["id"], image_bytes("JPEG", size=(40, 30)), "image/jpeg")
+        assert second.status_code == 200
+        second_photo_id = second.json()["photoId"]
+        legacy = upload_existing_photo(client, bean["id"], image_bytes("JPEG", size=(44, 28)), "image/jpeg")
+        assert legacy.status_code == 200
+        legacy_photo_id = legacy.json()["photoId"]
 
-        session = client.post(
+        front_session = client.post(
             f"/api/v1/coffee-diary/beans/{bean['id']}/photo-upload-sessions",
             json={"replacePhotoId": first_photo_id},
         )
-        assert session.status_code == 200
-        token = session.json()["uploadUrl"].split("#token=", 1)[1]
-        replacement = client.post(
+        assert front_session.status_code == 200
+        front_token = front_session.json()["uploadUrl"].split("#token=", 1)[1]
+        front_replacement = client.post(
             "/api/v1/coffee-diary/photo-upload",
-            headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"},
+            headers={"X-Coffee-Upload-Token": front_token, "Content-Type": "image/jpeg"},
             content=image_bytes("JPEG", size=(48, 32)),
         )
-        assert replacement.status_code == 200
-        replacement_photo_id = replacement.json()["photoId"]
-        assert replacement_photo_id != first_photo_id
+        assert front_replacement.status_code == 200
+        replacement_front_id = front_replacement.json()["photoId"]
+        assert replacement_front_id != first_photo_id
 
         collection = client.get("/api/v1/coffee-diary").json()
         saved = next(item for item in collection["beans"] if item["id"] == bean["id"])
-        assert saved["photoIds"] == [replacement_photo_id]
+        assert saved["photoIds"] == [replacement_front_id, second_photo_id, legacy_photo_id]
+
+        back_session = client.post(
+            f"/api/v1/coffee-diary/beans/{bean['id']}/photo-upload-sessions",
+            json={"replacePhotoId": second_photo_id},
+        )
+        assert back_session.status_code == 200
+        back_token = back_session.json()["uploadUrl"].split("#token=", 1)[1]
+        back_replacement = client.post(
+            "/api/v1/coffee-diary/photo-upload",
+            headers={"X-Coffee-Upload-Token": back_token, "Content-Type": "image/jpeg"},
+            content=image_bytes("JPEG", size=(52, 34)),
+        )
+        assert back_replacement.status_code == 200
+        replacement_back_id = back_replacement.json()["photoId"]
+
+        collection = client.get("/api/v1/coffee-diary").json()
+        saved = next(item for item in collection["beans"] if item["id"] == bean["id"])
+        assert saved["photoIds"] == [replacement_front_id, replacement_back_id, legacy_photo_id]
         exported = client.get("/api/v1/coffee-diary/export").json()
         old = next(item for item in exported["photos"] if item["id"] == first_photo_id)
         assert old["deletedAt"] is not None
-        assert {item["id"] for item in exported["photos"]} == {first_photo_id, replacement_photo_id}
+        assert next(item for item in exported["photos"] if item["id"] == second_photo_id)["deletedAt"] is not None
+        assert {item["id"] for item in exported["photos"]} == {first_photo_id, second_photo_id, legacy_photo_id, replacement_front_id, replacement_back_id}
 
         replay = client.post(
             "/api/v1/coffee-diary/photo-upload",
-            headers={"X-Coffee-Upload-Token": token, "Content-Type": "image/jpeg"},
+            headers={"X-Coffee-Upload-Token": front_token, "Content-Type": "image/jpeg"},
             content=image_bytes("JPEG"),
         )
         assert replay.status_code == 200
-        assert replay.json()["photoId"] == replacement_photo_id
+        assert replay.json()["photoId"] == replacement_front_id
+
+    reloaded_module = _api_module(monkeypatch, tmp_path)
+    with TestClient(reloaded_module.app) as reloaded_client:
+        reloaded = next(item for item in reloaded_client.get("/api/v1/coffee-diary").json()["beans"] if item["id"] == bean["id"])
+        assert reloaded["photoIds"] == [replacement_front_id, replacement_back_id, legacy_photo_id]
 
 
 def stored_image_files(module) -> list[str]:

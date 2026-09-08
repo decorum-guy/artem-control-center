@@ -61,6 +61,7 @@
 .coffee-diary-package-photos__slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
 .coffee-diary-package-photo { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; min-width: 0; }
 .coffee-diary-package-photo > strong { grid-column: 1 / -1; color: var(--text-secondary); font-size: 12px; }
+.coffee-diary-package-photo__hint { grid-column: 1 / -1; color: var(--text-muted); font-size: 11px; line-height: 1.35; }
 .coffee-diary-package-photo__image, .coffee-diary-package-photo__empty { min-height: 112px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface-secondary); }
 .coffee-diary-package-photo__image { padding: 0; }
 .coffee-diary-package-photo__image img { display: block; width: 100%; height: 112px; object-fit: cover; }
@@ -83,7 +84,9 @@
 .coffee-diary-photo-staging__header strong, .coffee-diary-photo-staging__header p { margin: 0; }
 .coffee-diary-photo-staging__header p { margin-top: 4px; color: var(--text-muted); font-size: 12px; }
 .coffee-diary-staged-previews { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.coffee-diary-staged-previews figure { display: grid; gap: 5px; margin: 0; }
 .coffee-diary-staged-previews img { display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 8px; object-fit: cover; }
+.coffee-diary-staged-previews figcaption { color: var(--text-muted); font-size: 11px; }
 .coffee-diary-qr-body { display: grid; justify-items: center; gap: 12px; text-align: center; }
 .coffee-diary-qr { display: block; width: min(280px, 100%); height: auto; image-rendering: pixelated; background: #fff; }
 .coffee-diary-qr-placeholder { display: grid; width: min(280px, 100%); aspect-ratio: 1; place-items: center; color: var(--text-muted); background: var(--surface-secondary); }

@@ -124,9 +124,11 @@ test.describe("Coffee Diary Slice 2", () => {
     const before = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { photos: Array<{ id: string; beanId: string }> };
     await page.goto("/coffee-diary");
     await expect(page.getByTestId("coffee-diary-detail")).toContainText(bean.name);
+    await expect(page.getByTestId("coffee-diary-package-slot-0").getByRole("button", { name: "Добавить фото" })).toBeEnabled();
+    await expect(page.getByTestId("coffee-diary-package-slot-1").getByRole("button", { name: "Сначала добавьте лицевую сторону" })).toBeDisabled();
 
     const sessionResponse = page.waitForResponse((response) => response.url().includes("/photo-upload-sessions") && response.request().method() === "POST");
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить: Лицевая сторона" }).click();
+    await page.getByTestId("coffee-diary-package-slot-0").getByRole("button", { name: "Добавить фото" }).click();
     const session = await (await sessionResponse).json() as UploadSession;
     expect(new URL(session.uploadUrl).search).toBe("");
     expect(new URL(session.uploadUrl).hash).toMatch(/^#token=[A-Za-z0-9_-]{43,}$/);
@@ -135,13 +137,18 @@ test.describe("Coffee Diary Slice 2", () => {
 
     await uploadFromMobile(page, session.uploadUrl, browser);
     await expect(page.getByTestId("coffee-diary-photo-upload-dialog")).toContainText("Фото прикреплено");
+    await page.getByTestId("coffee-diary-photo-upload-dialog").getByRole("button", { name: "Закрыть" }).last().click();
     await expect(page.getByTestId("coffee-diary-photos").locator("img")).toHaveCount(1);
+    await expect(page.getByTestId("coffee-diary-package-slot-0").locator("button").first()).toBeVisible();
+    await expect(page.getByTestId("coffee-diary-package-slot-1").getByRole("button", { name: "Добавить фото" })).toBeEnabled();
     await page.getByTestId("coffee-diary-photos").locator("button").filter({ has: page.locator("img") }).click();
     await expect(page.getByTestId("coffee-diary-photo-viewer")).toBeVisible();
     await expect(page.getByTestId("coffee-diary-photo-viewer").getByRole("button", { name: "Закрыть" })).toBeVisible();
     await page.getByTestId("coffee-diary-photo-viewer").getByRole("button", { name: "Закрыть" }).click();
     await page.reload();
     await expect(page.getByTestId("coffee-diary-photos").locator("img")).toHaveCount(1);
+    await expect(page.getByTestId("coffee-diary-package-slot-0").locator("button").first()).toBeVisible();
+    await expect(page.getByTestId("coffee-diary-package-slot-1").getByRole("button", { name: "Добавить фото" })).toBeEnabled();
 
     const collection = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { beans: BeanRecord[]; photos: Array<{ id: string; beanId: string; mediaType: string }> };
     const saved = collection.beans.find((candidate) => candidate.id === bean.id);
@@ -155,7 +162,7 @@ test.describe("Coffee Diary Slice 2", () => {
     const before = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { photos: Array<{ id: string; beanId: string }> };
     await page.goto("/coffee-diary");
     const sessionResponse = page.waitForResponse((response) => response.url().includes("/photo-upload-sessions") && response.request().method() === "POST");
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить: Лицевая сторона" }).click();
+    await page.getByTestId("coffee-diary-package-slot-0").getByRole("button", { name: "Добавить фото" }).click();
     const session = await (await sessionResponse).json() as UploadSession;
     await uploadFromMobileWithResponseLoss(session.uploadUrl, browser);
 
@@ -225,7 +232,7 @@ test.describe("Coffee Diary Slice 2", () => {
     await page.waitForTimeout(1_100);
     await page.mouse.up();
     await expect(page.getByTestId("interaction-lock-status")).toBeVisible();
-    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Добавить: Лицевая сторона" }).click();
+    await page.getByTestId("coffee-diary-package-slot-0").getByRole("button", { name: "Добавить фото" }).click();
     expect(requests).toEqual([]);
   });
 });
