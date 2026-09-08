@@ -11,7 +11,7 @@ test("target preparation is isolated before cutover and target continuation prom
   const continuation = updater.indexOf("if ($Continuation)");
   const targetProof = updater.indexOf("Assert-ArtemTargetUpdaterLogic", continuation);
   const staging = updater.indexOf("Invoke-ArtemTargetStaging");
-  const stagingBuild = updater.indexOf("Invoke-IsolatedValidation", staging);
+  const stagingBuild = updater.indexOf("Invoke-StagedProductionBuild", staging);
   const bootstrap = updater.indexOf('elseif ($decision.Action -eq "bootstrap")');
   const stageCall = updater.indexOf("$stagedTarget = Invoke-ArtemTargetStaging", bootstrap);
   const stop = updater.indexOf("Stop-ArtemRuntime", stageCall);
@@ -66,7 +66,7 @@ test("staged setup keeps the target runtime Python configured through validation
     const previousVenv = stagingSource.indexOf("$previousRuntimeVenv = $env:PANEL_RUNTIME_VENV");
     const configuredVenv = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $targetRuntimeVenv");
     const setup = stagingSource.indexOf('Description "staged project setup"');
-    const validation = stagingSource.indexOf("Invoke-IsolatedValidation");
+    const validation = stagingSource.indexOf('Arguments @("run", "production-update-preflight")');
     const firstRestore = stagingSource.indexOf("Remove-Item Env:PANEL_RUNTIME_VENV");
     const firstRestorePrevious = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $previousRuntimeVenv");
     const restore = stagingSource.indexOf("Remove-Item Env:PANEL_RUNTIME_VENV", validation);
@@ -88,6 +88,40 @@ test("staged setup keeps the target runtime Python configured through validation
   assert.match(ci, /test-python-runtime-venv\.ps1/);
 });
 
+test("new production staging runs a narrow host preflight then exactly one accepted-v2 build", () => {
+  const staging = updater.indexOf("function Invoke-ArtemTargetStaging");
+  const stagingEnd = updater.indexOf("$ArtemUpdateActivityMax", staging);
+  const source = updater.slice(staging, stagingEnd);
+  const validating = source.indexOf('-Phase "validating"');
+  const preflight = source.indexOf('Arguments @("run", "production-update-preflight")');
+  const building = source.indexOf('-Phase "building"');
+  const build = source.indexOf("Invoke-StagedProductionBuild", building);
+  const artifactReady = source.indexOf('-Phase "artifact-ready"');
+  const buildHelperStart = updater.indexOf("function Invoke-StagedProductionBuild");
+  const buildHelperEnd = updater.indexOf("function Get-ArtemUpdateStagingPaths", buildHelperStart);
+  const buildHelper = updater.slice(buildHelperStart, buildHelperEnd);
+  const bootstrap = updater.indexOf('elseif ($decision.Action -eq "bootstrap")');
+  const stop = updater.indexOf("Stop-ArtemRuntime", bootstrap);
+
+  assert.ok(validating >= 0 && preflight > validating);
+  assert.ok(building > preflight && build > building && artifactReady > build);
+  assert.ok(stop > updater.indexOf('-Phase "artifact-ready"', staging));
+  assert.match(source, /Description "target production update preflight"/);
+  assert.match(buildHelper, /Description "accepted V2 production dashboard build"/);
+  assert.equal((buildHelper.match(/Arguments @\("run", "build:production"\)/g) ?? []).length, 1);
+  for (const forbidden of [
+    'Arguments @("run", "check")',
+    'Arguments @("run", "lint")',
+    'Arguments @("run", "typecheck")',
+    'Arguments @("run", "test")',
+    "PYTEST_ADDOPTS",
+    "check-dist",
+    "PANEL_DASHBOARD_BUILD_OUT_DIR"
+  ]) {
+    assert.equal(source.includes(forbidden), false, `production staging must not invoke ${forbidden}`);
+  }
+});
+
 test("first rollout from an older updater rediscovers only its exact target revision environment", () => {
   const runtimeVenv = readFileSync(resolve(root, "scripts/runtime-venv.mjs"), "utf8");
   const setup = readFileSync(resolve(root, "scripts/setup.mjs"), "utf8");
@@ -104,6 +138,8 @@ test("first rollout from an older updater rediscovers only its exact target revi
   assert.match(migration, /Remove-Item Env:PANEL_RUNTIME_VENV/);
   assert.match(migration, /npm\.cmd run check/);
   assert.match(migration, /npm\.cmd run build:production/);
+  assert.match(migration, /Production update preflight passed/);
+  assert.match(migration, /repeated full validation/);
   assert.match(migration, /worktree add --detach/);
   assert.doesNotMatch(migration, /Stop-ArtemRuntime|update-production\.ps1/);
   assert.match(ci, /test-first-rollout-venv-migration\.ps1/);
