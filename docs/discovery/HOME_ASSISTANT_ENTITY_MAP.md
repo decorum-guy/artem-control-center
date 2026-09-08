@@ -176,6 +176,54 @@ Confidence: **high** that no dedicated helper exists in file-backed live YAML;
 **medium** that live HA has no UI-created helper, pending a scoped read-only
 entity-registry API check.
 
+## 2026-09-08 typed climate and ROG PSU addendum
+
+The Control Center implementation uses only these additional, fixed Home
+Assistant entities:
+
+| Purpose | Entity | Allowed state/fields |
+| --- | --- | --- |
+| Air conditioner | `climate.konditsioner` | HVAC state `cool`, `heat`, `fan_only`, `dry`, `auto`, `off`; allow-listed HVAC/fan modes; target temperature 16–32 °C in 1 °C steps; current temperature may be `null` |
+| Preferred power supply | `switch.bp_1` | state `on`/`off` plus HA `last_changed`/`last_updated` |
+| Secondary power supply | `switch.bp_2` | state `on`/`off` plus HA `last_changed`/`last_updated` |
+
+The closed climate observation was `state: off` with `hvac_modes:
+[cool, heat, fan_only, dry, auto, off]`, `min_temp: 16`, `max_temp: 32`,
+`target_temp_step: 1`, `fan_modes: [one, two, three, four, five]`,
+`current_temperature: null`, `temperature: 32`, `fan_mode: one`, and
+`supported_features: 393`. No fan `auto` value was observed or added.
+
+Climate attributes are sanitized to the typed allow-list. PSU attributes are
+discarded; the panel does not expose or infer watts, volts, amps, kWh, or any
+other power telemetry. PSU presentation is derived only from the two current
+states: `full` = both on, `normal` = BP1 on/BP2 off, `secondary_only` = BP1
+off/BP2 on, `off` = both off, otherwise `unavailable`. Normal mode always
+prefers BP1. Turning off the last confirmed-on PSU is rejected with the
+bounded `last_psu_off_blocked` result; an unavailable other PSU is not treated
+as safe.
+
+The typed action surface is limited to the five climate actions and six PSU
+actions implemented in the production Panel Agent router. Climate writes use
+only `climate.turn_on`, `climate.turn_off`, `climate.set_temperature`,
+`climate.set_hvac_mode`, and `climate.set_fan_mode` for the fixed climate
+entity. PSU writes use only `switch.turn_on`/`switch.turn_off` for the fixed
+BP entities and require a fresh HA read-back. HTTP 200 is not confirmation.
+
+This addendum does not add an energy integration, Camelion, Alice, Jarvis,
+ROG-host control, updater lifecycle, hardware discovery, or inferred device
+telemetry. Both new production write gates remain false by default and are
+independent of the existing aggregate Home Assistant health contract.
+
+The already observed coffee electrical sensors are documented here for
+provenance only and are not part of this slice:
+
+- `sensor.kofemashina_potreblenie_toka` — A, `measurement`, current;
+- `sensor.kofemashina_potrebliaemaia_moshchnost` — W, `measurement`, power;
+- `sensor.kofemashina_tekushchee_napriazhenie` — V, `measurement`, voltage.
+
+No cumulative coffee kWh entity has been confirmed. Energy history remains a
+separate future slice; no Cameleon integration is being added.
+
 ## Warm-up, ready, and long-running logic
 
 ### Verified HA state

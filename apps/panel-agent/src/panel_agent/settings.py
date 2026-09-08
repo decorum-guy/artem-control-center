@@ -68,6 +68,8 @@ class IntegrationSettings:
     rog_g703_health_poll_seconds: float = 15.0
     rog_g703_response_limit_bytes: int = 16 * 1024
     writes_enabled: bool = False
+    home_climate_actions_enabled: bool = False
+    rog_g703_psu_actions_enabled: bool = False
     coffee_timing_writes_enabled: bool = False
     coffee_notification_writes_enabled: bool = False
     coffee_actions_enabled: bool = False
@@ -299,6 +301,14 @@ class IntegrationSettings:
                 max(1024, int(os.getenv("PANEL_ROG_G703_RESPONSE_LIMIT_BYTES", str(16 * 1024)))),
             ),
             writes_enabled=_bool_env("PANEL_WRITES_ENABLED", False),
+            home_climate_actions_enabled=_bool_env(
+                "PANEL_HOME_CLIMATE_ACTIONS_ENABLED",
+                False,
+            ),
+            rog_g703_psu_actions_enabled=_bool_env(
+                "PANEL_ROG_G703_PSU_ACTIONS_ENABLED",
+                False,
+            ),
             coffee_timing_writes_enabled=_bool_env(
                 "PANEL_COFFEE_TIMING_WRITES_ENABLED",
                 False,

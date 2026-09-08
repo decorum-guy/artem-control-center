@@ -270,6 +270,8 @@ try {
         PANEL_PLANNING_INTERNAL_SECRET = $aliceDetailsToken
         PANEL_PLANNING_SECRET = $planningPanelSecret
         PANEL_WRITES_ENABLED = "false"
+        PANEL_HOME_CLIMATE_ACTIONS_ENABLED = "false"
+        PANEL_ROG_G703_PSU_ACTIONS_ENABLED = "false"
         PANEL_COFFEE_ACTIONS_ENABLED = "false"
         PANEL_COFFEE_TIMING_WRITES_ENABLED = "false"
         PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED = "false"
@@ -289,6 +291,8 @@ try {
     if (-not $KeepWritesDisabled) {
         foreach ($key in @(
             "PANEL_WRITES_ENABLED",
+            "PANEL_HOME_CLIMATE_ACTIONS_ENABLED",
+            "PANEL_ROG_G703_PSU_ACTIONS_ENABLED",
             "PANEL_COFFEE_ACTIONS_ENABLED",
             "PANEL_COFFEE_TIMING_WRITES_ENABLED",
             "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED"
@@ -312,6 +316,8 @@ try {
     Write-Host "AliceTG Bot: $botBaseUrl"
     Write-Host "Planning: authenticated panel-agent boundary enabled"
     Write-Host "Coffee writes: $(if ($KeepWritesDisabled) { 'disabled' } else { 'enabled behind access policy' })"
+    Write-Host "Home climate writes: $(if ($KeepWritesDisabled) { 'disabled' } else { 'enabled behind access policy' })"
+    Write-Host "ROG G703 PSU writes: $(if ($KeepWritesDisabled) { 'disabled' } else { 'enabled behind access policy' })"
     Write-Host "No token was printed or written to Git."
 }
 catch {

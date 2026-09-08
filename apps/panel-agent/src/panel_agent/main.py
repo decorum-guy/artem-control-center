@@ -1216,6 +1216,8 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "coffee_timing_writes": SETTINGS.coffee_timing_writes_enabled,
         "coffee_notification_writes": SETTINGS.coffee_notification_writes_enabled,
         "coffee_actions": SETTINGS.coffee_actions_enabled,
+        "home_climate_actions": SETTINGS.home_climate_actions_enabled,
+        "rog_g703_psu_actions": SETTINGS.rog_g703_psu_actions_enabled,
         "avalar_ssh": SETTINGS.avalar_ssh_enabled,
         "avalar_actions": SETTINGS.avalar_actions_enabled,
         "avalar_smoke": SETTINGS.avalar_smoke_enabled,

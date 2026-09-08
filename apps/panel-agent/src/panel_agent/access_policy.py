@@ -37,6 +37,17 @@ PROFILE_RANK: dict[AccessProfile, int] = {
 
 CAPABILITIES: dict[str, AccessProfile] = {
     "home.coffee.control": "standard",
+    "home.climate.power_on": "standard",
+    "home.climate.power_off": "standard",
+    "home.climate.set_temperature": "standard",
+    "home.climate.set_mode": "standard",
+    "home.climate.set_fan_mode": "standard",
+    "system.rog_g703.psu.mode.normal": "standard",
+    "system.rog_g703.psu.mode.full": "standard",
+    "system.rog_g703.psu.bp1.on": "standard",
+    "system.rog_g703.psu.bp1.off": "standard",
+    "system.rog_g703.psu.bp2.on": "standard",
+    "system.rog_g703.psu.bp2.off": "standard",
     "home.coffee.settings.timing": "standard",
     "home.coffee.settings.notifications": "standard",
     "settings.calendar.colors": "standard",

@@ -1,0 +1,280 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ServiceSnapshot } from "@artem/contracts";
+import { useAccess } from "./AccessControls";
+import { useInteractionLock } from "./InteractionLock";
+import { useNoticeCenter } from "./NoticeCenter";
+import {
+  fetchHomeAssistantActionAvailability,
+  executeHomeAssistantAction,
+  HOME_CLIMATE_POWER_OFF,
+  HOME_CLIMATE_POWER_ON,
+  HOME_CLIMATE_SET_FAN_MODE,
+  HOME_CLIMATE_SET_MODE,
+  HOME_CLIMATE_SET_TEMPERATURE,
+  newHomeAssistantRequestId,
+  type ClimateActionId,
+  type ClimateFanMode,
+  type ClimateHvacMode,
+  type HomeAssistantActionAvailability
+} from "./homeAssistantControlApi";
+import "./ClimateControl.css";
+
+export const climateHvacLabels: Record<ClimateHvacMode, string> = {
+  auto: "Авто",
+  heat: "Обогрев",
+  cool: "Охлаждение",
+  dry: "Осушение",
+  fan_only: "Вентиляция",
+  off: "Выкл"
+};
+
+export const climateFanLabels: Record<ClimateFanMode, string> = {
+  one: "1",
+  two: "2",
+  three: "3",
+  four: "4",
+  five: "5"
+};
+
+const hvacOrder: ClimateHvacMode[] = ["cool", "heat", "fan_only", "dry", "auto", "off"];
+const fanOrder: ClimateFanMode[] = ["one", "two", "three", "four", "five"];
+
+interface ClimateData {
+  state?: ClimateHvacMode;
+  available?: boolean;
+  stale?: boolean;
+  targetTemperature?: number | null;
+  currentTemperature?: number | null;
+  minTemperature?: number | null;
+  maxTemperature?: number | null;
+  temperatureStep?: number | null;
+  hvacModes?: string[];
+  fanMode?: ClimateFanMode | null;
+  fanModes?: string[];
+}
+
+function climateData(service: ServiceSnapshot): ClimateData {
+  return service.data as ClimateData;
+}
+
+function actionErrorCopy(code: string): string {
+  switch (code) {
+    case "ha_verification_timeout":
+      return "Home Assistant не подтвердил изменение состояния вовремя.";
+    case "ha_service_failed":
+      return "Home Assistant не принял команду.";
+    case "ha_integration_unavailable":
+    case "ha_entity_unavailable":
+      return "Состояние кондиционера сейчас недоступно.";
+    default:
+      return "Команда кондиционера не выполнена.";
+  }
+}
+
+export function ClimateControl({
+  service,
+  variant,
+  interactive = true
+}: {
+  service: ServiceSnapshot;
+  variant: "home" | "overview";
+  interactive?: boolean;
+}) {
+  const { ensureCapability, explainAvailability } = useAccess();
+  const { guardMutation } = useInteractionLock();
+  const { showNotice } = useNoticeCenter();
+  const [availability, setAvailability] = useState<HomeAssistantActionAvailability | null>(null);
+  const [apiAvailable, setApiAvailable] = useState(false);
+  const [pendingAction, setPendingAction] = useState<ClimateActionId | null>(null);
+  const data = climateData(service);
+  const climateLive = service.health === "healthy" && data.available !== false && data.stale !== true;
+  const minimumTemperature = 16;
+  const maximumTemperature = 32;
+  const targetTemperature = typeof data.targetTemperature === "number" ? data.targetTemperature : null;
+  const currentTemperature = typeof data.currentTemperature === "number" ? data.currentTemperature : null;
+  const modes = useMemo(
+    () => hvacOrder.filter((mode) => (data.hvacModes ?? []).includes(mode)),
+    [data.hvacModes]
+  );
+  const fans = useMemo(
+    () => fanOrder.filter((mode) => (data.fanModes ?? []).includes(mode)),
+    [data.fanModes]
+  );
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await fetchHomeAssistantActionAvailability();
+      setAvailability(next);
+      setApiAvailable(true);
+      return next;
+    } catch {
+      setAvailability(null);
+      setApiAvailable(false);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const canUse = useCallback((actionId: ClimateActionId) => {
+    const decision = availability?.actions[actionId];
+    return Boolean(
+      interactive &&
+      climateLive &&
+      !pendingAction &&
+      decision &&
+      (decision.allowed || decision.availability === "elevation_required")
+    );
+  }, [availability, climateLive, interactive, pendingAction]);
+
+  const run = useCallback(async (
+    actionId: ClimateActionId,
+    values: { temperature?: number; mode?: ClimateHvacMode; fanMode?: ClimateFanMode } = {}
+  ) => {
+    if (!interactive || pendingAction || !guardMutation()) return;
+    let decision = availability?.actions[actionId] ?? null;
+    if (!decision) {
+      const next = await refresh();
+      decision = next?.actions[actionId] ?? null;
+    }
+    if (!decision) {
+      showNotice({ id: "home.climate.action", severity: "warning", title: "Кондиционер", detail: "Управление кондиционером сейчас недоступно.", timeoutMs: 6_000 });
+      return;
+    }
+    if (!decision.allowed && decision.availability === "elevation_required") {
+      const elevated = await ensureCapability(actionId, "Кондиционер");
+      if (elevated) {
+        const next = await refresh();
+        decision = next?.actions[actionId] ?? decision;
+      }
+    }
+    if (!decision.allowed) {
+      showNotice({ id: "home.climate.action", severity: "warning", title: "Кондиционер", detail: explainAvailability(decision.availability), timeoutMs: 6_000 });
+      return;
+    }
+    if (!guardMutation()) return;
+    setPendingAction(actionId);
+    showNotice({ id: "home.climate.action", severity: "progress", title: "Кондиционер", detail: "Отправляем команду и ждём подтверждение…" });
+    try {
+      await executeHomeAssistantAction({
+        actionId,
+        requestId: newHomeAssistantRequestId(),
+        temperature: values.temperature ?? null,
+        mode: values.mode ?? null,
+        fanMode: values.fanMode ?? null
+      });
+      showNotice({ id: "home.climate.action", severity: "success", title: "Кондиционер", detail: "Изменение подтверждено Home Assistant.", timeoutMs: 6_000 });
+      await refresh();
+    } catch (error) {
+      showNotice({ id: "home.climate.action", severity: "error", title: "Кондиционер", detail: actionErrorCopy(error instanceof Error ? error.message : "action_failed"), timeoutMs: 10_000 });
+    } finally {
+      setPendingAction(null);
+    }
+  }, [availability, ensureCapability, explainAvailability, guardMutation, interactive, pendingAction, refresh, showNotice]);
+
+  const state = data.state ?? "off";
+  const powerAction = state === "off" ? HOME_CLIMATE_POWER_ON : HOME_CLIMATE_POWER_OFF;
+  const powerLabel = pendingAction === powerAction ? "Проверяем…" : state === "off" ? "Включить" : "Выключить";
+  const stateLabel = climateHvacLabels[state] ?? "Состояние неизвестно";
+  const statusLabel = !climateLive
+    ? service.health === "stale" || data.stale ? "Данные устарели" : "Недоступен"
+    : stateLabel;
+  const selectedMode = modes.includes(state) ? state : modes[0] ?? "off";
+  const selectedFan = data.fanMode && fans.includes(data.fanMode) ? data.fanMode : fans[0] ?? "one";
+  const step = 1;
+
+  return (
+    <section
+      className={`climate-control climate-control--${variant}${!climateLive ? " climate-control--unavailable" : ""}`}
+      data-testid={`climate-control-${variant}`}
+      aria-labelledby={`climate-control-title-${variant}`}
+    >
+      <header className="climate-control__header">
+        <div>
+          <p className="section-kicker">Дом · Home Assistant</p>
+          <h2 id={`climate-control-title-${variant}`}>{service.title}</h2>
+        </div>
+        <span className="climate-control__status" data-health={service.health}>{statusLabel}</span>
+      </header>
+
+      {!climateLive && <p className="climate-control__notice" role="status">Управление отключено до подтверждения свежего состояния.</p>}
+
+      <div className="climate-control__summary" role="status" aria-live="polite">
+        <div className="climate-control__room-temperature">
+          <span>В комнате</span>
+          <strong>{currentTemperature ?? "—"}</strong>
+          <small>{currentTemperature === null ? "Температура в комнате недоступна" : "°C"}</small>
+        </div>
+        <div className="climate-control__target-temperature">
+          <span>Цель</span>
+          <strong>{targetTemperature ?? "—"}</strong>
+          <small>{targetTemperature === null ? "Цель не указана" : "°C"}</small>
+        </div>
+      </div>
+
+      <div className="climate-control__controls">
+        <button
+          type="button"
+          className="climate-control__power"
+          data-testid={`climate-power-${variant}`}
+          disabled={!canUse(powerAction)}
+          aria-busy={pendingAction === powerAction}
+          onClick={() => void run(powerAction)}
+          title={availability?.actions[powerAction] ? explainAvailability(availability.actions[powerAction].availability) : "Проверяем доступность"}
+        >
+          <span aria-hidden="true">⏻</span>
+          {powerLabel}
+        </button>
+
+        <div className="climate-control__temperature-control" aria-label="Целевая температура">
+          <button
+            type="button"
+            className="climate-control__stepper"
+            data-testid={`climate-temperature-decrease-${variant}`}
+            disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || targetTemperature === null || targetTemperature <= minimumTemperature}
+            onClick={() => targetTemperature !== null && void run(HOME_CLIMATE_SET_TEMPERATURE, { temperature: Math.max(minimumTemperature, targetTemperature - step) })}
+            aria-label="Уменьшить целевую температуру"
+          >−</button>
+          <span className="climate-control__target-value">{targetTemperature ?? "—"}°</span>
+          <button
+            type="button"
+            className="climate-control__stepper"
+            data-testid={`climate-temperature-increase-${variant}`}
+            disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || targetTemperature === null || targetTemperature >= maximumTemperature}
+            onClick={() => targetTemperature !== null && void run(HOME_CLIMATE_SET_TEMPERATURE, { temperature: Math.min(maximumTemperature, targetTemperature + step) })}
+            aria-label="Увеличить целевую температуру"
+          >+</button>
+        </div>
+
+        <label className="climate-control__select-label">
+          <span>Режим</span>
+          <select
+            value={selectedMode}
+            disabled={!canUse(HOME_CLIMATE_SET_MODE) || !modes.length}
+            onChange={(event) => void run(HOME_CLIMATE_SET_MODE, { mode: event.target.value as ClimateHvacMode })}
+            aria-label="Режим кондиционера"
+          >
+            {modes.map((mode) => <option key={mode} value={mode}>{climateHvacLabels[mode]}</option>)}
+          </select>
+        </label>
+
+        <label className="climate-control__select-label">
+          <span>Скорость вентилятора</span>
+          <select
+            value={selectedFan}
+            disabled={!canUse(HOME_CLIMATE_SET_FAN_MODE) || !fans.length}
+            onChange={(event) => void run(HOME_CLIMATE_SET_FAN_MODE, { fanMode: event.target.value as ClimateFanMode })}
+            aria-label="Скорость вентилятора"
+          >
+            {fans.map((fan) => <option key={fan} value={fan}>Скорость {climateFanLabels[fan]}</option>)}
+          </select>
+        </label>
+      </div>
+      {!apiAvailable && interactive && <span className="climate-control__api-note">Проверяем доступность управления…</span>}
+    </section>
+  );
+}

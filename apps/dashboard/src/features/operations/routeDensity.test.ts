@@ -78,8 +78,17 @@ describe("PR7 route density helpers", () => {
     expect(selectHomePrimaryDevices([lamp])).toMatchObject({ fallback: lamp, additional: [] });
   });
 
+  it("gives the climate contract the primary Home slot and keeps Kettle additional", () => {
+    const coffee = service("coffee", { dataContract: "home.coffee-machine.v1", presentation: { category: "home-device", group: "Home infrastructure", overview: "primary", priority: 100 } });
+    const climate = service("climate-main", { dataContract: "home.climate.v1", presentation: { category: "home-device", group: "Home infrastructure", overview: "quick-control", priority: 95 } });
+    const kettle = service("kettle", { dataContract: "home.kettle.v1", presentation: { category: "home-device", group: "Home infrastructure", overview: "quick-control", priority: 70 } });
+
+    expect(selectHomePrimaryDevices([coffee, climate, kettle])).toMatchObject({ coffee, climate, kettle, additional: [kettle] });
+  });
+
   it("classifies only trusted system contracts and explicit System categories", () => {
     expect(classifySystemService(service("rog_g703gi", { dataContract: "system.rog-g703.v1" }))).toBe("rog");
+    expect(classifySystemService(service("rog-g703-psu", { dataContract: "system.rog-g703-psu.v1" }))).toBe("rogPsu");
     expect(classifySystemService(service("runtime", { dataContract: "system.runtime.v1" }))).toBe("runtime");
     expect(classifySystemService(service("update", { dataContract: "system.update.v1" }))).toBe("update");
     expect(classifySystemService(service("backup", { dataContract: "backup.snapshot.v1" }))).toBe("backup");
@@ -119,6 +128,14 @@ describe("PR7 route density helpers", () => {
       "fixture-multi-action"
     ]);
     expect(subjects.diagnostics.map((item) => item.id)).toEqual(["fixture-multi-action"]);
+  });
+
+  it("keeps ROG PSU visible even when the host service is absent", () => {
+    const psu = service("rog-g703-psu", { dataContract: "system.rog-g703-psu.v1" });
+    const subjects = selectSystemServiceSubjects([psu]);
+    expect(subjects.rog).toBeNull();
+    expect(subjects.rogPsu).toBe(psu);
+    expect(visibleSystemServices(subjects)).toEqual([psu]);
   });
 
   it("uses the bounded Russian health vocabulary", () => {

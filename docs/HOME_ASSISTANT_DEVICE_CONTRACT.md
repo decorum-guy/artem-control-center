@@ -212,6 +212,31 @@ Initial support:
 
 No coffee-specific warm-up assumptions are reused for the kettle without inspecting its actual HA logic.
 
+## 8.1 Typed climate and ROG G703 PSU controls
+
+The production Panel Agent has a separate, fixed action router for the
+following Home Assistant entities:
+
+- `climate.konditsioner` — only HVAC modes `cool`, `heat`, `fan_only`, `dry`,
+  `auto`, `off`; fan modes `one`–`five`; target temperature 16–32 °C with a
+  1 °C step. A missing current temperature remains `null`.
+- `switch.bp_1` and `switch.bp_2` — only state and HA timestamps are exposed;
+  no watts, volts, amps or kWh telemetry is fabricated.
+
+The six PSU action ids map to `full`, `normal`, BP1 on/off and BP2 on/off.
+`normal` is always BP1 on and BP2 off. The backend verifies every service
+request with fresh HA state; an HTTP 200 response alone is not success. It
+never turns off a last confirmed-on PSU and returns `last_psu_off_blocked` when
+the other PSU is off, unknown, unavailable, or otherwise not freshly confirmed
+on. Climate and PSU actions have independent locks and independent gates.
+
+The route accepts only the eleven typed action ids and bounded payload fields;
+it is not a generic entity/domain/service proxy. The two new production gates
+(`PANEL_HOME_CLIMATE_ACTIONS_ENABLED` and
+`PANEL_ROG_G703_PSU_ACTIONS_ENABLED`) default to false and are additionally
+guarded by `PANEL_WRITES_ENABLED`. Energy, Camelion, Alice, Jarvis, ROG-host,
+updater, and hardware-discovery scope is unchanged.
+
 ## 9. Required discovery output
 
 Before implementing the real HA adapter, Codex creates inside the writable Control Center repository:

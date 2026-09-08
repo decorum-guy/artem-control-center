@@ -7,6 +7,7 @@ import { RuntimeControls } from "../../RuntimeControls";
 import { Sheet } from "../../Sheet";
 import { OperationalStatusSummary, RouteHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { RogG703DetailControl } from "../../RogG703Controls";
+import { RogPsuControls } from "../../RogPsuControls";
 import { useInterfaceCopy } from "../../interfaceCopy";
 import { diagnosticsProblems, fetchDiagnosticsReport, useDiagnosticsReport } from "../../diagnosticsClient";
 import {
@@ -149,7 +150,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const diagnosticsIdentity = { revision: snapshot.revision, fixtureScenario: snapshot.fixtureScenario };
   const sharedDiagnostics = useDiagnosticsReport(diagnosticsIdentity);
   const subjects = selectSystemServiceSubjects(snapshot.services);
-  const { rog, runtime, update, backup, diagnostics } = subjects;
+  const { rog, rogPsu, runtime, update, backup, diagnostics } = subjects;
   const relevant = visibleSystemServices(subjects);
   const attention = diagnosticsProblems(sharedDiagnostics, snapshot);
   const counts = countHealth(relevant);
@@ -259,10 +260,11 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
       {selectedProblem?.technicalEvidence && <ProblemEvidenceSheet problem={selectedProblem} onClose={() => setSelectedProblem(null)} />}
 
       <section className="system-v2-zone-grid" data-testid="system-primary-zones" aria-label="Основные системные зоны">
-        {rog ? (
-          <ErrorBoundary title={rog.title}>
+        {rog || rogPsu ? (
+          <ErrorBoundary title={rog?.title ?? rogPsu?.title ?? "Питание ASUS ROG"}>
             <WorkZone className="system-primary-zone system-primary-zone--rog">
-              <RogG703DetailControl service={rog} />
+              {rog && <RogG703DetailControl service={rog} />}
+              {rogPsu && <RogPsuControls service={rogPsu} />}
             </WorkZone>
           </ErrorBoundary>
         ) : (
@@ -304,6 +306,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
             <div><dt>Здоровые</dt><dd>{counts.healthy}</dd></div>
             <div><dt>Требуют внимания</dt><dd>{attention?.length ?? "проверяем"}</dd></div>
             <div><dt>ROG</dt><dd>{rog ? healthLabel(rog.health) : "интеграция недоступна"}</dd></div>
+            <div><dt>Питание ROG</dt><dd>{rogPsu ? healthLabel(rogPsu.health) : "источник не подключён"}</dd></div>
             <div><dt>Диагностика</dt><dd>{diagnostics.length || "нет"}</dd></div>
             <div><dt>Обновления</dt><dd>{update ? healthLabel(update.health) : "источник не подключён"}</dd></div>
             <div><dt>Backup</dt><dd>{backup ? healthLabel(backup.health) : "источник не подключён"}</dd></div>

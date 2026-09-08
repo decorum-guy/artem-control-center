@@ -4,6 +4,7 @@ import { Icon } from "../../icons";
 import { resolveManifest } from "../../registry";
 import { RouteHeader, SectionHeader, StatusText } from "../../ShellPrimitives";
 import { CoffeeWidget } from "../../widgets";
+import { ClimateControl } from "../../ClimateControl";
 import { DeviceRow } from "../operations/DeviceRow";
 import { useInterfaceCopy } from "../../interfaceCopy";
 import {
@@ -72,17 +73,22 @@ export function HomeV2Page({
             />
           </ErrorBoundary>
         )}
-        {selection.kettle && (
+        {selection.climate && (
+          <ErrorBoundary title={selection.climate.title}>
+            <ClimateControl service={selection.climate} variant="home" />
+          </ErrorBoundary>
+        )}
+        {selection.kettle && !selection.climate && (
           <ErrorBoundary title={selection.kettle.title}>
             <DeviceRow service={selection.kettle} primary />
           </ErrorBoundary>
         )}
-        {!selection.coffee && !selection.kettle && selection.fallback && (
+        {!selection.coffee && !selection.climate && !selection.kettle && selection.fallback && (
           <ErrorBoundary title={selection.fallback.title}>
             <DeviceRow service={selection.fallback} primary />
           </ErrorBoundary>
         )}
-        {!selection.coffee && !selection.kettle && !selection.fallback && (
+        {!selection.coffee && !selection.climate && !selection.kettle && !selection.fallback && (
           <div className="home-v2-empty" data-testid="home-no-devices">
             <Icon name="home" />
             <strong>Домашние устройства не зарегистрированы</strong>

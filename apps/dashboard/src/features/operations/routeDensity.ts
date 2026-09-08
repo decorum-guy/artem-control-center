@@ -59,6 +59,7 @@ export function homeAuthority(services: readonly ServiceSnapshot[]): ServiceSnap
 
 export interface HomePrimarySelection {
   coffee: ServiceSnapshot | null;
+  climate: ServiceSnapshot | null;
   kettle: ServiceSnapshot | null;
   fallback: ServiceSnapshot | null;
   additional: ServiceSnapshot[];
@@ -71,13 +72,15 @@ export interface HomePrimarySelection {
 export function selectHomePrimaryDevices(services: readonly ServiceSnapshot[]): HomePrimarySelection {
   const homeDevices = enabledServices(services).filter(isHomeDevice);
   const coffee = homeDevices.find((service) => resolveManifest(service).id === "home.coffee-machine") ?? null;
+  const climate = homeDevices.find((service) => service.dataContract === "home.climate.v1") ?? null;
   const kettle = homeDevices.find((service) => resolveManifest(service).id === "home.kettle") ?? null;
-  const selected = new Set([coffee?.id, kettle?.id]);
-  const fallback = !coffee && !kettle ? homeDevices[0] ?? null : null;
+  const selected = new Set([coffee?.id, climate?.id, ...(climate ? [] : [kettle?.id])]);
+  const fallback = !coffee && !climate && !kettle ? homeDevices[0] ?? null : null;
   if (fallback) selected.add(fallback.id);
 
   return {
     coffee,
+    climate,
     kettle,
     fallback,
     additional: homeDevices.filter((service) => !selected.has(service.id))
@@ -126,7 +129,7 @@ export function groupHealthyServices(
   return groups;
 }
 
-export type SystemServiceKind = "rog" | "runtime" | "update" | "backup" | "system" | "other";
+export type SystemServiceKind = "rog" | "rogPsu" | "runtime" | "update" | "backup" | "system" | "other";
 
 /**
  * System placement is restricted to explicit system contracts/categories. A
@@ -134,6 +137,7 @@ export type SystemServiceKind = "rog" | "runtime" | "update" | "backup" | "syste
  */
 export function classifySystemService(service: ServiceSnapshot): SystemServiceKind {
   if (service.id === "rog_g703gi" || service.dataContract === "system.rog-g703.v1") return "rog";
+  if (service.dataContract === "system.rog-g703-psu.v1") return "rogPsu";
   if (service.dataContract.startsWith("system.runtime.")) return "runtime";
   if (service.dataContract.startsWith("system.update.") || service.dataContract.startsWith("update.")) return "update";
   if (service.dataContract.startsWith("backup.")) return "backup";
@@ -148,6 +152,7 @@ export function systemRelevantServices(services: readonly ServiceSnapshot[]): Se
 export interface SystemServiceSubjects {
   relevant: ServiceSnapshot[];
   rog: ServiceSnapshot | null;
+  rogPsu: ServiceSnapshot | null;
   runtime: ServiceSnapshot | null;
   update: ServiceSnapshot | null;
   backup: ServiceSnapshot | null;
@@ -164,11 +169,12 @@ export function selectSystemServiceSubjects(services: readonly ServiceSnapshot[]
   const firstOfKind = (kind: SystemServiceKind): ServiceSnapshot | null =>
     relevant.find((service) => classifySystemService(service) === kind) ?? null;
   const rog = firstOfKind("rog");
+  const rogPsu = firstOfKind("rogPsu");
   const runtime = firstOfKind("runtime");
   const update = firstOfKind("update");
   const backup = firstOfKind("backup");
   const primaryIds = new Set(
-    [rog, runtime, update, backup]
+    [rog, rogPsu, runtime, update, backup]
       .filter((service): service is ServiceSnapshot => service !== null)
       .map((service) => service.id)
   );
@@ -176,6 +182,7 @@ export function selectSystemServiceSubjects(services: readonly ServiceSnapshot[]
   return {
     relevant,
     rog,
+    rogPsu,
     runtime,
     update,
     backup,
@@ -184,7 +191,7 @@ export function selectSystemServiceSubjects(services: readonly ServiceSnapshot[]
 }
 
 export function visibleSystemServices(subjects: SystemServiceSubjects): ServiceSnapshot[] {
-  return [subjects.rog, subjects.runtime, subjects.update, subjects.backup]
+  return [subjects.rog, subjects.rogPsu, subjects.runtime, subjects.update, subjects.backup]
     .filter((service): service is ServiceSnapshot => service !== null)
     .concat(subjects.diagnostics);
 }
