@@ -7,6 +7,7 @@ import { resolveManifest, servicesByPriority } from "../../registry";
 import { CoffeeWidget } from "../../widgets";
 import { PlanningOverviewCard } from "../../PlanningOverviewCard";
 import { RogG703CompactControl } from "../../RogG703Controls";
+import { ClimateControl } from "../../ClimateControl";
 import type { OverviewRuntimeContext } from "./overviewRuntime";
 import { coffeeAppearanceConfig, planningDensityFor } from "./appearanceConfig";
 import type {
@@ -104,6 +105,17 @@ function quickDevices(snapshot: DashboardSnapshot): ServiceSnapshot[] {
 }
 
 function renderHome(runtime: OverviewRuntimeContext): ReactNode {
+  const climate = servicesByPriority(runtime.snapshot.services).find(
+    (service) => service.enabled && service.dataContract === "home.climate.v1"
+  ) ?? null;
+  if (climate) {
+    return (
+      <WorkZone className="overview-v2-real-widget overview-home-widget overview-home-widget--climate" data-testid="overview-home-widget">
+        <ClimateControl service={climate} variant="overview" interactive={!runtime.editMode} />
+      </WorkZone>
+    );
+  }
+
   const devices = quickDevices(runtime.snapshot);
   const stateCopy = (service: ServiceSnapshot): string => {
     const stage = (service.data as { stage?: unknown }).stage;

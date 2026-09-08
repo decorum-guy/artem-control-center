@@ -55,6 +55,8 @@ if (-not (Test-Path -LiteralPath $paths.RuntimeEnv)) {
 # This file is local to the Samsung and is never committed to Git.
 PANEL_AGENT_MODE=$PanelMode
 PANEL_WRITES_ENABLED=false
+PANEL_HOME_CLIMATE_ACTIONS_ENABLED=false
+PANEL_ROG_G703_PSU_ACTIONS_ENABLED=false
 PANEL_COFFEE_TIMING_WRITES_ENABLED=false
 PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED=false
 PANEL_COFFEE_ACTIONS_ENABLED=false

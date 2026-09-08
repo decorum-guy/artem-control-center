@@ -41,6 +41,13 @@
   justify-self: start;
   border-radius: var(--cc-radius-zone);
 }
+.home-v2-primary-grid > .climate-control--home {
+  grid-column: span 6;
+  grid-row: span 4;
+  min-height: 0;
+  height: 100%;
+  justify-self: start;
+}
 .home-v2-primary-grid > .coffee-panel--home-v2.coffee-panel--ready {
   border-left: 1px solid var(--cc-border);
 }
@@ -213,6 +220,7 @@
     grid-auto-rows: auto;
   }
   .home-v2-primary-grid > .coffee-panel--home-v2,
+  .home-v2-primary-grid > .climate-control--home,
   .home-v2-primary-grid > .device-row--primary { grid-column: 1 / -1; }
   .home-v2-primary-grid > .coffee-panel--home-v2 {
     grid-row: auto;
@@ -220,6 +228,7 @@
     grid-template-rows: minmax(0, auto) minmax(220px, auto);
     height: auto;
   }
+  .home-v2-primary-grid > .climate-control--home { grid-row: auto; height: auto; }
   .home-v2-primary-grid > .device-row--primary { grid-row: span 2; }
 }
 

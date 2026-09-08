@@ -106,6 +106,82 @@
       }
     },
     {
+      "id": "climate-main",
+      "title": "Кондиционер",
+      "enabled": false,
+      "dataContract": "home.climate.v1",
+      "health": "healthy",
+      "source": "fixture",
+      "summary": "Выключен · 32 °C",
+      "actions": [
+        { "id": "home.climate.power_on", "title": "Включить кондиционер", "enabled": false, "risk": "low" },
+        { "id": "home.climate.power_off", "title": "Выключить кондиционер", "enabled": false, "risk": "low" },
+        { "id": "home.climate.set_temperature", "title": "Установить температуру", "enabled": false, "risk": "low" },
+        { "id": "home.climate.set_mode", "title": "Установить режим", "enabled": false, "risk": "low" },
+        { "id": "home.climate.set_fan_mode", "title": "Установить скорость вентилятора", "enabled": false, "risk": "low" }
+      ],
+      "presentation": {
+        "category": "home-device",
+        "group": "Home infrastructure",
+        "overview": "quick-control",
+        "priority": 95,
+        "environment": "home",
+        "freshnessLabel": "только что",
+        "incidents": 0
+      },
+      "data": {
+        "authority": "home-assistant",
+        "state": "off",
+        "available": true,
+        "stale": false,
+        "observedAt": "2026-07-29T12:00:00Z",
+        "targetTemperature": 32,
+        "currentTemperature": null,
+        "minTemperature": 16,
+        "maxTemperature": 32,
+        "temperatureStep": 1,
+        "hvacModes": ["cool", "heat", "fan_only", "dry", "auto", "off"],
+        "fanMode": "one",
+        "fanModes": ["one", "two", "three", "four", "five"],
+        "supportedFeatures": 393
+      }
+    },
+    {
+      "id": "rog-g703-psu",
+      "title": "Питание ASUS ROG",
+      "enabled": false,
+      "dataContract": "system.rog-g703-psu.v1",
+      "health": "healthy",
+      "source": "fixture",
+      "summary": "Обычная мощность · БП 1",
+      "actions": [
+        { "id": "system.rog_g703.psu.mode.normal", "title": "Обычный режим", "enabled": false, "risk": "low" },
+        { "id": "system.rog_g703.psu.mode.full", "title": "Полная мощность", "enabled": false, "risk": "low" },
+        { "id": "system.rog_g703.psu.bp1.on", "title": "Включить БП 1", "enabled": false, "risk": "low" },
+        { "id": "system.rog_g703.psu.bp1.off", "title": "Выключить БП 1", "enabled": false, "risk": "low" },
+        { "id": "system.rog_g703.psu.bp2.on", "title": "Включить БП 2", "enabled": false, "risk": "low" },
+        { "id": "system.rog_g703.psu.bp2.off", "title": "Выключить БП 2", "enabled": false, "risk": "low" }
+      ],
+      "presentation": {
+        "category": "system",
+        "group": "System",
+        "overview": "none",
+        "priority": 58,
+        "environment": "home",
+        "freshnessLabel": "только что",
+        "incidents": 0
+      },
+      "data": {
+        "authority": "home-assistant",
+        "observedAt": "2026-07-29T12:00:00Z",
+        "stale": false,
+        "preferredPsu": "bp1",
+        "mode": "normal",
+        "psu1": { "state": "on", "available": true },
+        "psu2": { "state": "off", "available": true }
+      }
+    },
+    {
       "id": "alice-tg-bot",
       "title": "AliceTG Bot",
       "enabled": true,
@@ -257,6 +333,75 @@
       },
       "kettle": {
         "enabled": false
+      }
+    },
+    "home-climate-healthy": {
+      "climate-main": { "enabled": true }
+    },
+    "home-climate-stale": {
+      "climate-main": {
+        "enabled": true,
+        "health": "stale",
+        "source": "stale",
+        "summary": "Последнее состояние кондиционера устарело",
+        "data": { "stale": true }
+      },
+      "home-assistant": {
+        "health": "stale",
+        "source": "stale",
+        "summary": "Последнее подтверждение Home Assistant устарело",
+        "presentation": { "freshnessLabel": "40 мин назад" }
+      }
+    },
+    "home-climate-unavailable": {
+      "climate-main": {
+        "enabled": true,
+        "health": "offline",
+        "source": "unavailable",
+        "summary": "Состояние кондиционера неизвестно",
+        "data": { "state": "off", "available": false, "stale": true }
+      },
+      "home-assistant": {
+        "health": "healthy",
+        "source": "fixture"
+      }
+    },
+    "home-psu-full": {
+      "rog-g703-psu": {
+        "enabled": true,
+        "summary": "Полная мощность · 2 БП",
+        "data": {
+          "mode": "full",
+          "psu1": { "state": "on", "available": true },
+          "psu2": { "state": "on", "available": true }
+        }
+      }
+    },
+    "home-psu-normal": {
+      "rog-g703-psu": { "enabled": true }
+    },
+    "home-psu-secondary-only": {
+      "rog-g703-psu": {
+        "enabled": true,
+        "summary": "Один БП · БП 2",
+        "data": {
+          "mode": "secondary_only",
+          "psu1": { "state": "off", "available": true },
+          "psu2": { "state": "on", "available": true }
+        }
+      }
+    },
+    "home-psu-unavailable": {
+      "rog-g703-psu": {
+        "enabled": true,
+        "health": "offline",
+        "source": "unavailable",
+        "summary": "Состояние питания неизвестно",
+        "data": {
+          "mode": "unavailable",
+          "psu1": { "state": "unavailable", "available": false },
+          "psu2": { "state": "unavailable", "available": false }
+        }
       }
     },
     "home-ha-stale": {

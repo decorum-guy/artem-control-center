@@ -1,0 +1,51 @@
+.climate-control {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  height: 100%;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-zone);
+  background: var(--cc-surface-1);
+}
+
+.climate-control--overview { padding: 12px 14px; gap: 10px; }
+.climate-control--unavailable { border-color: var(--cc-offline-border); }
+.climate-control__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
+.climate-control__header > div { min-width: 0; }
+.climate-control__header h2 { margin: 0; color: var(--cc-text); font-size: var(--cc-type-widget-title-size); line-height: var(--cc-type-widget-title-line); overflow-wrap: anywhere; }
+.climate-control__status { flex: 0 0 auto; color: var(--cc-text-secondary); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); text-align: right; }
+.climate-control__status[data-health="stale"] { color: var(--cc-stale); }
+.climate-control__status[data-health="offline"] { color: var(--cc-unavailable); }
+.climate-control__notice, .climate-control__api-note { margin: 0; color: var(--cc-text-secondary); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); }
+.climate-control__summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; min-width: 0; }
+.climate-control__room-temperature, .climate-control__target-temperature { display: grid; gap: 2px; min-width: 0; padding: 10px 12px; border: 1px solid var(--cc-divider); border-radius: var(--cc-radius-control); background: var(--cc-surface-2); }
+.climate-control__summary span, .climate-control__summary small { color: var(--cc-text-muted); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); }
+.climate-control__summary strong { color: var(--cc-text); font-size: var(--cc-type-primary-state-size); line-height: var(--cc-type-primary-state-line); }
+.climate-control__controls { display: grid; grid-template-columns: minmax(112px, 1fr) minmax(132px, 1.15fr) minmax(140px, 1.2fr) minmax(160px, 1.35fr); align-items: end; gap: 8px; min-width: 0; }
+.climate-control__power, .climate-control__stepper, .climate-control__select-label select { min-height: 48px; }
+.climate-control__power { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 48px; padding: 0 12px; border: 1px solid var(--cc-accent); border-radius: var(--cc-radius-control); color: var(--cc-on-accent); background: var(--cc-accent-strong); font-size: var(--cc-type-control-size); font-weight: var(--cc-type-control-weight); }
+.climate-control__power:disabled, .climate-control__stepper:disabled, .climate-control__select-label select:disabled { border-color: var(--cc-border); color: var(--cc-text-disabled); background: var(--cc-surface-2); cursor: not-allowed; }
+.climate-control__temperature-control { display: grid; grid-template-columns: 48px minmax(0, 1fr) 48px; align-items: center; gap: 6px; min-width: 0; }
+.climate-control__stepper { width: 48px; padding: 0; border: 1px solid var(--cc-border-strong); border-radius: var(--cc-radius-control); color: var(--cc-text); background: var(--cc-interactive); font-size: 24px; line-height: 1; }
+.climate-control__target-value { min-width: 0; color: var(--cc-text); font-size: var(--cc-type-control-size); font-weight: var(--cc-type-control-weight); text-align: center; white-space: nowrap; }
+.climate-control__select-label { display: grid; gap: 4px; min-width: 0; }
+.climate-control__select-label span { color: var(--cc-text-muted); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); }
+.climate-control__select-label select { width: 100%; min-width: 0; padding: 0 10px; border: 1px solid var(--cc-border-strong); border-radius: var(--cc-radius-control); color: var(--cc-text); background: var(--cc-interactive); font: inherit; }
+
+.climate-control--overview .climate-control__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.climate-control--overview .climate-control__controls { grid-template-columns: minmax(102px, 1fr) minmax(122px, 1.1fr); }
+.climate-control--overview .climate-control__select-label { grid-column: span 1; }
+
+@media (max-width: 900px) {
+  .climate-control__controls, .climate-control--overview .climate-control__controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .climate-control__power, .climate-control__temperature-control { grid-column: span 1; }
+}
+
+@media (max-width: 520px) {
+  .climate-control { padding: 12px; }
+  .climate-control__summary { grid-template-columns: 1fr; }
+  .climate-control__controls, .climate-control--overview .climate-control__controls { grid-template-columns: 1fr; }
+  .climate-control__power, .climate-control__temperature-control, .climate-control__select-label { grid-column: 1; }
+}

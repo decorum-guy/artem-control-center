@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
@@ -24,6 +25,11 @@ KETTLE_SUPPORT_ENTITIES = (
     "switch.chainik_podsvetka",
     "switch.chainik_bez_zvuka",
 )
+CLIMATE_ENTITY = "climate.konditsioner"
+PSU_1_ENTITY = "switch.bp_1"
+PSU_2_ENTITY = "switch.bp_2"
+CLIMATE_HVAC_MODES = ("cool", "heat", "fan_only", "dry", "auto", "off")
+CLIMATE_FAN_MODES = ("one", "two", "three", "four", "five")
 REQUIRED_ENTITIES = (
     COFFEE_ENTITY,
     WARMUP_ENTITY,
@@ -32,6 +38,12 @@ REQUIRED_ENTITIES = (
     TIMING_INITIALIZED_ENTITY,
     KETTLE_ENTITY,
     *KETTLE_SUPPORT_ENTITIES,
+)
+WATCHED_ENTITIES = (
+    *REQUIRED_ENTITIES,
+    CLIMATE_ENTITY,
+    PSU_1_ENTITY,
+    PSU_2_ENTITY,
 )
 
 
@@ -115,6 +127,57 @@ class HomeAssistantAdapter:
         )
         await self._notify_change()
 
+    async def fetch_entity(self, entity_id: str) -> dict[str, Any]:
+        """Read one server-owned entity through the bounded HA allow-list."""
+
+        if entity_id not in WATCHED_ENTITIES:
+            raise ValueError("Home Assistant entity is not allow-listed")
+        async with httpx.AsyncClient(
+            base_url=self._settings.ha_url,
+            headers={"Authorization": f"Bearer {self._settings.ha_token}"},
+            timeout=10,
+            follow_redirects=False,
+            transport=self._transport,
+        ) as client:
+            response = await client.get(f"/api/states/{entity_id}")
+            response.raise_for_status()
+            payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Home Assistant entity response must be an object")
+
+        sanitized = _sanitize_state(entity_id, payload)
+        self._states[entity_id] = sanitized
+        self._observed_at = self._clock()
+        self._last_successful_rest_at = self._clock()
+        self._snapshot_confirmed_for_transport = True
+        self._source = "live"
+        self._save_cache()
+        await self._notify_change()
+        return dict(sanitized)
+
+    def mutation_transport_available(self) -> bool:
+        """Return whether a current authenticated HA transport can be used."""
+
+        return bool(
+            self.configured
+            and self._snapshot_confirmed_for_transport
+            and self._transport_is_live()
+        )
+
+    def mutation_entity_state(self, entity_id: str) -> str | None:
+        """Expose only a bounded current state for action availability."""
+
+        if entity_id not in WATCHED_ENTITIES:
+            return None
+        state = self._states.get(entity_id, {}).get("state")
+        return state if isinstance(state, str) else None
+
+    def mutation_entity_current(self, entity_id: str) -> bool:
+        if not self.mutation_transport_available():
+            return False
+        state = self.mutation_entity_state(entity_id)
+        return state not in {None, "unknown", "unavailable"}
+
     def coffee_confirmation(self) -> dict[str, Any]:
         coffee = self._states.get(COFFEE_ENTITY) or {}
         return {
@@ -150,7 +213,7 @@ class HomeAssistantAdapter:
         entity_id: str,
         new_state: Dict[str, Any],
     ) -> bool:
-        if entity_id not in REQUIRED_ENTITIES:
+        if entity_id not in WATCHED_ENTITIES:
             return False
         sanitized = _sanitize_state(entity_id, new_state)
         if self._states.get(entity_id) == sanitized and self._source == "live":
@@ -239,7 +302,104 @@ class HomeAssistantAdapter:
                 risk="low",
             ),
         ]
-        return [
+        climate = self._states.get(CLIMATE_ENTITY)
+        climate_state = _climate_state(climate)
+        climate_available = climate_state in CLIMATE_HVAC_MODES
+        climate_health = (
+            "offline"
+            if not climate or not climate_available
+            else "stale"
+            if stale
+            else "healthy"
+        )
+        climate_actions = [
+            ActionDescriptor(
+                id="home.climate.power_on",
+                title="Включить кондиционер",
+                enabled=self._climate_action_descriptor_enabled(climate_available),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="home.climate.power_off",
+                title="Выключить кондиционер",
+                enabled=self._climate_action_descriptor_enabled(climate_available),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="home.climate.set_temperature",
+                title="Установить температуру",
+                enabled=self._climate_action_descriptor_enabled(climate_available),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="home.climate.set_mode",
+                title="Установить режим",
+                enabled=self._climate_action_descriptor_enabled(climate_available),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="home.climate.set_fan_mode",
+                title="Установить скорость вентилятора",
+                enabled=self._climate_action_descriptor_enabled(climate_available),
+                risk="low",
+            ),
+        ]
+        psu1 = self._states.get(PSU_1_ENTITY)
+        psu2 = self._states.get(PSU_2_ENTITY)
+        psu1_state = _psu_state(psu1)
+        psu2_state = _psu_state(psu2)
+        psu_available = psu1_state in {"on", "off"} and psu2_state in {"on", "off"}
+        psu_health = (
+            "offline"
+            if not psu_available
+            else "stale"
+            if stale
+            else "healthy"
+        )
+        psu_actions = [
+            ActionDescriptor(
+                id="system.rog_g703.psu.mode.normal",
+                title="Обычный режим",
+                enabled=self._psu_action_descriptor_enabled(psu_available),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="system.rog_g703.psu.mode.full",
+                title="Полная мощность",
+                enabled=self._psu_action_descriptor_enabled(psu_available),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="system.rog_g703.psu.bp1.on",
+                title="Включить БП 1",
+                enabled=self._psu_action_descriptor_enabled(psu_available),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="system.rog_g703.psu.bp1.off",
+                title="Выключить БП 1",
+                enabled=self._psu_action_descriptor_enabled(
+                    psu_available and psu2_state == "on"
+                ),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="system.rog_g703.psu.bp2.on",
+                title="Включить БП 2",
+                enabled=self._psu_action_descriptor_enabled(psu_available),
+                risk="low",
+            ),
+            ActionDescriptor(
+                id="system.rog_g703.psu.bp2.off",
+                title="Выключить БП 2",
+                enabled=self._psu_action_descriptor_enabled(
+                    psu_available and psu1_state == "on"
+                ),
+                risk="low",
+            ),
+        ]
+
+        services = [
             ServiceSnapshot(
                 id="home-assistant",
                 title="Home Assistant",
@@ -349,6 +509,113 @@ class HomeAssistantAdapter:
                 },
             ),
         ]
+        target_temperature = _climate_number(
+            (climate or {}).get("attributes", {}).get("temperature")
+        )
+        current_temperature = _climate_number(
+            (climate or {}).get("attributes", {}).get("current_temperature")
+        )
+        climate_attributes = (climate or {}).get("attributes", {})
+        hvac_modes = _climate_modes(climate_attributes.get("hvac_modes"), CLIMATE_HVAC_MODES)
+        fan_modes = _climate_modes(climate_attributes.get("fan_modes"), CLIMATE_FAN_MODES)
+        services.append(
+            ServiceSnapshot(
+                id="climate-main",
+                title="Кондиционер",
+                enabled=climate is not None,
+                health=climate_health,
+                summary=_climate_summary(
+                    climate_state,
+                    target_temperature,
+                ),
+                dataContract="home.climate.v1",
+                actions=climate_actions,
+                source=source,
+                presentation=ServicePresentation(
+                    category="home-device",
+                    group="Home infrastructure",
+                    overview="quick-control",
+                    priority=95,
+                    environment="home",
+                    freshnessLabel=freshness,
+                ),
+                data={
+                    "authority": "home-assistant",
+                    "state": climate_state,
+                    "available": climate_available,
+                    "stale": stale,
+                    "observedAt": observed.isoformat(),
+                    "targetTemperature": target_temperature,
+                    "currentTemperature": current_temperature,
+                    "minTemperature": _climate_number(climate_attributes.get("min_temp")),
+                    "maxTemperature": _climate_number(climate_attributes.get("max_temp")),
+                    "temperatureStep": _climate_number(
+                        climate_attributes.get("target_temp_step")
+                    ),
+                    "hvacModes": hvac_modes,
+                    "fanMode": climate_attributes.get("fan_mode")
+                    if climate_attributes.get("fan_mode") in CLIMATE_FAN_MODES
+                    else None,
+                    "fanModes": fan_modes,
+                    "supportedFeatures": _bounded_int(
+                        climate_attributes.get("supported_features"), 0, 4095
+                    ),
+                },
+            )
+        )
+        psu_mode = _psu_mode(psu1_state, psu2_state)
+        services.append(
+            ServiceSnapshot(
+                id="rog-g703-psu",
+                title="Питание ASUS ROG",
+                enabled=psu1 is not None or psu2 is not None,
+                health=psu_health,
+                summary=_psu_summary(psu_mode),
+                dataContract="system.rog-g703-psu.v1",
+                actions=psu_actions,
+                source=source,
+                presentation=ServicePresentation(
+                    category="system",
+                    group="System",
+                    overview="none",
+                    priority=58,
+                    environment="home",
+                    freshnessLabel=freshness,
+                ),
+                data={
+                    "authority": "home-assistant",
+                    "observedAt": observed.isoformat(),
+                    "stale": stale,
+                    "preferredPsu": "bp1",
+                    "mode": psu_mode,
+                    "psu1": {
+                        "state": psu1_state,
+                        "available": psu1_state in {"on", "off"},
+                    },
+                    "psu2": {
+                        "state": psu2_state,
+                        "available": psu2_state in {"on", "off"},
+                    },
+                },
+            )
+        )
+        return services
+
+    def _climate_action_descriptor_enabled(self, entity_available: bool) -> bool:
+        return bool(
+            self._settings.writes_enabled
+            and self._settings.home_climate_actions_enabled
+            and self.mutation_transport_available()
+            and entity_available
+        )
+
+    def _psu_action_descriptor_enabled(self, entity_available: bool) -> bool:
+        return bool(
+            self._settings.writes_enabled
+            and self._settings.rog_g703_psu_actions_enabled
+            and self.mutation_transport_available()
+            and entity_available
+        )
 
     async def _subscribe_forever(self) -> None:
         delay = 1
@@ -398,7 +665,7 @@ class HomeAssistantAdapter:
                         data = event.get("data", {})
                         entity_id = data.get("entity_id")
                         new_state = data.get("new_state")
-                        if entity_id in REQUIRED_ENTITIES and isinstance(new_state, dict):
+                        if entity_id in WATCHED_ENTITIES and isinstance(new_state, dict):
                             await self.apply_state_changed(entity_id, new_state)
                     raise ConnectionError("Home Assistant WebSocket closed")
             except asyncio.CancelledError:
@@ -422,7 +689,7 @@ class HomeAssistantAdapter:
                 raise
 
     def _replace_states(self, payload: Iterable[Any]) -> None:
-        allowlist = set(REQUIRED_ENTITIES)
+        allowlist = set(WATCHED_ENTITIES)
         self._states = {
             str(item["entity_id"]): _sanitize_state(str(item["entity_id"]), item)
             for item in payload
@@ -509,7 +776,7 @@ class HomeAssistantAdapter:
             self._states = {
                 entity: _sanitize_state(entity, state)
                 for entity, state in payload.get("states", {}).items()
-                if entity in REQUIRED_ENTITIES and isinstance(state, dict)
+                if entity in WATCHED_ENTITIES and isinstance(state, dict)
             }
             self._observed_at = datetime.fromisoformat(payload["observedAt"])
             self._source = "cached" if self._states else "unavailable"
@@ -544,9 +811,67 @@ def _websocket_url(base_url: str) -> str:
 
 def _sanitize_state(entity_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
     attributes: Dict[str, Any] = {}
+    raw_attributes = state.get("attributes")
+    if not isinstance(raw_attributes, dict):
+        raw_attributes = {}
+    raw_state = state.get("state")
+    if entity_id == CLIMATE_ENTITY:
+        normalized_state = (
+            raw_state
+            if raw_state in CLIMATE_HVAC_MODES or raw_state in {"unknown", "unavailable"}
+            else "unknown"
+        )
+        hvac_modes = _climate_modes(raw_attributes.get("hvac_modes"), CLIMATE_HVAC_MODES)
+        fan_modes = _climate_modes(raw_attributes.get("fan_modes"), CLIMATE_FAN_MODES)
+        attributes = {
+            "hvac_modes": hvac_modes,
+            "min_temp": _bounded_int(raw_attributes.get("min_temp"), 16, 32),
+            "max_temp": _bounded_int(raw_attributes.get("max_temp"), 16, 32),
+            "target_temp_step": _bounded_int(
+                raw_attributes.get("target_temp_step"), 1, 1
+            ),
+            "fan_modes": fan_modes,
+            "current_temperature": _climate_number(
+                raw_attributes.get("current_temperature"), allow_none=True
+            ),
+            "temperature": _bounded_int(raw_attributes.get("temperature"), 16, 32),
+            "fan_mode": (
+                raw_attributes.get("fan_mode")
+                if raw_attributes.get("fan_mode") in CLIMATE_FAN_MODES
+                else None
+            ),
+            "supported_features": _bounded_int(
+                raw_attributes.get("supported_features"), 0, 4095
+            ),
+        }
+        attributes = {
+            key: value
+            for key, value in attributes.items()
+            if value is not None or key == "current_temperature"
+        }
+        return {
+            "entity_id": entity_id,
+            "state": normalized_state,
+            "last_changed": state.get("last_changed"),
+            "last_updated": state.get("last_updated"),
+            "attributes": attributes,
+        }
+    if entity_id in {PSU_1_ENTITY, PSU_2_ENTITY}:
+        normalized_state = (
+            raw_state
+            if raw_state in {"on", "off", "unknown", "unavailable"}
+            else "unknown"
+        )
+        return {
+            "entity_id": entity_id,
+            "state": normalized_state,
+            "last_changed": state.get("last_changed"),
+            "last_updated": state.get("last_updated"),
+            "attributes": {},
+        }
     if entity_id == LAST_ON_ENTITY:
-        timestamp = state.get("attributes", {}).get("timestamp")
-        if isinstance(timestamp, (int, float)):
+        timestamp = raw_attributes.get("timestamp")
+        if isinstance(timestamp, (int, float)) and math.isfinite(float(timestamp)):
             attributes["timestamp"] = timestamp
     return {
         "entity_id": entity_id,
@@ -555,6 +880,82 @@ def _sanitize_state(entity_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
         "last_updated": state.get("last_updated"),
         "attributes": attributes,
     }
+
+
+def _climate_modes(value: Any, allowed: tuple[str, ...]) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item in allowed]
+
+
+def _bounded_int(value: Any, minimum: int, maximum: int) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric = float(value)
+    if not math.isfinite(numeric) or not numeric.is_integer():
+        return None
+    integer = int(numeric)
+    if integer < minimum or integer > maximum:
+        return None
+    return integer
+
+
+def _climate_number(value: Any, *, allow_none: bool = False) -> int | float | None:
+    if value is None and allow_none:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric = float(value)
+    if not math.isfinite(numeric) or numeric < -50 or numeric > 80:
+        return None
+    return int(numeric) if numeric.is_integer() else numeric
+
+
+def _climate_state(state: Optional[Dict[str, Any]]) -> str:
+    value = (state or {}).get("state")
+    if value in CLIMATE_HVAC_MODES:
+        return value
+    return "unavailable"
+
+
+def _climate_summary(state: str, target_temperature: int | float | None) -> str:
+    labels = {
+        "off": "Выключен",
+        "cool": "Охлаждение",
+        "heat": "Обогрев",
+        "fan_only": "Вентиляция",
+        "dry": "Осушение",
+        "auto": "Авто",
+    }
+    label = labels.get(state, "Состояние неизвестно")
+    return f"{label} · {target_temperature:g} °C" if target_temperature is not None else label
+
+
+def _psu_state(state: Optional[Dict[str, Any]]) -> str:
+    value = (state or {}).get("state")
+    return value if value in {"on", "off"} else "unavailable"
+
+
+def _psu_mode(psu1_state: str, psu2_state: str) -> str:
+    if psu1_state == "on" and psu2_state == "on":
+        return "full"
+    if psu1_state == "on" and psu2_state == "off":
+        return "normal"
+    if psu1_state == "off" and psu2_state == "on":
+        return "secondary_only"
+    if psu1_state == "off" and psu2_state == "off":
+        return "off"
+    return "unavailable"
+
+
+def _psu_summary(mode: str) -> str:
+    return {
+        "full": "Полная мощность · 2 БП",
+        "normal": "Обычная мощность · БП 1",
+        "secondary_only": "Один БП · БП 2",
+        "off": "Оба БП выключены",
+        "unavailable": "Состояние питания неизвестно",
+    }[mode]
 
 
 def _minutes_to_seconds(state: Optional[Dict[str, Any]]) -> Optional[int]:

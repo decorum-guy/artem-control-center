@@ -79,6 +79,8 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("coffee_timing_writes", "Запись времени кофемашины", "Разрешение менять расписание кофемашины.", "Системные действия", "PANEL_COFFEE_TIMING_WRITES_ENABLED", "immediate", "none"),
     CapabilityDefinition("coffee_notification_writes", "Запись уведомлений кофемашины", "Разрешение менять уведомления кофемашины.", "Системные действия", "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED", "immediate", "none"),
     CapabilityDefinition("coffee_actions", "Действия кофемашины", "Разрешение выполнять действия кофемашины.", "Системные действия", "PANEL_COFFEE_ACTIONS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("home_climate_actions", "Действия кондиционера", "Разрешение выполнять фиксированные действия кондиционера через Home Assistant.", "Системные действия", "PANEL_HOME_CLIMATE_ACTIONS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("rog_g703_psu_actions", "Действия БП ROG G703", "Разрешение выполнять фиксированные действия двух БП через Home Assistant.", "Системные действия", "PANEL_ROG_G703_PSU_ACTIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_ssh", "Статус AVALAR по SSH", "Получение состояния инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SSH_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_actions", "Действия AVALAR", "Инфраструктурные действия внешнего сервиса.", "Инфраструктура", "PANEL_AVALAR_ACTIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_smoke", "Проверка AVALAR", "Smoke-проверка инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SMOKE_ENABLED", "immediate", "none"),
