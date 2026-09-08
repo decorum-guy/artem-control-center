@@ -993,7 +993,7 @@ class PlanningAdapter:
         self._last_status_attempt_at: float | None = None
         self._status_refresh_requested = False
         self._domains_current = False
-        self._cache_loaded = False
+        self._cache_backed_domains: set[str] = set()
         self._upstream_connected = False
         self._failure_count = 0
         self._status_failure_count = 0
@@ -1306,6 +1306,7 @@ class PlanningAdapter:
                     self._domain_last_success_text[domain] = self._max_synced_at(
                         [results[index] for index in indexes]
                     ) or now_text
+                    self._cache_backed_domains.discard(domain)
                 else:
                     self._domain_failure_counts[domain] += 1
             previous = self._last_good or self._projection
@@ -1326,7 +1327,6 @@ class PlanningAdapter:
                 self._last_success_at = self._clock()
                 self._last_refresh_success_text = self._max_synced_at(results) or now_text
                 self._domains_current = True
-                self._cache_loaded = False
                 status_refresh_needed = had_prior_failure and callable(getattr(self._client, "status", None))
                 if status_refresh_needed:
                     self._status_attempted_during_domain_recovery = True
@@ -1875,7 +1875,9 @@ class PlanningAdapter:
         now = self._wall_now()
         age = max(0.0, (now - timestamp_datetime(cached.lastSyncedAt)).total_seconds()) if cached.lastSyncedAt else float("inf")
         self._last_good = cached.model_copy(deep=True)
-        self._cache_loaded = True
+        self._cache_backed_domains = {
+            domain for domain, _ in _PLANNING_REFRESH_DOMAIN_GROUPS
+        }
         self._last_success_at = self._clock() - age if age != float("inf") else None
         self._last_refresh_success_text = cached.health.lastSuccessfulAt or cached.lastSyncedAt
         self._last_refresh_attempt_text = cached.health.lastAttemptedAt
@@ -2455,7 +2457,7 @@ class PlanningAdapter:
                 status = "unavailable"
             else:
                 age = max(0.0, now - last_success_at)
-                if self._cache_loaded:
+                if domain in self._cache_backed_domains:
                     status = (
                         "unavailable"
                         if age > self._settings.panel_planning_unavailable_after_seconds

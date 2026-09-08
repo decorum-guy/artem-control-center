@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -146,13 +146,74 @@ class SelectiveRefreshClient:
         return None
 
 
-def make_adapter(tmp_path, client: SelectiveRefreshClient, monotonic: list[float], **settings_overrides) -> PlanningAdapter:
+def make_adapter(
+    tmp_path,
+    client: SelectiveRefreshClient,
+    monotonic: list[float],
+    wall_clock: list[datetime] | None = None,
+    **settings_overrides,
+) -> PlanningAdapter:
+    wall = wall_clock or [REFERENCE_TIME]
     return PlanningAdapter(
         settings(tmp_path, **settings_overrides),
         client=client,
         monotonic_clock=lambda: monotonic[0],
-        wall_clock=lambda: REFERENCE_TIME,
+        wall_clock=lambda: wall[0],
     )
+
+
+@pytest.mark.parametrize(
+    ("cache_age_seconds", "expected_task_status", "expected_source_status"),
+    [
+        pytest.param(30.0, "stale", "stale", id="cache-backed-before-unavailable"),
+        pytest.param(301.0, "unavailable", "offline", id="cache-backed-after-unavailable"),
+    ],
+)
+def test_cached_partial_failure_tracks_health_provenance_per_domain(
+    tmp_path,
+    cache_age_seconds: float,
+    expected_task_status: str,
+    expected_source_status: str,
+):
+    seed_client = SelectiveRefreshClient()
+    seed_monotonic = [0.0]
+    seed_adapter = make_adapter(tmp_path, seed_client, seed_monotonic)
+    wall_clock = [REFERENCE_TIME + timedelta(seconds=cache_age_seconds)]
+    client = SelectiveRefreshClient()
+    client.failures = {"tasks"}
+    monotonic = [cache_age_seconds]
+    adapter = make_adapter(tmp_path, client, monotonic, wall_clock=wall_clock)
+
+    async def exercise():
+        await seed_adapter.start()
+        assert seed_adapter.projection is not None
+        await seed_adapter.close()
+
+        assert await adapter.start() is None
+        partial = adapter.projection
+        assert partial is not None
+        partial_domains = {domain.domain: domain.status for domain in partial.health.domains}
+        assert partial_domains == {
+            "reminders": "current",
+            "calendar": "current",
+            "projects": "current",
+            "tasks": expected_task_status,
+        }
+        assert adapter._domains_current is False
+        assert adapter._cache_backed_domains == {"tasks"}
+        assert partial.sourceStatus == expected_source_status
+
+        client.failures.clear()
+        monotonic[0] += 1.0
+        assert await adapter.refresh_domains() is True
+        recovered = adapter.projection
+        assert recovered is not None
+        assert all(domain.status == "current" for domain in recovered.health.domains)
+        assert adapter._cache_backed_domains == set()
+        assert adapter._domains_current is True
+        await adapter.close()
+
+    asyncio.run(exercise())
 
 
 def test_provider_freshness_is_separate_from_operational_planning_health(tmp_path):
