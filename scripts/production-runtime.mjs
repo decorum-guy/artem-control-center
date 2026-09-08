@@ -454,8 +454,8 @@ export function classifyPanelUpdateLockOwnership(lock, command, childPid) {
   return "different_owner";
 }
 
-export function canPublishPanelUpdateEarlyExit({ command, state, lock, terminal = false, childPid }) {
-  if (terminal) return false;
+export function canPublishPanelUpdateEarlyExit({ command, state, lock, terminal = false, durable = false, childPid }) {
+  if (terminal || durable) return false;
   const stateMatches = Boolean(
     state
     && state.schemaVersion === 1
@@ -478,16 +478,33 @@ export const UPDATER_BOOTSTRAP_RESULTS = new Set([
   "recorded", "helper-load-failed", "path-init-failed", "capability-apply-active",
   "lease-accept-failed", "lease-claim-failed", "transcript-start-failed"
 ]);
+export const UPDATER_BODY_PROOF_STAGES = new Set([
+  "script-entered",
+  "helpers-loaded",
+  "paths-initialized",
+  "lease-accepted",
+  "lease-claimed",
+  "transcript-starting",
+  "transcript-started",
+  "authoritative-state-started"
+]);
+const PANEL_UPDATE_DURABLE_PHASES = new Set([
+  "started", "preparing", "installing", "stopping", "checkout", "handoff",
+  "target-authoritative", "validating", "building", "artifact-ready", "restarting",
+  "verifying", "rollback"
+]);
 
 export function readUpdaterBootstrapEvidence(path, requestId) {
   try {
     const value = JSON.parse(readFileSync(path, "utf8"));
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    if (Object.keys(value).sort().join(",") !== "requestId,result,schemaVersion,stage,updatedAt") return null;
-    if (value.schemaVersion !== 1 || value.requestId !== requestId) return null;
+    if (Object.keys(value).sort().join(",") !== "processId,requestId,result,schemaVersion,stage,updatedAt") return null;
+    if (value.schemaVersion !== 2 || value.requestId !== requestId) return null;
     if (!UPDATER_BOOTSTRAP_STAGES.has(value.stage) || !UPDATER_BOOTSTRAP_RESULTS.has(value.result)) return null;
     if (typeof value.updatedAt !== "string" || !Number.isFinite(Date.parse(value.updatedAt))) return null;
-    return { stage: value.stage, result: value.result };
+    const processIdIsAbsentSpawnMarker = value.stage === "runtime-spawn-attempted" && value.processId === null;
+    if (!processIdIsAbsentSpawnMarker && (!Number.isInteger(value.processId) || value.processId <= 0)) return null;
+    return { stage: value.stage, result: value.result, processId: value.processId };
   } catch {
     return null;
   }
@@ -495,6 +512,8 @@ export function readUpdaterBootstrapEvidence(path, requestId) {
 
 export const UPDATER_LAUNCH_ACCEPTANCE_TIMEOUT_MS = 10_000;
 export const UPDATER_LAUNCH_POLL_INTERVAL_MS = 100;
+export const UPDATER_EARLY_EXIT_MIN_NEGATIVE_OBSERVATIONS = 3;
+export const UPDATER_EARLY_EXIT_MIN_NEGATIVE_DURATION_MS = 500;
 
 export function readUpdaterLaunchEvidence(path, requestId) {
   try {
@@ -530,8 +549,14 @@ export function createPanelUpdateLauncherLifecycle({
   readBootstrapEvidence = () => null,
   readLaunchEvidence = () => null,
   isUpdaterProcessAlive = () => false,
+  hasDurableEvidence = () => false,
   acceptanceTimeoutMs = UPDATER_LAUNCH_ACCEPTANCE_TIMEOUT_MS,
   pollIntervalMs = UPDATER_LAUNCH_POLL_INTERVAL_MS,
+  earlyExitMinNegativeObservations = UPDATER_EARLY_EXIT_MIN_NEGATIVE_OBSERVATIONS,
+  earlyExitMinNegativeDurationMs = UPDATER_EARLY_EXIT_MIN_NEGATIVE_DURATION_MS,
+  now = () => Date.now(),
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
   log = () => {}
 }) {
   let launcherSpawned = false;
@@ -542,34 +567,46 @@ export function createPanelUpdateLauncherLifecycle({
   let handled = false;
   let timer = null;
   let acceptanceDeadline = null;
+  let negativeProbeCount = 0;
+  let firstNegativeProbeAt = null;
+  let lastProbeClassification = "not_started";
 
-  const bodyProofStages = new Set([
-    "script-entered",
-    "helpers-loaded",
-    "paths-initialized",
-    "lease-accepted",
-    "lease-claimed",
-    "transcript-starting",
-    "transcript-started",
-    "authoritative-state-started"
-  ]);
-
-  function clearTimer() {
-    if (timer) clearTimeout(timer);
+  function clearObservationTimer() {
+    if (timer !== null) clearTimer(timer);
     timer = null;
+  }
+
+  function scheduleObservation() {
+    clearObservationTimer();
+    timer = setTimer(() => {
+      timer = null;
+      observeLaunch();
+    }, pollIntervalMs);
+    timer?.unref?.();
+  }
+
+  function acceptDurableEvidence(reason) {
+    if (handled) return;
+    actualUpdaterAccepted = true;
+    handled = true;
+    clearObservationTimer();
+    log(
+      "INFO",
+      `Panel updater accepted durable evidence requestId=${command.requestId} pid=${actualUpdaterPid ?? "unknown"} evidence=${reason}`
+    );
   }
 
   function publishBoundedFailure(result, options = {}) {
     if (handled || !isRuntimeAlive()) return false;
     handled = true;
-    clearTimer();
+    clearObservationTimer();
     const published = publishFailure(result, options);
     log(
       published ? "WARN" : "INFO",
       `Panel updater launch failure requestId=${command.requestId} result=${result}`
     );
     if (result === "updater_early_exit") {
-      const bootstrap = readBootstrapEvidence();
+      const bootstrap = readBootstrapEvidence(actualUpdaterPid);
       const stage = !bootstrap || bootstrap.stage === "runtime-process-created"
         ? "host_or_parameter_pre_script_exit"
         : bootstrap.stage;
@@ -585,13 +622,11 @@ export function createPanelUpdateLauncherLifecycle({
   function observeLaunch() {
     if (handled) return;
     if (!isRuntimeAlive()) {
-      clearTimer();
+      clearObservationTimer();
       return;
     }
     if (hasAuthoritativeEvidence()) {
-      handled = true;
-      clearTimer();
-      log("INFO", `Panel updater retained authoritative evidence requestId=${command.requestId}`);
+      acceptDurableEvidence("authoritative-state");
       return;
     }
 
@@ -601,60 +636,98 @@ export function createPanelUpdateLauncherLifecycle({
       return;
     }
     if (launch?.result === "recorded") {
-      actualUpdaterPid = actualUpdaterPid ?? launch.processId;
-      const bootstrap = readBootstrapEvidence();
-      if (bootstrap && bodyProofStages.has(bootstrap.stage)) {
-        if (!actualUpdaterAccepted) {
-          actualUpdaterAccepted = true;
-          log(
-            "INFO",
-            `Panel updater body accepted requestId=${command.requestId} pid=${actualUpdaterPid}`
-          );
-        }
+      if (actualUpdaterPid !== null && actualUpdaterPid !== launch.processId) {
+        log(
+          "WARN",
+          `Panel updater ignored changed launch receipt requestId=${command.requestId} receiptPid=${launch.processId}`
+        );
+      } else {
+        actualUpdaterPid = launch.processId;
       }
 
-      let processAlive = true;
-      try {
-        processAlive = isUpdaterProcessAlive(actualUpdaterPid, command.requestId);
-      } catch {
-        processAlive = false;
-      }
-      if (!processAlive) {
-        publishBoundedFailure("updater_early_exit", { childPid: actualUpdaterPid });
+      const bootstrap = readBootstrapEvidence(actualUpdaterPid);
+      if (
+        bootstrap
+        && bootstrap.processId === actualUpdaterPid
+        && UPDATER_BODY_PROOF_STAGES.has(bootstrap.stage)
+      ) {
+        acceptDurableEvidence(`body:${bootstrap.stage}`);
         return;
       }
+      if (hasDurableEvidence(actualUpdaterPid)) {
+        acceptDurableEvidence("lease-state-or-transaction");
+        return;
+      }
+
+      let probe = { classification: "absent" };
+      try {
+        const observed = isUpdaterProcessAlive(actualUpdaterPid, command.requestId);
+        probe = typeof observed === "boolean"
+          ? { classification: observed ? "alive" : "absent" }
+          : observed && typeof observed === "object" && typeof observed.classification === "string"
+            ? observed
+            : { classification: "probe_invalid" };
+      } catch (error) {
+        probe = { classification: "probe_invocation_failed" };
+      }
+      lastProbeClassification = probe.classification;
+      if (probe.classification === "alive") {
+        negativeProbeCount = 0;
+        firstNegativeProbeAt = null;
+      } else if (probe.classification === "absent") {
+        negativeProbeCount += 1;
+        firstNegativeProbeAt = firstNegativeProbeAt ?? now();
+        const negativeDurationMs = now() - firstNegativeProbeAt;
+        log(
+          "INFO",
+          `Panel updater process recognition requestId=${command.requestId} pid=${actualUpdaterPid} classification=absent negativeCount=${negativeProbeCount} negativeDurationMs=${negativeDurationMs}`
+        );
+        if (
+          negativeProbeCount >= earlyExitMinNegativeObservations
+          && negativeDurationMs >= earlyExitMinNegativeDurationMs
+        ) {
+          publishBoundedFailure("updater_early_exit", { childPid: actualUpdaterPid });
+          return;
+        }
+      } else {
+        negativeProbeCount = 0;
+        firstNegativeProbeAt = null;
+        log(
+          "INFO",
+          `Panel updater process recognition requestId=${command.requestId} pid=${actualUpdaterPid} classification=${probe.classification}`
+        );
+      }
     }
 
-    if (actualUpdaterAccepted) {
-      timer = setTimeout(observeLaunch, pollIntervalMs);
-      timer.unref?.();
-      return;
-    }
+    if (actualUpdaterAccepted) return;
 
-    if (acceptanceDeadline === null) acceptanceDeadline = Date.now() + acceptanceTimeoutMs;
-    if (Date.now() >= acceptanceDeadline) {
+    if (acceptanceDeadline === null) acceptanceDeadline = now() + acceptanceTimeoutMs;
+    if (now() >= acceptanceDeadline) {
       const spawnFailed = launcherExited && launcherExitCode !== 0 && !launch;
-      publishBoundedFailure(spawnFailed ? "updater_spawn_failed" : "updater_early_exit");
+      log(
+        "WARN",
+        `Panel updater acceptance timeout requestId=${command.requestId} receipt=${launch?.result ?? "missing"} lastProbe=${lastProbeClassification}`
+      );
+      publishBoundedFailure(spawnFailed ? "updater_spawn_failed" : "updater_stale", { childPid: actualUpdaterPid });
       return;
     }
-    timer = setTimeout(observeLaunch, pollIntervalMs);
-    timer.unref?.();
+    scheduleObservation();
   }
 
   launcher.once("spawn", () => {
     if (handled) return;
     launcherSpawned = true;
-    acceptanceDeadline = Date.now() + acceptanceTimeoutMs;
+    acceptanceDeadline = now() + acceptanceTimeoutMs;
     launcher.unref?.();
     // This PID belongs only to the short-lived bootstrap.  The actual updater
-    // process is accepted later from its private launch receipt and body proof.
+    // process is accepted later from its private launch receipt and durable proof.
     log("INFO", `Panel updater launcher created requestId=${command.requestId} pid=${launcher.pid ?? "unknown"}`);
     observeLaunch();
   });
 
-  launcher.once("error", (error) => {
+  launcher.once("error", () => {
     if (launcherSpawned || handled) {
-      log("ERROR", `Panel updater launcher error requestId=${command.requestId}: ${error?.message || error}`);
+      log("ERROR", `Panel updater launcher error requestId=${command.requestId} classification=launcher_error`);
       observeLaunch();
       return;
     }
@@ -743,24 +816,43 @@ function closeKioskWindow(edgeProfileDir, log) {
   if (result.status !== 0) log("WARN", "Unable to close the panel-owned Edge profile");
 }
 
-function updaterOwnerProcessAlive(ownerPid, requestId) {
-  if (process.platform !== "win32" || !Number.isInteger(ownerPid) || ownerPid <= 0) return false;
-  if (typeof requestId !== "string" || !/^[a-f0-9]{24}$/.test(requestId)) return false;
+function probeUpdaterOwnerProcess(ownerPid, requestId) {
+  if (process.platform !== "win32" || !Number.isInteger(ownerPid) || ownerPid <= 0) {
+    return { classification: "probe_unavailable" };
+  }
+  if (typeof requestId !== "string" || !/^[a-f0-9]{24}$/.test(requestId)) {
+    return { classification: "request_invalid" };
+  }
   const script = [
-    `$process = Get-CimInstance Win32_Process -Filter \"ProcessId = ${ownerPid}\" -ErrorAction SilentlyContinue`,
-    "$hasRequestArgument = $null -ne $process -and $process.CommandLine -like '*-RequestId*'",
-    "if ($null -ne $process",
-    "-and $process.Name -in @('powershell.exe','pwsh.exe')",
-    "-and $process.CommandLine -like '*update-production.ps1*'",
-    `-and (-not $hasRequestArgument -or $process.CommandLine -like '*${requestId}*')) { exit 0 }`,
-    "exit 1"
+    "try { $process = Get-CimInstance Win32_Process -Filter \"ProcessId = " + ownerPid + "\" -ErrorAction Stop } catch { exit 30 }",
+    "if ($null -eq $process) { exit 20 }",
+    "if ($process.Name -notin @('powershell.exe','pwsh.exe')) { exit 21 }",
+    "if ([string]::IsNullOrWhiteSpace($process.CommandLine)) { exit 22 }",
+    "if ($process.CommandLine -notlike '*update-production.ps1*') { exit 23 }",
+    "if ($process.CommandLine -notlike '*-RequestId*') { exit 24 }",
+    `if ($process.CommandLine -notlike '*${requestId}*') { exit 25 }`,
+    "exit 0"
   ].join(" ");
   const result = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", script],
     { encoding: "utf8", windowsHide: true }
   );
-  return result.status === 0;
+  const classification = new Map([
+    [0, "alive"],
+    [20, "absent"],
+    [21, "wrong_executable"],
+    [22, "command_line_unavailable"],
+    [23, "wrong_script"],
+    [24, "request_argument_unavailable"],
+    [25, "request_mismatch"],
+    [30, "cim_invocation_failed"]
+  ]).get(result.status);
+  return { classification: classification ?? "probe_invocation_failed" };
+}
+
+function updaterOwnerProcessAlive(ownerPid, requestId) {
+  return probeUpdaterOwnerProcess(ownerPid, requestId).classification === "alive";
 }
 
 async function probeHealth(url, timeoutMs = 3_000) {
@@ -797,6 +889,7 @@ export async function runProductionRuntime() {
   const capabilityApplyStatePath = join(runtimeDir, "capability-apply-state.json");
   const updateLockPath = join(runtimeDir, "update-lock.json");
   const updateStatePath = join(runtimeDir, "update-state.json");
+  const updateTransactionPath = join(runtimeDir, "update-transaction.json");
   const updateBootstrapPath = join(runtimeDir, "update-bootstrap.json");
   const updateLaunchPath = join(runtimeDir, "update-launch.json");
   const updaterLauncherPath = resolve(root, "scripts", "windows", "launch-update-production.ps1");
@@ -905,6 +998,35 @@ export async function runProductionRuntime() {
     if (isExactPanelUpdateState(state, command, ["success", "failed"])) return true;
   }
 
+  function isExactPanelUpdateTransaction(payload, command) {
+    return Boolean(
+      payload
+      && payload.schemaVersion === 1
+      && payload.status === "incomplete"
+      && PANEL_UPDATE_DURABLE_PHASES.has(payload.phase)
+      && payload.requestId === command.requestId
+      && payload.previousHead === command.expectedCurrentHead
+      && payload.targetHead === command.expectedTargetHead
+    );
+  }
+
+  function hasDurablePanelUpdateEvidence(command, childPid) {
+    if (hasTerminalPanelUpdateEvidence(command)) return true;
+    const bootstrap = readUpdaterBootstrapEvidence(updateBootstrapPath, command.requestId);
+    if (bootstrap?.processId === childPid && UPDATER_BODY_PROOF_STAGES.has(bootstrap.stage)) return true;
+
+    const lock = readRuntimeJson(updateLockPath);
+    if (isExactPanelUpdateLock(lock, command) && lock.ownerPid === childPid) return true;
+
+    const state = readRuntimeJson(updateStatePath);
+    if (
+      isExactPanelUpdateState(state, command, ["checking", "updating"])
+      && PANEL_UPDATE_DURABLE_PHASES.has(state.phase)
+    ) return true;
+
+    return isExactPanelUpdateTransaction(readRuntimeJson(updateTransactionPath), command);
+  }
+
   function releaseExactOwnerlessPanelUpdateLock(command) {
     const lock = readRuntimeJson(updateLockPath);
     if (!isExactPanelUpdateLock(lock, command, { ownerless: true })) return false;
@@ -920,8 +1042,9 @@ export async function runProductionRuntime() {
     const state = readRuntimeJson(updateStatePath);
     const lock = readRuntimeJson(updateLockPath);
     const terminal = hasTerminalPanelUpdateEvidence(command);
+    const durable = result === "updater_early_exit" && hasDurablePanelUpdateEvidence(command, childPid);
     const allowed = result === "updater_early_exit"
-      ? canPublishPanelUpdateEarlyExit({ command, state, lock, terminal, childPid })
+      ? canPublishPanelUpdateEarlyExit({ command, state, lock, terminal, durable, childPid })
       : canPublishPanelUpdateRuntimeFailure({ command, state, lock, authoritative: terminal });
     if (!allowed) return false;
     writeUpdateState("failed", result, {
@@ -1203,10 +1326,11 @@ export async function runProductionRuntime() {
     let launcher;
     try {
       atomicWriteJson(updateBootstrapPath, {
-        schemaVersion: 1,
+        schemaVersion: 2,
         requestId: command.requestId,
         stage: "runtime-spawn-attempted",
         result: "recorded",
+        processId: null,
         updatedAt: new Date().toISOString()
       });
       rmSync(updateLaunchPath, { force: true });
@@ -1214,11 +1338,11 @@ export async function runProductionRuntime() {
       // updater is created by it and is observed through the private receipt,
       // body marker, and owner lease rather than through this child's exit.
       launcher = spawnWindowsUpdaterLauncher({ root, command });
-    } catch (error) {
+    } catch {
       const published = publishPanelUpdateRuntimeFailure(command, "updater_spawn_failed");
       log(
         published ? "ERROR" : "WARN",
-        `Panel updater spawn threw requestId=${command.requestId}: ${error?.message || error}`
+        `Panel updater spawn failed requestId=${command.requestId} classification=launcher_spawn_exception`
       );
       return;
     }
@@ -1230,7 +1354,8 @@ export async function runProductionRuntime() {
       publishFailure: (result, options) => publishPanelUpdateRuntimeFailure(command, result, options),
       readBootstrapEvidence: () => readUpdaterBootstrapEvidence(updateBootstrapPath, command.requestId),
       readLaunchEvidence: () => readUpdaterLaunchEvidence(updateLaunchPath, command.requestId),
-      isUpdaterProcessAlive: (pid, requestId) => updaterOwnerProcessAlive(pid, requestId),
+      isUpdaterProcessAlive: (pid, requestId) => probeUpdaterOwnerProcess(pid, requestId),
+      hasDurableEvidence: (pid) => hasDurablePanelUpdateEvidence(command, pid),
       log
     });
   }

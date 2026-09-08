@@ -58,6 +58,7 @@ jobs:
         run: |
           ./scripts/windows/test-production-scripts.ps1
           ./scripts/windows/test-python-runtime-venv.ps1
+          ./scripts/windows/test-first-rollout-venv-migration.ps1
           ./scripts/windows/test-update-production-launch.ps1
           ./scripts/windows/test-update-production-validation-temp.ps1
           ./scripts/windows/test-update-production-bootstrap.ps1

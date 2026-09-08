@@ -1,7 +1,12 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { resolveSetupVenvRoot, resolveVenvPython } from "./runtime-venv.mjs";
+import {
+  clearStagedRuntimeVenvMarker,
+  resolveSetupVenvRoot,
+  resolveVenvPython,
+  writeStagedRuntimeVenvMarker
+} from "./runtime-venv.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const isWindows = process.platform === "win32";
@@ -45,5 +50,14 @@ if (!existsSync(venvPython)) {
 
 run(venvPython, ["-m", "pip", "install", "--upgrade", "pip"]);
 run(venvPython, ["-m", "pip", "install", "-r", "apps/panel-agent/requirements-dev.txt"]);
+
+const stagingMarker = writeStagedRuntimeVenvMarker(root, configuredVenv);
+if (stagingMarker) {
+  console.log("Recorded the exact revision runtime environment for staged validation.");
+} else if (!configuredVenv) {
+  // A normal developer setup must return to the checkout-local .venv contract
+  // even if this directory was previously used for a production staging run.
+  clearStagedRuntimeVenvMarker(root);
+}
 
 console.log("Setup complete. Start with: npm run dev:fixtures");

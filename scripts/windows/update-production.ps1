@@ -22,7 +22,11 @@ function Write-ArtemUpdaterBootstrapEvidence {
     if ($ArtemUpdaterBootstrapStages -notcontains $Stage -or $ArtemUpdaterBootstrapResults -notcontains $Result -or $RequestId -notmatch '^[0-9a-f]{24}$') { return }
     try {
         New-Item -ItemType Directory -Force -Path $ArtemBootstrapRuntimeRoot | Out-Null
-        $payload = @{ schemaVersion = 1; requestId = $RequestId.ToLowerInvariant(); stage = $Stage; result = $Result; updatedAt = [DateTime]::UtcNow.ToString("o") }
+        # PID/request binding is the earliest durable proof that this exact
+        # Start-Process child reached the updater body.  It intentionally
+        # precedes helper loading, transcripts, lock ownership, and any work
+        # that can fail after PowerShell accepts -File.
+        $payload = @{ schemaVersion = 2; requestId = $RequestId.ToLowerInvariant(); processId = [int]$PID; stage = $Stage; result = $Result; updatedAt = [DateTime]::UtcNow.ToString("o") }
         $temporary = "$ArtemBootstrapEvidencePath.$PID.tmp"
         [IO.File]::WriteAllText($temporary, ($payload | ConvertTo-Json -Compress), [Text.Encoding]::ASCII)
         if (Test-Path -LiteralPath $ArtemBootstrapEvidencePath) {

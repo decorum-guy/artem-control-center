@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "../..");
 
@@ -42,30 +43,73 @@ function fakeUpdater(pid = 4242) {
   return updater;
 }
 
+function fakeClock() {
+  let current = 0;
+  let nextId = 0;
+  const timers = new Map();
+  return {
+    now: () => current,
+    setTimer(callback, delay) {
+      const timer = { id: ++nextId, due: current + delay, callback, unref() {} };
+      timers.set(timer.id, timer);
+      return timer;
+    },
+    clearTimer(timer) {
+      timers.delete(timer.id);
+    },
+    advance(milliseconds) {
+      const target = current + milliseconds;
+      while (true) {
+        const due = [...timers.values()]
+          .filter((timer) => timer.due <= target)
+          .sort((left, right) => left.due - right.due)[0];
+        if (!due) break;
+        timers.delete(due.id);
+        current = due.due;
+        due.callback();
+      }
+      current = target;
+    },
+    get pending() {
+      return timers.size;
+    }
+  };
+}
+
 function launchLifecycle({
   authoritative = false,
   runtimeAlive = true,
   bootstrap = null,
   launchReceipt = null,
   actualProcessAlive = true,
-  acceptanceTimeoutMs
+  durable = false,
+  acceptanceTimeoutMs,
+  probes
 } = {}) {
   const launcher = fakeUpdater();
   const failures = [];
   const logs = [];
+  const clock = fakeClock();
+  let probeIndex = 0;
   createPanelUpdateLauncherLifecycle({
     command: validCommand(),
     launcher,
     isRuntimeAlive: () => runtimeAlive,
     hasAuthoritativeEvidence: () => authoritative,
     publishFailure: (result) => { failures.push(result); return true; },
-    readBootstrapEvidence: () => bootstrap,
+    readBootstrapEvidence: () => typeof bootstrap === "function" ? bootstrap() : bootstrap,
     readLaunchEvidence: () => launchReceipt,
-    isUpdaterProcessAlive: () => actualProcessAlive,
+    isUpdaterProcessAlive: () => probes
+      ? probes[Math.min(probeIndex++, probes.length - 1)]
+      : actualProcessAlive,
+    hasDurableEvidence: () => durable,
     ...(acceptanceTimeoutMs === undefined ? {} : { acceptanceTimeoutMs }),
+    now: clock.now,
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
     log: (level, message) => logs.push({ level, message })
   });
-  return { launcher, failures, logs };
+  return { launcher, failures, logs, clock };
 }
 
 function updateLock(updatedAt, ownerPid) {
@@ -97,6 +141,7 @@ function simulateEarlyExit({ state = activeUpdateState(), lock, transaction = nu
   const originalTransaction = transaction;
   let currentState = state;
   let currentLock = lock;
+  const clock = fakeClock();
   createPanelUpdateLauncherLifecycle({
     command,
     launcher: updater,
@@ -109,7 +154,8 @@ function simulateEarlyExit({ state = activeUpdateState(), lock, transaction = nu
       && currentState.targetHead === TARGET
     ),
     publishFailure: (result, { childPid } = {}) => {
-      if (!canPublishPanelUpdateEarlyExit({ command, state: currentState, lock: currentLock, childPid })) return false;
+      const durable = currentLock?.ownerPid === childPid || transaction?.requestId === REQUEST;
+      if (!canPublishPanelUpdateEarlyExit({ command, state: currentState, lock: currentLock, durable, childPid })) return false;
       currentState = {
         schemaVersion: 1,
         status: "failed",
@@ -127,10 +173,18 @@ function simulateEarlyExit({ state = activeUpdateState(), lock, transaction = nu
       processId: 4242
     }),
     isUpdaterProcessAlive: () => false,
+    hasDurableEvidence: (childPid) => currentLock?.ownerPid === childPid || transaction?.requestId === REQUEST,
+    earlyExitMinNegativeObservations: 3,
+    earlyExitMinNegativeDurationMs: 20,
+    pollIntervalMs: 10,
+    now: clock.now,
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
     log: () => {}
   });
   updater.emit("spawn");
   updater.emit("exit", 1, null);
+  clock.advance(20);
   return { state: currentState, lock: currentLock, transaction, originalLock, originalTransaction };
 }
 
@@ -207,42 +261,122 @@ test("updater spawn error publishes only the fixed safe spawn result", () => {
   assert.equal(failures.join(" ").includes("private"), false);
 });
 
-test("unexplained early updater exit publishes the fixed safe early-exit result", () => {
-  const { launcher, failures } = launchLifecycle({
+test("receipt plus an immediate launcher exit tolerates transient false recognition until durable body proof", () => {
+  let bootstrap = null;
+  const { launcher, failures, logs, clock } = launchLifecycle({
+    bootstrap: () => bootstrap,
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    probes: [false, false, false]
+  });
+  launcher.emit("spawn");
+  launcher.emit("exit", 0, null);
+  clock.advance(200);
+  assert.deepEqual(failures, [], "one or more transient negatives are not child death");
+  bootstrap = { stage: "script-entered", result: "recorded", processId: 4242 };
+  clock.advance(100);
+  assert.deepEqual(failures, []);
+  assert.match(logs.map(({ message }) => message).join(" "), /accepted durable evidence.*body:script-entered/);
+  assert.equal(clock.pending, 0, "body acceptance stops PID monitoring instead of leaking an observer");
+});
+
+test("multiple transient false probes followed by a live probe remain non-terminal", () => {
+  const { launcher, failures, clock } = launchLifecycle({
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    probes: [false, false, true, false, true]
+  });
+  launcher.emit("spawn");
+  launcher.emit("exit", 0, null);
+  clock.advance(700);
+  assert.deepEqual(failures, []);
+});
+
+test("matching body proof wins over later failed process recognition", () => {
+  const { launcher, failures, clock } = launchLifecycle({
+    bootstrap: { stage: "script-entered", result: "recorded", processId: 4242 },
     launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
     actualProcessAlive: false
   });
   launcher.emit("spawn");
   launcher.emit("exit", 0, null);
-  assert.deepEqual(failures, ["updater_early_exit"]);
-  assert.equal(failures.join(" ").includes("71"), false);
+  clock.advance(1_000);
+  assert.deepEqual(failures, []);
+  assert.equal(clock.pending, 0);
 });
 
-for (const [label, bootstrap] of [
-  ["pre-script", null],
-  ["after process creation before script body", { stage: "runtime-process-created", result: "recorded" }],
-  ["after script body entry", { stage: "script-entered", result: "recorded" }],
-  ["after helper load", { stage: "helpers-loaded", result: "recorded" }],
-  ["after lease claim", { stage: "lease-claimed", result: "recorded" }]
-]) {
-  test(`early updater exit logs bounded ${label} bootstrap classification`, () => {
-    const { launcher, failures, logs } = launchLifecycle({
-      bootstrap,
-      launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
-      actualProcessAlive: false
-    });
-    launcher.emit("spawn");
-    launcher.emit("exit", 0, null);
-    assert.deepEqual(failures, ["updater_early_exit"]);
-    assert.match(logs.map(({ message }) => message).join(" "), /launch failure requestId=.*result=updater_early_exit/);
-    assert.match(logs.at(-1).message, /bootstrapStage=/);
-    assert.doesNotMatch(logs.map(({ message }) => message).join(" "), /C:\\\\|secret|private/i);
+test("matching updater lease, state, or transaction ownership wins over later failed recognition", () => {
+  const { launcher, failures, clock } = launchLifecycle({
+    durable: true,
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    actualProcessAlive: false
   });
-}
+  launcher.emit("spawn");
+  launcher.emit("exit", 0, null);
+  clock.advance(1_000);
+  assert.deepEqual(failures, []);
+  assert.equal(clock.pending, 0);
+});
+
+test("genuine child death before body proof requires repeated confirmed absence over grace", () => {
+  const { launcher, failures, logs, clock } = launchLifecycle({
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    actualProcessAlive: false
+  });
+  launcher.emit("spawn");
+  launcher.emit("exit", 0, null);
+  clock.advance(499);
+  assert.deepEqual(failures, []);
+  clock.advance(1);
+  assert.deepEqual(failures, ["updater_early_exit"]);
+  assert.match(logs.map(({ message }) => message).join(" "), /classification=absent negativeCount=7 negativeDurationMs=500/);
+});
+
+test("recognition command and command-line uncertainty never count as process absence", () => {
+  const { launcher, failures, logs, clock } = launchLifecycle({
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    probes: [
+      { classification: "cim_invocation_failed" },
+      { classification: "command_line_unavailable" },
+      { classification: "request_mismatch" }
+    ],
+    acceptanceTimeoutMs: 400
+  });
+  launcher.emit("spawn");
+  clock.advance(400);
+  assert.deepEqual(failures, ["updater_stale"]);
+  assert.match(logs.map(({ message }) => message).join(" "), /classification=cim_invocation_failed/);
+  assert.match(logs.map(({ message }) => message).join(" "), /acceptance timeout.*lastProbe=request_mismatch/);
+});
 
 test("bootstrap reader correlates only exact strict bounded evidence", () => {
   const path = resolve(root, "package.json");
   assert.equal(readUpdaterBootstrapEvidence(path, REQUEST), null, "non-bootstrap JSON is ignored");
+});
+
+test("bootstrap body proof is strict, request-bound, and PID-bound", () => {
+  const directory = mkdtempSync(join(tmpdir(), "artem-bootstrap-evidence-"));
+  const path = join(directory, "update-bootstrap.json");
+  try {
+    const payload = {
+      schemaVersion: 2,
+      requestId: REQUEST,
+      processId: 4242,
+      stage: "script-entered",
+      result: "recorded",
+      updatedAt: new Date().toISOString()
+    };
+    writeFileSync(path, JSON.stringify(payload));
+    assert.deepEqual(readUpdaterBootstrapEvidence(path, REQUEST), {
+      stage: "script-entered", result: "recorded", processId: 4242
+    });
+    writeFileSync(path, JSON.stringify({ ...payload, requestId: "f".repeat(24) }));
+    assert.equal(readUpdaterBootstrapEvidence(path, REQUEST), null, "stale request evidence is ignored");
+    writeFileSync(path, JSON.stringify({ ...payload, processId: null }));
+    assert.equal(readUpdaterBootstrapEvidence(path, REQUEST), null, "body proof requires the actual child PID");
+    writeFileSync(path, JSON.stringify({ ...payload, unexpected: true }));
+    assert.equal(readUpdaterBootstrapEvidence(path, REQUEST), null, "schema is closed to extra fields");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("launch receipt correlates only an actual private updater process", () => {
@@ -250,27 +384,72 @@ test("launch receipt correlates only an actual private updater process", () => {
   assert.equal(readUpdaterLaunchEvidence(path, REQUEST), null, "non-launch JSON is ignored");
 });
 
-test("launcher exit is not updater success without body evidence", () => {
-  const { launcher, failures } = launchLifecycle({
+test("stale or malformed launch receipt is ignored", () => {
+  const directory = mkdtempSync(join(tmpdir(), "artem-launch-receipt-"));
+  const path = join(directory, "update-launch.json");
+  try {
+    const receipt = {
+      schemaVersion: 1,
+      requestId: REQUEST,
+      stage: "runtime-process-created",
+      result: "recorded",
+      processId: 4242,
+      updatedAt: new Date().toISOString()
+    };
+    writeFileSync(path, JSON.stringify({ ...receipt, requestId: "f".repeat(24) }));
+    assert.equal(readUpdaterLaunchEvidence(path, REQUEST), null);
+    writeFileSync(path, JSON.stringify({ ...receipt, processId: null }));
+    assert.equal(readUpdaterLaunchEvidence(path, REQUEST), null);
+    writeFileSync(path, JSON.stringify({ ...receipt, unexpected: true }));
+    assert.equal(readUpdaterLaunchEvidence(path, REQUEST), null);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("mismatched request body marker is ignored and cannot accept a different updater", () => {
+  const { launcher, failures, clock } = launchLifecycle({
+    bootstrap: { stage: "script-entered", result: "recorded", processId: 5252 },
+    launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
+    actualProcessAlive: true,
+    acceptanceTimeoutMs: 200
+  });
+  launcher.emit("spawn");
+  clock.advance(200);
+  assert.deepEqual(failures, ["updater_stale"]);
+});
+
+test("no receipt or body proof reaches a bounded stale acceptance failure", () => {
+  const { launcher, failures, clock } = launchLifecycle({ acceptanceTimeoutMs: 300 });
+  launcher.emit("spawn");
+  launcher.emit("exit", 0, null);
+  clock.advance(300);
+  assert.deepEqual(failures, ["updater_stale"]);
+  assert.equal(clock.pending, 0);
+});
+
+test("launcher exit is not updater success without receipt/body evidence", () => {
+  const { launcher, failures, clock } = launchLifecycle({
     launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
     actualProcessAlive: true,
     acceptanceTimeoutMs: 0
   });
   launcher.emit("spawn");
   launcher.emit("exit", 0, null);
-  assert.deepEqual(failures, ["updater_early_exit"], "launcher exit alone must not publish success");
+  clock.advance(0);
+  assert.deepEqual(failures, ["updater_stale"], "launcher exit alone must not publish success");
 });
 
 test("real updater body evidence accepts a surviving independent process", () => {
   const { launcher, failures, logs } = launchLifecycle({
-    bootstrap: { stage: "script-entered", result: "recorded" },
+    bootstrap: { stage: "script-entered", result: "recorded", processId: 4242 },
     launchReceipt: { stage: "runtime-process-created", result: "recorded", processId: 4242 },
     actualProcessAlive: true
   });
   launcher.emit("spawn");
   launcher.emit("exit", 0, null);
   assert.deepEqual(failures, []);
-  assert.match(logs.map(({ message }) => message).join(" "), /body accepted/);
+  assert.match(logs.map(({ message }) => message).join(" "), /accepted durable evidence.*body:script-entered/);
 });
 
 test("authoritative updater evidence wins over early child exit", () => {
@@ -282,7 +461,7 @@ test("authoritative updater evidence wins over early child exit", () => {
   launcher.emit("spawn");
   launcher.emit("exit", 1, null);
   assert.deepEqual(failures, []);
-  assert.match(logs.at(-1).message, /retained authoritative evidence/);
+  assert.match(logs.at(-1).message, /accepted durable evidence.*authoritative-state/);
 });
 
 test("exact ownerless lock matching never accepts updater-owned or different requests", () => {
@@ -320,20 +499,28 @@ test("runtime spawn failure publisher still requires an exact ownerless lock", (
     false,
     "a terminal updater state wins"
   );
+  assert.equal(
+    canPublishPanelUpdateEarlyExit({
+      command,
+      state,
+      lock: updateLock(new Date().toISOString(), 4242),
+      childPid: 4242,
+      durable: true
+    }),
+    false,
+    "matching durable updater ownership cannot be overwritten by launch monitoring"
+  );
 });
 
-test("H1 claimed exact updater lock then pre-transcript exit publishes early exit without releasing the lock", () => {
+test("H1 claimed exact updater lock is durable ownership and suppresses supervisor early exit", () => {
   const lock = updateLock(new Date().toISOString(), 4242);
   const result = simulateEarlyExit({ lock });
-  assert.equal(result.state.result, "updater_early_exit");
-  assert.equal(result.state.requestId, REQUEST);
-  assert.equal(result.state.currentHead, CURRENT);
-  assert.equal(result.state.targetHead, TARGET);
-  assert.equal("ownerPid" in result.state, false);
+  assert.equal(result.state.status, "updating");
+  assert.equal(result.state.result, undefined);
   assert.equal(result.lock, result.originalLock);
 });
 
-test("H2 incomplete transaction remains diagnostic evidence and does not suppress an exited child", () => {
+test("H2 matching incomplete transaction is durable ownership and suppresses supervisor early exit", () => {
   const transaction = {
     schemaVersion: 1,
     status: "incomplete",
@@ -343,7 +530,7 @@ test("H2 incomplete transaction remains diagnostic evidence and does not suppres
     targetHead: TARGET
   };
   const result = simulateEarlyExit({ lock: updateLock(new Date().toISOString(), 4242), transaction });
-  assert.equal(result.state.result, "updater_early_exit");
+  assert.equal(result.state.status, "updating");
   assert.equal(result.transaction, result.originalTransaction);
   assert.equal(result.lock.ownerPid, 4242);
 });
@@ -390,8 +577,10 @@ test("supervisor handoff is wired to the fixed canonical updater script and owne
   assert.match(source, /"-ExpectedCurrentHead"[\s\S]*command\.expectedCurrentHead/);
   assert.match(source, /"-ExpectedTargetHead"[\s\S]*command\.expectedTargetHead/);
   assert.match(source, /"-RequestId"[\s\S]*command\.requestId/);
-  assert.match(source, /CommandLine -like '\*update-production\.ps1\*'/);
-  assert.match(source, /CommandLine -like '\*\$\{requestId\}\*'/);
+  assert.match(source, /function probeUpdaterOwnerProcess/);
+  assert.match(source, /CommandLine -notlike '\*update-production\.ps1\*'/);
+  assert.match(source, /CommandLine -notlike '\*\$\{requestId\}\*'/);
+  assert.match(source, /cim_invocation_failed/);
   assert.match(source, /readUpdaterLaunchEvidence/);
   assert.match(source, /createPanelUpdateLauncherLifecycle/);
   assert.doesNotMatch(source, /detached\s*:\s*true/);
