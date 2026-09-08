@@ -17,6 +17,7 @@ from .access_policy import AccessPolicyStore
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")
+RECOVERY_OWNER_TOKEN_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 UPDATE_HANDOFF_MAX_AGE = timedelta(minutes=2)
 CAPABILITY_APPLY_MAX_AGE = timedelta(minutes=15)
 SAFE_OWNER_RESULTS = frozenset({
@@ -347,6 +348,10 @@ class PanelUpdateService:
         self.state_path = self.runtime_root / "update-state.json"
         self._git_runner = git_runner or self._run_git
         self._update_owner_alive = update_owner_alive
+        # This is generated once for the Panel Agent service instance and is
+        # never sent to the browser. It distinguishes an abandoned recovery
+        # reservation from a live one even if a later process reuses its PID.
+        self._recovery_owner_token = secrets.token_hex(32)
 
     def _handoff_failure_result(self, request_id: str | None) -> str | None:
         """Read only the updater's fixed, request-bound handoff evidence.
@@ -720,6 +725,15 @@ class PanelUpdateService:
     def _clear_stale_lock(self) -> None:
         payload = _read_json(self.lock_path)
         if payload and payload.get("status") == "recovering":
+            if self._owns_recovery_lock(payload):
+                return
+            # A recovering lock from any other service instance cannot prove
+            # a live operation to this instance. This includes malformed and
+            # legacy reservations, and is deliberately token—not age—based.
+            try:
+                self.lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             return
         if not _update_lock_active(payload, owner_alive=self._update_owner_alive):
             try:
@@ -770,6 +784,8 @@ class PanelUpdateService:
             "schemaVersion": 1,
             "status": "recovering",
             "requestId": request_id,
+            "ownerPid": os.getpid(),
+            "ownerInstanceToken": self._recovery_owner_token,
             "updatedAt": _iso_now(),
         }
         try:
@@ -782,9 +798,24 @@ class PanelUpdateService:
             os.fsync(handle.fileno())
         return True
 
+    def _owns_recovery_lock(self, payload: dict | None) -> bool:
+        return bool(
+            payload
+            and payload.get("schemaVersion") == 1
+            and payload.get("status") == "recovering"
+            and _safe_request_id(payload.get("requestId"))
+            and isinstance(payload.get("ownerPid"), int)
+            and not isinstance(payload.get("ownerPid"), bool)
+            and payload.get("ownerPid") == os.getpid()
+            and isinstance(payload.get("ownerInstanceToken"), str)
+            and RECOVERY_OWNER_TOKEN_PATTERN.fullmatch(payload["ownerInstanceToken"])
+            and payload["ownerInstanceToken"] == self._recovery_owner_token
+            and _safe_timestamp(payload.get("updatedAt"))
+        )
+
     def _release_recovery_lock(self, request_id: str) -> None:
         payload = _read_json(self.lock_path)
-        if payload and payload.get("status") == "recovering" and payload.get("requestId") == request_id:
+        if self._owns_recovery_lock(payload) and payload.get("requestId") == request_id:
             try:
                 self.lock_path.unlink(missing_ok=True)
             except OSError:
