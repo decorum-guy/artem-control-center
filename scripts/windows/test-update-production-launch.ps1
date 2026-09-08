@@ -41,6 +41,9 @@ foreach ($name in $environmentNames) {
 }
 $survivalParent = $null
 $entryParent = $null
+$raceParent = $null
+$failureParent = $null
+$earlyParent = $null
 $raceChildPid = $null
 $raceContinue = $null
 
@@ -53,6 +56,32 @@ function Wait-ArtemFixtureFile {
     while (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         if ([DateTime]::UtcNow -ge $deadline) {
             throw "Timed out waiting for fixture file: $Path"
+        }
+        Start-Sleep -Milliseconds 50
+    }
+}
+
+function Wait-ArtemProcessExit {
+    param(
+        [Parameter(Mandatory)][System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][string]$Description,
+        [int]$TimeoutMilliseconds = 5000
+    )
+    if (-not $Process.WaitForExit($TimeoutMilliseconds)) {
+        throw "Timed out waiting for $Description (PID $($Process.Id)) to exit"
+    }
+    $Process.Refresh()
+}
+
+function Wait-ArtemFixtureProcessGone {
+    param(
+        [Parameter(Mandatory)][int]$ProcessId,
+        [int]$TimeoutMilliseconds = 5000
+    )
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    while ($null -ne (Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f $ProcessId) -ErrorAction SilentlyContinue)) {
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Timed out waiting for fixture process $ProcessId to exit"
         }
         Start-Sleep -Milliseconds 50
     }
@@ -306,12 +335,12 @@ try {
         -FilePath "node.exe" `
         -ArgumentList ('"{0}"' -f $parentScript) `
         -WorkingDirectory $fixtureRepo `
-        -PassThru `
-        -Wait
-    Assert-ArtemFixture -Condition ($entryParent.ExitCode -eq 0) -Message "Node launcher entry parent failed"
+        -PassThru
     Wait-ArtemFixtureFile -Path $entryMarker
     Wait-ArtemFixtureFile -Path $entryExit
     Wait-ArtemFixtureFile -Path $entryParentResult
+    Wait-ArtemProcessExit -Process $entryParent -Description "Node launcher entry parent"
+    Assert-ArtemFixture -Condition ($entryParent.ExitCode -eq 0) -Message "Node launcher entry parent failed"
     $entryPayload = Get-Content -LiteralPath $entryMarker -Raw | ConvertFrom-Json
     Assert-ArtemFixture -Condition ($entryPayload.expectedCurrentHead -eq $currentHead) -Message "Updater fixture received the wrong current SHA"
     Assert-ArtemFixture -Condition ($entryPayload.expectedTargetHead -eq $targetHead) -Message "Updater fixture received the wrong target SHA"
@@ -324,6 +353,7 @@ try {
     Assert-ArtemFixture -Condition ($entryReceipt.requestId -eq $requestId) -Message "Launch receipt request id is not correlated"
     Assert-ArtemFixture -Condition ($entryReceipt.stage -eq "runtime-process-created" -and $entryReceipt.result -eq "recorded") -Message "Launch receipt did not prove actual process creation"
     Assert-ArtemFixture -Condition ([int]$entryReceipt.processId -gt 0) -Message "Launch receipt did not contain a valid private process identity"
+    Write-Host "Launch fixture: entry passed"
 
     # Regression 2: the fixture updater is the actual script body and waits on
     # a file event.  The launcher must be gone before this exact production
@@ -368,13 +398,14 @@ try {
 
     & taskkill.exe /PID ([string]$survivalParent.Id) /T /F | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Production-equivalent taskkill /T could not terminate fake runtime parent" }
-    $survivalParent.Refresh()
+    Wait-ArtemProcessExit -Process $survivalParent -Description "fake runtime parent after taskkill /T"
     Assert-ArtemFixture -Condition $survivalParent.HasExited -Message "Fake runtime parent survived taskkill"
     Set-Content -LiteralPath $survivalContinue -Value "continue" -Encoding ASCII
     Wait-ArtemFixtureFile -Path $survivalMarkerB
     Wait-ArtemFixtureFile -Path $survivalExit
     Assert-ArtemFixture -Condition ((Get-Content -LiteralPath $survivalMarkerB -Raw).Trim() -eq "survived-runtime-stop") -Message "Updater did not survive production runtime tree termination"
     Assert-ArtemFixture -Condition ((Get-Content -LiteralPath $survivalExit -Raw).Trim() -eq "normal-exit") -Message "Surviving updater fixture did not exit normally"
+    Write-Host "Launch fixture: process-tree survival passed"
 
     # Regression 3: run the real production-style launcher and a harmless
     # long-lived fixture while the lifecycle intentionally sees its first two
@@ -399,15 +430,15 @@ try {
         -FilePath "node.exe" `
         -ArgumentList ('"{0}"' -f $raceHarness) `
         -WorkingDirectory $fixtureRepo `
-        -PassThru `
-        -Wait
-    Assert-ArtemFixture -Condition ($raceParent.ExitCode -eq 0) -Message "Transient-recognition race harness published a false launch failure"
+        -PassThru
     Wait-ArtemFixtureFile -Path $raceResultPath
     $raceResult = Get-Content -LiteralPath $raceResultPath -Raw | ConvertFrom-Json
     Assert-ArtemFixture -Condition ($raceResult.failures.Count -eq 0) -Message "Fixture race published updater_early_exit"
     Assert-ArtemFixture -Condition ($raceResult.logs.message -match "accepted durable evidence") -Message "Fixture race did not accept durable body evidence"
     Assert-ArtemFixture -Condition ([int]$raceResult.receipt.processId -gt 0 -and [int]$raceResult.bootstrap.processId -eq [int]$raceResult.receipt.processId) -Message "Fixture race evidence did not bind the real child PID"
     $raceChildPid = [int]$raceResult.receipt.processId
+    Wait-ArtemProcessExit -Process $raceParent -Description "transient-recognition race Node harness"
+    Assert-ArtemFixture -Condition ($raceParent.ExitCode -eq 0) -Message "Transient-recognition race harness published a false launch failure"
     $raceProcess = Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f $raceChildPid) -ErrorAction Stop
     Assert-ArtemFixture -Condition ($raceProcess.Name -ieq "powershell.exe") -Message "Fixture race did not leave a real PowerShell child alive"
     if (-not [string]::IsNullOrWhiteSpace([string]$raceProcess.CommandLine)) {
@@ -416,6 +447,8 @@ try {
     }
     Set-Content -LiteralPath $raceContinue -Value "continue" -Encoding ASCII
     Wait-ArtemFixtureFile -Path $raceExit
+    Wait-ArtemFixtureProcessGone -ProcessId $raceChildPid
+    Write-Host "Launch fixture: transient recognition race passed"
 
     # Regression 4: a launcher can report a bounded failure, but that receipt
     # must never be treated as actual updater success or leave the ownerless
@@ -461,15 +494,16 @@ try {
         -FilePath "node.exe" `
         -ArgumentList ('"{0}"' -f $failureHarness) `
         -WorkingDirectory $failureRepo `
-        -PassThru `
-        -Wait
-    Assert-ArtemFixture -Condition ($failureParent.ExitCode -eq 0) -Message "Launch failure lifecycle harness failed"
+        -PassThru
     Wait-ArtemFixtureFile -Path $failureResultPath
+    Wait-ArtemProcessExit -Process $failureParent -Description "launch failure lifecycle harness"
+    Assert-ArtemFixture -Condition ($failureParent.ExitCode -eq 0) -Message "Launch failure lifecycle harness failed"
     $failureResult = Get-Content -LiteralPath $failureResultPath -Raw | ConvertFrom-Json
     Assert-ArtemFixture -Condition ($failureResult.result -eq "updater_spawn_failed") -Message "Launcher failure was not classified as updater_spawn_failed"
     Assert-ArtemFixture -Condition ($failureResult.stateResult -eq "updater_spawn_failed") -Message "Owner did not receive the bounded launch failure state"
     Assert-ArtemFixture -Condition (-not [bool]$failureResult.lockExists) -Message "Ownerless provisional lock was not released after launch failure"
     Assert-ArtemFixture -Condition ($failureResult.receipt.result -eq "child-start-failed" -and $null -eq $failureResult.receipt.processId) -Message "Launch failure receipt was not narrow and process-free"
+    Write-Host "Launch fixture: bounded launch failure passed"
 
     # Regression 5: Windows really creates this fixture updater child and it
     # exits before its first body marker. Repeated real process probes must
@@ -507,13 +541,14 @@ exit 0
         -FilePath "node.exe" `
         -ArgumentList ('"{0}"' -f $failureHarness) `
         -WorkingDirectory $earlyRepo `
-        -PassThru `
-        -Wait
-    Assert-ArtemFixture -Condition ($earlyParent.ExitCode -eq 0) -Message "True early-child-exit lifecycle harness failed"
+        -PassThru
     Wait-ArtemFixtureFile -Path $earlyResultPath
+    Wait-ArtemProcessExit -Process $earlyParent -Description "true early-child-exit lifecycle harness"
+    Assert-ArtemFixture -Condition ($earlyParent.ExitCode -eq 0) -Message "True early-child-exit lifecycle harness failed"
     $earlyResult = Get-Content -LiteralPath $earlyResultPath -Raw | ConvertFrom-Json
     Assert-ArtemFixture -Condition ($earlyResult.result -eq "updater_early_exit") -Message "Real child early exit was not classified after bounded repeated negatives"
     Assert-ArtemFixture -Condition ($earlyResult.receipt.result -eq "recorded" -and [int]$earlyResult.receipt.processId -gt 0) -Message "Early-exit fixture did not first receive an actual child receipt"
+    Write-Host "Launch fixture: early death passed"
 
     Write-Host "Validated updater script entry, real PowerShell receipt/body PID binding, transient recognition race, taskkill /T process-tree survival, and bounded launch failures."
 }
@@ -527,7 +562,7 @@ finally {
     if ($raceChildPid -gt 0) {
         & taskkill.exe /PID ([string]$raceChildPid) /T /F | Out-Null 2>$null
     }
-    foreach ($process in @($entryParent, $survivalParent)) {
+    foreach ($process in @($entryParent, $survivalParent, $raceParent, $failureParent, $earlyParent)) {
         if ($null -ne $process) {
             try {
                 $process.Refresh()
