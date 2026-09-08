@@ -79,7 +79,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
     }
 
     // The server policy may waive ordinary ceremonies, but a small explicit
-    // catalog of mandatory actions (currently full panel shutdown) cannot be
+    // catalog of mandatory actions cannot be
     // waived by Full access or a relaxed confirmation policy.
     if (
       !spec.alwaysConfirm

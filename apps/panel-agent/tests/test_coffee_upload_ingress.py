@@ -32,6 +32,10 @@ def test_ingress_serves_only_the_minimal_page_and_fixed_upload_post(monkeypatch)
         assert page.headers["cache-control"] == "no-store"
         assert page.headers["referrer-policy"] == "no-referrer"
         assert "X-Coffee-Upload-Token" in page.text
+        assert '<section id="success" class="success" hidden' in page.text
+        assert "[hidden] { display: none !important; }" in page.text
+        assert "capture=\"environment\"" not in page.text
+        assert "Выбрать другое фото" in page.text
         assert "/api/v1/snapshot" not in page.text
         assert client.get("/").status_code == 404
         assert client.get("/api/v1/snapshot").status_code == 404

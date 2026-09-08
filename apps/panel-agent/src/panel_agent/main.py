@@ -779,13 +779,20 @@ def get_coffee_diary_bean(bean_id: str) -> CoffeeDiaryBeanDetail:
 
 
 @app.post("/api/v1/coffee-diary/beans/{bean_id}/photo-upload-sessions")
-def create_coffee_diary_photo_upload_session(bean_id: str, request: Request, response: Response) -> dict[str, object]:
+async def create_coffee_diary_photo_upload_session(bean_id: str, request: Request, response: Response) -> dict[str, object]:
     _require_coffee_diary_write()
     try:
         origin = _coffee_upload_origin(request)
         parsed_bean_id = validate_uuid4(bean_id)
-        coffee_diary_store.bean_detail(parsed_bean_id)
-        session, token = coffee_upload_registry.create(intent="bean", bean_id=parsed_bean_id)
+        detail = coffee_diary_store.bean_detail(parsed_bean_id)
+        raw_body = await _read_bounded_coffee_diary_body(request)
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        if not isinstance(payload, dict) or set(payload) - {"replacePhotoId"}:
+            raise CoffeeDiaryValidationError("coffee_diary_photo_relationship_invalid")
+        replace_photo_id = validate_uuid4(payload["replacePhotoId"]) if payload.get("replacePhotoId") is not None else None
+        if replace_photo_id is not None and replace_photo_id not in detail.bean.photoIds:
+            raise CoffeeDiaryValidationError("coffee_diary_photo_relationship_invalid")
+        session, token = coffee_upload_registry.create(intent="bean", bean_id=parsed_bean_id, replace_photo_id=replace_photo_id)
         return _coffee_upload_session_response(response, session, token, origin)
     except Exception as exc:
         if isinstance(exc, HTTPException):
@@ -923,7 +930,10 @@ async def upload_coffee_diary_photo(request: Request, response: Response) -> dic
                 createdAt=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             )
             try:
-                coffee_diary_store.attach_photo(session.bean_id, photo)
+                if session.replace_photo_id is None:
+                    coffee_diary_store.attach_photo(session.bean_id, photo)
+                else:
+                    coffee_diary_store.replace_photo(session.bean_id, session.replace_photo_id, photo)
             except Exception:
                 coffee_photo_storage.remove(final_path)
                 coffee_upload_registry.fail_upload(session.session_id)

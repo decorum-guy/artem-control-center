@@ -33,6 +33,7 @@ COFFEE_UPLOAD_PAGE = r"""<!doctype html>
 <style>
 :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { min-width: 320px; min-height: 100svh; margin: 0; padding: 16px; display: grid; place-items: center; color: #f5eee4; background: #171311; }
 main { width: min(100%, 420px); display: grid; gap: 18px; padding: 24px; border: 1px solid rgba(226,177,112,.28); border-radius: 22px; background: #241c18; box-shadow: 0 24px 70px rgba(0,0,0,.35); }
 .kicker { margin: 0; color: #d9a768; font-size: 12px; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
@@ -59,10 +60,10 @@ img { width: 100%; max-height: 300px; border-radius: 14px; object-fit: contain; 
 <section id="success" class="success" hidden role="status" aria-live="polite"><span class="mark" aria-hidden="true">✓</span><p>Фото загружено.</p><p>Можно вернуться к панели.</p></section>
 <section id="form" class="controls">
 <p>Выберите или сделайте фотографию</p>
-<label><span>Выбрать фото</span><input id="file" type="file" accept="image/*" capture="environment"></label>
-<img id="preview" alt="Предпросмотр выбранного фото" hidden>
+<label><span id="file-label">Выбрать фото</span><input id="file" data-testid="coffee-upload-file" type="file" accept="image/*"></label>
+<img id="preview" data-testid="coffee-upload-preview" alt="Предпросмотр выбранного фото" hidden>
 <p id="filename" class="filename" hidden></p>
-<button id="submit" type="button" disabled>Загрузить</button>
+<button id="submit" data-testid="coffee-upload-submit" type="button" disabled>Загрузить</button>
 <p id="error" class="error" role="alert" aria-live="assertive" hidden></p>
 </section>
 <p id="invalid" class="error" role="alert" hidden>Ссылка недействительна.</p>
@@ -74,6 +75,7 @@ img { width: 100%; max-height: 300px; border-radius: 14px; object-fit: contain; 
   var token = new URLSearchParams(hash).get("token") || "";
   window.history.replaceState({}, "", window.location.pathname);
   var fileInput = document.getElementById("file");
+  var fileLabel = document.getElementById("file-label");
   var preview = document.getElementById("preview");
   var filename = document.getElementById("filename");
   var submit = document.getElementById("submit");
@@ -110,6 +112,7 @@ img { width: 100%; max-height: 300px; border-radius: 14px; object-fit: contain; 
     preview.hidden = false;
     filename.textContent = next.name;
     filename.hidden = false;
+    fileLabel.textContent = "Выбрать другое фото";
     submit.disabled = !token;
     showError("");
   }

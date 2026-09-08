@@ -92,6 +92,7 @@ class UploadSession:
     token_hash: str
     intent: Literal["bean", "bean_create"]
     bean_id: UUID | None
+    replace_photo_id: UUID | None
     expires_at: datetime
     deadline: float
     state: Literal["created", "uploading", "uploaded", "consumed", "cancelled", "expired"] = "created"
@@ -368,7 +369,13 @@ class PhotoUploadRegistry:
         for session in evictable[:remove_count]:
             self._sessions.pop(session.session_id, None)
 
-    def create(self, *, intent: Literal["bean", "bean_create"], bean_id: UUID | None) -> tuple[UploadSession, str]:
+    def create(
+        self,
+        *,
+        intent: Literal["bean", "bean_create"],
+        bean_id: UUID | None,
+        replace_photo_id: UUID | None = None,
+    ) -> tuple[UploadSession, str]:
         with self._lock:
             self._cleanup_locked()
             self._prune_evictable_locked(slots_needed=1)
@@ -381,6 +388,7 @@ class PhotoUploadRegistry:
                 token_hash="",
                 intent=intent,
                 bean_id=bean_id,
+                replace_photo_id=replace_photo_id,
                 expires_at=now + timedelta(seconds=UPLOAD_SESSION_TTL_SECONDS),
                 deadline=self._monotonic() + UPLOAD_SESSION_TTL_SECONDS,
             )
