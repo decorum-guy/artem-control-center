@@ -24,7 +24,9 @@ foreach ($forbidden in @(
 if (-not $updaterText.Contains('Arguments @("run", "production-update-preflight")')) {
     throw "Production staging must invoke the fixed narrow host preflight"
 }
-if (($updaterText.Split('Arguments @("run", "build:production")').Count - 1) -ne 1) {
+$productionBuildInvocation = 'Arguments @("run", "build:production")'
+$productionBuildCount = ([regex]::Matches($updaterText, [regex]::Escape($productionBuildInvocation))).Count
+if ($productionBuildCount -ne 1) {
     throw "Production staging must perform exactly one accepted-v2 production build"
 }
 if (-not $updaterText.Contains('git.exe status --porcelain --untracked-files=no')) {
