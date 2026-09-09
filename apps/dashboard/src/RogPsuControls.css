@@ -28,10 +28,11 @@
 .rog-psu-controls__toggle { display: inline-grid; place-items: center; width: 48px; min-width: 48px; height: 48px; padding: 0; font-size: 22px; }
 .rog-psu-controls__toggle svg { display: block; }
 .rog-psu-controls__toggle--on { border-color: var(--cc-accent); color: var(--cc-on-accent); background: var(--cc-accent-strong); }
+.rog-psu-controls__toggle.rog-psu-controls__toggle--on:disabled { border-color: var(--cc-accent); color: var(--cc-accent); background: var(--cc-surface-2); cursor: not-allowed; }
 
 .rog-psu-controls--home { padding: 12px; gap: 10px; }
 .rog-psu-controls--overview { display: contents; padding: 0; border: 0; background: none; }
-.rog-psu-controls--overview .rog-psu-controls__modes { display: contents; }
+.rog-psu-controls--overview .rog-psu-controls__modes { display: flex; align-items: center; gap: 8px; }
 .rog-psu-controls__mode--overview { display: inline-grid; place-items: center; width: 48px; min-width: 48px; height: 48px; padding: 0; color: var(--cc-text-secondary); background: var(--cc-interactive); }
 .rog-psu-controls__mode--overview.rog-psu-controls__mode--selected { border-color: var(--cc-accent); color: var(--cc-on-accent); background: var(--cc-accent-strong); }
 .rog-psu-controls__pending-icon { animation: rog-psu-spin .8s linear infinite; }

@@ -13,6 +13,7 @@
 
 .climate-control--home { gap: 10px; padding: 12px 12px 18px; }
 .climate-control--overview { gap: 6px; padding: 10px 12px 12px; }
+.climate-control--overview .climate-control__controls { margin-top: 4px; }
 .climate-control--overview .climate-control__controls { row-gap: 6px; }
 .climate-control--overview .climate-control__select-label { gap: 2px; }
 .climate-control--unavailable { border-color: var(--cc-offline-border); }

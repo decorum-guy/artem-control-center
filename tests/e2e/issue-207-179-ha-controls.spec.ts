@@ -143,12 +143,16 @@ test.describe("Issue 207 · Overview climate projection", () => {
         minus,
         plus,
         confirm,
-        climate: element.closest<HTMLElement>(".climate-control")?.getBoundingClientRect()
+        climate: element.closest<HTMLElement>(".climate-control")?.getBoundingClientRect(),
+        header: element.closest<HTMLElement>(".climate-control")?.querySelector<HTMLElement>(".climate-control__header")?.getBoundingClientRect()
       };
     });
     expect(temperatureGeometry).not.toBeNull();
     if (!temperatureGeometry) return;
     expect(temperatureGeometry.control.width).toBeLessThan((temperatureGeometry.climate?.width ?? temperatureGeometry.control.width) * 0.8);
+    const headerToControls = temperatureGeometry.control.top - (temperatureGeometry.header?.bottom ?? temperatureGeometry.control.top);
+    expect(headerToControls).toBeGreaterThanOrEqual(9);
+    expect(headerToControls).toBeLessThanOrEqual(11);
     expect(temperatureGeometry.plus.left - temperatureGeometry.minus.right).toBeGreaterThanOrEqual(4);
     expect(temperatureGeometry.plus.left - temperatureGeometry.minus.right).toBeLessThanOrEqual(8);
     expect(temperatureGeometry.confirm.left - temperatureGeometry.plus.right).toBeGreaterThanOrEqual(4);
@@ -235,17 +239,50 @@ test.describe("Issue 179 · ROG G703 PSU controls", () => {
     const disabled = await unavailable.locator("button").evaluateAll((controls) => controls.every((control) => (control as HTMLButtonElement).disabled));
     expect(disabled).toBe(true);
   });
+
+  test("keeps the confirmed ON PSU visibly ON when last-off protection disables it", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/system?scenario=home-psu-normal");
+    const controls = page.getByTestId("rog-psu-controls");
+    const primary = controls.getByTestId("rog-psu-toggle-1");
+    const secondary = controls.getByTestId("rog-psu-toggle-2");
+
+    await expect(primary).toHaveAttribute("aria-pressed", "true");
+    await expect(primary).toBeDisabled();
+    await expect(primary).toHaveClass(/rog-psu-controls__toggle--on/);
+    await expect(primary).toHaveAttribute("title", "Нельзя выключить последний включённый блок питания");
+    await expect(secondary).toHaveAttribute("aria-pressed", "false");
+
+    const visualState = await controls.evaluate((element) => {
+      const on = element.querySelector<HTMLElement>('[data-testid="rog-psu-toggle-1"]');
+      const off = element.querySelector<HTMLElement>('[data-testid="rog-psu-toggle-2"]');
+      if (!on || !off) return null;
+      const onStyle = getComputedStyle(on);
+      const offStyle = getComputedStyle(off);
+      return {
+        onColor: onStyle.color,
+        offColor: offStyle.color,
+        onBorder: onStyle.borderColor,
+        offBorder: offStyle.borderColor
+      };
+    });
+    expect(visualState).not.toBeNull();
+    if (!visualState) return;
+    expect(visualState.onColor).not.toBe(visualState.offColor);
+    expect(visualState.onBorder).not.toBe(visualState.offBorder);
+  });
 });
 
 test.describe("Overview ASUS operational strip", () => {
   test.skip(!visualShellEnabled || !overviewEnabled, "Requires the V2 visual shell and Overview V2.");
 
-  test("keeps four icon-only host and PSU actions contained", async ({ page }) => {
+  test("keeps the three host and two PSU actions grouped and contained", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?scenario=home-asus-both");
     const rog = page.getByTestId("overview-rog-g703");
     await expect(rog).toBeVisible();
     for (const [testId, label] of [
+      ["overview-rog-g703-wake", "Включить"],
       ["overview-rog-g703-sleep", "Перевести ASUS ROG в спящий режим"],
       ["overview-rog-g703-hibernate", "Перевести ASUS ROG в гибернацию"],
       ["overview-rog-psu-normal", "Обычный режим питания ASUS ROG"],
@@ -253,9 +290,13 @@ test.describe("Overview ASUS operational strip", () => {
     ] as const) {
       const control = rog.getByTestId(testId);
       await expect(control).toHaveAccessibleName(label);
-      await expect(control.locator("svg")).toHaveCount(1);
-      await expect(control).toHaveText("");
     }
+    await expect(rog.getByTestId("overview-rog-g703-wake")).toBeDisabled();
+    await expect(rog.getByTestId("overview-rog-g703-wake").locator("svg")).toHaveCount(1);
+    await expect(rog.getByTestId("overview-rog-g703-sleep").locator("svg")).toHaveCount(1);
+    await expect(rog.getByTestId("overview-rog-g703-hibernate")).toHaveText("H");
+    await expect(rog.getByTestId("overview-rog-g703-hibernate").locator("svg")).toHaveCount(0);
+    await expect(rog.getByTestId("overview-rog-g703-hibernate")).toHaveAttribute("title", /гибернацию/i);
     await expectMinimumControlSize(rog.locator("button"));
     await expectContained(rog, [".overview-rog-widget__action"]);
     const actionGeometry = await rog.locator(".overview-rog-widget__action").evaluate((element) => {
@@ -267,7 +308,7 @@ test.describe("Overview ASUS operational strip", () => {
         viewportWidth: document.documentElement.clientWidth
       };
     });
-    expect(actionGeometry.buttons).toHaveLength(4);
+    expect(actionGeometry.buttons).toHaveLength(5);
     for (const button of actionGeometry.buttons) {
       expect(button.width).toBeGreaterThanOrEqual(48);
       expect(button.height).toBeGreaterThanOrEqual(48);
@@ -275,9 +316,14 @@ test.describe("Overview ASUS operational strip", () => {
       expect(button.right).toBeLessThanOrEqual(actionGeometry.action.right + 1);
     }
     const gaps = actionGeometry.buttons.slice(1).map((button, index) => button.left - actionGeometry.buttons[index].right);
-    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1);
-    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(7);
-    expect(Math.max(...gaps)).toBeLessThanOrEqual(9);
+    expect(gaps[0]).toBeGreaterThanOrEqual(7);
+    expect(gaps[0]).toBeLessThanOrEqual(9);
+    expect(gaps[1]).toBeGreaterThanOrEqual(7);
+    expect(gaps[1]).toBeLessThanOrEqual(9);
+    expect(gaps[2]).toBeGreaterThanOrEqual(15);
+    expect(gaps[2]).toBeLessThanOrEqual(17);
+    expect(gaps[3]).toBeGreaterThanOrEqual(7);
+    expect(gaps[3]).toBeLessThanOrEqual(9);
     expect(actionGeometry.documentWidth).toBeLessThanOrEqual(actionGeometry.viewportWidth + 1);
     await expectNoHorizontalOverflow(page);
   });

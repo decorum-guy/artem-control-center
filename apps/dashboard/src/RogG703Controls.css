@@ -93,6 +93,13 @@
 }
 
 .rog-g703-action--icon { display: inline-grid; place-items: center; width: 48px; min-width: 48px; height: 48px; padding: 0; }
+.rog-g703-action__hibernate-mark {
+  display: inline-block;
+  font-family: var(--cc-font-family);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+}
 
 .rog-g703-controls__note,
 .rog-g703-controls__unavailable {

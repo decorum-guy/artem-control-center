@@ -36,7 +36,7 @@ export function RogG703PowerActionGroup({
       ? [ROG_G703_WAKE_ACTION]
       : [];
   const actionIds = iconOnly
-    ? [ROG_G703_SLEEP_ACTION, ROG_G703_HIBERNATE_ACTION]
+    ? [ROG_G703_WAKE_ACTION, ROG_G703_SLEEP_ACTION, ROG_G703_HIBERNATE_ACTION]
     : availableActionIds;
 
   if (!actionIds.length) return null;
@@ -73,7 +73,11 @@ export function RogG703PowerActionGroup({
             onClick={() => void controller.run(actionId)}
           >
             {iconOnly
-              ? <Icon name={pending ? "refresh" : actionId === ROG_G703_SLEEP_ACTION ? "sleep" : actionId === ROG_G703_HIBERNATE_ACTION ? "hibernate" : "power"} size={20} className={pending ? "overview-rog-widget__pending-icon" : undefined} />
+              ? pending
+                ? <Icon name="refresh" size={20} className="overview-rog-widget__pending-icon" />
+                : actionId === ROG_G703_HIBERNATE_ACTION
+                  ? <span aria-hidden="true" className="rog-g703-action__hibernate-mark">H</span>
+                  : <Icon name={actionId === ROG_G703_SLEEP_ACTION ? "sleep" : "power"} size={20} />
               : label}
           </button>
         );
