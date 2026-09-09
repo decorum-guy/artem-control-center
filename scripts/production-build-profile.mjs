@@ -32,7 +32,9 @@ export const PERSISTED_CAPABILITY_IDS = Object.freeze([
   "planning_overview",
   "planning_tasks_route",
   "planning_calendar_route",
-  "planning_reminders_route"
+  "planning_reminders_route",
+  "home_climate_actions",
+  "rog_g703_psu_actions"
 ]);
 
 export const MAX_CAPABILITY_OVERRIDE_FILE_BYTES = 16 * 1024;

@@ -13,7 +13,8 @@ import {
   safeDelayedCapabilityOverrides,
   loadProductionCapabilityOverrides,
   resolveCapabilityOverridesPath,
-  MAX_CAPABILITY_OVERRIDE_FILE_BYTES
+  MAX_CAPABILITY_OVERRIDE_FILE_BYTES,
+  PERSISTED_CAPABILITY_IDS
 } from "../production-build-profile.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -32,6 +33,22 @@ const expectedProfile = {
   VITE_TOUCH_INPUT_LOCK_ENABLED: "true",
   VITE_TOUCH_INPUT_LOCK_START_LOCKED: "true"
 };
+
+test("the persisted capability allow-list contains exactly the current mutable IDs", () => {
+  const expectedIds = [
+    "calendar_display_colors",
+    "overview_layout_editor",
+    "planning_overview",
+    "planning_tasks_route",
+    "planning_calendar_route",
+    "planning_reminders_route",
+    "home_climate_actions",
+    "rog_g703_psu_actions"
+  ];
+
+  assert.deepEqual([...PERSISTED_CAPABILITY_IDS], expectedIds);
+  assert.deepEqual(new Set(PERSISTED_CAPABILITY_IDS), new Set(expectedIds));
+});
 
 test("the accepted-v2 profile is complete and cannot be overridden by inherited VITE values", () => {
   assert.equal(productionBuildProfileName, "accepted-v2");
@@ -89,6 +106,80 @@ test("normal production build resolves the Panel-owned LOCALAPPDATA store and an
   assert.deepEqual(productionBuildCapabilities({}).active, productionBuildCapabilities({}).baseline);
 });
 
+test("a mixed canonical store accepts immediate IDs but returns only delayed build overrides", () => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "artem-mixed-production-store-"));
+  const path = join(temporaryRoot, "capability-overrides.json");
+  writeFileSync(path, JSON.stringify({
+    schemaVersion: "capability-overrides.v1",
+    revision: 7,
+    updatedAt: "2026-09-09T10:40:00Z",
+    overrides: {
+      home_climate_actions: true,
+      rog_g703_psu_actions: true,
+      overview_layout_editor: true,
+      planning_calendar_route: false
+    }
+  }));
+
+  assert.deepEqual(
+    loadProductionCapabilityOverrides({ PANEL_CAPABILITY_OVERRIDES_PATH: path }),
+    { planning_calendar_route: false }
+  );
+});
+
+test("an immediate-only canonical store is accepted without producing build overrides", () => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "artem-immediate-production-store-"));
+  const path = join(temporaryRoot, "capability-overrides.json");
+  writeFileSync(path, JSON.stringify({
+    schemaVersion: "capability-overrides.v1",
+    revision: 8,
+    updatedAt: "2026-09-09T10:40:00Z",
+    overrides: {
+      home_climate_actions: true,
+      rog_g703_psu_actions: true
+    }
+  }));
+
+  assert.deepEqual(
+    loadProductionCapabilityOverrides({ PANEL_CAPABILITY_OVERRIDES_PATH: path }),
+    {}
+  );
+});
+
+test("mixed canonical store values only change the intended planning build capability", () => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "artem-mixed-capability-build-"));
+  const path = join(temporaryRoot, "capability-overrides.json");
+  writeFileSync(path, JSON.stringify({
+    schemaVersion: "capability-overrides.v1",
+    revision: 9,
+    updatedAt: "2026-09-09T10:40:00Z",
+    overrides: {
+      home_climate_actions: true,
+      rog_g703_psu_actions: true,
+      planning_calendar_route: false
+    }
+  }));
+
+  const overrides = loadProductionCapabilityOverrides({ PANEL_CAPABILITY_OVERRIDES_PATH: path });
+  const capabilities = productionBuildCapabilities(overrides);
+  const environment = productionBuildEnvironment({}, overrides);
+  const planningCapabilityIds = [
+    "planning_overview",
+    "planning_tasks_route",
+    "planning_calendar_route",
+    "planning_reminders_route"
+  ];
+
+  assert.deepEqual(Object.keys(capabilities.baseline), planningCapabilityIds);
+  assert.deepEqual(Object.keys(capabilities.active), planningCapabilityIds);
+  assert.equal(capabilities.active.planning_calendar_route, false);
+  assert.equal(capabilities.active.home_climate_actions, undefined);
+  assert.equal(capabilities.active.rog_g703_psu_actions, undefined);
+  assert.equal(environment.VITE_PLANNING_CALENDAR_ROUTE_ENABLED, "false");
+  assert.equal(environment.VITE_HOME_CLIMATE_ACTIONS_ENABLED, undefined);
+  assert.equal(environment.VITE_ROG_G703_PSU_ACTIONS_ENABLED, undefined);
+});
+
 test("a present capability store must be canonical before production build consumption", () => {
   const valid = () => ({
     schemaVersion: "capability-overrides.v1",
@@ -107,7 +198,7 @@ test("a present capability store must be canonical before production build consu
     ["missing overrides", (() => { const value = valid(); delete value.overrides; return value; })()],
     ["array overrides", { ...valid(), overrides: [] }],
     ["null overrides", { ...valid(), overrides: null }],
-    ["unknown persisted ID", { ...valid(), overrides: { planning_calendar_route: false, unknown: true } }],
+    ["unknown persisted ID", { ...valid(), overrides: { home_climate_actions: true, unknown: true } }],
     ["non-boolean known ID", { ...valid(), overrides: { planning_calendar_route: "false" } }],
     ["invalid JSON", "not json"]
   ];
