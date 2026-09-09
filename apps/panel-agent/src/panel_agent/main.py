@@ -1059,6 +1059,19 @@ def delete_coffee_diary_bean(bean_id: str, request: Request, response: Response)
     return result
 
 
+@app.post("/api/v1/coffee-diary/beans/{bean_id}/restore", response_model=CoffeeDiaryBean)
+def restore_coffee_diary_bean(bean_id: str, request: Request, response: Response) -> CoffeeDiaryBean:
+    _require_coffee_diary_write()
+    try:
+        result = coffee_diary_store.restore_bean(validate_uuid4(bean_id), validate_if_match(request.headers.get("If-Match")))
+    except Exception as exc:
+        _coffee_diary_error(exc)
+        raise AssertionError("unreachable")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = f'"{result.version}"'
+    return result
+
+
 @app.post("/api/v1/coffee-diary/beans/{bean_id}/extractions", response_model=CoffeeDiaryExtraction, status_code=201)
 async def post_coffee_diary_extraction(bean_id: str, request: Request, response: Response) -> CoffeeDiaryExtraction:
     _require_coffee_diary_write()

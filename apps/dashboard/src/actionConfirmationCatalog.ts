@@ -195,7 +195,8 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     target: "Кофейное зерно",
     environment: "Кофейный дневник",
     description: "Зерно будет скрыто из активного списка, а история приготовлений сохранится.",
-    confirmLabel: "Убрать из коллекции"
+    confirmLabel: "Убрать из коллекции",
+    alwaysConfirm: true
   },
   "coffee-diary.extraction.delete": {
     id: "coffee-diary.extraction.delete",

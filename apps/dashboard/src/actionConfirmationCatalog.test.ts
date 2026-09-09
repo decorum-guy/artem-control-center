@@ -64,17 +64,25 @@ describe("action confirmation catalog", () => {
     expect(actionConfirmationCatalog["planning.tasks.archive"].description).toBe("Задача исчезнет из активных списков.");
   });
 
-  it("marks panel shutdown and diary preparation deletion as non-waivable confirmations", () => {
+  it("marks panel shutdown and diary deletions as non-waivable confirmations", () => {
     expect(actionConfirmationCatalog["system.runtime.shutdown"]).toMatchObject({
       level: "simple",
       title: "Полностью закрыть панель?",
       confirmLabel: "Полностью закрыть",
       alwaysConfirm: true
     });
+    expect(actionConfirmationCatalog["coffee-diary.bean.delete"]).toMatchObject({
+      level: "simple",
+      title: "Убрать кофе из активной коллекции?",
+      description: "Зерно будет скрыто из активного списка, а история приготовлений сохранится.",
+      confirmLabel: "Убрать из коллекции",
+      alwaysConfirm: true
+    });
     const mandatory = Object.values(actionConfirmationCatalog)
       .filter((spec) => spec.alwaysConfirm)
       .map((spec) => spec.id);
+    expect(actionConfirmationCatalog["coffee-diary.bean.delete"].alwaysConfirm).toBe(true);
     expect(actionConfirmationCatalog["coffee-diary.extraction.delete"].alwaysConfirm).toBe(true);
-    expect(mandatory).toEqual(["system.runtime.shutdown", "coffee-diary.extraction.delete"]);
+    expect(mandatory).toEqual(["system.runtime.shutdown", "coffee-diary.bean.delete", "coffee-diary.extraction.delete"]);
   });
 });

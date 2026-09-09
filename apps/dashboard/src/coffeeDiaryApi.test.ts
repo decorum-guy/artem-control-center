@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { CoffeeDiaryApiError, parseCoffeeDiaryBean, parseCoffeeDiaryExport, parseCoffeeDiaryExtraction, patchCoffeeDiaryFavorite } from "./coffeeDiaryApi";
+import { CoffeeDiaryApiError, parseCoffeeDiaryBean, parseCoffeeDiaryExport, parseCoffeeDiaryExtraction, patchCoffeeDiaryFavorite, restoreCoffeeDiaryBean } from "./coffeeDiaryApi";
 import { coffeeDiaryApiMessage } from "./coffeeDiaryMessages";
 
 const bean = {
@@ -90,6 +90,20 @@ describe("coffee diary API contracts", () => {
       body: JSON.stringify({ extractionId: null }),
       headers: expect.objectContaining({ "If-Match": '"4"' })
     }));
+    vi.unstubAllGlobals();
+  });
+
+  it("sends bean restore with the tombstone version and parses the bean contract", async () => {
+    const restored = { ...bean, version: 3 };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(restored), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await restoreCoffeeDiaryBean(bean.id, 2);
+    expect(result).toMatchObject({ id: bean.id, version: 3, name: bean.name });
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/coffee-diary/beans/${bean.id}/restore`, expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ "If-Match": '"2"' })
+    }));
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("body");
     vi.unstubAllGlobals();
   });
 

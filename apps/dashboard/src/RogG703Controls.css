@@ -84,6 +84,12 @@
   background: var(--accent-strong);
 }
 
+.rog-g703-action--wake.rog-g703-action--icon {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--surface-secondary);
+}
+
 .rog-g703-action--hibernate {
   border-color: color-mix(in srgb, var(--warning) 58%, var(--border));
 }

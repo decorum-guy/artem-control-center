@@ -378,6 +378,66 @@ def test_deleted_bean_may_own_historical_extraction(tmp_path):
     assert document.extractions[0].beanId == bean.id == extraction.beanId
 
 
+def test_restore_bean_reuses_tombstone_and_preserves_relationships(tmp_path):
+    store = CoffeeDiaryStore(tmp_path / "coffee.json", writes_enabled=True)
+    bean = store.create_bean(bean_create("保留关系", notes="Метаданные сохраняются"), "restore-bean-0001")
+    extraction = store.create_extraction(bean.id, extraction_create(make_favorite=True), "restore-extract-0001")
+    photo = CoffeeDiaryPhoto(
+        id=GRAPH_PHOTO,
+        beanId=bean.id,
+        storageId="photo-graph-1",
+        mediaType="image/jpeg",
+        byteSize=100,
+        width=10,
+        height=10,
+        sha256="a" * 64,
+        createdAt=GRAPH_TIMESTAMP,
+    )
+    store.attach_photo(bean.id, photo)
+
+    before_delete_document = store.read_document()
+    before_delete = next(item for item in before_delete_document.beans if item.id == bean.id)
+    before_extractions = [item.model_dump(mode="json") for item in before_delete_document.extractions]
+    before_photos = [item.model_dump(mode="json") for item in before_delete_document.photos]
+    assert before_delete.version == 3
+    assert before_delete.favoriteExtractionId == extraction.id
+    assert before_delete.photoIds == [photo.id]
+
+    deleted = store.delete_bean(bean.id, before_delete.version)
+    after_delete_document = store.read_document()
+    assert deleted.id == bean.id
+    assert deleted.version == 4
+    assert deleted.deletedAt is not None
+    assert after_delete_document.revision == before_delete_document.revision + 1
+    assert store.collection().beans == []
+
+    restored = store.restore_bean(bean.id, deleted.version)
+    after_restore_document = store.read_document()
+    assert restored.id == before_delete.id
+    assert restored.version == 5
+    assert restored.deletedAt is None
+    assert restored.model_dump(mode="json", exclude={"version", "updatedAt", "deletedAt"}) == before_delete.model_dump(mode="json", exclude={"version", "updatedAt", "deletedAt"})
+    assert after_restore_document.revision == after_delete_document.revision + 1
+    assert [item.model_dump(mode="json") for item in after_restore_document.extractions] == before_extractions
+    assert [item.model_dump(mode="json") for item in after_restore_document.photos] == before_photos
+    active = store.collection().beans
+    assert len(active) == 1 and active[0].id == bean.id
+
+
+def test_restore_bean_rejects_unknown_active_and_stale_versions(tmp_path):
+    store = CoffeeDiaryStore(tmp_path / "coffee.json", writes_enabled=True)
+    bean = store.create_bean(bean_create("Восстановление"), "restore-errors-0001")
+
+    with pytest.raises(CoffeeDiaryConflict, match="coffee_diary_bean_not_deleted"):
+        store.restore_bean(bean.id, bean.version)
+    with pytest.raises(CoffeeDiaryNotFound, match="coffee_diary_bean_not_found"):
+        store.restore_bean(UUID("99999999-9999-4999-8999-999999999999"), 1)
+
+    deleted = store.delete_bean(bean.id, bean.version)
+    with pytest.raises(CoffeeDiaryConflict, match="revision_conflict"):
+        store.restore_bean(bean.id, deleted.version - 1)
+
+
 def test_deleted_bean_may_own_tombstoned_photo_without_active_reference(tmp_path):
     path = tmp_path / "history.json"
     path.write_bytes(
@@ -587,3 +647,62 @@ def test_api_favourite_relationship_is_cross_bean_safe_and_stale_conflict_is_tru
         assert stale.status_code == 409 and stale.json()["detail"] == "revision_conflict"
         canonical = client.get(f"/api/v1/coffee-diary/beans/{bean_a['id']}").json()["bean"]
         assert canonical["version"] == 2 and canonical["favoriteExtractionId"] is None
+
+
+def test_api_restore_bean_uses_fixed_route_and_preserves_error_semantics(monkeypatch, tmp_path):
+    module = _api_module(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        created = client.post(
+            "/api/v1/coffee-diary/beans",
+            headers={"Idempotency-Key": "api-restore-bean-0001"},
+            json=api_bean_payload("API восстановление", notes="Сохраняем метаданные"),
+        )
+        assert created.status_code == 201
+        bean = created.json()
+
+        deleted = client.delete(
+            f"/api/v1/coffee-diary/beans/{bean['id']}",
+            headers={"If-Match": '"1"'},
+        )
+        assert deleted.status_code == 200
+        assert deleted.headers["cache-control"] == "no-store"
+        assert deleted.headers["etag"] == '"2"'
+        assert deleted.json()["deletedAt"] is not None
+        assert client.get("/api/v1/coffee-diary").json()["beans"] == []
+
+        restored = client.post(
+            f"/api/v1/coffee-diary/beans/{bean['id']}/restore",
+            headers={"If-Match": '"2"'},
+        )
+        assert restored.status_code == 200
+        assert restored.headers["cache-control"] == "no-store"
+        assert restored.headers["etag"] == '"3"'
+        assert restored.json()["id"] == bean["id"]
+        assert restored.json()["name"] == bean["name"]
+        assert restored.json()["deletedAt"] is None
+
+        active = client.post(
+            f"/api/v1/coffee-diary/beans/{bean['id']}/restore",
+            headers={"If-Match": '"3"'},
+        )
+        assert active.status_code == 409
+        assert active.json()["detail"] == "coffee_diary_conflict"
+
+        deleted_again = client.delete(
+            f"/api/v1/coffee-diary/beans/{bean['id']}",
+            headers={"If-Match": '"3"'},
+        )
+        assert deleted_again.status_code == 200
+        stale = client.post(
+            f"/api/v1/coffee-diary/beans/{bean['id']}/restore",
+            headers={"If-Match": '"3"'},
+        )
+        assert stale.status_code == 409
+        assert stale.json()["detail"] == "revision_conflict"
+
+        unknown = client.post(
+            "/api/v1/coffee-diary/beans/99999999-9999-4999-8999-999999999999/restore",
+            headers={"If-Match": '"1"'},
+        )
+        assert unknown.status_code == 404
+        assert unknown.json()["detail"] == "coffee_diary_bean_not_found"

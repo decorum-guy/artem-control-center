@@ -991,6 +991,33 @@ class CoffeeDiaryStore:
 
         return self._mutate(operation)
 
+    def restore_bean(self, bean_id: UUID, expected_version: int) -> CoffeeDiaryBean:
+        def operation(document: CoffeeDiaryDocument):
+            index = next((index for index, bean in enumerate(document.beans) if bean.id == bean_id), None)
+            if index is None:
+                raise CoffeeDiaryNotFound("coffee_diary_bean_not_found")
+            current = document.beans[index]
+            if current.deletedAt is None:
+                raise CoffeeDiaryConflict("coffee_diary_bean_not_deleted")
+            if current.version != expected_version:
+                raise CoffeeDiaryConflict("revision_conflict")
+            now = _canonical_now()
+            restored = current.model_copy(update={
+                "version": current.version + 1,
+                "updatedAt": now,
+                "deletedAt": None,
+            })
+            next_beans = [*document.beans]
+            next_beans[index] = restored
+            next_document = document.model_copy(update={
+                "revision": document.revision + 1,
+                "updatedAt": now,
+                "beans": next_beans,
+            })
+            return restored, next_document
+
+        return self._mutate(operation)
+
     def create_extraction(self, bean_id: UUID, payload: CoffeeDiaryExtractionCreate, idempotency_key: str) -> CoffeeDiaryExtraction:
         if not _IDEMPOTENCY_PATTERN.fullmatch(idempotency_key):
             raise CoffeeDiaryValidationError("idempotency_key_invalid")

@@ -398,6 +398,29 @@ test.describe("PR4 curated Overview", () => {
     await expect(wake).toHaveAccessibleName("Включить");
     await expect(wake).toBeEnabled();
     await expect(wake.locator("svg")).toHaveCount(1);
+    expect((await wake.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+    const compactWakeStyles = await wake.evaluate((element) => {
+      const actual = getComputedStyle(element);
+      const neutral = document.createElement("button");
+      neutral.className = "rog-g703-action rog-g703-action--icon";
+      neutral.style.position = "fixed";
+      neutral.style.visibility = "hidden";
+      document.body.append(neutral);
+      const expected = getComputedStyle(neutral);
+      const result = {
+        borderColor: actual.borderColor,
+        color: actual.color,
+        backgroundColor: actual.backgroundColor,
+        neutralBorderColor: expected.borderColor,
+        neutralColor: expected.color,
+        neutralBackgroundColor: expected.backgroundColor
+      };
+      neutral.remove();
+      return result;
+    });
+    expect(compactWakeStyles.borderColor).toBe(compactWakeStyles.neutralBorderColor);
+    expect(compactWakeStyles.color).toBe(compactWakeStyles.neutralColor);
+    expect(compactWakeStyles.backgroundColor).toBe(compactWakeStyles.neutralBackgroundColor);
     for (const [testId, label] of [
       ["overview-rog-g703-sleep", "Перевести ASUS ROG в спящий режим"],
       ["overview-rog-g703-hibernate", "Перевести ASUS ROG в гибернацию"]
