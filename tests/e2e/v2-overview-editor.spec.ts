@@ -19,7 +19,7 @@ type LayoutDocument = {
   schemaVersion: "overview.layout.v2";
   profileId: "samsung-control";
   presetId: "overview.default";
-  presetVersion: 2;
+  presetVersion: 3;
   revision: number;
   viewportClass: "landscape-12";
   updatedAt: string;
@@ -80,10 +80,10 @@ const foundationItems: LayoutItem[] = [
     config: { density: "comfortable" }
   },
   {
-    instanceId: "fixture.quick-actions",
-    widgetType: "home.quick-actions",
+    instanceId: "fixture.climate",
+    widgetType: "home.climate",
     visibility: "visible",
-    placement: { x: 0, y: 5, w: 7, h: 2 },
+    placement: { x: 0, y: 5, w: 7, h: 4 },
     sizeVariant: "standard",
     config: {}
   },
@@ -110,7 +110,7 @@ function makeDocument(revision = 0, items: readonly LayoutItem[] = foundationIte
     schemaVersion: "overview.layout.v2",
     profileId: "samsung-control",
     presetId: "overview.default",
-    presetVersion: 2,
+    presetVersion: 3,
     revision,
     viewportClass: "landscape-12",
     updatedAt: "2026-08-14T12:00:00+00:00",
@@ -279,12 +279,14 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
           ".overview-rog-widget__action",
           ".overview-rog-widget__unavailable"
         ]
-      : currentId === "fixture.quick-actions"
+      : currentId === "fixture.climate"
         ? [
-            ".overview-home-widget__heading h2",
-            ".overview-home-widget__cell-kicker",
-            ".overview-home-widget__cell strong",
-            ".overview-home-widget__cell-state"
+            ".climate-control__header h2",
+            ".climate-control__status",
+            ".climate-control__room-temperature",
+            ".climate-control__target-temperature",
+            ".climate-control__mode-label select",
+            ".climate-control__fan-label select"
           ]
         : currentId === "fixture.health"
           ? [
@@ -330,7 +332,7 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
         if (control.visualRect && content.rect) expect(rectIntersects(control.visualRect, content.rect), `${control.label} intersects ${content.selector}`).toBe(false);
       }
     }
-    if (instanceId === "fixture.rog" || instanceId === "fixture.quick-actions" || instanceId === "fixture.health") {
+    if (instanceId === "fixture.rog" || instanceId === "fixture.climate" || instanceId === "fixture.health") {
       for (const content of geometry.semanticContent) {
         if (control.visualRect && content) expect(rectIntersects(control.visualRect, content), `${control.label} intersects semantic content`).toBe(false);
       }
@@ -576,19 +578,19 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     expect(canonicalGeometry.horizontalOverflow).toBe(false);
 
     await selectFrame(page, "fixture.coffee");
-    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.climate", "fixture.health"]);
     await captureArtifact(page, testInfo, "overview-edit-selected-coffee.png");
 
     await selectFrame(page, "fixture.rog");
     await assertEditorChromeGeometry(page, "fixture.rog", ["fixture.coffee", "fixture.planning"]);
     await captureArtifact(page, testInfo, "overview-edit-selected-rog.png");
 
-    await selectFrame(page, "fixture.quick-actions");
-    await assertEditorChromeGeometry(page, "fixture.quick-actions", ["fixture.coffee", "fixture.health"]);
+    await selectFrame(page, "fixture.climate");
+    await assertEditorChromeGeometry(page, "fixture.climate", ["fixture.coffee", "fixture.health"]);
     await captureArtifact(page, testInfo, "overview-edit-selected-lower-widget.png");
 
     await selectFrame(page, "fixture.health");
-    await assertEditorChromeGeometry(page, "fixture.health", ["fixture.coffee", "fixture.quick-actions"]);
+    await assertEditorChromeGeometry(page, "fixture.health", ["fixture.coffee", "fixture.climate"]);
     await captureArtifact(page, testInfo, "overview-edit-selected-health.png");
   });
 
@@ -639,7 +641,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
 
     await openEditor(page, "/overview?scenario=coffee-off&theme=night");
     await selectFrame(page, "fixture.coffee");
-    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.climate", "fixture.health"]);
     await assertCoffeeContentGeometry(page, "coffee-off selected");
     await captureArtifact(page, testInfo, "overview-edit-coffee-off-selected.png");
 
@@ -652,7 +654,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await page.getByTestId("overview-configure").click();
     await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
     await selectFrame(page, "fixture.coffee");
-    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+    await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.climate", "fixture.health"]);
     await assertCoffeeActivityHidden(page);
     await captureArtifact(page, testInfo, "overview-edit-coffee-warming-selected.png");
 
@@ -670,7 +672,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
       const items = cloneItems();
       const coffee = items.find((item) => item.instanceId === "fixture.coffee");
       const planning = items.find((item) => item.instanceId === "fixture.planning");
-      const quickActions = items.find((item) => item.instanceId === "fixture.quick-actions");
+      const climate = items.find((item) => item.instanceId === "fixture.climate");
       const health = items.find((item) => item.instanceId === "fixture.health");
       if (coffee) {
         coffee.sizeVariant = variant;
@@ -688,8 +690,11 @@ test.describe("Overview V2 Edit mode and persistence", () => {
             ? { x: 8, y: 1, w: 4, h: 3 }
             : { x: 7, y: 1, w: 5, h: 4 };
       }
-      if (quickActions) quickActions.placement = variant === "large" ? { x: 0, y: 6, w: 7, h: 2 } : { x: 0, y: 5, w: 7, h: 2 };
-      if (health) health.placement = variant === "large" ? { x: 7, y: 6, w: 5, h: 2 } : { x: 7, y: 5, w: 5, h: 2 };
+      if (climate) {
+        climate.sizeVariant = variant === "large" ? "large" : "standard";
+        climate.placement = variant === "large" ? { x: 0, y: 6, w: 8, h: 5 } : { x: 0, y: 5, w: 7, h: 4 };
+      }
+      if (health) health.placement = variant === "large" ? { x: 8, y: 6, w: 4, h: 2 } : { x: 7, y: 5, w: 5, h: 2 };
       routeState.document = makeDocument(0, items);
 
       await page.goto("/overview?scenario=coffee-off&theme=night");

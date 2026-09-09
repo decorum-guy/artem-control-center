@@ -26,7 +26,10 @@
 .rog-psu-controls__identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .rog-psu-controls__identity strong { color: var(--cc-text); font-size: var(--cc-type-body-size); }
 .rog-psu-controls__toggle { width: 48px; min-width: 48px; padding: 0; font-size: 22px; }
+.rog-psu-controls__toggle svg { display: block; }
 .rog-psu-controls__toggle--on { border-color: var(--cc-accent); color: var(--cc-on-accent); background: var(--cc-accent-strong); }
+
+.rog-psu-controls--home { padding: 12px; gap: 10px; }
 
 @media (max-width: 520px) {
   .rog-psu-controls { padding: 12px; }

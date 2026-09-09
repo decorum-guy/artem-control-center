@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import asyncio
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -80,14 +81,141 @@ def test_trusted_appearance_schema_matches_registered_widget_vocabulary(tmp_path
         assert all(control["control"] in {"boolean", "enum", "integer_range"} for control in controls)
 
 
-def test_get_without_file_returns_shipped_v2_and_no_store(tmp_path, monkeypatch):
+def test_home_climate_registry_shipped_v3_and_strict_size_singleton_validation(tmp_path, monkeypatch):
+    module = load_app(monkeypatch, tmp_path / "layout.json", writes=True)
+    from panel_agent import overview_layout
+
+    assert overview_layout.WIDGETS["home.climate"]["sizes"] == {
+        "compact": (4, 5),
+        "standard": (7, 4),
+        "large": (8, 5),
+    }
+    assert overview_layout.shipped_layout()["presetVersion"] == 3
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        payload = initial.json()
+        climate = [item for item in payload["items"] if item["widgetType"] == "home.climate"]
+        assert len(climate) == 1
+        assert not any(item["widgetType"] == "home.quick-actions" for item in payload["items"])
+
+        invalid_size = deepcopy(payload["items"])
+        invalid_size[3]["sizeVariant"] = "compact"
+        invalid_size[3]["placement"] = {"x": 0, "y": 5, "w": 7, "h": 4}
+        assert client.patch(
+            "/api/v1/overview/layout",
+            headers={"If-Match": initial.headers["etag"]},
+            json={"items": invalid_size},
+        ).status_code == 422
+
+        duplicate = deepcopy(payload["items"])
+        duplicate.append(deepcopy(next(item for item in duplicate if item["widgetType"] == "home.climate")))
+        duplicate[-1]["instanceId"] = "fixture.climate-copy"
+        assert client.patch(
+            "/api/v1/overview/layout",
+            headers={"If-Match": initial.headers["etag"]},
+            json={"items": duplicate},
+        ).status_code == 422
+
+
+def test_preset_v2_to_v3_migration_preserves_custom_layout_and_handles_hidden_slot(tmp_path, monkeypatch):
+    module = load_app(monkeypatch, tmp_path / "layout.json", writes=False)
+    from panel_agent import overview_layout
+
+    old = overview_layout.shipped_layout(revision=7)
+    old["presetVersion"] = 2
+    quick = next(item for item in old["items"] if item["instanceId"] == "fixture.climate")
+    quick.update({
+        "instanceId": "fixture.quick-actions",
+        "widgetType": "home.quick-actions",
+        "visibility": "hidden",
+        "placement": {"x": 4, "y": 11, "w": 7, "h": 2},
+        "sizeVariant": "standard",
+        "config": {},
+    })
+    migrated = overview_layout.migrate_preset_v2_to_v3(old)
+    climate = next(item for item in migrated["items"] if item["widgetType"] == "home.climate")
+    assert migrated["presetVersion"] == 3
+    assert climate == {
+        "instanceId": "fixture.climate",
+        "widgetType": "home.climate",
+        "visibility": "hidden",
+        "placement": {"x": 4, "y": 11, "w": 7, "h": 4},
+        "sizeVariant": "standard",
+        "config": {},
+    }
+
+    custom_items = [
+        item for item in old["items"]
+        if item["instanceId"] != "fixture.quick-actions"
+    ]
+    custom_items[1]["placement"] = {"x": 0, "y": 6, "w": 7, "h": 4}
+    custom = {**old, "items": custom_items}
+    custom_migrated = overview_layout.migrate_preset_v2_to_v3(custom)
+    custom_climate = next(item for item in custom_migrated["items"] if item["widgetType"] == "home.climate")
+    assert custom_migrated["presetVersion"] == 3
+    assert custom_climate["placement"] == {"x": 0, "y": 1, "w": 7, "h": 4}
+    assert {item["instanceId"] for item in custom_migrated["items"] if item["instanceId"] != "fixture.climate"} == {
+        item["instanceId"] for item in custom_items
+    }
+
+
+def test_preset_v2_existing_climate_is_not_duplicated_and_read_does_not_write(tmp_path, monkeypatch):
+    path = tmp_path / "layout.json"
+    module = load_app(monkeypatch, path, writes=False)
+    from panel_agent import overview_layout
+
+    stored = overview_layout.shipped_layout(revision=11)
+    stored["presetVersion"] = 2
+    stored["items"] = [item for item in stored["items"] if item["widgetType"] != "home.quick-actions"]
+    original = json.dumps(stored, ensure_ascii=False).encode("utf-8")
+    path.write_bytes(original)
+
+    with TestClient(module.app) as client:
+        payload = get_layout(client).json()
+        assert payload["presetVersion"] == 3
+        assert payload["revision"] == 11
+        assert len([item for item in payload["items"] if item["widgetType"] == "home.climate"]) == 1
+    assert path.read_bytes() == original
+
+
+def test_preset_v2_exact_climate_migration_reflows_a_collision_without_deleting_widgets():
+    from panel_agent import overview_layout
+
+    migrated = overview_layout.migrate_preset_v2_to_v3({
+        "schemaVersion": "overview.layout.v2",
+        "presetVersion": 2,
+        "items": [
+            {
+                "instanceId": "owner.other",
+                "widgetType": "home.coffee-machine",
+                "visibility": "visible",
+                "placement": {"x": 0, "y": 0, "w": 7, "h": 4},
+                "sizeVariant": "standard",
+                "config": {},
+            },
+            {
+                "instanceId": "fixture.quick-actions",
+                "widgetType": "home.quick-actions",
+                "visibility": "visible",
+                "placement": {"x": 0, "y": 0, "w": 7, "h": 2},
+                "sizeVariant": "standard",
+                "config": {},
+            },
+        ],
+    })
+    climate = next(item for item in migrated["items"] if item["instanceId"] == "fixture.climate")
+    assert climate["placement"] == {"x": 0, "y": 4, "w": 7, "h": 4}
+    assert any(item["instanceId"] == "owner.other" for item in migrated["items"])
+
+
+def test_get_without_file_returns_shipped_v3_and_no_store(tmp_path, monkeypatch):
     module = load_app(monkeypatch, tmp_path / "layout.json", writes=False)
     with TestClient(module.app) as client:
         response = get_layout(client)
         payload = response.json()
         assert payload["schemaVersion"] == "overview.layout.v2"
         assert payload["presetId"] == "overview.default"
-        assert payload["presetVersion"] == 2
+        assert payload["presetVersion"] == 3
         assert payload["revision"] == 0
         assert payload["writesEnabled"] is False
         assert response.headers["cache-control"] == "no-store"
@@ -474,7 +602,7 @@ def test_legacy_migration_and_corrupt_fallback_never_overwrite_bytes(tmp_path, m
     module = load_app(monkeypatch, path, writes=False)
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 2
+        assert payload["presetVersion"] == 3
         assert payload["revision"] == 0
         assert payload["warnings"]
     assert path.read_bytes() == corrupt_bytes

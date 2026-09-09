@@ -27,7 +27,7 @@ from .contracts import (
 SCHEMA_VERSION = "overview.layout.v2"
 PROFILE_ID = "samsung-control"
 PRESET_ID = "overview.default"
-PRESET_VERSION = 2
+PRESET_VERSION = 3
 VIEWPORT_CLASS = "landscape-12"
 CANONICAL_COLUMNS = 12
 MAX_ITEMS = 32
@@ -46,6 +46,11 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
     "home.coffee-machine": {
         "singleton": True,
         "sizes": {"compact": (4, 3), "standard": (7, 4), "large": (8, 5)},
+        "default": "standard",
+    },
+    "home.climate": {
+        "singleton": True,
+        "sizes": {"compact": (4, 5), "standard": (7, 4), "large": (8, 5)},
         "default": "standard",
     },
     "system.rog-g703-operational": {
@@ -88,6 +93,7 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
 DEFAULT_INSTANCE_IDS = {
     "system.rog-g703-operational": "fixture.rog",
     "home.coffee-machine": "fixture.coffee",
+    "home.climate": "fixture.climate",
     "planning.summary": "fixture.planning",
     "home.quick-actions": "fixture.quick-actions",
     "system.health-summary": "fixture.health",
@@ -209,7 +215,7 @@ def shipped_items() -> List[Dict[str, Any]]:
         _item("fixture.rog", "system.rog-g703-operational", "standard", 0, 0),
         _item("fixture.coffee", "home.coffee-machine", "standard", 0, 1),
         _item("fixture.planning", "planning.summary", "standard", 7, 1),
-        _item("fixture.quick-actions", "home.quick-actions", "standard", 0, 5),
+        _item("fixture.climate", "home.climate", "standard", 0, 5),
         _item("fixture.health", "system.health-summary", "compact", 7, 5),
     ]
 
@@ -248,6 +254,69 @@ def _first_fit(
             if not any(_rectangle_overlap(candidate, rect) for rect in occupied):
                 return candidate
     return _placement_dict(0, max(first_row, bottom), w, h)
+
+
+def migrate_preset_v2_to_v3(raw: Mapping[str, Any]) -> Dict[str, Any]:
+    """Convert the shipped PR #214 quick-actions climate slot to its real type."""
+    migrated = deepcopy(dict(raw))
+    source_items = [deepcopy(item) for item in raw.get("items", []) if isinstance(item, dict)]
+    has_climate = any(item.get("widgetType") == "home.climate" for item in source_items)
+    exact_quick_index = next(
+        (
+            index
+            for index, item in enumerate(source_items)
+            if item.get("instanceId") == "fixture.quick-actions"
+            and item.get("widgetType") == "home.quick-actions"
+        ),
+        None,
+    )
+
+    if not has_climate and exact_quick_index is not None:
+        old_item = source_items[exact_quick_index]
+        old_placement = old_item.get("placement")
+        old_x = old_placement.get("x", 0) if isinstance(old_placement, dict) else 0
+        old_y = old_placement.get("y", 0) if isinstance(old_placement, dict) else 0
+        old_x = old_x if type(old_x) is int else 0
+        old_y = old_y if type(old_y) is int else 0
+        placement = _placement_dict(
+            max(0, min(CANONICAL_COLUMNS - 7, old_x)),
+            max(0, old_y),
+            7,
+            4,
+        )
+        if old_item.get("visibility", "visible") != "hidden":
+            occupied = [
+                item["placement"]
+                for index, item in enumerate(source_items)
+                if index != exact_quick_index
+                and item.get("visibility", "visible") != "hidden"
+                and isinstance(item.get("placement"), dict)
+                and all(type(item["placement"].get(key)) is int for key in ("x", "y", "w", "h"))
+            ]
+            if any(_rectangle_overlap(placement, rectangle) for rectangle in occupied):
+                placement = _first_fit((7, 4), occupied, 0)
+        source_items[exact_quick_index] = {
+            "instanceId": "fixture.climate",
+            "widgetType": "home.climate",
+            "visibility": "hidden" if old_item.get("visibility") == "hidden" else "visible",
+            "placement": placement,
+            "sizeVariant": "standard",
+            "config": {},
+        }
+    elif not has_climate:
+        occupied = []
+        for item in source_items:
+            if item.get("visibility", "visible") == "hidden":
+                continue
+            placement = item.get("placement")
+            if isinstance(placement, dict) and all(type(placement.get(key)) is int for key in ("x", "y", "w", "h")):
+                occupied.append(placement)
+        placement = _first_fit((7, 4), occupied, 0)
+        source_items.append(_item("fixture.climate", "home.climate", "standard", placement["x"], placement["y"]))
+
+    migrated["items"] = source_items
+    migrated["presetVersion"] = PRESET_VERSION
+    return migrated
 
 
 def _safe_identifier(value: Any, fallback: str) -> str:
@@ -387,7 +456,7 @@ def migrate_v1_to_v2(raw: Mapping[str, Any]) -> Dict[str, Any]:
         "schemaVersion": SCHEMA_VERSION,
         "profileId": PROFILE_ID,
         "presetId": PRESET_ID,
-        "presetVersion": PRESET_VERSION,
+        "presetVersion": 2,
         "revision": int(raw.get("revision", 0)) if type(raw.get("revision", 0)) is int else 0,
         "viewportClass": VIEWPORT_CLASS,
         "updatedAt": raw.get("updatedAt") if isinstance(raw.get("updatedAt"), str) else DEFAULT_UPDATED_AT,
@@ -469,6 +538,8 @@ def recover_stored_layout(raw: Mapping[str, Any]) -> Tuple[Optional[Dict[str, An
         raw = migrate_v1_to_v2(raw)
     if raw.get("schemaVersion") != SCHEMA_VERSION:
         return None, ["stored layout schema is not recognized"], []
+    if raw.get("presetVersion") == 2:
+        raw = migrate_preset_v2_to_v3(raw)
     if raw.get("profileId") not in {None, PROFILE_ID}:
         return None, ["stored layout profile is not recognized"], []
     if raw.get("presetId") not in {None, PRESET_ID}:

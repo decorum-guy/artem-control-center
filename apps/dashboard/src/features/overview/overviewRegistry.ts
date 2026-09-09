@@ -54,6 +54,24 @@ export const overviewWidgetRegistry: readonly OverviewWidgetDefinition[] = [
     fixtureCopy: "Структурный слот состояния и безопасного действия."
   }),
   definition({
+    widgetType: "home.climate",
+    title: "Кондиционер",
+    category: "Дом",
+    iconKey: "home",
+    singleton: true,
+    minW: 4,
+    minH: 4,
+    maxW: 8,
+    maxH: 5,
+    defaultSizeVariant: "standard",
+    sizes: {
+      compact: { w: 4, h: 5 },
+      standard: { w: 7, h: 4 },
+      large: { w: 8, h: 5 }
+    },
+    fixtureCopy: "Состояние и безопасное управление кондиционером."
+  }),
+  definition({
     widgetType: "system.rog-g703-operational",
     title: "ASUS ROG G703GI",
     category: "Управление",

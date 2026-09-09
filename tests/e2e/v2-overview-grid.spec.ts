@@ -67,7 +67,7 @@ test.describe("Overview V2 safe grid foundation", () => {
       ["fixture.rog", 0, 0, 12, 1],
       ["fixture.coffee", 0, 1, 7, 4],
       ["fixture.planning", 7, 1, 5, 4],
-      ["fixture.quick-actions", 0, 5, 7, 2],
+      ["fixture.climate", 0, 5, 7, 4],
       ["fixture.health", 7, 5, 5, 2]
     ] as const;
     for (const [instanceId, x, y, w, h] of expected) {
@@ -164,7 +164,7 @@ test.describe("Overview V2 safe grid foundation", () => {
     await expect(page.getByTestId("overview-grid")).toHaveAttribute("data-grid-profile", "compact-4");
     await expect(page.getByTestId("overview-grid")).toHaveAttribute("data-grid-columns", "4");
     expect(await page.locator(".overview-v2-grid-item").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-instance-id"))))
-      .toEqual(["fixture.rog", "fixture.coffee", "fixture.planning", "fixture.quick-actions", "fixture.health"]);
+      .toEqual(["fixture.rog", "fixture.coffee", "fixture.planning", "fixture.climate", "fixture.health"]);
     const columns = await page.locator(".overview-v2-grid-item").evaluateAll((elements) => elements.map((element) => Number(element.getAttribute("data-grid-x")) + Number(element.getAttribute("data-grid-w"))));
     expect(columns.every((end) => end <= 4)).toBe(true);
     const controls = await page.locator(".overview-v2-grid button, .overview-v2-grid a, .overview-v2-grid input, .overview-v2-grid select").evaluateAll((elements) => elements.flatMap((element) => {

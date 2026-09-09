@@ -182,6 +182,36 @@
       }
     },
     {
+      "id": "rog_g703gi",
+      "title": "ASUS ROG G703GI",
+      "enabled": false,
+      "dataContract": "system.rog-g703.v1",
+      "health": "healthy",
+      "source": "fixture",
+      "summary": "ASUS companion state",
+      "actions": [
+        { "id": "system.rog_g703.wake", "title": "Включить", "enabled": false, "risk": "low" },
+        { "id": "system.rog_g703.sleep", "title": "Сон", "enabled": false, "risk": "medium" },
+        { "id": "system.rog_g703.hibernate", "title": "Гибернация", "enabled": false, "risk": "medium" }
+      ],
+      "presentation": {
+        "category": "system",
+        "group": "System",
+        "overview": "aggregate",
+        "priority": 95,
+        "environment": "home",
+        "freshnessLabel": "только что",
+        "incidents": 0
+      },
+      "data": {
+        "targetId": "rog_g703gi",
+        "status": "online",
+        "observedAt": "2026-07-29T12:00:00Z",
+        "lastTransitionAt": "2026-07-29T11:50:00Z",
+        "lastError": null
+      }
+    },
+    {
       "id": "alice-tg-bot",
       "title": "AliceTG Bot",
       "enabled": true,
@@ -403,6 +433,16 @@
           "psu2": { "state": "unavailable", "available": false }
         }
       }
+    },
+    "home-asus-both": {
+      "rog_g703gi": { "enabled": true },
+      "rog-g703-psu": { "enabled": true }
+    },
+    "home-asus-psu-only": {
+      "rog-g703-psu": { "enabled": true }
+    },
+    "home-asus-host-only": {
+      "rog_g703gi": { "enabled": true }
     },
     "home-ha-stale": {
       "home-assistant": {

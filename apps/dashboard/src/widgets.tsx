@@ -350,7 +350,7 @@ export function CoffeeWidget({
       <div className="coffee-panel__copy">
         <div className="coffee-panel__heading">
           <div>
-            <p className="section-kicker">Дом</p>
+            {variant !== "home-v2" && <p className="section-kicker">Дом</p>}
             <h2>{service.title}</h2>
           </div>
         </div>

@@ -26,10 +26,10 @@ const foundationLayout: readonly OverviewLayoutItem[] = [
     visibility: "visible"
   },
   {
-    instanceId: "fixture.quick-actions",
-    widgetType: "home.quick-actions",
+    instanceId: "fixture.climate",
+    widgetType: "home.climate",
     sizeVariant: "standard",
-    placement: { x: 0, y: 5, w: 7, h: 2 },
+    placement: { x: 0, y: 5, w: 7, h: 4 },
     visibility: "visible"
   },
   {
@@ -60,7 +60,7 @@ export function overviewFoundationLayout(
       instanceId: "fixture.unknown",
       widgetType: "future.untrusted-widget",
       sizeVariant: "standard",
-      placement: { x: 0, y: 8, w: 7, h: 4 },
+      placement: { x: 0, y: 9, w: 7, h: 4 },
       visibility: "visible",
       config: {}
     });
@@ -71,7 +71,7 @@ export function overviewFoundationLayout(
       instanceId: "fixture.throwing",
       widgetType: "planning.task-list",
       sizeVariant: "compact",
-      placement: { x: 0, y: 8, w: 4, h: 3 },
+      placement: { x: 0, y: 9, w: 4, h: 3 },
       visibility: "visible",
       config: {}
     });
@@ -82,7 +82,7 @@ export function overviewFoundationLayout(
       instanceId: "fixture.invalid",
       widgetType: "planning.task-list",
       sizeVariant: "compact",
-      placement: { x: 0, y: 8, w: 6, h: 3 },
+      placement: { x: 0, y: 9, w: 6, h: 3 },
       visibility: "visible",
       config: {}
     });

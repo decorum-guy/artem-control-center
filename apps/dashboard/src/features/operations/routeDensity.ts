@@ -65,6 +65,11 @@ export interface HomePrimarySelection {
   additional: ServiceSnapshot[];
 }
 
+export interface HomeAsusSelection {
+  rog: ServiceSnapshot | null;
+  rogPsu: ServiceSnapshot | null;
+}
+
 /**
  * Selects only source-owned primary placements. The fallback is intentionally
  * one bounded device, so sparse snapshots never render an empty peer slot.
@@ -84,6 +89,15 @@ export function selectHomePrimaryDevices(services: readonly ServiceSnapshot[]): 
     kettle,
     fallback,
     additional: homeDevices.filter((service) => !selected.has(service.id))
+  };
+}
+
+/** Resolves the two fixed ASUS Home subjects without coupling their state domains. */
+export function selectHomeAsusServices(services: readonly ServiceSnapshot[]): HomeAsusSelection {
+  const ordered = enabledServices(services);
+  return {
+    rog: ordered.find((service) => service.enabled && (service.id === "rog_g703gi" || service.dataContract === "system.rog-g703.v1")) ?? null,
+    rogPsu: ordered.find((service) => service.enabled && service.dataContract === "system.rog-g703-psu.v1") ?? null
   };
 }
 

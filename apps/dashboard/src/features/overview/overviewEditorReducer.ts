@@ -70,7 +70,7 @@ export function makeShippedOverviewDocument(writesEnabled = false): OverviewLayo
     schemaVersion: "overview.layout.v2",
     profileId: "samsung-control",
     presetId: "overview.default",
-    presetVersion: 2,
+    presetVersion: 3,
     revision: 0,
     viewportClass: "landscape-12",
     updatedAt: "1970-01-01T00:00:00+00:00",

@@ -117,6 +117,10 @@
   box-sizing: border-box;
   padding: 8px 148px 8px 8px;
 }
+.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.climate"] .overview-edit-frame__body {
+  box-sizing: border-box;
+  padding: 8px 148px 8px 8px;
+}
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.coffee-machine"]
   .coffee-panel--overview[data-overview-copy-density="spacious"] .coffee-asset {
   transform: translateX(calc(12px * var(--cc-coffee-image-x, 0)))
@@ -175,7 +179,8 @@
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="system.rog-g703-operational"] .overview-edit-frame__actions,
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.quick-actions"] .overview-edit-frame__actions,
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="system.health-summary"] .overview-edit-frame__actions,
-.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.coffee-machine"] .overview-edit-frame__actions {
+.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.coffee-machine"] .overview-edit-frame__actions,
+.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.climate"] .overview-edit-frame__actions {
   top: 0;
   right: 0;
 }
@@ -186,7 +191,8 @@
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="system.rog-g703-operational"] .overview-edit-frame__menu-toggle,
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.quick-actions"] .overview-edit-frame__menu-toggle,
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="system.health-summary"] .overview-edit-frame__menu-toggle,
-.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.coffee-machine"] .overview-edit-frame__menu-toggle {
+.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.coffee-machine"] .overview-edit-frame__menu-toggle,
+.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.climate"] .overview-edit-frame__menu-toggle {
   top: 0;
   right: 96px;
 }
@@ -206,7 +212,8 @@
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="system.rog-g703-operational"] .overview-edit-frame__size,
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.quick-actions"] .overview-edit-frame__size,
 .overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="system.health-summary"] .overview-edit-frame__size,
-.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.coffee-machine"] .overview-edit-frame__size {
+.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.coffee-machine"] .overview-edit-frame__size,
+.overview-edit-frame--selected:not([data-editor-chrome-hidden="true"])[data-widget-type="home.climate"] .overview-edit-frame__size {
   right: 60px;
   bottom: 12px;
 }

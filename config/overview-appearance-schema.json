@@ -109,6 +109,7 @@
       ]
     },
     "home.quick-actions": { "defaults": {}, "controls": [] },
+    "home.climate": { "defaults": {}, "controls": [] },
     "system.health-summary": { "defaults": {}, "controls": [] },
     "system.rog-g703-operational": { "defaults": {}, "controls": [] },
     "weather.alert": { "defaults": {}, "controls": [] },

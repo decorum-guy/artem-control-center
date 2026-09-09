@@ -9,6 +9,7 @@ const categories: readonly OverviewWidgetCategory[] = ["Управление", "
 function purposeCopy(widgetType: string): string {
   switch (widgetType) {
     case "home.coffee-machine": return "Состояние и управление кофемашиной";
+    case "home.climate": return "Состояние и управление кондиционером";
     case "system.rog-g703-operational": return "Операционное состояние компьютера";
     case "planning.summary": return "Ближайшие дела на сегодня";
     case "home.quick-actions": return "Быстрый доступ к домашним устройствам";

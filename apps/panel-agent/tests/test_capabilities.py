@@ -131,6 +131,46 @@ def test_inventory_is_explicit_safe_and_two_behaviors_only(tmp_path, monkeypatch
         assert forbidden not in serialized
 
 
+def test_home_action_gates_are_immediate_owner_overrides_with_environment_baselines(tmp_path, monkeypatch):
+    module, store = _load(monkeypatch, tmp_path)
+    capability_ids = ("home_climate_actions", "rog_g703_psu_actions")
+    with TestClient(module.app) as client:
+        initial = _get(client)
+        assert all(_entry(initial, capability_id)["mutable"] is True for capability_id in capability_ids)
+        assert all(_entry(initial, capability_id)["behavior"] == "immediate" for capability_id in capability_ids)
+        assert all(_entry(initial, capability_id)["requiredApplyAction"] == "none" for capability_id in capability_ids)
+        assert all(_entry(initial, capability_id)["configuredEnabled"] is False for capability_id in capability_ids)
+        assert all(_entry(initial, capability_id)["activeEnabled"] is False for capability_id in capability_ids)
+
+        revision = initial["revision"]
+        for capability_id in capability_ids:
+            enabled = _patch(client, revision, capability_id, True)
+            assert enabled.status_code == 200
+            revision = enabled.json()["revision"]
+            enabled_entry = _entry(enabled.json(), capability_id)
+            assert enabled_entry["activeEnabled"] is True
+            assert enabled_entry["desiredEnabled"] is True
+            assert enabled_entry["overrideEnabled"] is True
+
+            disabled = _patch(client, revision, capability_id, False)
+            assert disabled.status_code == 200
+            revision = disabled.json()["revision"]
+            assert _entry(disabled.json(), capability_id)["activeEnabled"] is False
+
+            cleared = _patch(client, revision, capability_id, None)
+            assert cleared.status_code == 200
+            revision = cleared.json()["revision"]
+            cleared_entry = _entry(cleared.json(), capability_id)
+            assert cleared_entry["activeEnabled"] is False
+            assert cleared_entry["overrideEnabled"] is None
+
+    stored = json.loads(store.read_text(encoding="utf-8"))
+    assert stored["overrides"] == {}
+    serialized = store.read_text(encoding="utf-8")
+    for forbidden in ("PANEL_HOME_CLIMATE_ACTIONS_ENABLED", "PANEL_ROG_G703_PSU_ACTIONS_ENABLED", "runtime.env", str(store)):
+        assert forbidden not in serialized
+
+
 def test_current_product_gate_set_has_explicit_registry_classification():
     """A newly introduced product gate requires a deliberate inventory choice."""
     from panel_agent.capabilities import CAPABILITY_REGISTRY

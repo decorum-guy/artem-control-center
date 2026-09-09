@@ -98,24 +98,36 @@ function renderPlanning(item: OverviewProjectionItem, runtime: OverviewRuntimeCo
   );
 }
 
+function renderClimate(item: OverviewProjectionItem, runtime: OverviewRuntimeContext): ReactNode {
+  const climate = runtime.snapshot.services.find((service) => service.dataContract === "home.climate.v1") ?? null;
+  if (!climate) {
+    return (
+      <OverviewRuntimeUnavailable
+        title="Кондиционер"
+        detail="Данные Home Assistant пока недоступны."
+        testId="overview-climate-unavailable"
+      />
+    );
+  }
+  return (
+    <WorkZone className="overview-v2-real-widget overview-climate-widget" data-testid="overview-climate-widget" data-widget-type="home.climate">
+      <ClimateControl
+        service={climate}
+        variant="overview"
+        overviewSizeVariant={overviewSizeVariant(item.sizeVariant)}
+        interactive={!runtime.editMode}
+      />
+    </WorkZone>
+  );
+}
+
 function quickDevices(snapshot: DashboardSnapshot): ServiceSnapshot[] {
   return servicesByPriority(snapshot.services)
-    .filter((service) => service.presentation?.overview === "quick-control")
+    .filter((service) => service.presentation?.overview === "quick-control" && service.dataContract !== "home.climate.v1")
     .slice(0, 2);
 }
 
 function renderHome(runtime: OverviewRuntimeContext): ReactNode {
-  const climate = servicesByPriority(runtime.snapshot.services).find(
-    (service) => service.enabled && service.dataContract === "home.climate.v1"
-  ) ?? null;
-  if (climate) {
-    return (
-      <WorkZone className="overview-v2-real-widget overview-home-widget overview-home-widget--climate" data-testid="overview-home-widget">
-        <ClimateControl service={climate} variant="overview" interactive={!runtime.editMode} />
-      </WorkZone>
-    );
-  }
-
   const devices = quickDevices(runtime.snapshot);
   const stateCopy = (service: ServiceSnapshot): string => {
     const stage = (service.data as { stage?: unknown }).stage;
@@ -307,6 +319,8 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
     }
     case "home.coffee-machine":
       return renderCoffee(item, runtime);
+    case "home.climate":
+      return renderClimate(item, runtime);
     case "planning.summary":
       return renderPlanning(item, runtime);
     case "home.quick-actions":

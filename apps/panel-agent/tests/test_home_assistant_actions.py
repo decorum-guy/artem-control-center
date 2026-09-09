@@ -168,6 +168,7 @@ def make_stack(
     psu_gate: bool = True,
     writes: bool = True,
     profile: str = "standard",
+    gate_provider=None,
 ) -> tuple[HomeAssistantStub, HomeAssistantAdapter, AccessPolicyStore, HomeAssistantActionExecutor]:
     stub = server or HomeAssistantStub(base_states())
     transport = httpx.MockTransport(stub)
@@ -194,6 +195,7 @@ def make_stack(
         clock=clock,
         verification_timeout=1.0,
         verification_interval=0.25,
+        gate_provider=gate_provider,
     )
     return stub, adapter, access, executor
 
@@ -632,6 +634,33 @@ def test_action_gates_and_access_profile_fail_closed(tmp_path: Path) -> None:
     with pytest.raises(HTTPException) as writes_error:
         run(writes_disabled.execute(request("home.climate.power_on")))
     assert writes_error.value.detail == "ha_action_disabled"
+
+
+def test_effective_owner_gate_provider_changes_climate_and_psu_availability_without_restart(tmp_path: Path) -> None:
+    gates = {
+        "home_climate_actions": False,
+        "rog_g703_psu_actions": False,
+    }
+    provider = lambda capability_id: gates[capability_id]
+    _, _, _, executor = make_stack(tmp_path, climate_gate=False, psu_gate=False, gate_provider=provider)
+
+    assert executor.availability()["actions"]["home.climate.power_on"]["availability"] == "gate_disabled"
+    assert executor.availability()["actions"]["system.rog_g703.psu.mode.full"]["availability"] == "gate_disabled"
+
+    gates["home_climate_actions"] = True
+    gates["rog_g703_psu_actions"] = True
+    assert executor.availability()["actions"]["home.climate.power_on"]["availability"] == "allowed"
+    assert executor.availability()["actions"]["system.rog_g703.psu.mode.full"]["availability"] == "allowed"
+
+    _, _, _, writes_disabled = make_stack(
+        tmp_path / "global-writes-off",
+        climate_gate=False,
+        psu_gate=False,
+        writes=False,
+        gate_provider=lambda _capability_id: True,
+    )
+    assert writes_disabled.availability()["actions"]["home.climate.power_on"]["availability"] == "gate_disabled"
+    assert writes_disabled.availability()["actions"]["system.rog_g703.psu.mode.full"]["availability"] == "gate_disabled"
 
 
 def test_stale_or_disconnected_global_transport_blocks_new_mutation(tmp_path: Path) -> None:

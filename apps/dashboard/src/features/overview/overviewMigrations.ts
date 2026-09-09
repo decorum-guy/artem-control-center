@@ -1,5 +1,6 @@
 import type { OverviewLayoutItem, OverviewUnplacedWidget } from "@artem/contracts";
 import { defaultAppearanceConfig, normalizeLayoutItems } from "./appearanceConfig";
+import { findFirstFit, rectanglesOverlap } from "./layoutValidation";
 import { getOverviewWidgetDefinition } from "./overviewRegistry";
 import { makeShippedOverviewDocument } from "./overviewEditorReducer";
 
@@ -67,6 +68,71 @@ export function migrateV1ToV2(raw: unknown): unknown {
   };
 }
 
+/** Pure preset migration. It never persists or binds arbitrary device data. */
+export function migratePresetV2ToV3(raw: unknown): unknown {
+  const root = objectRecord(raw);
+  if (!root || root.schemaVersion !== "overview.layout.v2" || root.presetVersion !== 2) return raw;
+  const sourceItems = Array.isArray(root.items)
+    ? root.items.map((item) => objectRecord(item)).filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+  const hasClimate = sourceItems.some((item) => item.widgetType === "home.climate");
+  const quickIndex = sourceItems.findIndex((item) => item.instanceId === "fixture.quick-actions" && item.widgetType === "home.quick-actions");
+
+  if (!hasClimate && quickIndex >= 0) {
+    const old = sourceItems[quickIndex];
+    const placement = objectRecord(old.placement);
+    const x = typeof placement?.x === "number" && Number.isInteger(placement.x) ? placement.x : 0;
+    const y = typeof placement?.y === "number" && Number.isInteger(placement.y) ? placement.y : 0;
+    let nextPlacement = { x: Math.max(0, Math.min(5, x)), y: Math.max(0, y), w: 7, h: 4 };
+    if (old.visibility !== "hidden") {
+      const occupied = sourceItems
+        .filter((item, index) => index !== quickIndex && item.visibility !== "hidden")
+        .map((item) => objectRecord(item.placement))
+        .filter((item): item is Record<string, unknown> =>
+          item !== null && ["x", "y", "w", "h"].every((key) => typeof item[key] === "number" && Number.isInteger(item[key]))
+        )
+        .map((item) => ({ x: Number(item.x), y: Number(item.y), w: Number(item.w), h: Number(item.h) }));
+      if (occupied.some((item) => rectanglesOverlap(nextPlacement, item))) {
+        nextPlacement = findFirstFit({ w: 7, h: 4 }, occupied, 12, 0) ?? nextPlacement;
+      }
+    }
+    sourceItems[quickIndex] = {
+      instanceId: "fixture.climate",
+      widgetType: "home.climate",
+      visibility: old.visibility === "hidden" ? "hidden" : "visible",
+      placement: nextPlacement,
+      sizeVariant: "standard",
+      config: {}
+    };
+  } else if (!hasClimate) {
+    const occupied = sourceItems
+      .filter((item) => item.visibility !== "hidden")
+      .map((item) => objectRecord(item.placement))
+      .filter((placement): placement is Record<string, unknown> =>
+        placement !== null && ["x", "y", "w", "h"].every((key) => typeof placement[key] === "number" && Number.isInteger(placement[key]))
+      )
+      .map((placement) => ({
+        x: Number(placement.x),
+        y: Number(placement.y),
+        w: Number(placement.w),
+        h: Number(placement.h)
+      }));
+    const placement = findFirstFit({ w: 7, h: 4 }, occupied, 12, 0);
+    if (placement) {
+      sourceItems.push({
+        instanceId: "fixture.climate",
+        widgetType: "home.climate",
+        visibility: "visible",
+        placement,
+        sizeVariant: "standard",
+        config: {}
+      });
+    }
+  }
+
+  return { ...root, items: sourceItems, presetVersion: 3 };
+}
+
 export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
   const root = objectRecord(raw);
   if (!root) {
@@ -78,7 +144,8 @@ export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
     };
   }
   const migrated = root.schemaVersion === "overview.layout.v1" || root.version === 1 ? migrateV1ToV2(root) : root;
-  const document = objectRecord(migrated);
+  const presetMigrated = migratePresetV2ToV3(migrated);
+  const document = objectRecord(presetMigrated);
   const sourceItems = document && Array.isArray(document.items) ? document.items : null;
   if (!document || document.schemaVersion !== "overview.layout.v2" || !sourceItems) {
     return {
