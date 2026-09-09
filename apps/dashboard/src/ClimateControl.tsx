@@ -236,7 +236,6 @@ export function ClimateControl({
     >
       <header className="climate-control__header">
         <div>
-          {variant === "overview" && <p className="section-kicker">Дом · Home Assistant</p>}
           <h2 id={`climate-control-title-${variant}`}>{service.title}</h2>
         </div>
         <span className="climate-control__status" data-health={service.health}>{statusLabel}</span>

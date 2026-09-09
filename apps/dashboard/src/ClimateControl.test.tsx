@@ -27,12 +27,12 @@ const climate = (state: "off" | "heat" = "off", targetTemperature = 32): Service
   }
 });
 
-function markup(service: ServiceSnapshot): string {
+function markup(service: ServiceSnapshot, variant: "home" | "overview" = "home"): string {
   return renderToStaticMarkup(
     <InteractionLockProvider>
       <AccessProvider>
         <NoticeCenterProvider>
-          <ClimateControl service={service} variant="home" />
+          <ClimateControl service={service} variant={variant} />
         </NoticeCenterProvider>
       </AccessProvider>
     </InteractionLockProvider>
@@ -57,5 +57,9 @@ describe("ClimateControl compact presentation", () => {
     expect(html).toContain("climate-control__power--on");
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain('aria-label="Выключить кондиционер"');
+  });
+
+  it("does not add an integration kicker to the Overview header", () => {
+    expect(markup(climate(), "overview")).not.toContain("Дом · Home Assistant");
   });
 });

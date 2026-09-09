@@ -35,7 +35,9 @@ export function RogG703PowerActionGroup({
     : status === "offline" || status === "waking"
       ? [ROG_G703_WAKE_ACTION]
       : [];
-  const actionIds = iconOnly ? availableActionIds.filter((actionId) => actionId !== ROG_G703_WAKE_ACTION) : availableActionIds;
+  const actionIds = iconOnly
+    ? [ROG_G703_SLEEP_ACTION, ROG_G703_HIBERNATE_ACTION]
+    : availableActionIds;
 
   if (!actionIds.length) return null;
 
@@ -180,22 +182,14 @@ export function RogG703CompactControl({ service, psuService, interactive = true 
         {service.presentation?.freshnessLabel ?? "свежесть не указана"}
       </span>
       <div className="overview-rog-widget__action">
-        {status === "unavailable" && !psuService ? (
-          <span className="overview-rog-widget__unavailable" data-testid="overview-rog-g703-unavailable">
-            Недоступен
-          </span>
-        ) : <>
-          {status !== "unavailable" && (
-          <RogG703PowerActionGroup
-            controller={controller}
-            testIdPrefix="overview-rog-g703"
-            className="overview-rog-widget__actions"
-            interactive={interactive}
-            iconOnly
-          />
-          )}
-          {psuService && <RogPsuControls service={psuService} variant="overview" interactive={interactive} />}
-        </>}
+        <RogG703PowerActionGroup
+          controller={controller}
+          testIdPrefix="overview-rog-g703"
+          className="overview-rog-widget__actions"
+          interactive={interactive}
+          iconOnly
+        />
+        {psuService && <RogPsuControls service={psuService} variant="overview" interactive={interactive} />}
       </div>
     </WorkZone>
   );

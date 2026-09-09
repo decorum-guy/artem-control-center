@@ -120,6 +120,7 @@ test.describe("Issue 207 · Overview climate projection", () => {
     await expect(climate).toBeVisible();
     await expect(climate).not.toContainText("В комнате");
     await expect(climate).not.toContainText("Цель");
+    await expect(climate).not.toContainText("Дом · Home Assistant");
     await expect(item.getByTestId("overview-home-widget")).toHaveCount(0);
     await expect(page.locator('.overview-v2-grid-item[data-widget-type="home.quick-actions"]')).toHaveCount(0);
     await expectContained(climate, [
