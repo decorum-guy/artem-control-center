@@ -269,7 +269,9 @@ export function ClimateControl({
             disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || draftTarget === null || draftTarget <= minimumTemperature}
             onClick={() => updateDraft(-step)}
             aria-label="Уменьшить целевую температуру"
-          >−</button>
+          >
+            <Icon name="minus" size={24} />
+          </button>
           <button
             type="button"
             className="climate-control__stepper"
@@ -277,7 +279,9 @@ export function ClimateControl({
             disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || draftTarget === null || draftTarget >= maximumTemperature}
             onClick={() => updateDraft(step)}
             aria-label="Увеличить целевую температуру"
-          >+</button>
+          >
+            <Icon name="plus" size={24} />
+          </button>
           <button
             type="button"
             className={`climate-control__confirm${targetDirty ? " climate-control__confirm--dirty" : ""}`}
