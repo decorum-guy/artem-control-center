@@ -711,12 +711,19 @@ test.describe("PR4 curated Overview", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
+    const gridBefore = await page.getByTestId("overview-grid").boundingBox();
     const before = await item(page, "fixture.health").boundingBox();
+    const rogBefore = await page.getByTestId("overview-rog-g703").boundingBox();
+    const lockBefore = await page.getByTestId("interaction-lock-control").boundingBox();
+    expect(gridBefore).not.toBeNull();
     expect(before).not.toBeNull();
+    expect(rogBefore).not.toBeNull();
+    expect(lockBefore).not.toBeNull();
 
     await page.goto("/overview?theme=night&b0=triple-notice");
     await waitForOverview(page);
-    await expect(page.getByTestId("global-notice-stack")).toBeVisible();
+    const stack = page.getByTestId("global-notice-stack");
+    await expect(stack).toBeVisible();
     const after = await item(page, "fixture.health").boundingBox();
     expect(after).toMatchObject({
       x: before?.x,
@@ -724,6 +731,34 @@ test.describe("PR4 curated Overview", () => {
       width: before?.width,
       height: before?.height
     });
+    const gridAfter = await page.getByTestId("overview-grid").boundingBox();
+    const rogAfter = await page.getByTestId("overview-rog-g703").boundingBox();
+    const lockAfter = await page.getByTestId("interaction-lock-control").boundingBox();
+    expect(gridAfter).toMatchObject({ x: gridBefore?.x, y: gridBefore?.y, width: gridBefore?.width, height: gridBefore?.height });
+    expect(rogAfter).toMatchObject({ x: rogBefore?.x, y: rogBefore?.y, width: rogBefore?.width, height: rogBefore?.height });
+    expect(lockAfter).toMatchObject({ x: lockBefore?.x, y: lockBefore?.y, width: lockBefore?.width, height: lockBefore?.height });
+
+    const notices = stack.locator(".global-notice");
+    await expect(notices).toHaveCount(3);
+    const noticeBoxes = await notices.evaluateAll((elements) => elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }));
+    const actionBox = await page.getByTestId("overview-rog-g703").locator(".overview-rog-widget__action").boundingBox();
+    expect(actionBox).not.toBeNull();
+    const intersects = (left: typeof noticeBoxes[number], right: NonNullable<typeof actionBox>) =>
+      left.x < right.x + right.width && left.x + left.width > right.x &&
+      left.y < right.y + right.height && left.y + left.height > right.y;
+    if (actionBox && lockAfter) {
+      for (const noticeBox of noticeBoxes) {
+        expect(intersects(noticeBox, actionBox)).toBe(false);
+        expect(intersects(noticeBox, lockAfter)).toBe(false);
+      }
+    }
+    for (let index = 1; index < noticeBoxes.length; index += 1) {
+      expect(noticeBoxes[index].y).toBeCloseTo(noticeBoxes[0].y, 0);
+      expect(noticeBoxes[index].x + noticeBoxes[index].width).toBeLessThanOrEqual(noticeBoxes[index - 1].x - 7);
+    }
     await expectNoOverflow(page);
   });
 

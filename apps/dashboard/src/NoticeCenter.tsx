@@ -32,6 +32,8 @@ export interface NoticeInput {
 
 export interface NoticeRecord extends Omit<NoticeInput, "timeoutMs"> {
   createdAt: number;
+  lifetimeMs?: number;
+  lifetimeStartedAt?: number;
 }
 
 interface NoticeCenterContextValue {
@@ -51,7 +53,8 @@ const severityOrder: Record<NoticeSeverity, number> = {
 };
 
 const defaultTimeoutBySeverity: Partial<Record<NoticeSeverity, number>> = {
-  success: 6_000,
+  info: 4_000,
+  success: 4_000,
   warning: 10_000,
   error: 12_000
 };
@@ -117,6 +120,19 @@ export function noticeExpiresAt(input: NoticeInput, now = Date.now()): number | 
   return defaultTimeout === undefined ? undefined : now + defaultTimeout;
 }
 
+export function noticeLifetime(
+  input: NoticeInput,
+  now = Date.now()
+): Pick<NoticeRecord, "expiresAt" | "lifetimeMs" | "lifetimeStartedAt"> {
+  const expiresAt = noticeExpiresAt(input, now);
+  if (expiresAt === undefined) return { expiresAt: undefined };
+  return {
+    expiresAt,
+    lifetimeMs: Math.max(0, expiresAt - now),
+    lifetimeStartedAt: now
+  };
+}
+
 export function NoticeCenterProvider({ children }: { children: ReactNode }) {
   const [notices, setNotices] = useState<NoticeRecord[]>([]);
   const sequenceRef = useRef(0);
@@ -126,9 +142,10 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
     setNotices((current) => {
       if (isNoticeDismissed(input, dismissedKeysRef.current)) return current;
       const existing = current.find((notice) => noticeIdentityMatches(notice, input));
+      const now = Date.now();
       const next: NoticeRecord = {
         ...input,
-        expiresAt: noticeExpiresAt(input),
+        ...noticeLifetime(input, now),
         createdAt: existing?.createdAt ?? sequenceRef.current++
       };
       return [...current.filter((notice) => !noticeIdentityMatches(notice, input)), next];
@@ -147,7 +164,7 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const timer = window.setInterval(() => {
       const now = Date.now();
-      setNotices((current) => current.filter((notice) => !notice.expiresAt || notice.expiresAt > now));
+      setNotices((current) => current.filter((notice) => notice.expiresAt === undefined || notice.expiresAt > now));
     }, 500);
     return () => window.clearInterval(timer);
   }, []);
@@ -192,6 +209,15 @@ function NoticeRegion({ notices, dismissNotice }: { notices: NoticeRecord[]; dis
           data-correlation-id={notice.correlationId}
         >
           <span className="global-notice__indicator" aria-hidden="true" />
+          {notice.lifetimeMs !== undefined && notice.lifetimeStartedAt !== undefined && (
+            <span
+              key={`${notice.lifetimeStartedAt}:${notice.expiresAt ?? ""}`}
+              className="global-notice__lifetime"
+              aria-hidden="true"
+              data-testid="global-notice-lifetime"
+              style={{ animationDuration: `${Math.max(1, notice.lifetimeMs)}ms` }}
+            />
+          )}
           <div className="global-notice__body">
             <div className="global-notice__heading">
               <div className="global-notice__heading-copy">

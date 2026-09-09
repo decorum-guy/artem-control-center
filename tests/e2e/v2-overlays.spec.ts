@@ -7,6 +7,7 @@ test.describe.configure({ mode: "serial" });
 const overviewRouteTestId = process.env.VITE_OVERVIEW_V2_ENABLED === "true"
   ? "route-overview-v2"
   : "route-overview";
+const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 
 async function expectNoDocumentOverflow(page: Page) {
   const result = await page.evaluate(() => ({
@@ -47,8 +48,15 @@ test("NoticeCenter is a fixed root overlay and does not reflow the route", async
 
   const stackBox = await readBox(stack);
   expect(stackBox.x + stackBox.width).toBeCloseTo(1260, 0);
-  expect(stackBox.y).toBeCloseTo(76, 0);
-  expect(stackBox.width).toBeCloseTo(360, 0);
+  if (visualShellEnabled) {
+    expect(stackBox.x).toBeCloseTo(196, 0);
+    expect(stackBox.y).toBeCloseTo(64, 0);
+    expect(stackBox.width).toBeCloseTo(1064, 0);
+    expect(stackBox.height).toBeCloseTo(72, 0);
+  } else {
+    expect(stackBox.y).toBeCloseTo(76, 0);
+    expect(stackBox.width).toBeCloseTo(360, 0);
+  }
   expect(await stack.evaluate((element) => ({
     parentIsBody: element.parentElement === document.body,
     position: getComputedStyle(element).position
@@ -59,11 +67,19 @@ test("NoticeCenter is a fixed root overlay and does not reflow the route", async
   await expect(notices).toHaveCount(3);
   const noticeBoxes = await notices.evaluateAll((elements) => elements.map((element) => {
     const rect = element.getBoundingClientRect();
-    return { top: rect.top, bottom: rect.bottom, height: rect.height };
+    return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, height: rect.height };
   }));
-  expect(noticeBoxes.every((box) => box.height >= 80)).toBeTruthy();
-  for (let index = 1; index < noticeBoxes.length; index += 1) {
-    expect(noticeBoxes[index].top - noticeBoxes[index - 1].bottom).toBeCloseTo(8, 0);
+  if (visualShellEnabled) {
+    expect(noticeBoxes.every((box) => box.height === 72)).toBeTruthy();
+    for (let index = 1; index < noticeBoxes.length; index += 1) {
+      expect(noticeBoxes[index].top).toBeCloseTo(noticeBoxes[index - 1].top, 0);
+      expect(noticeBoxes[index].right).toBeLessThanOrEqual(noticeBoxes[index - 1].left - 7);
+    }
+  } else {
+    expect(noticeBoxes.every((box) => box.height >= 80)).toBeTruthy();
+    for (let index = 1; index < noticeBoxes.length; index += 1) {
+      expect(noticeBoxes[index].top - noticeBoxes[index - 1].bottom).toBeCloseTo(8, 0);
+    }
   }
   const targets = await notices.locator("button").evaluateAll((elements) => elements.map((element) => {
     const rect = element.getBoundingClientRect();
@@ -85,6 +101,12 @@ test("NoticeCenter reconciles identity, expiry modes, reduced motion, and compac
 
   await page.goto("/overview?b0=triple-notice&motion=reduced");
   await expect(page.locator(".global-notice--progress .global-notice__indicator")).toHaveCSS("animation-name", "none");
+  await expect(page.locator(".global-notice__lifetime")).toHaveCount(2);
+  const reducedLifetime = await page.locator(".global-notice__lifetime").evaluateAll((elements) => elements.map((element) => ({
+    animationName: getComputedStyle(element).animationName,
+    transform: getComputedStyle(element).transform
+  })));
+  expect(reducedLifetime.every((lifetime) => lifetime.animationName === "none" && lifetime.transform !== "none")).toBeTruthy();
 
   await page.setViewportSize({ width: 640, height: 360 });
   await page.goto("/overview?b0=triple-notice");

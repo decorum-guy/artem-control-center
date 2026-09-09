@@ -4,6 +4,7 @@ import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 const overviewEnabled = process.env.VITE_OVERVIEW_V2_ENABLED === "true";
 const overviewEditorEnabled = process.env.VITE_OVERVIEW_EDITOR_ENABLED === "true";
+const interactionLockEnabled = process.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true";
 
 async function expectMinimumControlSize(locator: Locator): Promise<void> {
   const heights = await locator.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
@@ -94,6 +95,97 @@ test.describe("Issue 207 · Home Assistant climate controls", () => {
     await climate.getByTestId("climate-temperature-confirm-home").click();
     await expect.poll(() => actionRequests).toBe(1);
     await expect(climate.getByTestId("climate-temperature-confirm-home")).toBeDisabled();
+  });
+
+  test("freezes the existing temperature draft while Interaction Lock is active", async ({ page }) => {
+    test.skip(!interactionLockEnabled, "Requires the Interaction Lock build gate.");
+    let actionRequests = 0;
+    await page.route("**/api/v1/actions/home-assistant/availability", async (route) => {
+      const decision = { capability: "home_climate_actions", minimumProfile: "standard", effectiveProfile: "standard", allowed: true, availability: "allowed", gateEnabled: true, integrationAvailable: true, busy: false, preconditionOk: true };
+      const actions = Object.fromEntries(["home.climate.power_on", "home.climate.power_off", "home.climate.set_temperature", "home.climate.set_mode", "home.climate.set_fan_mode"].map((id) => [id, decision]));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, actions }) });
+    });
+    await page.route("**/api/v1/actions/home-assistant", async (route) => {
+      actionRequests += 1;
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "unexpected_climate_mutation" }) });
+    });
+    await page.goto("/home?scenario=home-climate-healthy");
+    await unlockTouchLockIfNeeded(page);
+    const climate = page.getByTestId("climate-control-home");
+    const minus = climate.getByTestId("climate-temperature-decrease-home");
+    const plus = climate.getByTestId("climate-temperature-increase-home");
+
+    await expect(minus).toBeEnabled();
+    await minus.click();
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("31°");
+    await plus.click();
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("32°");
+    await minus.click();
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("31°");
+    expect(actionRequests).toBe(0);
+
+    const lock = page.getByTestId("interaction-lock-control");
+    await lock.focus();
+    await page.keyboard.down("Space");
+    await page.waitForTimeout(1_100);
+    await page.keyboard.up("Space");
+    await expect(lock).toHaveAttribute("aria-pressed", "true");
+    await expect(minus).toBeDisabled();
+    await expect(plus).toBeDisabled();
+    await expect(climate.getByTestId("climate-temperature-confirm-home")).toBeDisabled();
+    await plus.click({ force: true });
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("31°");
+    expect(actionRequests).toBe(0);
+
+    await unlockTouchLockIfNeeded(page);
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("31°");
+    await expect(plus).toBeEnabled();
+    await plus.click();
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("32°");
+    expect(actionRequests).toBe(0);
+  });
+
+  test("reconciles an external Home Assistant climate power change without a panel action", async ({ page }) => {
+    let externalState = "heat";
+    let actionRequests = 0;
+    await page.route("**/api/v1/actions/home-assistant/availability", async (route) => {
+      const decision = { capability: "home_climate_actions", minimumProfile: "standard", effectiveProfile: "standard", allowed: true, availability: "allowed", gateEnabled: true, integrationAvailable: true, busy: false, preconditionOk: true };
+      const actions = Object.fromEntries(["home.climate.power_on", "home.climate.power_off", "home.climate.set_temperature", "home.climate.set_mode", "home.climate.set_fan_mode"].map((id) => [id, decision]));
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, actions }) });
+    });
+    await page.route("**/api/v1/actions/home-assistant", async (route) => {
+      actionRequests += 1;
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "unexpected_climate_mutation" }) });
+    });
+    await page.route("**/api/v1/snapshot**", async (route) => {
+      const response = await route.fetch();
+      const snapshot = await response.json() as { services: Array<{ id: string; summary: string; data: Record<string, unknown> }> };
+      const climate = snapshot.services.find((service) => service.id === "climate-main");
+      if (climate) {
+        climate.data.state = externalState;
+        climate.summary = externalState === "off" ? "Кондиционер выключен" : "Кондиционер нагревает до 32°";
+      }
+      await route.fulfill({ response, body: JSON.stringify(snapshot) });
+    });
+    await page.route("**/api/v1/events", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        headers: { "cache-control": "no-cache" },
+        body: "event: connected\ndata: {\"revision\":1}\n\n"
+      });
+    });
+    await page.goto("/home?scenario=home-climate-healthy");
+    await unlockTouchLockIfNeeded(page);
+    const climate = page.getByTestId("climate-control-home");
+    await expect(climate).toContainText("Обогрев");
+    await climate.getByTestId("climate-temperature-decrease-home").click();
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("31°");
+
+    externalState = "off";
+    await expect(climate).toContainText("Выкл", { timeout: 10_000 });
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("31°");
+    expect(actionRequests).toBe(0);
   });
 
   test("disables climate writes for stale and unavailable snapshots", async ({ page }) => {

@@ -677,6 +677,16 @@ class HomeAssistantAdapter:
         while True:
             try:
                 await asyncio.sleep(interval)
+                # The WebSocket is the fast path, but a live connection can
+                # still miss an individual state_changed event. Reconcile
+                # the complete allow-listed snapshot on the existing bounded
+                # HA watcher cadence so external controller changes recover
+                # without a climate-specific poller.
+                try:
+                    await self.fetch_initial_snapshot()
+                except (httpx.HTTPError, ValueError):
+                    if not self._transport_is_live():
+                        await self._mark_cached_or_unavailable()
                 stale = self._is_stale()
                 if stale != was_stale:
                     was_stale = stale

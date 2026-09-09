@@ -32,12 +32,18 @@ const actionProgressCopy: Record<RogG703ActionExecution["status"], string> = {
   requested: "Запрос зарегистрирован",
   waking: "Пакет пробуждения отправлен — проверяем ASUS",
   verifying: "Проверяем, появился ли ASUS в сети",
-  online: "ASUS появился в сети",
+  online: "ASUS в сети — пробуждение подтверждено.",
   wake_timeout: "Не удалось разбудить ASUS",
   sleeping: "ASUS переходит в сон",
   hibernating: "ASUS переходит в гибернацию",
   offline: "ASUS больше не отвечает — переход подтверждён",
   failed: "Операция ASUS завершилась ошибкой"
+};
+
+const actionDispatchCopy: Record<RogG703ActionId, string> = {
+  [ROG_G703_WAKE_ACTION]: "Команда пробуждения отправлена.",
+  [ROG_G703_SLEEP_ACTION]: "Команда перехода в сон отправлена.",
+  [ROG_G703_HIBERNATE_ACTION]: "Команда гибернации отправлена."
 };
 
 function actionErrorCopy(error: string | null): string {
@@ -125,11 +131,11 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
   }), []);
 
   const showActionNotice = useCallback((
-    severity: "progress" | "success" | "warning" | "error",
+    severity: "info" | "success" | "warning" | "error",
     detail: string,
     correlationId?: string,
     timeoutMs?: number,
-    phase: "progress" | "terminal" = "progress"
+    phase: "dispatch" | "terminal" = "terminal"
   ) => {
     const noticeId = correlationId
       ? `rog-g703.action.${phase}.${correlationId}`
@@ -194,14 +200,15 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
       const started = await startRogG703Action(actionId);
       actionCorrelationId = started.correlationId;
       showActionNotice(
-        "progress",
-        actionProgressCopy[started.status],
-        started.correlationId
+        "info",
+        actionDispatchCopy[actionId],
+        started.correlationId,
+        4_000,
+        "dispatch"
       );
       const finished = await waitForRogG703Execution(
         started.correlationId,
         (execution) => {
-          const failed = execution.status === "failed" || execution.status === "wake_timeout";
           if (execution.status === "waking") setTransitionStatus("waking");
           if (execution.status === "verifying") setTransitionStatus("waking");
           if (execution.status === "sleeping") setTransitionStatus("sleeping");
@@ -211,13 +218,6 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
           if (execution.status === "failed") {
             setTransitionStatus(actionId === ROG_G703_WAKE_ACTION ? "offline" : "online");
           }
-          if (!failed && execution.status !== "online" && execution.status !== "offline") {
-            showActionNotice(
-              "progress",
-              actionProgressCopy[execution.status],
-              execution.correlationId
-            );
-          }
         }
       );
       if (finished.status === "online" || finished.status === "offline") {
@@ -225,7 +225,7 @@ export function useRogG703Controller(service: ServiceSnapshot): RogG703Controlle
           "success",
           actionProgressCopy[finished.status],
           finished.correlationId,
-          8_000,
+          4_000,
           "terminal"
         );
       } else {

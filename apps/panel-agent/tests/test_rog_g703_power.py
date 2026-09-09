@@ -858,6 +858,20 @@ def test_sleep_executor_exception_is_fixed_and_sanitized(tmp_path) -> None:
     asyncio.run(scenario())
 
 
+def test_rog_health_timeout_defaults_to_90_seconds_without_overriding_explicit_env(monkeypatch) -> None:
+    assert IntegrationSettings().rog_g703_health_timeout_seconds == 90
+
+    monkeypatch.setenv("PANEL_ROG_G703_ENABLED", "false")
+    monkeypatch.delenv("PANEL_ROG_G703_HEALTH_TIMEOUT_SECONDS", raising=False)
+    assert IntegrationSettings.from_env().rog_g703_health_timeout_seconds == 90
+
+    monkeypatch.setenv("PANEL_ROG_G703_HEALTH_TIMEOUT_SECONDS", "60")
+    assert IntegrationSettings.from_env().rog_g703_health_timeout_seconds == 60
+
+    monkeypatch.setenv("PANEL_ROG_G703_HEALTH_TIMEOUT_SECONDS", "181")
+    assert IntegrationSettings.from_env().rog_g703_health_timeout_seconds == 180
+
+
 def test_enabled_environment_rejects_invalid_machine_configuration(monkeypatch) -> None:
     monkeypatch.setenv("PANEL_ROG_G703_ENABLED", "true")
     monkeypatch.setenv("PANEL_ROG_G703_MAC", "not-a-mac")

@@ -90,7 +90,7 @@ export function ClimateControl({
   overviewSizeVariant?: "compact" | "standard" | "large";
 }) {
   const { ensureCapability, explainAvailability } = useAccess();
-  const { guardMutation } = useInteractionLock();
+  const { guardMutation, locked } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
   const [availability, setAvailability] = useState<HomeAssistantActionAvailability | null>(null);
   const [apiAvailable, setApiAvailable] = useState(false);
@@ -148,12 +148,13 @@ export function ClimateControl({
     const decision = availability?.actions[actionId];
     return Boolean(
       interactive &&
+      !locked &&
       climateLive &&
       !pendingAction &&
       decision &&
       (decision.allowed || decision.availability === "elevation_required")
     );
-  }, [availability, climateLive, interactive, pendingAction]);
+  }, [availability, climateLive, interactive, locked, pendingAction]);
 
   const run = useCallback(async (
     actionId: ClimateActionId,
