@@ -17,6 +17,7 @@ body.cc-overlay-open .global-notice-stack {
 }
 
 .global-notice {
+  position: relative;
   display: grid;
   grid-template-columns: 4px minmax(0, 1fr);
   min-height: 80px;
@@ -37,6 +38,26 @@ body.cc-overlay-open .global-notice-stack {
 .global-notice--warning .global-notice__indicator { background: var(--cc-warning); }
 .global-notice--error .global-notice__indicator { background: var(--cc-danger); }
 .global-notice--progress .global-notice__indicator { animation: global-notice-progress 1.35s ease-in-out infinite; }
+
+.global-notice__lifetime {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  height: 3px;
+  background: var(--cc-accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation-name: global-notice-lifetime;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  pointer-events: none;
+}
+
+.global-notice--success .global-notice__lifetime { background: var(--cc-success); }
+.global-notice--warning .global-notice__lifetime { background: var(--cc-warning); }
+.global-notice--error .global-notice__lifetime { background: var(--cc-danger); }
 
 .global-notice__body {
   display: grid;
@@ -126,6 +147,158 @@ body.cc-overlay-open .global-notice-stack {
   to { opacity: .55; }
 }
 
+@keyframes global-notice-lifetime {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* The V2 shell reserves the generic band between its 64px header and the
+   first widget row for a compact horizontal notice rail. */
+body:has(.v2-shell) {
+  --cc-v2-navigation-rail-width: 176px;
+  --cc-v2-product-header-height: 64px;
+  --cc-v2-route-inset: 20px;
+}
+
+@media (min-width: 952px) {
+  body:has(.v2-shell) .global-notice-stack {
+    top: var(--cc-v2-product-header-height);
+    right: var(--cc-v2-route-inset);
+    left: calc(var(--cc-v2-navigation-rail-width) + var(--cc-v2-route-inset));
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: stretch;
+    width: auto;
+    max-width: none;
+    height: 72px;
+    max-height: 72px;
+    overflow: visible;
+  }
+
+  body:has(.v2-shell) .global-notice {
+    flex: 0 1 340px;
+    width: 340px;
+    min-width: 0;
+    min-height: 72px;
+    height: 72px;
+    display: block;
+  }
+
+  body:has(.v2-shell) .global-notice__indicator {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 4px;
+  }
+
+  body:has(.v2-shell) .global-notice__body {
+    display: block;
+    height: 100%;
+    padding: 6px 58px 6px 10px;
+    overflow: hidden;
+  }
+
+  body:has(.v2-shell) .global-notice__heading {
+    display: block;
+  }
+
+  body:has(.v2-shell) .global-notice__heading-copy {
+    display: block;
+  }
+
+  body:has(.v2-shell) .global-notice__severity,
+  body:has(.v2-shell) .global-notice__heading strong,
+  body:has(.v2-shell) .global-notice__body p {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body:has(.v2-shell) .global-notice__severity {
+    line-height: 12px;
+  }
+
+  body:has(.v2-shell) .global-notice__heading strong {
+    line-height: 18px;
+  }
+
+  body:has(.v2-shell) .global-notice__body p {
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 16px;
+  }
+
+  body:has(.v2-shell) .global-notice__dismiss {
+    position: absolute;
+    top: 11px;
+    right: 6px;
+    z-index: 2;
+    margin: 0;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice-stack {
+    top: 76px;
+    right: calc(560px + 32px);
+    left: auto;
+    display: grid;
+    width: 360px;
+    max-width: calc(100vw - 40px);
+    height: auto;
+    max-height: calc(var(--cc-visible-height, 100dvh) - 88px);
+    overflow: auto;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice {
+    display: grid;
+    width: auto;
+    min-height: 80px;
+    height: auto;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice__indicator {
+    position: static;
+    width: auto;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice__body {
+    display: grid;
+    height: auto;
+    padding: 12px;
+    overflow: visible;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice__heading {
+    display: flex;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice__heading-copy {
+    display: grid;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice__severity,
+  body.cc-overlay-open:has(.v2-shell) .global-notice__heading strong,
+  body.cc-overlay-open:has(.v2-shell) .global-notice__body p {
+    display: initial;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice__body p {
+    margin-top: 0;
+    font-size: var(--cc-type-body-size);
+    line-height: var(--cc-type-body-line);
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice__dismiss {
+    position: static;
+    margin: -4px -4px 0 0;
+  }
+}
+
 @media (max-width: 760px) {
   .global-notice-stack {
     top: 124px;
@@ -170,6 +343,14 @@ html[data-motion="battery-saving"] .global-notice--progress .global-notice__indi
   animation: none;
 }
 
+html[data-motion="reduced"] .global-notice__lifetime,
+html[data-motion="low-performance"] .global-notice__lifetime,
+html[data-motion="battery-saving"] .global-notice__lifetime {
+  animation: none;
+  transform: scaleX(1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .global-notice--progress .global-notice__indicator { animation: none; }
+  .global-notice__lifetime { animation: none; transform: scaleX(1); }
 }

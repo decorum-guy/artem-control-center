@@ -143,7 +143,10 @@ async function mockRogG703(page: Page, options: {
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const payload = await response.json() as { services: unknown[] };
-    payload.services = [...payload.services, rogService(status)];
+    payload.services = [
+      ...payload.services.filter((service) => (service as { id?: unknown }).id !== "rog_g703gi"),
+      rogService(status)
+    ];
     await route.fulfill({ response, body: JSON.stringify(payload) });
   });
 
@@ -283,8 +286,10 @@ test("touch-first ROG flow verifies wake, distinct Sleep/S4 hibernate and safe a
 
   await wake.tap();
   await expect(controls).toContainText("Пробуждение");
-  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("Пакет пробуждения");
+  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("Команда пробуждения отправлена.");
+  await expect(page.getByTestId("rog-g703-action-notice")).toHaveClass(/global-notice--info/);
   await expect(controls).toContainText("В сети");
+  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("ASUS в сети");
   await expect(sleep).toBeEnabled();
   await expect(hibernate).toBeEnabled();
   expect((await sleep.boundingBox())?.height).toBeGreaterThanOrEqual(48);
@@ -299,7 +304,7 @@ test("touch-first ROG flow verifies wake, distinct Sleep/S4 hibernate and safe a
   await expect(sleep).toBeDisabled();
   await expect(hibernate).toBeDisabled();
   await expect(sleep).toHaveAttribute("aria-busy", "true");
-  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("переходит в сон");
+  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("Команда перехода в сон отправлена.");
   await expect(controls).toContainText("Не в сети");
   await expect(page.getByTestId("rog-g703-action-notice")).toContainText("переход подтверждён");
 
@@ -312,7 +317,7 @@ test("touch-first ROG flow verifies wake, distinct Sleep/S4 hibernate and safe a
   await expect(confirmation).toContainText("Перевести ASUS ROG G703GI в гибернацию?");
   await confirmation.getByRole("button", { name: "Гибернация" }).click();
   await expect(controls).toContainText("Гибернация");
-  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("переходит в гибернацию");
+  await expect(page.getByTestId("rog-g703-action-notice")).toContainText("Команда гибернации отправлена.");
   await expect(controls).toContainText("Не в сети");
   await expect(page.getByTestId("rog-g703-action-notice")).toContainText("переход подтверждён");
 
@@ -336,12 +341,14 @@ test("keeps one Wake notice per server event across unchanged polls and admits a
 
   await page.getByTestId("rog-g703-wake").tap();
   const notice = page.getByTestId("rog-g703-action-notice");
-  await expect(notice).toContainText("Пакет пробуждения");
+  await expect(notice).toContainText("Команда пробуждения отправлена.");
+  await expect(notice).toHaveClass(/global-notice--info/);
   const progressId = await notice.getAttribute("data-notice-id");
+  expect(progressId).toContain(".dispatch.");
   await notice.getByRole("button", { name: "Закрыть уведомление" }).click();
   await expect.poll(() => api.getExecutionPolls(), { timeout: 5_000 }).toBeGreaterThan(6);
   await expect(notice).toHaveCount(0);
-  await expect(notice).toContainText("ASUS появился в сети");
+  await expect(notice).toContainText("ASUS в сети");
   const terminalId = await notice.getAttribute("data-notice-id");
   expect(terminalId).not.toBe(progressId);
   await notice.getByRole("button", { name: "Закрыть уведомление" }).click();
@@ -350,7 +357,7 @@ test("keeps one Wake notice per server event across unchanged polls and admits a
   api.setOffline();
   await page.reload();
   await page.getByTestId("rog-g703-wake").tap();
-  await expect(notice).toContainText("Пакет пробуждения");
+  await expect(notice).toContainText("Команда пробуждения отправлена.");
   const secondActionProgressId = await notice.getAttribute("data-notice-id");
   expect(secondActionProgressId).not.toBe(progressId);
 });

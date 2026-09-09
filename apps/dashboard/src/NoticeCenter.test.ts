@@ -5,6 +5,7 @@ import {
   noticeDismissalKey,
   noticeExpiresAt,
   noticeIdentityMatches,
+  noticeLifetime,
   rememberDismissedNoticeKey,
   type NoticeInput
 } from "./NoticeCenter";
@@ -30,13 +31,27 @@ describe("NoticeCenter lifetime and identity contract", () => {
     )).toBe(true);
   });
 
-  it("keeps progress and generic info persistent while applying semantic defaults", () => {
+  it("applies finite info and success defaults while keeping progress persistent", () => {
     const now = 1_000;
-    expect(noticeExpiresAt({ ...baseNotice, severity: "info" }, now)).toBeUndefined();
+    expect(noticeExpiresAt({ ...baseNotice, severity: "info" }, now)).toBe(5_000);
     expect(noticeExpiresAt({ ...baseNotice, severity: "progress" }, now)).toBeUndefined();
-    expect(noticeExpiresAt({ ...baseNotice, severity: "success" }, now)).toBe(7_000);
+    expect(noticeExpiresAt({ ...baseNotice, severity: "success" }, now)).toBe(5_000);
     expect(noticeExpiresAt({ ...baseNotice, severity: "warning" }, now)).toBe(11_000);
     expect(noticeExpiresAt({ ...baseNotice, severity: "error" }, now)).toBe(13_000);
+  });
+
+  it("derives one finite lifetime source for rendering and expiry", () => {
+    expect(noticeLifetime({ ...baseNotice, severity: "success" }, 2_000)).toEqual({
+      expiresAt: 6_000,
+      lifetimeMs: 4_000,
+      lifetimeStartedAt: 2_000
+    });
+    expect(noticeLifetime({ ...baseNotice, severity: "progress" }, 2_000)).toEqual({ expiresAt: undefined });
+    expect(noticeLifetime({ ...baseNotice, severity: "progress", timeoutMs: 750 }, 2_000)).toEqual({
+      expiresAt: 2_750,
+      lifetimeMs: 750,
+      lifetimeStartedAt: 2_000
+    });
   });
 
   it("gives explicit expiry and timeout precedence over severity defaults", () => {

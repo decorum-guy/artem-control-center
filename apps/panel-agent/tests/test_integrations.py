@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from panel_agent.home_assistant import HomeAssistantAdapter
+from panel_agent.home_assistant import CLIMATE_ENTITY, HomeAssistantAdapter
 from panel_agent.http_integrations import HttpIntegrationAdapter
 from panel_agent.settings import IntegrationSettings
 from panel_agent.snapshot import SnapshotPublisher
@@ -75,6 +75,26 @@ def _ha_states():
             "attributes": {"secret": "must-not-cache"},
         },
     ]
+
+
+def _climate_state(state: str = "heat"):
+    return {
+        "entity_id": CLIMATE_ENTITY,
+        "state": state,
+        "last_changed": "2026-07-29T11:54:09Z",
+        "last_updated": "2026-07-29T11:59:30Z",
+        "attributes": {
+            "temperature": 32,
+            "current_temperature": 24,
+            "min_temp": 16,
+            "max_temp": 32,
+            "target_temp_step": 1,
+            "hvac_modes": ["off", "heat"],
+            "fan_modes": ["one"],
+            "fan_mode": "one",
+            "supported_features": 1,
+        },
+    }
 
 
 def test_ha_initial_snapshot_normalizes_canonical_helpers(tmp_path):
@@ -293,6 +313,82 @@ def test_ha_allowlisted_event_publishes_only_meaningful_snapshot(tmp_path):
             {"state": "private"},
         )
         assert publisher.revision == 2
+
+    asyncio.run(exercise())
+
+
+def test_external_climate_state_reaches_panel_snapshot_without_panel_action(tmp_path):
+    states = [*_ha_states(), _climate_state()]
+    adapter = HomeAssistantAdapter(
+        IntegrationSettings(
+            ha_url="http://ha.test",
+            ha_token="test-token",
+            state_cache_path=str(tmp_path / "ha-cache.json"),
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=states)),
+    )
+    publisher = SnapshotPublisher(
+        mode="read_only",
+        services_builder=adapter.services,
+    )
+    adapter.set_on_change(publisher.rebuild)
+
+    async def exercise():
+        await adapter.fetch_initial_snapshot()
+        initial = publisher.snapshot
+        assert initial is not None
+        initial_climate = next(service for service in initial.services if service.id == "climate-main")
+        assert initial_climate.data["state"] == "heat"
+        initial_revision = initial.revision
+
+        changed = _climate_state("off")
+        changed["last_updated"] = "2026-07-29T12:00:00Z"
+        assert await adapter.apply_state_changed(CLIMATE_ENTITY, changed)
+
+        updated = publisher.snapshot
+        assert updated is not None
+        updated_climate = next(service for service in updated.services if service.id == "climate-main")
+        assert updated.revision > initial_revision
+        assert updated_climate.data["state"] == "off"
+
+    asyncio.run(exercise())
+
+
+def test_bounded_ha_reconciliation_recovers_missed_external_climate_update(tmp_path):
+    states = [*_ha_states(), _climate_state()]
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=states)
+
+    adapter = HomeAssistantAdapter(
+        IntegrationSettings(
+            ha_url="http://ha.test",
+            ha_token="test-token",
+            state_cache_path=str(tmp_path / "ha-cache.json"),
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    publisher = SnapshotPublisher(
+        mode="read_only",
+        services_builder=adapter.services,
+    )
+    adapter.set_on_change(publisher.rebuild)
+
+    async def exercise():
+        await adapter.fetch_initial_snapshot()
+        initial_revision = publisher.revision
+        states[-1] = _climate_state("off")
+        states[-1]["last_updated"] = "2026-07-29T12:00:00Z"
+
+        # This is the same bounded REST reconciliation used by the shared HA
+        # staleness watcher after a missed WebSocket event.
+        await adapter.fetch_initial_snapshot()
+
+        updated = publisher.snapshot
+        assert updated is not None
+        climate = next(service for service in updated.services if service.id == "climate-main")
+        assert updated.revision > initial_revision
+        assert climate.data["state"] == "off"
 
     asyncio.run(exercise())
 

@@ -232,6 +232,8 @@ jobs:
         env:
           VITE_OVERVIEW_V2_ENABLED: "true"
           VITE_V2_VISUAL_SHELL: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
           V2_OVERVIEW_CURATED_ARTIFACT_DIR: artifacts/v2-overview-curated-review
           B3_PLANNING_TASKS_ROUTE_ENABLED: "true"
           B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
