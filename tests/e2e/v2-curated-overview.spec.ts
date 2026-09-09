@@ -381,72 +381,49 @@ test.describe("PR4 curated Overview", () => {
     await expectNoOverflow(page);
   });
 
-  test("keeps the ROG action contextual and preserves the exact action payload", async ({ page }) => {
+  test("keeps offline host actions visible but disabled without exposing Wake", async ({ page }) => {
     rogStatus = "offline";
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
     const rog = page.getByTestId("overview-rog-g703");
-    const actionRegion = rog.locator(".overview-rog-widget__action");
-    const wake = page.getByTestId("overview-rog-g703-wake");
     await expect(rog).toContainText("Не в сети");
-    await expect(wake).toHaveText("Включить");
-    const [actionRegionBox, wakeBox] = await Promise.all([
-      actionRegion.boundingBox(),
-      wake.boundingBox()
-    ]);
-    expect(actionRegionBox).not.toBeNull();
-    expect(wakeBox).not.toBeNull();
-    expect((wakeBox?.x ?? 0) + (wakeBox?.width ?? 0)).toBeCloseTo(
-      (actionRegionBox?.x ?? 0) + (actionRegionBox?.width ?? 0),
-      0
-    );
-    expect(wakeBox?.height).toBeGreaterThanOrEqual(48);
-    await wake.click();
-    await expect.poll(() => postedActions.length).toBe(1);
-    expect(postedActions).toEqual([{ actionId: "system.rog_g703.wake" }]);
-    await expect(page.getByTestId("overview-rog-g703")).toContainText("В сети");
+    await expect(page.getByTestId("overview-rog-g703-wake")).toHaveCount(0);
+    for (const [testId, label] of [
+      ["overview-rog-g703-sleep", "Перевести ASUS ROG в спящий режим"],
+      ["overview-rog-g703-hibernate", "Перевести ASUS ROG в гибернацию"]
+    ] as const) {
+      const action = page.getByTestId(testId);
+      await expect(action).toHaveAccessibleName(label);
+      await expect(action.locator("svg")).toHaveCount(1);
+      await expect(action).toBeDisabled();
+    }
+    await expect(rog.locator(".overview-rog-widget__action button")).toHaveCount(2);
+    expect(postedActions).toEqual([]);
     await expectNoOverflow(page);
   });
 
   test.describe("ROG state projection", () => {
-    const states: Array<[RogStatus, string, string | null]> = [
-      ["online", "В сети", "Сон"],
-      ["offline", "Не в сети", "Включить"],
-      ["waking", "Пробуждение", null],
-      ["sleeping", "Сон", "Сон"],
-      ["hibernating", "Гибернация", "Гибернация"],
-      ["unavailable", "Недоступен", null]
+    const states: Array<[RogStatus, string]> = [
+      ["online", "В сети"],
+      ["offline", "Не в сети"],
+      ["waking", "Пробуждение"],
+      ["sleeping", "Сон"],
+      ["hibernating", "Гибернация"],
+      ["unavailable", "Недоступен"]
     ];
 
-    for (const [state, label, action] of states) {
+    for (const [state, label] of states) {
       test(`renders ${state} without a guessed opposite action`, async ({ page }) => {
         rogStatus = state;
         await page.setViewportSize({ width: 1280, height: 720 });
         await page.goto("/overview?theme=night");
         await waitForOverview(page);
         await expect(page.getByTestId("overview-rog-g703")).toContainText(label);
-        if (action) {
-          if (state === "online") {
-            await expect(page.getByTestId("overview-rog-g703-sleep")).toContainText("Сон");
-            await expect(page.getByTestId("overview-rog-g703-hibernate")).toContainText("Гибернация");
-          } else {
-            const actionButton = state === "offline"
-              ? page.getByTestId("overview-rog-g703-wake")
-              : page.getByTestId(state === "sleeping" ? "overview-rog-g703-sleep" : "overview-rog-g703-hibernate");
-            await expect(actionButton).toContainText(action);
-          }
-          await expect(page.locator(".overview-rog-widget__action button")).toHaveCount(state === "online" || state === "sleeping" || state === "hibernating" ? 2 : 1);
-          if (state === "online") await expect(page.getByTestId("overview-rog-g703-wake")).toHaveCount(0);
-          if (state === "offline") await expect(page.getByTestId("overview-rog-g703-hibernate")).toHaveCount(0);
-        } else {
-          if (state === "waking") {
-            await expect(page.getByTestId("overview-rog-g703-wake")).toBeDisabled();
-          } else {
-            await expect(page.getByTestId("overview-rog-g703-unavailable")).toContainText("Недоступен");
-            await expect(page.getByTestId("overview-rog-g703-wake")).toHaveCount(0);
-          }
-        }
+        await expect(page.getByTestId("overview-rog-g703-sleep")).toHaveAccessibleName("Перевести ASUS ROG в спящий режим");
+        await expect(page.getByTestId("overview-rog-g703-hibernate")).toHaveAccessibleName("Перевести ASUS ROG в гибернацию");
+        await expect(page.getByTestId("overview-rog-g703-wake")).toHaveCount(0);
+        await expect(page.locator(".overview-rog-widget__action button")).toHaveCount(2);
         await expectNoOverflow(page);
       });
     }
@@ -457,7 +434,7 @@ test.describe("PR4 curated Overview", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    await expect(page.getByTestId("overview-rog-g703-wake")).toHaveText("Включить");
+    await expect(page.getByTestId("overview-rog-g703-wake")).toHaveCount(0);
     await page.goto("/system?theme=night");
     if (visualShellEnabled) {
       await expect(page.getByTestId("system-rog-g703")).toBeVisible();

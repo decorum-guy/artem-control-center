@@ -194,12 +194,13 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
-  min-width: 144px;
+  min-width: 0;
 }
 
 .overview-rog-widget__actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(132px, 1fr));
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -208,21 +209,35 @@
 }
 
 .overview-rog-widget__action button {
-  width: 156px;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
   min-height: 48px;
   border: 1px solid var(--cc-accent);
   border-radius: var(--cc-radius-control);
   color: var(--cc-on-accent);
   background: var(--cc-accent-strong);
-  font-size: var(--cc-type-control-size);
-  font-weight: var(--cc-type-control-weight);
-  line-height: var(--cc-type-control-line);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
 }
 
 .overview-rog-widget__action button:disabled {
   border-color: var(--cc-border);
   color: var(--cc-text-disabled);
   background: var(--cc-surface-2);
+}
+
+.overview-rog-widget__action .rog-psu-controls__mode--overview {
+  border-color: var(--cc-border-strong);
+  color: var(--cc-text-secondary);
+  background: var(--cc-interactive);
+}
+
+.overview-rog-widget__action .rog-psu-controls__mode--overview.rog-psu-controls__mode--selected {
+  border-color: var(--cc-accent);
+  color: var(--cc-on-accent);
+  background: var(--cc-accent-strong);
 }
 
 .overview-rog-widget__unavailable {
@@ -236,6 +251,10 @@
   font-size: var(--cc-type-control-size);
   font-weight: var(--cc-type-control-weight);
 }
+
+.overview-rog-widget__pending-icon { animation: overview-rog-spin .8s linear infinite; }
+
+@keyframes overview-rog-spin { to { transform: rotate(360deg); } }
 
 .coffee-panel--overview {
   grid-template-columns: minmax(0, 1.25fr) minmax(112px, .75fr);
@@ -820,22 +839,16 @@
 }
 
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-rog-widget__actions {
-  width: 100%;
+  width: auto;
 }
 
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-rog-widget__action button,
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-rog-widget__unavailable {
-  width: 100%;
+  width: 48px;
 }
 
 @media (max-width: 760px) {
-  .overview-rog-widget__actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .overview-rog-widget__action button {
-    width: auto;
-  }
+  .overview-rog-widget__actions { gap: 6px; }
 }
 
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .coffee-panel--overview {

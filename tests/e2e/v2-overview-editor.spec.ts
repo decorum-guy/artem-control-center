@@ -283,8 +283,7 @@ async function assertEditorChromeGeometry(page: Page, instanceId: string, neighb
         ? [
             ".climate-control__header h2",
             ".climate-control__status",
-            ".climate-control__room-temperature",
-            ".climate-control__target-temperature",
+            ".climate-control__temperature-control",
             ".climate-control__mode-label select",
             ".climate-control__fan-label select"
           ]

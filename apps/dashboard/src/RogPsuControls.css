@@ -30,6 +30,13 @@
 .rog-psu-controls__toggle--on { border-color: var(--cc-accent); color: var(--cc-on-accent); background: var(--cc-accent-strong); }
 
 .rog-psu-controls--home { padding: 12px; gap: 10px; }
+.rog-psu-controls--overview { display: contents; padding: 0; border: 0; background: none; }
+.rog-psu-controls--overview .rog-psu-controls__modes { display: contents; }
+.rog-psu-controls__mode--overview { display: inline-grid; place-items: center; width: 48px; min-width: 48px; height: 48px; padding: 0; color: var(--cc-text-secondary); background: var(--cc-interactive); }
+.rog-psu-controls__mode--overview.rog-psu-controls__mode--selected { border-color: var(--cc-accent); color: var(--cc-on-accent); background: var(--cc-accent-strong); }
+.rog-psu-controls__pending-icon { animation: rog-psu-spin .8s linear infinite; }
+
+@keyframes rog-psu-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 520px) {
   .rog-psu-controls { padding: 12px; }
