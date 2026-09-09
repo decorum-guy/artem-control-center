@@ -73,6 +73,7 @@ from .capabilities import (
     CapabilityOverrideStore,
     CapabilityRevisionConflict,
     CapabilityStoreError,
+    IMMEDIATE_MUTABLE_IDS,
 )
 from .ai_settings import AIProviderSettingsStore
 from .ai_text import AITextService
@@ -510,7 +511,7 @@ def patch_interface_copy(
 
 
 def _calendar_display_write_allowed() -> bool:
-    return _write_allowed(_immediate_capability_enabled("calendar_display_colors"))
+    return _write_allowed(effective_immediate_capability_enabled("calendar_display_colors"))
 
 
 def _ai_settings_write_allowed() -> bool:
@@ -1188,6 +1189,8 @@ def _immediate_baseline(capability_id: str) -> bool:
     return {
         "calendar_display_colors": SETTINGS.calendar_display_color_writes_enabled,
         "overview_layout_editor": SETTINGS.overview_layout_writes_enabled,
+        "home_climate_actions": SETTINGS.home_climate_actions_enabled,
+        "rog_g703_psu_actions": SETTINGS.rog_g703_psu_actions_enabled,
     }[capability_id]
 
 
@@ -1196,7 +1199,9 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return default if not raw else raw in {"1", "true", "yes", "on"}
 
 
-def _immediate_capability_enabled(capability_id: str) -> bool:
+def effective_immediate_capability_enabled(capability_id: str) -> bool:
+    if capability_id not in IMMEDIATE_MUTABLE_IDS:
+        raise ValueError("capability_not_immediate_mutable")
     document, available = capability_override_store.read()
     if not available:
         return _immediate_baseline(capability_id)
@@ -1216,8 +1221,6 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "coffee_timing_writes": SETTINGS.coffee_timing_writes_enabled,
         "coffee_notification_writes": SETTINGS.coffee_notification_writes_enabled,
         "coffee_actions": SETTINGS.coffee_actions_enabled,
-        "home_climate_actions": SETTINGS.home_climate_actions_enabled,
-        "rog_g703_psu_actions": SETTINGS.rog_g703_psu_actions_enabled,
         "avalar_ssh": SETTINGS.avalar_ssh_enabled,
         "avalar_actions": SETTINGS.avalar_actions_enabled,
         "avalar_smoke": SETTINGS.avalar_smoke_enabled,
@@ -1239,7 +1242,7 @@ def _capability_inventory() -> dict:
     entries = []
     for definition in CAPABILITY_REGISTRY:
         configured = None
-        if definition.id in {"calendar_display_colors", "overview_layout_editor"}:
+        if definition.id in IMMEDIATE_MUTABLE_IDS:
             configured = _immediate_baseline(definition.id)
             effective = overrides.get(definition.id, configured)
             active = desired = effective
@@ -1251,7 +1254,7 @@ def _capability_inventory() -> dict:
             active = desired = build_flags[definition.technical_flag]
         else:
             active = desired = _read_only_capability_enabled(definition.id)
-        blocked = "panel_writes_disabled" if definition.id in {"calendar_display_colors", "overview_layout_editor"} and desired and not SETTINGS.writes_enabled else None
+        blocked = "panel_writes_disabled" if definition.id in IMMEDIATE_MUTABLE_IDS and desired and not SETTINGS.writes_enabled else None
         entry = {
             "id": definition.id,
             "label": definition.label,
@@ -1757,7 +1760,7 @@ def _write_allowed(narrow_gate: bool) -> bool:
 
 
 def _overview_write_allowed() -> bool:
-    return _write_allowed(_immediate_capability_enabled("overview_layout_editor"))
+    return _write_allowed(effective_immediate_capability_enabled("overview_layout_editor"))
 
 
 def _capabilities_write_allowed() -> bool:

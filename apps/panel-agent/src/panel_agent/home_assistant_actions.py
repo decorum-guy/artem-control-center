@@ -137,6 +137,7 @@ class HomeAssistantActionExecutor:
         clock: Callable[[], float] = time.monotonic,
         verification_interval: float = 0.25,
         verification_timeout: float = 5.0,
+        gate_provider: Callable[[str], bool] | None = None,
     ) -> None:
         self.settings = settings
         self.access = access
@@ -146,6 +147,7 @@ class HomeAssistantActionExecutor:
         self._clock = clock
         self._verification_interval = verification_interval
         self._verification_timeout = verification_timeout
+        self._gate_provider = gate_provider
         # Python 3.9 binds asyncio.Lock to the current loop at construction;
         # create each independent lock lazily on the first async request so
         # production import and synchronous availability reads remain safe.
@@ -154,14 +156,13 @@ class HomeAssistantActionExecutor:
 
     def _gate_enabled(self, action_id: str) -> bool:
         if action_id in CLIMATE_ACTION_IDS:
-            return bool(
-                self.settings.writes_enabled
-                and self.settings.home_climate_actions_enabled
-            )
-        return bool(
-            self.settings.writes_enabled
-            and self.settings.rog_g703_psu_actions_enabled
-        )
+            capability_id = "home_climate_actions"
+            configured = self.settings.home_climate_actions_enabled
+        else:
+            capability_id = "rog_g703_psu_actions"
+            configured = self.settings.rog_g703_psu_actions_enabled
+        effective = self._gate_provider(capability_id) if self._gate_provider else configured
+        return bool(self.settings.writes_enabled and effective)
 
     def _lock_for(self, action_id: str) -> asyncio.Lock:
         if action_id in CLIMATE_ACTION_IDS:

@@ -200,7 +200,6 @@ export function CapabilitySettingsSheet({ onClose, capabilities }: { onClose: ()
                   {entry.behavior === "delayed" && <span>После применения: {stateCopy(entry.desiredEnabled)}</span>}
                   {entry.pending && <span className="capability-row__pending">Ожидает применения</span>}
                   <small>{entry.mutable ? behaviorCopy(entry.behavior) : "Управляется конфигурацией"} · {entry.description}</small>
-                  <small className="capability-row__technical">{entry.technicalFlag}</small>
                   {entry.operationalBlockedReason === "panel_writes_disabled" && <small className="capability-row__blocked">Включено, но запись панели отключена</small>}
                 </div>
                 {entry.mutable && <div className="capability-row__actions">

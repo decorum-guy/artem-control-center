@@ -13,7 +13,7 @@ from .home_assistant_actions import (
     HomeAssistantActionExecutor,
     build_home_assistant_action_router,
 )
-from .main import SETTINGS, app, runtime
+from .main import SETTINGS, app, effective_immediate_capability_enabled, runtime
 from .rog_g703_power import RogG703ActionExecutor, build_rog_g703_action_router
 from .static_dashboard import install_dashboard_routes
 from .system_update import build_system_update_router
@@ -38,6 +38,7 @@ home_assistant_actions = HomeAssistantActionExecutor(
     SETTINGS,
     access_policy,
     runtime.home_assistant,
+    gate_provider=effective_immediate_capability_enabled,
 )
 rog_g703_actions = RogG703ActionExecutor(
     SETTINGS,

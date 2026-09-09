@@ -5,12 +5,15 @@ import { resolveManifest } from "../../registry";
 import { RouteHeader, SectionHeader, StatusText } from "../../ShellPrimitives";
 import { CoffeeWidget } from "../../widgets";
 import { ClimateControl } from "../../ClimateControl";
+import { RogG703HomeControl } from "../../RogG703Controls";
+import { RogPsuControls } from "../../RogPsuControls";
 import { DeviceRow } from "../operations/DeviceRow";
 import { useInterfaceCopy } from "../../interfaceCopy";
 import {
   healthLabel,
   healthTone,
   homeAuthority,
+  selectHomeAsusServices,
   selectHomePrimaryDevices
 } from "../operations/routeDensity";
 
@@ -31,6 +34,7 @@ export function HomeV2Page({
 }) {
   const { copy } = useInterfaceCopy();
   const selection = selectHomePrimaryDevices(snapshot.services);
+  const asus = selectHomeAsusServices(snapshot.services);
   const authority = homeAuthority(snapshot.services);
   const authorityLabel = authority ? healthLabel(authority.health) : "Недоступен";
   const authorityTone = authority ? healthTone(authority.health) : "unavailable";
@@ -96,6 +100,30 @@ export function HomeV2Page({
           </div>
         )}
       </section>
+
+      {(asus.rog || asus.rogPsu) && (
+        <section className="home-v2-asus-zone" data-testid="home-asus-zone" aria-labelledby="home-asus-zone-title">
+          <header className="home-v2-asus-zone__header">
+            <span className="home-v2-asus-zone__icon" aria-hidden="true"><Icon name="home" /></span>
+            <div>
+              <h2 id="home-asus-zone-title">ASUS ROG G703GI</h2>
+              <span>Домашняя зона</span>
+            </div>
+          </header>
+          <div className="home-v2-asus-zone__grid">
+            {asus.rog && (
+              <ErrorBoundary title={asus.rog.title}>
+                <RogG703HomeControl service={asus.rog} />
+              </ErrorBoundary>
+            )}
+            {asus.rogPsu && (
+              <ErrorBoundary title={asus.rogPsu.title}>
+                <RogPsuControls service={asus.rogPsu} variant="home" />
+              </ErrorBoundary>
+            )}
+          </div>
+        </section>
+      )}
 
       {selection.additional.length > 0 && (
         <section className="home-v2-secondary-zone" data-testid="home-secondary-devices">

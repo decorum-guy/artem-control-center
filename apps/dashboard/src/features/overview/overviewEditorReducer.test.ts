@@ -42,10 +42,10 @@ describe("Overview edit reducer", () => {
     const result = moveOverviewItem(overviewFoundationLayout(), "fixture.planning", -5, 0);
     expect(result.ok).toBe(true);
     const coffee = result.items.find((item) => item.instanceId === "fixture.coffee")!;
-    const quickActions = result.items.find((item) => item.instanceId === "fixture.quick-actions")!;
+    const climate = result.items.find((item) => item.instanceId === "fixture.climate")!;
     expect(coffee.placement).toMatchObject({ x: 0, w: 7 });
-    expect(quickActions.placement).toMatchObject({ x: 0, w: 7 });
-    expect(quickActions.placement.y).toBeGreaterThan(coffee.placement.y);
+    expect(climate.placement).toMatchObject({ x: 0, w: 7 });
+    expect(climate.placement.y).toBeGreaterThan(coffee.placement.y);
   });
 
   it("rejects invalid movement and resize without mutating the draft", () => {
@@ -76,6 +76,20 @@ describe("Overview edit reducer", () => {
     expect(addOverviewWidget(restored.items, "home.coffee-machine").ok).toBe(false);
   });
 
+  it("removes and re-adds the fixed climate singleton with the same identity", () => {
+    const removed = removeOverviewWidget(overviewFoundationLayout(), "fixture.climate");
+    expect(removed.find((item) => item.instanceId === "fixture.climate")?.visibility).toBe("hidden");
+    const restored = addOverviewWidget(removed, "home.climate");
+    expect(restored.ok).toBe(true);
+    expect(restored.items.filter((item) => item.widgetType === "home.climate")).toHaveLength(1);
+    expect(restored.items.find((item) => item.widgetType === "home.climate")).toMatchObject({
+      instanceId: "fixture.climate",
+      visibility: "visible",
+      placement: { w: 7, h: 4 }
+    });
+    expect(addOverviewWidget(restored.items, "home.climate").ok).toBe(false);
+  });
+
   it("tracks config dirty state, resets only one widget, and preserves config across resize", () => {
     const items = overviewFoundationLayout();
     const changed = setOverviewItemConfig(items, "fixture.coffee", "imageScalePct", 120);
@@ -93,7 +107,7 @@ describe("Overview edit reducer", () => {
     for (const originalItem of original) {
       expect(result.items.find((item) => item.instanceId === originalItem.instanceId)?.placement).toEqual(originalItem.placement);
     }
-    expect(result.items.find((item) => item.widgetType === "weather.alert")?.placement).toEqual({ x: 0, y: 7, w: 6, h: 2 });
+    expect(result.items.find((item) => item.widgetType === "weather.alert")?.placement).toEqual({ x: 0, y: 9, w: 6, h: 2 });
   });
 
   it("keeps appearance config through compact projection without changing the canonical draft", () => {

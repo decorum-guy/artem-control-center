@@ -466,11 +466,15 @@ test("Coffee action-row enum stays touch-safe across all supported widget sizes"
                   : { x: 7, y: 1, w: 5, h: 4 }
             };
           }
-          if (item.instanceId === "fixture.quick-actions") {
-            return { ...item, placement: sizeVariant === "large" ? { x: 0, y: 6, w: 7, h: 2 } : { x: 0, y: 5, w: 7, h: 2 } };
+          if (item.instanceId === "fixture.climate") {
+            return {
+              ...item,
+              sizeVariant: sizeVariant === "large" ? "large" : "standard",
+              placement: sizeVariant === "large" ? { x: 0, y: 6, w: 8, h: 5 } : { x: 0, y: 5, w: 7, h: 4 }
+            };
           }
           if (item.instanceId === "fixture.health") {
-            return { ...item, placement: sizeVariant === "large" ? { x: 7, y: 6, w: 5, h: 2 } : { x: 7, y: 5, w: 5, h: 2 } };
+            return { ...item, placement: sizeVariant === "large" ? { x: 8, y: 6, w: 4, h: 2 } : { x: 7, y: 5, w: 5, h: 2 } };
           }
           return item;
         })

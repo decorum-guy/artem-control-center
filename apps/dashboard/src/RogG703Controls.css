@@ -1,4 +1,6 @@
 .rog-g703-controls {
+  box-sizing: border-box;
+  min-width: 0;
   max-width: 900px;
   padding: 20px;
   border: 1px solid var(--border);
@@ -13,11 +15,15 @@
   gap: var(--space-4);
 }
 
-.rog-g703-controls h2 {
+.rog-g703-controls h2,
+.rog-g703-controls h3 {
   margin: 4px 0 0;
   font-size: 24px;
   letter-spacing: -.025em;
 }
+
+.rog-g703-controls--home h3 { margin: 0; font-size: var(--cc-type-widget-title-size); line-height: var(--cc-type-widget-title-line); overflow-wrap: anywhere; }
+.rog-g703-controls--home .rog-g703-status { min-height: 64px; margin: 12px 0; }
 
 .rog-g703-status {
   display: flex;

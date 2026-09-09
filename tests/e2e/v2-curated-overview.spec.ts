@@ -323,7 +323,7 @@ test.describe("PR4 curated Overview", () => {
       ["fixture.rog", 196, 136, 1064, 60],
       ["fixture.coffee", 196, 208, 616, 276],
       ["fixture.planning", 824, 208, 436, 276],
-      ["fixture.quick-actions", 196, 496, 616, 132],
+      ["fixture.climate", 196, 496, 616, 276],
       ["fixture.health", 824, 496, 436, 132]
     ] as const;
 
@@ -370,7 +370,7 @@ test.describe("PR4 curated Overview", () => {
       rog.getByTestId("overview-rog-g703-hibernate"),
       page.getByTestId("widget-coffee-machine").locator("[data-coffee-action]"),
       coffeeDelayedAction,
-      page.getByTestId("overview-home-device-kettle"),
+      page.getByTestId("climate-power-overview"),
       page.getByTestId("planning-overview-card").locator(".planning-row").first()
     ]) {
       const box = await control.boundingBox();
@@ -559,27 +559,19 @@ test.describe("PR4 curated Overview", () => {
     await expect(metadata).toHaveCSS("line-height", "18px");
   });
 
-  test("spans one truthful Home device and preserves the two-device projection", async ({ page }) => {
+  test("renders the dedicated climate widget without a generic quick-action projection", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    const oneCells = page.getByTestId("overview-home-cells");
-    const oneCell = page.getByTestId("overview-home-device-kettle");
-    const oneCellsBox = await oneCells.boundingBox();
-    const oneCellBox = await oneCell.boundingBox();
-    expect(await oneCells.getAttribute("data-device-count")).toBe("1");
-    expect(oneCellBox?.width).toBeCloseTo(oneCellsBox?.width ?? 0, 0);
-    await expect(page.getByTestId("overview-home-device-fixture-desk-lamp")).toHaveCount(0);
+    await expect(page.getByTestId("overview-climate-widget")).toBeVisible();
+    await expect(page.getByTestId("climate-control-overview")).toBeVisible();
+    await expect(page.getByTestId("overview-home-widget")).toHaveCount(0);
 
     homeFixture = "two";
     await page.goto("/overview?theme=night");
     await waitForOverview(page);
-    await expect(page.getByTestId("overview-home-cells")).toHaveAttribute("data-device-count", "2");
-    await expect(page.getByTestId("overview-home-device-kettle")).toBeVisible();
-    await expect(page.getByTestId("overview-home-device-fixture-desk-lamp")).toBeVisible();
-    const twoCellsBox = await page.getByTestId("overview-home-cells").boundingBox();
-    const twoCellBox = await page.getByTestId("overview-home-device-kettle").boundingBox();
-    expect(twoCellBox?.width).toBeLessThan((twoCellsBox?.width ?? 0) - 8);
+    await expect(page.getByTestId("overview-climate-widget")).toBeVisible();
+    await expect(page.getByTestId("overview-home-widget")).toHaveCount(0);
     await expectNoOverflow(page);
   });
 
@@ -623,7 +615,7 @@ test.describe("PR4 curated Overview", () => {
     const planning = page.getByTestId("planning-overview-card");
     await expect(planning).toHaveAttribute("data-visible-item-count", "3");
     await expect(planning.locator(".planning-row")).toHaveCount(3);
-    await expect(page.getByTestId("overview-home-device-kettle")).toContainText("Чайник");
+    await expect(page.getByTestId("overview-climate-widget")).toContainText("Кондиционер");
     await expect(page.getByTestId("overview-health-widget")).toContainText("требуют внимания");
     await expectNoOverflow(page);
   });

@@ -64,7 +64,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
     (service) => service.presentation?.role === "home-authority"
   );
   const quickDevices = ordered.filter(
-    (service) => service.presentation?.overview === "quick-control"
+    (service) => service.presentation?.overview === "quick-control" && service.dataContract !== "home.climate.v1"
   );
   const serviceCatalog = ordered.filter(
     (service) => service.presentation?.category !== "home-device"

@@ -6,6 +6,7 @@ import {
   groupHealthyServices,
   healthLabel,
   selectHomePrimaryDevices,
+  selectHomeAsusServices,
   selectSystemServiceSubjects,
   servicesByAttention,
   systemRelevantServices,
@@ -136,6 +137,14 @@ describe("PR7 route density helpers", () => {
     expect(subjects.rog).toBeNull();
     expect(subjects.rogPsu).toBe(psu);
     expect(visibleSystemServices(subjects)).toEqual([psu]);
+  });
+
+  it("selects Home ASUS host and PSU independently", () => {
+    const host = service("rog_g703gi", { dataContract: "system.rog-g703.v1" });
+    const psu = service("rog-g703-psu", { dataContract: "system.rog-g703-psu.v1" });
+    expect(selectHomeAsusServices([host, psu])).toEqual({ rog: host, rogPsu: psu });
+    expect(selectHomeAsusServices([psu])).toEqual({ rog: null, rogPsu: psu });
+    expect(selectHomeAsusServices([host])).toEqual({ rog: host, rogPsu: null });
   });
 
   it("uses the bounded Russian health vocabulary", () => {

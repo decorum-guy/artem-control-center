@@ -3,6 +3,7 @@ import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { useInteractionLock } from "./InteractionLock";
 import { useNoticeCenter } from "./NoticeCenter";
+import { Icon } from "./icons";
 import {
   executeHomeAssistantAction,
   fetchHomeAssistantActionAvailability,
@@ -82,7 +83,18 @@ function actionLabel(actionId: RogPsuActionId): string {
   }
 }
 
-export function RogPsuControls({ service, interactive = true }: { service: ServiceSnapshot; interactive?: boolean }) {
+function availabilityCopy(availability: string, explain: (value: string) => string): string {
+  return availability === "gate_disabled"
+    ? "Управление блоками питания выключено в настройках возможностей."
+    : explain(availability);
+}
+
+function displayActionLabel(actionId: RogPsuActionId, variant: "system" | "home"): string {
+  if (variant === "home" && actionId === ROG_PSU_MODE_NORMAL) return "Обычный режим";
+  return actionLabel(actionId);
+}
+
+export function RogPsuControls({ service, interactive = true, variant = "system" }: { service: ServiceSnapshot; interactive?: boolean; variant?: "system" | "home" }) {
   const { ensureCapability, explainAvailability } = useAccess();
   const { guardMutation } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
@@ -144,7 +156,7 @@ export function RogPsuControls({ service, interactive = true }: { service: Servi
       }
     }
     if (!decision.allowed) {
-      showNotice({ id: "system.rog-g703-psu.action", severity: "warning", title: "Питание ASUS ROG", detail: explainAvailability(decision.availability), timeoutMs: 6_000 });
+      showNotice({ id: "system.rog-g703-psu.action", severity: "warning", title: "Питание ASUS ROG", detail: availabilityCopy(decision.availability, explainAvailability), timeoutMs: 6_000 });
       return;
     }
     if (!guardMutation()) return;
@@ -170,11 +182,11 @@ export function RogPsuControls({ service, interactive = true }: { service: Servi
       : rogPsuModeLabel(mode);
 
   return (
-    <section className={`rog-psu-controls${!live ? " rog-psu-controls--unavailable" : ""}`} data-testid="rog-psu-controls" aria-labelledby="rog-psu-title">
+    <section className={`rog-psu-controls rog-psu-controls--${variant}${!live ? " rog-psu-controls--unavailable" : ""}`} data-testid="rog-psu-controls" data-variant={variant} aria-labelledby={`rog-psu-title-${variant}`}>
       <header className="rog-psu-controls__header">
         <div>
-          <p className="section-kicker">Система · питание</p>
-          <h2 id="rog-psu-title">{service.title}</h2>
+          {variant === "system" && <p className="section-kicker">Система · питание</p>}
+          <h2 id={`rog-psu-title-${variant}`}>{variant === "home" ? "Блоки питания" : service.title}</h2>
         </div>
         <StatusText label={statusLabel} tone={live ? "success" : service.health === "stale" ? "stale" : "unavailable"} />
       </header>
@@ -189,10 +201,10 @@ export function RogPsuControls({ service, interactive = true }: { service: Servi
             className={`rog-psu-controls__mode${mode === (actionId === ROG_PSU_MODE_FULL ? "full" : "normal") ? " rog-psu-controls__mode--selected" : ""}`}
             disabled={!canUse(actionId)}
             aria-busy={pendingAction === actionId}
-            title={availability?.actions[actionId] ? explainAvailability(availability.actions[actionId].availability) : "Проверяем доступность"}
+            title={availability?.actions[actionId] ? availabilityCopy(availability.actions[actionId].availability, explainAvailability) : "Проверяем доступность"}
             onClick={() => void run(actionId)}
           >
-            {pendingAction === actionId ? "Проверяем…" : actionLabel(actionId)}
+            {pendingAction === actionId ? "Проверяем…" : displayActionLabel(actionId, variant)}
           </button>
         ))}
       </div>
@@ -218,10 +230,10 @@ export function RogPsuControls({ service, interactive = true }: { service: Servi
                 aria-pressed={state === "on"}
                 aria-busy={pendingAction === targetAction}
                 disabled={!canUse(targetAction, offAllowed)}
-                title={!offAllowed ? "Нельзя выключить последний включённый блок питания" : availability?.actions[targetAction] ? explainAvailability(availability.actions[targetAction].availability) : "Проверяем доступность"}
+                title={!offAllowed ? "Нельзя выключить последний включённый блок питания" : availability?.actions[targetAction] ? availabilityCopy(availability.actions[targetAction].availability, explainAvailability) : "Проверяем доступность"}
                 onClick={() => void run(targetAction)}
               >
-                <span aria-hidden="true">⏻</span>
+                <Icon name="power" size={22} />
               </button>
             </div>
           );
@@ -229,7 +241,7 @@ export function RogPsuControls({ service, interactive = true }: { service: Servi
       </div>
 
       {!apiAvailable && interactive && <p className="rog-psu-controls__notice">Проверяем доступность управления…</p>}
-      <p className="rog-psu-controls__note">Состояние показывает только два подтверждённых переключателя Home Assistant. Телеметрия мощности не подключена.</p>
+      {variant === "system" && <p className="rog-psu-controls__note">Состояние показывает только два подтверждённых переключателя Home Assistant. Телеметрия мощности не подключена.</p>}
     </section>
   );
 }

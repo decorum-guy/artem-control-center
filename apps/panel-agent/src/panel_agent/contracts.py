@@ -720,6 +720,8 @@ class CapabilityPatch(BaseModel):
     capabilityId: Literal[
         "calendar_display_colors",
         "overview_layout_editor",
+        "home_climate_actions",
+        "rog_g703_psu_actions",
         "planning_overview",
         "planning_tasks_route",
         "planning_calendar_route",
@@ -768,7 +770,7 @@ class OverviewLayoutResponse(BaseModel):
     schemaVersion: Literal["overview.layout.v2"]
     profileId: Literal["samsung-control"]
     presetId: Literal["overview.default"]
-    presetVersion: Literal[2]
+    presetVersion: Literal[3]
     revision: int = Field(ge=0)
     viewportClass: Literal["landscape-12"]
     updatedAt: str

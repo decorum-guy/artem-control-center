@@ -43,7 +43,7 @@
 }
 .home-v2-primary-grid > .climate-control--home {
   grid-column: span 6;
-  grid-row: span 4;
+  grid-row: span 5;
   min-height: 0;
   height: 100%;
   justify-self: start;
@@ -207,6 +207,33 @@
 .home-v2-empty strong { color: var(--cc-text-secondary); font-size: var(--cc-type-widget-title-size); }
 .home-v2-empty span { color: var(--cc-text-muted); font-size: var(--cc-type-body-size); }
 
+.home-v2-asus-zone {
+  min-width: 0;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-zone);
+  background: var(--cc-surface-1);
+}
+
+.home-v2-asus-zone__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 10px;
+}
+
+.home-v2-asus-zone__icon { display: grid; place-items: center; color: var(--cc-accent-strong); }
+.home-v2-asus-zone__header > div { min-width: 0; }
+.home-v2-asus-zone__header h2 { margin: 0; color: var(--cc-text); font-size: var(--cc-type-section-title-size); line-height: var(--cc-type-section-title-line); overflow-wrap: anywhere; }
+.home-v2-asus-zone__header span:not(.home-v2-asus-zone__icon) { color: var(--cc-text-secondary); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); }
+.home-v2-asus-zone__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; min-width: 0; align-items: stretch; }
+.home-v2-asus-zone__grid > * { min-width: 0; min-height: 0; }
+.home-v2-asus-zone__grid > :only-child { grid-column: 1 / -1; }
+.home-v2-asus-zone .rog-g703-controls,
+.home-v2-asus-zone .rog-psu-controls { width: 100%; max-width: none; height: 100%; }
+
 .home-v2-secondary-zone { margin-top: 12px; border-top: 1px solid var(--cc-divider); }
 .home-v2-device-rows { overflow: hidden; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-zone); background: var(--cc-surface-1); }
 .home-v2-device-rows .device-row + .device-row { border-top: 1px solid var(--cc-divider); }
@@ -230,6 +257,8 @@
   }
   .home-v2-primary-grid > .climate-control--home { grid-row: auto; height: auto; }
   .home-v2-primary-grid > .device-row--primary { grid-row: span 2; }
+  .home-v2-asus-zone__grid { grid-template-columns: minmax(0, 1fr); }
+  .home-v2-asus-zone__grid > :only-child { grid-column: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3,6 +3,7 @@ import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { useInteractionLock } from "./InteractionLock";
 import { useNoticeCenter } from "./NoticeCenter";
+import { Icon } from "./icons";
 import {
   fetchHomeAssistantActionAvailability,
   executeHomeAssistantAction,
@@ -71,14 +72,22 @@ function actionErrorCopy(code: string): string {
   }
 }
 
+function climateAvailabilityCopy(availability: string, explain: (value: string) => string): string {
+  return availability === "gate_disabled"
+    ? "Управление выключено в настройках возможностей."
+    : explain(availability);
+}
+
 export function ClimateControl({
   service,
   variant,
-  interactive = true
+  interactive = true,
+  overviewSizeVariant
 }: {
   service: ServiceSnapshot;
   variant: "home" | "overview";
   interactive?: boolean;
+  overviewSizeVariant?: "compact" | "standard" | "large";
 }) {
   const { ensureCapability, explainAvailability } = useAccess();
   const { guardMutation } = useInteractionLock();
@@ -153,7 +162,7 @@ export function ClimateControl({
       }
     }
     if (!decision.allowed) {
-      showNotice({ id: "home.climate.action", severity: "warning", title: "Кондиционер", detail: explainAvailability(decision.availability), timeoutMs: 6_000 });
+      showNotice({ id: "home.climate.action", severity: "warning", title: "Кондиционер", detail: climateAvailabilityCopy(decision.availability, explainAvailability), timeoutMs: 6_000 });
       return;
     }
     if (!guardMutation()) return;
@@ -178,7 +187,6 @@ export function ClimateControl({
 
   const state = data.state ?? "off";
   const powerAction = state === "off" ? HOME_CLIMATE_POWER_ON : HOME_CLIMATE_POWER_OFF;
-  const powerLabel = pendingAction === powerAction ? "Проверяем…" : state === "off" ? "Включить" : "Выключить";
   const stateLabel = climateHvacLabels[state] ?? "Состояние неизвестно";
   const statusLabel = !climateLive
     ? service.health === "stale" || data.stale ? "Данные устарели" : "Недоступен"
@@ -191,11 +199,12 @@ export function ClimateControl({
     <section
       className={`climate-control climate-control--${variant}${!climateLive ? " climate-control--unavailable" : ""}`}
       data-testid={`climate-control-${variant}`}
+      data-overview-size-variant={variant === "overview" ? overviewSizeVariant ?? "standard" : undefined}
       aria-labelledby={`climate-control-title-${variant}`}
     >
       <header className="climate-control__header">
         <div>
-          <p className="section-kicker">Дом · Home Assistant</p>
+          {variant === "overview" && <p className="section-kicker">Дом · Home Assistant</p>}
           <h2 id={`climate-control-title-${variant}`}>{service.title}</h2>
         </div>
         <span className="climate-control__status" data-health={service.health}>{statusLabel}</span>
@@ -222,12 +231,13 @@ export function ClimateControl({
           className="climate-control__power"
           data-testid={`climate-power-${variant}`}
           disabled={!canUse(powerAction)}
+          aria-label={state === "off" ? "Включить кондиционер" : "Выключить кондиционер"}
+          aria-pressed={state !== "off"}
           aria-busy={pendingAction === powerAction}
           onClick={() => void run(powerAction)}
-          title={availability?.actions[powerAction] ? explainAvailability(availability.actions[powerAction].availability) : "Проверяем доступность"}
+          title={availability?.actions[powerAction] ? climateAvailabilityCopy(availability.actions[powerAction].availability, explainAvailability) : "Проверяем доступность"}
         >
-          <span aria-hidden="true">⏻</span>
-          {powerLabel}
+          <Icon name="power" size={22} />
         </button>
 
         <div className="climate-control__temperature-control" aria-label="Целевая температура">
@@ -250,7 +260,7 @@ export function ClimateControl({
           >+</button>
         </div>
 
-        <label className="climate-control__select-label">
+        <label className="climate-control__select-label climate-control__mode-label">
           <span>Режим</span>
           <select
             value={selectedMode}
@@ -262,7 +272,7 @@ export function ClimateControl({
           </select>
         </label>
 
-        <label className="climate-control__select-label">
+        <label className="climate-control__select-label climate-control__fan-label">
           <span>Скорость вентилятора</span>
           <select
             value={selectedFan}

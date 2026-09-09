@@ -15,14 +15,14 @@ import "./RogG703Controls.css";
 
 type RogG703Controller = ReturnType<typeof useRogG703Controller>;
 
-function RogG703PowerActionGroup({
+export function RogG703PowerActionGroup({
   controller,
   testIdPrefix,
   className,
   interactive = true
 }: {
   controller: RogG703Controller;
-  testIdPrefix: "rog-g703" | "system-rog" | "overview-rog-g703";
+  testIdPrefix: "rog-g703" | "system-rog" | "overview-rog-g703" | "home-rog-g703";
   className: string;
   interactive?: boolean;
 }) {
@@ -102,6 +102,40 @@ export function RogG703Controls({ service }: { service: ServiceSnapshot }) {
       {!controller.apiAvailable && (
         <p className="rog-g703-controls__unavailable">Управление ASUS ROG сейчас недоступно.</p>
       )}
+    </section>
+  );
+}
+
+/** Home presentation backed by the same typed controller and fixed actions as System. */
+export function RogG703HomeControl({ service, interactive = true }: { service: ServiceSnapshot; interactive?: boolean }) {
+  const controller = useRogG703Controller(service);
+  const display = rogG703StatusCopy[controller.displayStatus];
+
+  return (
+    <section className="rog-g703-controls rog-g703-controls--home" data-testid="home-rog-g703" aria-labelledby="home-rog-g703-title">
+      <header className="rog-g703-controls__header">
+        <div>
+          <h3 id="home-rog-g703-title">ASUS ROG G703GI</h3>
+        </div>
+        <HealthMark health={service.health} compact />
+      </header>
+
+      <div className={`rog-g703-status rog-g703-status--${controller.displayStatus}`} role="status" aria-live="polite">
+        <span className="rog-g703-status__indicator" aria-hidden="true" />
+        <div>
+          <strong>{display.label}</strong>
+          <span>{display.detail}</span>
+        </div>
+      </div>
+
+      <RogG703PowerActionGroup
+        controller={controller}
+        testIdPrefix="home-rog-g703"
+        className="rog-g703-actions"
+        interactive={interactive}
+      />
+
+      {!controller.apiAvailable && <p className="rog-g703-controls__unavailable">Управление ASUS ROG сейчас недоступно.</p>}
     </section>
   );
 }

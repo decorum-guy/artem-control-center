@@ -65,6 +65,18 @@ describe("Overview V2 placement validation", () => {
     ]).issues.map((issue) => issue.code)).toContain("variant-dimension-mismatch");
     expect(resolveOverviewWidgetSize(getOverviewWidgetDefinition("home.coffee-machine")!, "standard"))
       .toEqual({ w: 7, h: 4 });
+    const climate = getOverviewWidgetDefinition("home.climate")!;
+    expect(["compact", "standard", "large"].map((sizeVariant) =>
+      resolveOverviewWidgetSize(climate, sizeVariant)
+    )).toEqual([{ w: 4, h: 5 }, { w: 7, h: 4 }, { w: 8, h: 5 }]);
+    expect(["compact", "standard", "large"].every((sizeVariant) => {
+      const size = resolveOverviewWidgetSize(climate, sizeVariant)!;
+      return validateOverviewLayout([item(`climate-${sizeVariant}`, "home.climate", sizeVariant, { x: 0, y: 0, ...size })]).valid;
+    })).toBe(true);
+    expect(validateOverviewLayout([
+      item("climate-one", "home.climate", "standard", { x: 0, y: 0, w: 7, h: 4 }),
+      item("climate-two", "home.climate", "standard", { x: 0, y: 4, w: 7, h: 4 })
+    ]).issues.map((issue) => issue.code)).toContain("duplicate-singleton");
   });
 
   it("rejects duplicate instance IDs and singleton definitions", () => {
@@ -228,7 +240,7 @@ describe("Overview V2 responsive projection", () => {
       "fixture.rog",
       "fixture.coffee",
       "fixture.planning",
-      "fixture.quick-actions",
+      "fixture.climate",
       "fixture.health"
     ]);
     expect(projection.items.find((entry) => entry.item.instanceId === "fixture.coffee")?.sizeVariant).toBe("compact");
