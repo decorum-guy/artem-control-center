@@ -25,7 +25,7 @@
 .rog-psu-controls__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; min-height: 56px; padding: 8px 10px 8px 12px; border: 1px solid var(--cc-divider); border-radius: var(--cc-radius-control); background: var(--cc-surface-2); }
 .rog-psu-controls__identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .rog-psu-controls__identity strong { color: var(--cc-text); font-size: var(--cc-type-body-size); }
-.rog-psu-controls__toggle { width: 48px; min-width: 48px; padding: 0; font-size: 22px; }
+.rog-psu-controls__toggle { display: inline-grid; place-items: center; width: 48px; min-width: 48px; height: 48px; padding: 0; font-size: 22px; }
 .rog-psu-controls__toggle svg { display: block; }
 .rog-psu-controls__toggle--on { border-color: var(--cc-accent); color: var(--cc-on-accent); background: var(--cc-accent-strong); }
 

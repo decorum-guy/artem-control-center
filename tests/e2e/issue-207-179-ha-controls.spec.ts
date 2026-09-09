@@ -80,15 +80,15 @@ test.describe("Issue 207 · Home Assistant climate controls", () => {
     });
     await page.route("**/api/v1/actions/home-assistant", async (route) => {
       actionRequests += 1;
-      expect(route.request().postDataJSON()).toMatchObject({ actionId: "home.climate.set_temperature", temperature: 29 });
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, requestId: "fixture", actionId: "home.climate.set_temperature", status: "confirmed", observedAt: "2026-09-09T00:00:00Z", climate: { state: "off", targetTemperature: 29, fanMode: "one" }, psu: null }) });
+      expect(route.request().postDataJSON()).toMatchObject({ actionId: "home.climate.set_temperature", temperature: 27 });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, requestId: "fixture", actionId: "home.climate.set_temperature", status: "confirmed", observedAt: "2026-09-09T00:00:00Z", climate: { state: "off", targetTemperature: 27, fanMode: "one" }, psu: null }) });
     });
     await page.goto("/home?scenario=home-climate-healthy");
     const climate = page.getByTestId("climate-control-home");
-    await climate.getByTestId("climate-temperature-decrease-home").click();
-    await climate.getByTestId("climate-temperature-decrease-home").click();
-    await climate.getByTestId("climate-temperature-decrease-home").click();
-    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("29°");
+    for (let index = 0; index < 5; index += 1) {
+      await climate.getByTestId("climate-temperature-decrease-home").click();
+    }
+    await expect(climate.getByTestId("climate-temperature-value-home")).toHaveText("27°");
     expect(actionRequests).toBe(0);
     await expect(climate.getByTestId("climate-temperature-confirm-home")).toBeEnabled();
     await climate.getByTestId("climate-temperature-confirm-home").click();
@@ -129,6 +129,35 @@ test.describe("Issue 207 · Overview climate projection", () => {
       ".climate-control__mode-label",
       ".climate-control__fan-label"
     ]);
+    const temperature = climate.locator(".climate-control__temperature-control");
+    const temperatureGeometry = await temperature.evaluate((element) => {
+      const control = element.getBoundingClientRect();
+      const value = element.querySelector<HTMLElement>('[data-testid="climate-temperature-value-overview"]')?.getBoundingClientRect();
+      const minus = element.querySelector<HTMLElement>('[data-testid="climate-temperature-decrease-overview"]')?.getBoundingClientRect();
+      const plus = element.querySelector<HTMLElement>('[data-testid="climate-temperature-increase-overview"]')?.getBoundingClientRect();
+      const confirm = element.querySelector<HTMLElement>('[data-testid="climate-temperature-confirm-overview"]')?.getBoundingClientRect();
+      if (!value || !minus || !plus || !confirm) return null;
+      return {
+        control,
+        value,
+        minus,
+        plus,
+        confirm,
+        climate: element.closest<HTMLElement>(".climate-control")?.getBoundingClientRect()
+      };
+    });
+    expect(temperatureGeometry).not.toBeNull();
+    if (!temperatureGeometry) return;
+    expect(temperatureGeometry.control.width).toBeLessThan((temperatureGeometry.climate?.width ?? temperatureGeometry.control.width) * 0.8);
+    expect(temperatureGeometry.plus.left - temperatureGeometry.minus.right).toBeGreaterThanOrEqual(4);
+    expect(temperatureGeometry.plus.left - temperatureGeometry.minus.right).toBeLessThanOrEqual(8);
+    expect(temperatureGeometry.confirm.left - temperatureGeometry.plus.right).toBeGreaterThanOrEqual(4);
+    expect(temperatureGeometry.confirm.left - temperatureGeometry.plus.right).toBeLessThanOrEqual(8);
+    expect(temperatureGeometry.value.height).toBeGreaterThanOrEqual(48);
+    for (const button of [temperatureGeometry.minus, temperatureGeometry.plus, temperatureGeometry.confirm]) {
+      expect(button.width).toBeGreaterThanOrEqual(48);
+      expect(button.height).toBeGreaterThanOrEqual(48);
+    }
     await expectNoHorizontalOverflow(page);
   });
 
@@ -229,6 +258,27 @@ test.describe("Overview ASUS operational strip", () => {
     }
     await expectMinimumControlSize(rog.locator("button"));
     await expectContained(rog, [".overview-rog-widget__action"]);
+    const actionGeometry = await rog.locator(".overview-rog-widget__action").evaluate((element) => {
+      const buttons = Array.from(element.querySelectorAll<HTMLElement>("button"), (button) => button.getBoundingClientRect());
+      return {
+        action: element.getBoundingClientRect(),
+        buttons,
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth
+      };
+    });
+    expect(actionGeometry.buttons).toHaveLength(4);
+    for (const button of actionGeometry.buttons) {
+      expect(button.width).toBeGreaterThanOrEqual(48);
+      expect(button.height).toBeGreaterThanOrEqual(48);
+      expect(button.left).toBeGreaterThanOrEqual(actionGeometry.action.left - 1);
+      expect(button.right).toBeLessThanOrEqual(actionGeometry.action.right + 1);
+    }
+    const gaps = actionGeometry.buttons.slice(1).map((button, index) => button.left - actionGeometry.buttons[index].right);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(7);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(9);
+    expect(actionGeometry.documentWidth).toBeLessThanOrEqual(actionGeometry.viewportWidth + 1);
     await expectNoHorizontalOverflow(page);
   });
 

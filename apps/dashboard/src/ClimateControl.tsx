@@ -260,6 +260,7 @@ export function ClimateControl({
         </button>
 
         <div className="climate-control__temperature-control" aria-label="Целевая температура">
+          <span className="climate-control__target-value" data-testid={`climate-temperature-value-${variant}`}>{draftTarget ?? "—"}°</span>
           <button
             type="button"
             className="climate-control__stepper"
@@ -268,7 +269,6 @@ export function ClimateControl({
             onClick={() => updateDraft(-step)}
             aria-label="Уменьшить целевую температуру"
           >−</button>
-          <span className="climate-control__target-value" data-testid={`climate-temperature-value-${variant}`}>{draftTarget ?? "—"}°</span>
           <button
             type="button"
             className="climate-control__stepper"
