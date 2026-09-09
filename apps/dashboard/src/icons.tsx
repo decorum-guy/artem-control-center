@@ -18,7 +18,12 @@ export type IconName =
   | "refresh"
   | "lock"
   | "lock-open"
-  | "power";
+  | "power"
+  | "check"
+  | "sleep"
+  | "hibernate"
+  | "economy"
+  | "performance";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   name: IconName;
@@ -138,6 +143,31 @@ const iconPaths: Record<IconName, ReactNode> = {
       <path d="M12 2v9" />
       <path d="M6.4 5.8a8 8 0 1 0 11.2 0" />
     </>
+  ),
+  check: (
+    <path d="m5 12 4.2 4.2L19 6.5" />
+  ),
+  sleep: (
+    <>
+      <path d="M19 15.5A8 8 0 0 1 8.5 5 8 8 0 1 0 19 15.5Z" />
+      <path d="M17 5h3M18.5 3.5v3" />
+    </>
+  ),
+  hibernate: (
+    <>
+      <path d="M6 5v14M18 5v14M6 12h12" />
+      <path d="m9 8 3-3 3 3M9 16l3 3 3-3" />
+    </>
+  ),
+  economy: (
+    <>
+      <path d="M12 21V10" />
+      <path d="M12 14C7 14 5 10.5 5 6c5 0 7 3.5 7 8Z" />
+      <path d="M12 17c4.5 0 7-2.5 7-7-4.5 0-7 2.5-7 7Z" />
+    </>
+  ),
+  performance: (
+    <path d="m13 2-8 12h6l-1 8 9-13h-6V2Z" />
   )
 };
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { useInteractionLock } from "./InteractionLock";
@@ -100,7 +100,9 @@ export function ClimateControl({
   const minimumTemperature = 16;
   const maximumTemperature = 32;
   const targetTemperature = typeof data.targetTemperature === "number" ? data.targetTemperature : null;
-  const currentTemperature = typeof data.currentTemperature === "number" ? data.currentTemperature : null;
+  const [confirmedTarget, setConfirmedTarget] = useState<number | null>(targetTemperature);
+  const [draftTarget, setDraftTarget] = useState<number | null>(targetTemperature);
+  const serviceIdRef = useRef(service.id);
   const modes = useMemo(
     () => hvacOrder.filter((mode) => (data.hvacModes ?? []).includes(mode)),
     [data.hvacModes]
@@ -129,6 +131,19 @@ export function ClimateControl({
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  useEffect(() => {
+    if (serviceIdRef.current !== service.id) {
+      serviceIdRef.current = service.id;
+      setConfirmedTarget(targetTemperature);
+      setDraftTarget(targetTemperature);
+      return;
+    }
+    setConfirmedTarget((previousConfirmed) => {
+      setDraftTarget((previousDraft) => previousDraft === previousConfirmed ? targetTemperature : previousDraft);
+      return targetTemperature;
+    });
+  }, [service.id, targetTemperature]);
+
   const canUse = useCallback((actionId: ClimateActionId) => {
     const decision = availability?.actions[actionId];
     return Boolean(
@@ -144,7 +159,7 @@ export function ClimateControl({
     actionId: ClimateActionId,
     values: { temperature?: number; mode?: ClimateHvacMode; fanMode?: ClimateFanMode } = {}
   ) => {
-    if (!interactive || pendingAction || !guardMutation()) return;
+    if (!interactive || pendingAction || !guardMutation()) return null;
     let decision = availability?.actions[actionId] ?? null;
     if (!decision) {
       const next = await refresh();
@@ -152,7 +167,7 @@ export function ClimateControl({
     }
     if (!decision) {
       showNotice({ id: "home.climate.action", severity: "warning", title: "Кондиционер", detail: "Управление кондиционером сейчас недоступно.", timeoutMs: 6_000 });
-      return;
+      return null;
     }
     if (!decision.allowed && decision.availability === "elevation_required") {
       const elevated = await ensureCapability(actionId, "Кондиционер");
@@ -163,13 +178,13 @@ export function ClimateControl({
     }
     if (!decision.allowed) {
       showNotice({ id: "home.climate.action", severity: "warning", title: "Кондиционер", detail: climateAvailabilityCopy(decision.availability, explainAvailability), timeoutMs: 6_000 });
-      return;
+      return null;
     }
-    if (!guardMutation()) return;
+    if (!guardMutation()) return null;
     setPendingAction(actionId);
     showNotice({ id: "home.climate.action", severity: "progress", title: "Кондиционер", detail: "Отправляем команду и ждём подтверждение…" });
     try {
-      await executeHomeAssistantAction({
+      const response = await executeHomeAssistantAction({
         actionId,
         requestId: newHomeAssistantRequestId(),
         temperature: values.temperature ?? null,
@@ -178,8 +193,10 @@ export function ClimateControl({
       });
       showNotice({ id: "home.climate.action", severity: "success", title: "Кондиционер", detail: "Изменение подтверждено Home Assistant.", timeoutMs: 6_000 });
       await refresh();
+      return response;
     } catch (error) {
       showNotice({ id: "home.climate.action", severity: "error", title: "Кондиционер", detail: actionErrorCopy(error instanceof Error ? error.message : "action_failed"), timeoutMs: 10_000 });
+      return null;
     } finally {
       setPendingAction(null);
     }
@@ -194,6 +211,21 @@ export function ClimateControl({
   const selectedMode = modes.includes(state) ? state : modes[0] ?? "off";
   const selectedFan = data.fanMode && fans.includes(data.fanMode) ? data.fanMode : fans[0] ?? "one";
   const step = 1;
+  const targetDirty = draftTarget !== confirmedTarget;
+  const temperaturePending = pendingAction === HOME_CLIMATE_SET_TEMPERATURE;
+  const updateDraft = (delta: number) => {
+    if (draftTarget === null || temperaturePending || !canUse(HOME_CLIMATE_SET_TEMPERATURE)) return;
+    setDraftTarget(Math.min(maximumTemperature, Math.max(minimumTemperature, draftTarget + delta)));
+  };
+  const confirmDraft = async () => {
+    if (draftTarget === null || !targetDirty || temperaturePending) return;
+    const response = await run(HOME_CLIMATE_SET_TEMPERATURE, { temperature: draftTarget });
+    const confirmed = response?.climate?.targetTemperature;
+    if (typeof confirmed === "number") {
+      setConfirmedTarget(confirmed);
+      setDraftTarget(confirmed);
+    }
+  };
 
   return (
     <section
@@ -212,24 +244,12 @@ export function ClimateControl({
 
       {!climateLive && <p className="climate-control__notice" role="status">Управление отключено до подтверждения свежего состояния.</p>}
 
-      <div className="climate-control__summary" role="status" aria-live="polite">
-        <div className="climate-control__room-temperature">
-          <span>В комнате</span>
-          <strong>{currentTemperature ?? "—"}</strong>
-          <small>{currentTemperature === null ? "Температура в комнате недоступна" : "°C"}</small>
-        </div>
-        <div className="climate-control__target-temperature">
-          <span>Цель</span>
-          <strong>{targetTemperature ?? "—"}</strong>
-          <small>{targetTemperature === null ? "Цель не указана" : "°C"}</small>
-        </div>
-      </div>
-
       <div className="climate-control__controls">
         <button
           type="button"
-          className="climate-control__power"
+          className={`climate-control__power climate-control__power--${state === "off" ? "off" : "on"}`}
           data-testid={`climate-power-${variant}`}
+          data-power-state={state === "off" ? "off" : "on"}
           disabled={!canUse(powerAction)}
           aria-label={state === "off" ? "Включить кондиционер" : "Выключить кондиционер"}
           aria-pressed={state !== "off"}
@@ -237,7 +257,7 @@ export function ClimateControl({
           onClick={() => void run(powerAction)}
           title={availability?.actions[powerAction] ? climateAvailabilityCopy(availability.actions[powerAction].availability, explainAvailability) : "Проверяем доступность"}
         >
-          <Icon name="power" size={22} />
+          {pendingAction === powerAction ? <Icon name="refresh" size={20} className="climate-control__pending-icon" /> : <Icon name="power" size={22} />}
         </button>
 
         <div className="climate-control__temperature-control" aria-label="Целевая температура">
@@ -245,19 +265,31 @@ export function ClimateControl({
             type="button"
             className="climate-control__stepper"
             data-testid={`climate-temperature-decrease-${variant}`}
-            disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || targetTemperature === null || targetTemperature <= minimumTemperature}
-            onClick={() => targetTemperature !== null && void run(HOME_CLIMATE_SET_TEMPERATURE, { temperature: Math.max(minimumTemperature, targetTemperature - step) })}
+            disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || draftTarget === null || draftTarget <= minimumTemperature}
+            onClick={() => updateDraft(-step)}
             aria-label="Уменьшить целевую температуру"
           >−</button>
-          <span className="climate-control__target-value">{targetTemperature ?? "—"}°</span>
+          <span className="climate-control__target-value" data-testid={`climate-temperature-value-${variant}`}>{draftTarget ?? "—"}°</span>
           <button
             type="button"
             className="climate-control__stepper"
             data-testid={`climate-temperature-increase-${variant}`}
-            disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || targetTemperature === null || targetTemperature >= maximumTemperature}
-            onClick={() => targetTemperature !== null && void run(HOME_CLIMATE_SET_TEMPERATURE, { temperature: Math.min(maximumTemperature, targetTemperature + step) })}
+            disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || draftTarget === null || draftTarget >= maximumTemperature}
+            onClick={() => updateDraft(step)}
             aria-label="Увеличить целевую температуру"
           >+</button>
+          <button
+            type="button"
+            className={`climate-control__confirm${targetDirty ? " climate-control__confirm--dirty" : ""}`}
+            data-testid={`climate-temperature-confirm-${variant}`}
+            disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || !targetDirty}
+            aria-label={targetDirty ? "Подтвердить целевую температуру" : "Целевая температура подтверждена"}
+            aria-busy={temperaturePending}
+            title={targetDirty ? "Подтвердить целевую температуру" : "Целевая температура подтверждена"}
+            onClick={() => void confirmDraft()}
+          >
+            {temperaturePending ? <Icon name="refresh" size={20} className="climate-control__pending-icon" /> : <Icon name="check" size={20} />}
+          </button>
         </div>
 
         <label className="climate-control__select-label climate-control__mode-label">

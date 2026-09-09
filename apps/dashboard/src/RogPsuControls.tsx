@@ -89,12 +89,12 @@ function availabilityCopy(availability: string, explain: (value: string) => stri
     : explain(availability);
 }
 
-function displayActionLabel(actionId: RogPsuActionId, variant: "system" | "home"): string {
+function displayActionLabel(actionId: RogPsuActionId, variant: "system" | "home" | "overview"): string {
   if (variant === "home" && actionId === ROG_PSU_MODE_NORMAL) return "Обычный режим";
   return actionLabel(actionId);
 }
 
-export function RogPsuControls({ service, interactive = true, variant = "system" }: { service: ServiceSnapshot; interactive?: boolean; variant?: "system" | "home" }) {
+export function RogPsuControls({ service, interactive = true, variant = "system" }: { service: ServiceSnapshot; interactive?: boolean; variant?: "system" | "home" | "overview" }) {
   const { ensureCapability, explainAvailability } = useAccess();
   const { guardMutation } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
@@ -182,34 +182,39 @@ export function RogPsuControls({ service, interactive = true, variant = "system"
       : rogPsuModeLabel(mode);
 
   return (
-    <section className={`rog-psu-controls rog-psu-controls--${variant}${!live ? " rog-psu-controls--unavailable" : ""}`} data-testid="rog-psu-controls" data-variant={variant} aria-labelledby={`rog-psu-title-${variant}`}>
-      <header className="rog-psu-controls__header">
+    <section className={`rog-psu-controls rog-psu-controls--${variant}${!live ? " rog-psu-controls--unavailable" : ""}`} data-testid={variant === "overview" ? "overview-rog-psu-controls" : "rog-psu-controls"} data-variant={variant} aria-label={variant === "overview" ? "Режимы питания ASUS ROG" : undefined} aria-labelledby={variant === "overview" ? undefined : `rog-psu-title-${variant}`}>
+      {variant !== "overview" && <header className="rog-psu-controls__header">
         <div>
           {variant === "system" && <p className="section-kicker">Система · питание</p>}
           <h2 id={`rog-psu-title-${variant}`}>{variant === "home" ? "Блоки питания" : service.title}</h2>
         </div>
         <StatusText label={statusLabel} tone={live ? "success" : service.health === "stale" ? "stale" : "unavailable"} />
-      </header>
+      </header>}
 
-      {!live && <p className="rog-psu-controls__notice" role="status">Управление отключено до подтверждения свежего состояния.</p>}
+      {!live && variant !== "overview" && <p className="rog-psu-controls__notice" role="status">Управление отключено до подтверждения свежего состояния.</p>}
 
       <div className="rog-psu-controls__modes" aria-label="Режимы питания">
         {[ROG_PSU_MODE_NORMAL, ROG_PSU_MODE_FULL].map((actionId) => (
           <button
             key={actionId}
             type="button"
-            className={`rog-psu-controls__mode${mode === (actionId === ROG_PSU_MODE_FULL ? "full" : "normal") ? " rog-psu-controls__mode--selected" : ""}`}
+            className={`rog-psu-controls__mode${variant === "overview" ? " rog-psu-controls__mode--overview" : ""}${mode === (actionId === ROG_PSU_MODE_FULL ? "full" : "normal") ? " rog-psu-controls__mode--selected" : ""}`}
             disabled={!canUse(actionId)}
             aria-busy={pendingAction === actionId}
-            title={availability?.actions[actionId] ? availabilityCopy(availability.actions[actionId].availability, explainAvailability) : "Проверяем доступность"}
+            aria-pressed={mode === (actionId === ROG_PSU_MODE_FULL ? "full" : "normal")}
+            aria-label={actionId === ROG_PSU_MODE_NORMAL ? "Обычный режим питания ASUS ROG" : "Полная мощность ASUS ROG"}
+            data-testid={variant === "overview" ? `overview-rog-psu-${actionId === ROG_PSU_MODE_NORMAL ? "normal" : "full"}` : undefined}
+            title={`${actionId === ROG_PSU_MODE_NORMAL ? "Обычный режим питания ASUS ROG" : "Полная мощность ASUS ROG"}. ${availability?.actions[actionId] ? availabilityCopy(availability.actions[actionId].availability, explainAvailability) : "Проверяем доступность"}`}
             onClick={() => void run(actionId)}
           >
-            {pendingAction === actionId ? "Проверяем…" : displayActionLabel(actionId, variant)}
+            {variant === "overview"
+              ? <Icon name={pendingAction === actionId ? "refresh" : actionId === ROG_PSU_MODE_NORMAL ? "economy" : "performance"} size={20} className={pendingAction === actionId ? "rog-psu-controls__pending-icon" : undefined} />
+              : pendingAction === actionId ? "Проверяем…" : displayActionLabel(actionId, variant)}
           </button>
         ))}
       </div>
 
-      <div className="rog-psu-controls__rows">
+      {variant !== "overview" && <div className="rog-psu-controls__rows">
         {([
           { number: 1 as const, state: psu1State, on: ROG_PSU_BP1_ON, off: ROG_PSU_BP1_OFF, other: psu2State },
           { number: 2 as const, state: psu2State, on: ROG_PSU_BP2_ON, off: ROG_PSU_BP2_OFF, other: psu1State }
@@ -238,9 +243,9 @@ export function RogPsuControls({ service, interactive = true, variant = "system"
             </div>
           );
         })}
-      </div>
+      </div>}
 
-      {!apiAvailable && interactive && <p className="rog-psu-controls__notice">Проверяем доступность управления…</p>}
+      {!apiAvailable && interactive && variant !== "overview" && <p className="rog-psu-controls__notice">Проверяем доступность управления…</p>}
       {variant === "system" && <p className="rog-psu-controls__note">Состояние показывает только два подтверждённых переключателя Home Assistant. Телеметрия мощности не подключена.</p>}
     </section>
   );

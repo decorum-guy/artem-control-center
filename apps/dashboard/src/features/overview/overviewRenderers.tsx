@@ -6,7 +6,7 @@ import { StatusText, WorkZone } from "../../ShellPrimitives";
 import { resolveManifest, servicesByPriority } from "../../registry";
 import { CoffeeWidget } from "../../widgets";
 import { PlanningOverviewCard } from "../../PlanningOverviewCard";
-import { RogG703CompactControl } from "../../RogG703Controls";
+import { RogG703CompactControl, RogG703PsuCompactControl } from "../../RogG703Controls";
 import { ClimateControl } from "../../ClimateControl";
 import type { OverviewRuntimeContext } from "./overviewRuntime";
 import { coffeeAppearanceConfig, planningDensityFor } from "./appearanceConfig";
@@ -20,7 +20,11 @@ function findServiceByManifest(services: readonly ServiceSnapshot[], manifestId:
 }
 
 function findRogService(services: readonly ServiceSnapshot[]): ServiceSnapshot | null {
-  return services.find((service) => service.id === "rog_g703gi" || service.dataContract === "system.rog-g703.v1") ?? null;
+  return services.find((service) => service.enabled && (service.id === "rog_g703gi" || service.dataContract === "system.rog-g703.v1")) ?? null;
+}
+
+function findRogPsuService(services: readonly ServiceSnapshot[]): ServiceSnapshot | null {
+  return services.find((service) => service.enabled && service.dataContract === "system.rog-g703-psu.v1") ?? null;
 }
 
 function overviewSizeVariant(sizeVariant: OverviewProjectionItem["sizeVariant"]): "compact" | "standard" | "large" {
@@ -303,8 +307,11 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
   switch (item.item.widgetType) {
     case "system.rog-g703-operational": {
       const service = findRogService(runtime.snapshot.services);
+      const psuService = findRogPsuService(runtime.snapshot.services);
       return service
-        ? <RogG703CompactControl service={service} interactive={!runtime.editMode} />
+        ? <RogG703CompactControl service={service} psuService={psuService} interactive={!runtime.editMode} />
+        : psuService
+          ? <RogG703PsuCompactControl service={psuService} interactive={!runtime.editMode} />
         : (
           <WorkZone className="overview-v2-real-widget overview-rog-widget overview-rog-widget--unavailable" data-testid="overview-rog-g703-unavailable">
             <span className="overview-rog-widget__icon" aria-hidden="true"><Icon name="system" /></span>

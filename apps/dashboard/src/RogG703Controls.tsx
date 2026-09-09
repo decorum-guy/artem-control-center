@@ -11,6 +11,7 @@ import {
   ROG_G703_SLEEP_ACTION,
   ROG_G703_WAKE_ACTION
 } from "./rogG703Api";
+import { RogPsuControls } from "./RogPsuControls";
 import "./RogG703Controls.css";
 
 type RogG703Controller = ReturnType<typeof useRogG703Controller>;
@@ -19,19 +20,22 @@ export function RogG703PowerActionGroup({
   controller,
   testIdPrefix,
   className,
-  interactive = true
+  interactive = true,
+  iconOnly = false
 }: {
   controller: RogG703Controller;
   testIdPrefix: "rog-g703" | "system-rog" | "overview-rog-g703" | "home-rog-g703";
   className: string;
   interactive?: boolean;
+  iconOnly?: boolean;
 }) {
   const status = controller.displayStatus;
-  const actionIds = status === "online" || status === "sleeping" || status === "hibernating"
+  const availableActionIds = status === "online" || status === "sleeping" || status === "hibernating"
     ? [ROG_G703_SLEEP_ACTION, ROG_G703_HIBERNATE_ACTION]
     : status === "offline" || status === "waking"
       ? [ROG_G703_WAKE_ACTION]
       : [];
+  const actionIds = iconOnly ? availableActionIds.filter((actionId) => actionId !== ROG_G703_WAKE_ACTION) : availableActionIds;
 
   if (!actionIds.length) return null;
 
@@ -42,6 +46,11 @@ export function RogG703PowerActionGroup({
     >
       {actionIds.map((actionId) => {
         const pending = controller.pendingAction === actionId;
+        const iconLabel = actionId === ROG_G703_SLEEP_ACTION
+          ? "Перевести ASUS ROG в спящий режим"
+          : actionId === ROG_G703_HIBERNATE_ACTION
+            ? "Перевести ASUS ROG в гибернацию"
+            : controller.actionTitles[actionId];
         const label = pending
           ? actionId === ROG_G703_WAKE_ACTION
             ? "Пробуждаем…"
@@ -52,15 +61,18 @@ export function RogG703PowerActionGroup({
         return (
           <button
             key={actionId}
-            className={`rog-g703-action rog-g703-action--${actionId === ROG_G703_WAKE_ACTION ? "wake" : actionId === ROG_G703_SLEEP_ACTION ? "sleep" : "hibernate"}`}
+            className={`rog-g703-action rog-g703-action--${actionId === ROG_G703_WAKE_ACTION ? "wake" : actionId === ROG_G703_SLEEP_ACTION ? "sleep" : "hibernate"}${iconOnly ? " rog-g703-action--icon" : ""}`}
             type="button"
             data-testid={`${testIdPrefix}-${actionId === ROG_G703_WAKE_ACTION ? "wake" : actionId === ROG_G703_SLEEP_ACTION ? "sleep" : "hibernate"}`}
             disabled={!interactive || !controller.canUse(actionId)}
             aria-busy={pending}
-            title={controller.availabilityReason(actionId)}
+            aria-label={iconOnly ? iconLabel : controller.actionTitles[actionId]}
+            title={iconOnly ? `${iconLabel}. ${controller.availabilityReason(actionId)}` : controller.availabilityReason(actionId)}
             onClick={() => void controller.run(actionId)}
           >
-            {label}
+            {iconOnly
+              ? <Icon name={pending ? "refresh" : actionId === ROG_G703_SLEEP_ACTION ? "sleep" : actionId === ROG_G703_HIBERNATE_ACTION ? "hibernate" : "power"} size={20} className={pending ? "overview-rog-widget__pending-icon" : undefined} />
+              : label}
           </button>
         );
       })}
@@ -148,7 +160,7 @@ function rogG703Tone(status: ReturnType<typeof useRogG703Controller>["displaySta
 }
 
 /** Compact/standard Overview presentation backed by the same controller as System. */
-export function RogG703CompactControl({ service, interactive = true }: { service: ServiceSnapshot; interactive?: boolean }) {
+export function RogG703CompactControl({ service, psuService, interactive = true }: { service: ServiceSnapshot; psuService?: ServiceSnapshot | null; interactive?: boolean }) {
   const controller = useRogG703Controller(service);
   const status = controller.displayStatus;
 
@@ -168,18 +180,36 @@ export function RogG703CompactControl({ service, interactive = true }: { service
         {service.presentation?.freshnessLabel ?? "свежесть не указана"}
       </span>
       <div className="overview-rog-widget__action">
-        {status === "unavailable" ? (
+        {status === "unavailable" && !psuService ? (
           <span className="overview-rog-widget__unavailable" data-testid="overview-rog-g703-unavailable">
             Недоступен
           </span>
-        ) : (
+        ) : <>
+          {status !== "unavailable" && (
           <RogG703PowerActionGroup
             controller={controller}
             testIdPrefix="overview-rog-g703"
             className="overview-rog-widget__actions"
             interactive={interactive}
+            iconOnly
           />
-        )}
+          )}
+          {psuService && <RogPsuControls service={psuService} variant="overview" interactive={interactive} />}
+        </>}
+      </div>
+    </WorkZone>
+  );
+}
+
+/** PSU actions remain available in Overview even if the independent host service is absent. */
+export function RogG703PsuCompactControl({ service, interactive = true }: { service: ServiceSnapshot; interactive?: boolean }) {
+  return (
+    <WorkZone className="overview-v2-real-widget overview-rog-widget" data-testid="overview-rog-g703">
+      <span className="overview-rog-widget__icon" aria-hidden="true"><Icon name="system" /></span>
+      <div className="overview-rog-widget__identity"><h2>ASUS ROG G703GI</h2></div>
+      <span className="overview-rog-widget__freshness">Питание доступно</span>
+      <div className="overview-rog-widget__action">
+        <RogPsuControls service={service} variant="overview" interactive={interactive} />
       </div>
     </WorkZone>
   );
