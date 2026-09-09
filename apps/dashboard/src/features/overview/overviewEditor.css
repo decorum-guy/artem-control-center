@@ -169,7 +169,8 @@
 .overview-edit-frame__drag-handle { top: 50%; left: -24px; transform: translateY(-50%); color: var(--cc-text-muted); cursor: grab; }
 .overview-edit-frame--selected .overview-edit-frame__drag-handle { top: -12px; left: 4px; transform: none; color: var(--cc-text); }
 .overview-edit-frame[data-widget-type="home.coffee-machine"].overview-edit-frame--selected .overview-edit-frame__drag-handle,
-.overview-edit-frame[data-widget-type="system.rog-g703-operational"].overview-edit-frame--selected .overview-edit-frame__drag-handle {
+.overview-edit-frame[data-widget-type="system.rog-g703-operational"].overview-edit-frame--selected .overview-edit-frame__drag-handle,
+.overview-edit-frame[data-widget-type="home.climate"].overview-edit-frame--selected .overview-edit-frame__drag-handle {
   top: 50%;
   left: -24px;
   transform: translateY(-50%);
