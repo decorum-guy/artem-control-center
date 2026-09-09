@@ -227,6 +227,10 @@ export function deleteCoffeeDiaryBean(beanId: string, version: number): Promise<
   return requestJson(`/api/v1/coffee-diary/beans/${encodeURIComponent(beanId)}`, parseCoffeeDiaryBean, { method: "DELETE", headers: { "If-Match": `"${version}"` } });
 }
 
+export function restoreCoffeeDiaryBean(beanId: string, version: number): Promise<CoffeeDiaryBean> {
+  return requestJson(`/api/v1/coffee-diary/beans/${encodeURIComponent(beanId)}/restore`, parseCoffeeDiaryBean, { method: "POST", headers: { "If-Match": `"${version}"` } });
+}
+
 export function createCoffeeDiaryExtraction(beanId: string, payload: Record<string, unknown>, idempotencyKey: string): Promise<CoffeeDiaryExtraction> {
   return requestJson(`/api/v1/coffee-diary/beans/${encodeURIComponent(beanId)}/extractions`, parseCoffeeDiaryExtraction, { method: "POST", headers: mutationHeaders(idempotencyKey), body: JSON.stringify(payload) });
 }

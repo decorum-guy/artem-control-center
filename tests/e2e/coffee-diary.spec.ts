@@ -209,6 +209,105 @@ test.describe("Coffee Diary Slice 1", () => {
     await expect(page.getByTestId("action-confirmation")).toContainText("Удалить запись приготовления?");
   });
 
+  test("always confirms bean deletion and restores the same bean through authoritative Undo", async ({ page }) => {
+    const bean = await seedBean(page, "Обязательное удаление зерна", "e2e-bean-undo");
+    await page.route("**/api/v1/access", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(relaxedAccessStatus()) });
+        return;
+      }
+      await route.fallback();
+    });
+
+    const deleteRequests: string[] = [];
+    const restoreRequests: string[] = [];
+    const restoreBodies: Array<string | null> = [];
+    const createRequests: string[] = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname === `/api/v1/coffee-diary/beans/${bean.id}` && request.method() === "DELETE") deleteRequests.push(request.headers()["if-match"] ?? "");
+      if (pathname === `/api/v1/coffee-diary/beans/${bean.id}/restore` && request.method() === "POST") {
+        restoreRequests.push(request.headers()["if-match"] ?? "");
+        restoreBodies.push(request.postData());
+      }
+      if (pathname === "/api/v1/coffee-diary/beans" && request.method() === "POST") createRequests.push(pathname);
+    });
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/coffee-diary");
+    const detail = page.getByTestId("coffee-diary-detail");
+    await expect(detail).toContainText(bean.name);
+    const deleteButton = detail.getByRole("button", { name: "Удалить" });
+
+    await deleteButton.click();
+    const confirmation = page.getByTestId("action-confirmation");
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole("button", { name: "Отмена" }).click();
+    await expect(confirmation).toHaveCount(0);
+    expect(deleteRequests).toHaveLength(0);
+
+    await deleteButton.click();
+    await expect(confirmation).toBeVisible();
+    const deleteResponsePromise = page.waitForResponse((response) => {
+      const pathname = new URL(response.url()).pathname;
+      return pathname === `/api/v1/coffee-diary/beans/${bean.id}` && response.request().method() === "DELETE";
+    });
+    await confirmation.getByRole("button", { name: "Убрать из коллекции" }).click();
+    const deleteResponse = await deleteResponsePromise;
+    expect(deleteResponse.status()).toBe(200);
+    const deleted = await deleteResponse.json() as BeanRecord;
+    expect(deleteRequests).toHaveLength(1);
+    expect(deleted.id).toBe(bean.id);
+    expect(deleted.version).toBe(2);
+    await expect(page.getByTestId("coffee-diary-empty")).toBeVisible();
+
+    const undo = page.getByTestId("coffee-diary-undo");
+    const undoAction = page.getByTestId("coffee-diary-undo-action");
+    await expect(undo).toContainText("Кофе удалён");
+    await expect(undoAction).toHaveText("Отменить");
+    expect((await undoAction.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+    let releaseRestore!: () => void;
+    let resolveRestoreStarted!: () => void;
+    const restoreGate = new Promise<void>((resolve) => { releaseRestore = resolve; });
+    const restoreStarted = new Promise<void>((resolve) => { resolveRestoreStarted = resolve; });
+    await page.route(`**/api/v1/coffee-diary/beans/${bean.id}/restore`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      resolveRestoreStarted();
+      await restoreGate;
+      await route.continue();
+    });
+
+    const restoreResponsePromise = page.waitForResponse((response) => {
+      const pathname = new URL(response.url()).pathname;
+      return pathname === `/api/v1/coffee-diary/beans/${bean.id}/restore` && response.request().method() === "POST";
+    });
+    await undoAction.click();
+    await restoreStarted;
+    await expect(undoAction).toBeDisabled();
+    expect(restoreRequests).toEqual(['"2"']);
+    expect(restoreBodies).toEqual([null]);
+    expect(createRequests).toEqual([]);
+
+    releaseRestore();
+    const restoreResponse = await restoreResponsePromise;
+    expect(restoreResponse.status()).toBe(200);
+    const restored = await restoreResponse.json() as BeanRecord;
+    expect(restored.id).toBe(bean.id);
+    expect(restored.deletedAt).toBeNull();
+    await expect(page.getByTestId("coffee-diary-detail")).toContainText(bean.name);
+    await expect(page.getByTestId("coffee-diary-undo")).toHaveCount(0);
+    expect(createRequests).toEqual([]);
+    expect(restoreRequests).toHaveLength(1);
+    const collection = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { beans: BeanRecord[] };
+    expect(collection.beans.map((item) => item.id)).toContain(bean.id);
+    await page.unroute(`**/api/v1/coffee-diary/beans/${bean.id}/restore`);
+  });
+
   test("blocks a rapid bean double-submit with one POST", async ({ page }) => {
     await page.goto("/coffee-diary");
     await page.getByTestId("coffee-diary-add-bean").click();
