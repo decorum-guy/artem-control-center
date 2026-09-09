@@ -72,6 +72,62 @@ test.describe("Issue 207 · Home Assistant climate controls", () => {
     await expectNoHorizontalOverflow(page);
   });
 
+  test("centers all climate action SVG boxes in their 48px buttons at 1280×720", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/home?scenario=home-climate-healthy");
+    const climate = page.getByTestId("climate-control-home");
+    const actionTestIds = [
+      "climate-power-home",
+      "climate-temperature-decrease-home",
+      "climate-temperature-increase-home",
+      "climate-temperature-confirm-home"
+    ];
+
+    const geometry = await Promise.all(actionTestIds.map(async (testId) => {
+      const button = climate.getByTestId(testId);
+      await expect(button).toBeVisible();
+      await expect(button.locator("svg")).toHaveCount(1);
+      return button.evaluate((element) => {
+        const buttonRect = element.getBoundingClientRect();
+        const svg = element.querySelector("svg");
+        if (!svg) return null;
+        const svgRect = svg.getBoundingClientRect();
+        const buttonStyle = getComputedStyle(element);
+        return {
+          button: { width: buttonRect.width, height: buttonRect.height, left: buttonRect.left, top: buttonRect.top },
+          svg: { width: svgRect.width, height: svgRect.height, left: svgRect.left, top: svgRect.top },
+          buttonStyle: {
+            display: buttonStyle.display,
+            minWidth: buttonStyle.minWidth,
+            minHeight: buttonStyle.minHeight,
+            padding: buttonStyle.padding,
+            alignItems: buttonStyle.alignItems,
+            justifyItems: buttonStyle.justifyItems
+          },
+          svgDisplay: getComputedStyle(svg).display
+        };
+      });
+    }));
+
+    for (const result of geometry) {
+      expect(result).not.toBeNull();
+      if (!result) continue;
+      expect(result.button.width).toBe(48);
+      expect(result.button.height).toBe(48);
+      expect(result.buttonStyle).toMatchObject({
+        display: "grid",
+        minWidth: "48px",
+        minHeight: "48px",
+        padding: "0px",
+        alignItems: "center",
+        justifyItems: "center"
+      });
+      expect(result.svgDisplay).toBe("block");
+      expect(Math.abs((result.svg.left + result.svg.width / 2) - (result.button.left + result.button.width / 2))).toBeLessThanOrEqual(0.5);
+      expect(Math.abs((result.svg.top + result.svg.height / 2) - (result.button.top + result.button.height / 2))).toBeLessThanOrEqual(0.5);
+    }
+  });
+
   test("drafts temperature locally and sends one confirmed request", async ({ page }) => {
     let actionRequests = 0;
     await page.route("**/api/v1/actions/home-assistant/availability", async (route) => {

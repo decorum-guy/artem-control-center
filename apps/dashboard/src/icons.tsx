@@ -19,6 +19,8 @@ export type IconName =
   | "lock"
   | "lock-open"
   | "power"
+  | "minus"
+  | "plus"
   | "check"
   | "sleep"
   | "hibernate"
@@ -143,6 +145,12 @@ const iconPaths: Record<IconName, ReactNode> = {
       <path d="M12 2v9" />
       <path d="M6.4 5.8a8 8 0 1 0 11.2 0" />
     </>
+  ),
+  minus: (
+    <path d="M5 12h14" />
+  ),
+  plus: (
+    <path d="M5 12h14M12 5v14" />
   ),
   check: (
     <path d="m5 12 4.2 4.2L19 6.5" />

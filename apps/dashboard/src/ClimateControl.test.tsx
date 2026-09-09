@@ -59,6 +59,25 @@ describe("ClimateControl compact presentation", () => {
     expect(html).toContain('aria-label="Выключить кондиционер"');
   });
 
+  it("renders all climate action buttons with icon children", () => {
+    const html = markup(climate());
+    const actionTestIds = [
+      "climate-power-home",
+      "climate-temperature-decrease-home",
+      "climate-temperature-increase-home",
+      "climate-temperature-confirm-home"
+    ];
+
+    for (const testId of actionTestIds) {
+      const button = new RegExp(`<button[^>]*data-testid="${testId}"[\\s\\S]*?</button>`).exec(html)?.[0];
+      expect(button).toBeDefined();
+      expect(button).toContain('<svg');
+      expect(button).toContain('viewBox="0 0 24 24"');
+    }
+    expect(html).not.toContain(">−</button>");
+    expect(html).not.toContain(">+</button>");
+  });
+
   it("does not add an integration kicker to the Overview header", () => {
     expect(markup(climate(), "overview")).not.toContain("Дом · Home Assistant");
   });
