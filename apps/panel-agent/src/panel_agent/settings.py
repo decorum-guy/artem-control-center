@@ -79,6 +79,7 @@ class IntegrationSettings:
     calendar_display_color_writes_enabled: bool = False
     calendar_display_color_path: str = ".cache/calendar-display-colors.json"
     device_visibility_path: str = ".cache/device-visibility.json"
+    projects_config_path: str = ".runtime/projects.yaml"
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
     panel_planning_enabled: bool = False
@@ -345,6 +346,10 @@ class IntegrationSettings:
                 "PANEL_DEVICE_VISIBILITY_PATH",
                 ".cache/device-visibility.json",
             ).strip(),
+            projects_config_path=(
+                os.getenv("PANEL_PROJECTS_CONFIG_PATH", ".runtime/projects.yaml").strip()
+                or ".runtime/projects.yaml"
+            ),
             access_temporary_minutes=max(
                 1,
                 int(os.getenv("PANEL_ACCESS_TEMPORARY_MINUTES", "30")),

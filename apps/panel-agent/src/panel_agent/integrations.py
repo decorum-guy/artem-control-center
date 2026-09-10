@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from typing import Awaitable, Callable, List
 
+import httpx
+
 from .contracts import PanelMode, ServiceSnapshot
 from .alice_control import AliceControlClient
 from .home_assistant import HomeAssistantAdapter
 from .http_integrations import HttpIntegrationAdapter
+from .project_monitor import DeclarativeProjectMonitor
+from .project_registry import ProjectRegistry, load_project_registry
 from .planning import PlanningProjection
 from .planning_adapter import PlanningAdapter
 from .planning_fixtures import PlanningFixtureTransport, fixture_reference_datetime
@@ -20,6 +24,8 @@ class IntegrationRuntime:
         settings: IntegrationSettings,
         *,
         mode: PanelMode = "read_only",
+        project_registry: ProjectRegistry | None = None,
+        project_monitor_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.settings = settings
         self.home_assistant = HomeAssistantAdapter(settings, panel_mode=mode)
@@ -31,6 +37,16 @@ class IntegrationRuntime:
         self.http = HttpIntegrationAdapter(
             settings,
             details_provider=self.avalar_ssh,
+        )
+        self.project_registry = (
+            project_registry
+            if project_registry is not None
+            else load_project_registry(settings.projects_config_path)
+        )
+        self.project_monitor = DeclarativeProjectMonitor(
+            self.project_registry,
+            settings,
+            transport=project_monitor_transport,
         )
         self.rog_g703 = RogG703Device(settings)
         fixture_planning = (
@@ -55,6 +71,7 @@ class IntegrationRuntime:
     ) -> None:
         self._snapshot_callback = callback
         self.http.set_on_change(callback)
+        self.project_monitor.set_on_change(callback)
         self.planning.set_on_change(callback)
         self.rog_g703.set_on_change(callback)
 
@@ -74,6 +91,7 @@ class IntegrationRuntime:
         await self.home_assistant.start()
         await self.avalar_ssh.start()
         await self.http.start()
+        await self.project_monitor.start()
         await self.planning.start()
         await self.rog_g703.start()
 
@@ -83,6 +101,7 @@ class IntegrationRuntime:
         await self.planning.start()
 
     async def close(self) -> None:
+        await self.project_monitor.close()
         await self.http.close()
         await self.avalar_ssh.close()
         await self.home_assistant.close()
@@ -93,6 +112,7 @@ class IntegrationRuntime:
         services = (
             self.home_assistant.services()
             + self.http.services()
+            + self.project_monitor.services()
             + ([self.rog_g703.service_snapshot()] if self.rog_g703.enabled else [])
         )
         return sorted(
