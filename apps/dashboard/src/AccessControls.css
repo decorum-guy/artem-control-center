@@ -85,7 +85,9 @@
 
 .pin-modal-backdrop {
   position: fixed;
-  z-index: 100;
+  /* Elevation can be requested from a settings Sheet; keep the existing PIN
+     flow above that Sheet and below the shared destructive confirmation. */
+  z-index: 235;
   inset: 0;
   display: grid;
   place-items: center;

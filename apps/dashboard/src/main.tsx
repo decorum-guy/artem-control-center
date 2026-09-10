@@ -14,6 +14,7 @@ import { CalendarDisplayPreferencesProvider } from "./CalendarDisplayPreferences
 import { DeviceVisibilityProvider } from "./DeviceVisibility";
 import { KioskPresenceHeartbeat } from "./KioskPresenceHeartbeat";
 import { InterfaceCopyProvider } from "./interfaceCopy";
+import { ProjectRegistryProvider } from "./ProjectRegistry";
 import "./InteractionLock.css";
 import "./ActionConfirmations.css";
 import "./AvalarActions.css";
@@ -37,20 +38,22 @@ createRoot(document.getElementById("root")!).render(publicCoffeeUpload ? <Coffee
       <InteractionLockProvider>
         <CalendarDisplayPreferencesProvider>
           <DeviceVisibilityProvider>
-            <AccessProvider>
-            <ActionConfirmationProvider>
-              <InterfaceCopyProvider>
-                <WeatherProvider>
-                  <WeatherAutoRefresh />
-                  <ConnectivityActionsProvider>
-                    <AvalarActionsProvider>
-                      <App />
-                    </AvalarActionsProvider>
-                  </ConnectivityActionsProvider>
-                </WeatherProvider>
-              </InterfaceCopyProvider>
-            </ActionConfirmationProvider>
-            </AccessProvider>
+            <ProjectRegistryProvider>
+              <AccessProvider>
+                <ActionConfirmationProvider>
+                  <InterfaceCopyProvider>
+                    <WeatherProvider>
+                      <WeatherAutoRefresh />
+                      <ConnectivityActionsProvider>
+                        <AvalarActionsProvider>
+                          <App />
+                        </AvalarActionsProvider>
+                      </ConnectivityActionsProvider>
+                    </WeatherProvider>
+                  </InterfaceCopyProvider>
+                </ActionConfirmationProvider>
+              </AccessProvider>
+            </ProjectRegistryProvider>
           </DeviceVisibilityProvider>
         </CalendarDisplayPreferencesProvider>
       </InteractionLockProvider>

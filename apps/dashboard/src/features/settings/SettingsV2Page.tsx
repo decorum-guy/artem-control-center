@@ -24,13 +24,16 @@ import { AIProviderSettingsSheet, aiStateLabel, aiSummary, useAIProviderSettings
 import { ReminderDeliverySettingsSheet, reminderDeliveryStateLabel, reminderDeliverySummary, useReminderDeliverySettings, type ReminderDeliverySettingsController } from "./ReminderDeliverySettings";
 import { InterfaceCopySettingsSheet } from "./InterfaceCopySettings";
 import { DeviceVisibilitySettingsSheet, deviceVisibilityStateLabel, deviceVisibilitySummary } from "./DeviceVisibilitySettings";
+import { ProjectSettingsSheet } from "./ProjectSettings";
+import { projectRegistryStateLabel, projectRegistrySummary } from "../../projectRegistryPresentation";
 import { useDeviceVisibility } from "../../DeviceVisibility";
 import { useInterfaceCopy } from "../../interfaceCopy";
+import { useProjectRegistry, type ProjectRegistryController } from "../../ProjectRegistry";
 import "./settingsV2.css";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
-type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery" | "interface-copy" | "device-visibility";
+type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery" | "interface-copy" | "device-visibility" | "projects";
 
 const motionLabels: Record<MotionMode, string> = {
   full: "Полное",
@@ -68,6 +71,7 @@ export function SettingsV2Page({
   const ai = useAIProviderSettings();
   const reminderDelivery = useReminderDeliverySettings();
   const deviceVisibility = useDeviceVisibility();
+  const projects = useProjectRegistry();
   const { copy } = useInterfaceCopy();
   const [openSheet, setOpenSheet] = useState<SettingsSheet | null>(null);
 
@@ -129,6 +133,14 @@ export function SettingsV2Page({
             stateTone={deviceVisibility.settings?.available === false ? "unavailable" : "neutral"}
             testId="settings-summary-device-visibility"
             onClick={() => setOpenSheet("device-visibility")}
+          />
+          <SettingsSummaryRow
+            title="Проекты"
+            summary={projectRegistrySummary(projects.loading, projects.registry, projects.error !== null)}
+            stateLabel={projectRegistryStateLabel(projects.loading, projects.registry, projects.error !== null)}
+            stateTone={projects.error || projects.registry?.available === false ? "unavailable" : "neutral"}
+            testId="settings-summary-projects"
+            onClick={() => setOpenSheet("projects")}
           />
           <SettingsSummaryRow
             title="Названия и подписи"
@@ -214,6 +226,7 @@ export function SettingsV2Page({
           capabilities={capabilities}
           ai={ai}
           reminderDelivery={reminderDelivery}
+          projects={projects}
           onRefreshCalendarMetadata={onRefreshCalendarMetadata}
           onClose={() => setOpenSheet(null)}
         />
@@ -229,6 +242,7 @@ function SettingsSheet({
   capabilities,
   ai,
   reminderDelivery,
+  projects,
   onRefreshCalendarMetadata,
   onClose
 }: {
@@ -238,11 +252,13 @@ function SettingsSheet({
   capabilities: CapabilitiesController;
   ai: AIProviderSettingsController;
   reminderDelivery: ReminderDeliverySettingsController;
+  projects: ProjectRegistryController;
   onRefreshCalendarMetadata: () => Promise<boolean>;
   onClose: () => void;
 }) {
   if (kind === "interface-copy") return <InterfaceCopySettingsSheet onClose={onClose} />;
   if (kind === "device-visibility") return <DeviceVisibilitySettingsSheet onClose={onClose} />;
+  if (kind === "projects") return <ProjectSettingsSheet onClose={onClose} controller={projects} />;
   if (kind === "calendars") {
     return (
       <CalendarSettingsSheet

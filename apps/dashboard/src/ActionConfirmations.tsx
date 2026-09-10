@@ -23,12 +23,14 @@ export interface ActionConfirmationResult {
 }
 
 interface ActionConfirmationOptions {
+  title?: string;
   revision?: string;
   target?: string;
 }
 
 interface PendingConfirmation {
   spec: ActionConfirmationSpec;
+  title?: string;
   revision?: string;
   target?: string;
   resolve: (result: ActionConfirmationResult) => void;
@@ -97,7 +99,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
       : null;
 
     return new Promise<ActionConfirmationResult>((resolve) => {
-      const next = { spec, revision: options.revision, target: options.target, resolve };
+      const next = { spec, title: options.title, revision: options.revision, target: options.target, resolve };
       pendingRef.current = next;
       setPending(next);
     });
@@ -208,7 +210,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
                 <p className="action-confirmation__kicker">
                   {pending.spec.tone === "production" ? "Критическое действие" : "Подтверждение действия"}
                 </p>
-                <h2 id="action-confirmation-title">{pending.spec.title}</h2>
+                <h2 id="action-confirmation-title">{pending.title ?? pending.spec.title}</h2>
               </div>
               <span className="action-confirmation__environment">{pending.spec.environment}</span>
             </div>

@@ -12,12 +12,22 @@ Implemented in this slice:
 
 Still pending:
 
-- Settings onboarding wizard and add/edit/delete UI (the backend control
-  plane is available, but no Settings UI is included in this slice);
 - YAML import/export UI;
 - secret store;
 - additional adapters and capabilities;
 - deploy, actions, backups, restore and related write operations.
+
+## Slice C implementation status
+
+The Settings V2 Projects sheet now provides the first monitor-only onboarding
+surface: registry inventory, one external HTTP service editor, enable/disable,
+delete confirmation and Full-access/read-only states. It sends only the
+declarative environment-variable name; endpoint values, credentials and raw
+configuration never cross the browser boundary. Mutations use the server's
+revisioned response as authoritative state and refresh after conflict or
+runtime reconciliation failures.
+
+This is intentionally not the generalized onboarding wizard described below.
 
 ## Slice B backend control plane
 
