@@ -513,6 +513,8 @@ class PlanningIncident(StrictPlanningModel):
     aggregateCount: StrictInt = Field(ge=0)
     ageSeconds: StrictInt | None = Field(default=None, ge=0)
 
+    _code = field_validator("code")(validate_error_code)
+
 
 class UpstreamPlanningHealth(StrictPlanningModel):
     schemaVersion: Literal["planning.operations.v1"]
@@ -882,8 +884,14 @@ class PlanningHealthIssue(StrictPlanningModel):
     consecutiveFailures: StrictInt = Field(ge=0)
     lastAttemptedAt: StrictStr | None = None
     lastSuccessfulAt: StrictStr | None = None
+    errorCode: StrictStr | None = None
+    # Older cached snapshots predate this field.  Treating them as data-affecting
+    # preserves their previous warning semantics until a fresh projection says
+    # otherwise.
+    affectsDataFreshness: StrictBool = True
 
     _timestamps = _timestamp_fields("lastAttemptedAt", "lastSuccessfulAt")
+    _error = field_validator("errorCode")(validate_error_code)
 
 
 class PlanningDomainHealth(StrictPlanningModel):

@@ -176,7 +176,7 @@ describe("Planning Overview selectors and presentation", () => {
         lastAttemptedAt: "2026-08-12T12:00:00Z",
         lastSuccessfulAt: "2026-08-12T11:59:00Z",
         consecutiveFailures: 1,
-        issues: [{ source: "tasks" as const, status: "retrying" as const, consecutiveFailures: 1, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" }],
+        issues: [{ source: "tasks" as const, status: "retrying" as const, consecutiveFailures: 1, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z", errorCode: null, affectsDataFreshness: true }],
         domains: [
           { domain: "reminders" as const, status: "current" as const, consecutiveFailures: 0, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" },
           { domain: "tasks" as const, status: "retrying" as const, consecutiveFailures: 1, lastAttemptedAt: "2026-08-12T12:00:00Z", lastSuccessfulAt: "2026-08-12T11:59:00Z" },

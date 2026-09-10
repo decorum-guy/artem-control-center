@@ -29,6 +29,7 @@ from .contracts import (
 )
 from .settings import IntegrationSettings
 from .rog_g703_power import _SAFE_ERROR_CODES as ROG_SAFE_ERROR_CODES
+from .planning import PlanningHealthIssue
 
 ROG_INCIDENT_ERROR_CODES = ROG_SAFE_ERROR_CODES | {"action_failed"}
 
@@ -37,6 +38,7 @@ _SAFE_REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _SAFE_OPAQUE_ID = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
 _SAFE_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T[^\s]{1,48}$")
 _SAFE_CODE = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,119}$")
+_SAFE_PLANNING_CODE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
 
 _SERVICE_LABELS = {
     "home-assistant": "Home Assistant",
@@ -132,6 +134,24 @@ def _safe_code(value: object) -> Optional[str]:
     return value if isinstance(value, str) and _SAFE_CODE.fullmatch(value) else None
 
 
+def _safe_planning_code(value: object) -> Optional[str]:
+    return value if isinstance(value, str) and _SAFE_PLANNING_CODE.fullmatch(value) else None
+
+
+def _planning_problem_id(issue: PlanningHealthIssue, owner_source: str) -> str:
+    prefix = "planning:planning-status:"
+    code = _safe_planning_code(getattr(issue, "errorCode", None))
+    if issue.source != "planning-status" or code is None:
+        return f"planning:{owner_source}"
+    if len(code) <= 120 - len(prefix):
+        return prefix + code
+    digest = 0x811C9DC5
+    for character in code:
+        digest ^= ord(character)
+        digest = (digest * 0x01000193) & 0xFFFFFFFF
+    return prefix + "hash-" + f"{digest:08x}"
+
+
 def _provider_problem_state(status: str) -> str | None:
     if status == "error":
         return "error"
@@ -224,8 +244,8 @@ def _problems_for_snapshot(
             issue for issue in planning.health.issues
             if _planning_issue_state(issue.status) is not None
         ]
-        has_attributable_issue = any(issue.source != "planning-status" for issue in planning_issues)
-        if planning.sourceStatus != "current" and not planning_issues:
+        has_data_issue = any(getattr(issue, "affectsDataFreshness", True) for issue in planning_issues)
+        if planning.sourceStatus != "current" and not has_data_issue:
             problem_id = "planning:source"
             first_observed.setdefault(problem_id, observed_at)
             state = planning.sourceStatus
@@ -252,10 +272,8 @@ def _problems_for_snapshot(
             state = _planning_issue_state(issue.status)
             if state is None:
                 continue
-            if issue.source == "planning-status" and has_attributable_issue:
-                continue
             owner_source = "tasks" if issue.source == "projects" else issue.source
-            problem_id = f"planning:{owner_source}"
+            problem_id = _planning_problem_id(issue, owner_source)
             first_observed.setdefault(problem_id, observed_at)
             label = _PLANNING_ISSUE_LABELS[issue.source]
             result[problem_id] = DiagnosticsProblem(
@@ -279,6 +297,7 @@ def _problems_for_snapshot(
                     lastSuccessfulAt=_safe_timestamp(issue.lastSuccessfulAt),
                     observedAt=_safe_timestamp(observed_at),
                     cacheUsed=planning.sourceStatus in {"stale", "offline"},
+                    errorCode=_safe_planning_code(getattr(issue, "errorCode", None)),
                 ),
             )
         for provider in planning.providerStatuses:

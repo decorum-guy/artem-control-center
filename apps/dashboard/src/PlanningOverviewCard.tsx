@@ -176,6 +176,7 @@ function abnormalCalendars(calendars: PlanningCalendarSourceCalendar[]): Array<{
 
 function planningHealthProblems(planning: PlanningSnapshot): PlanningHealthProblem[] {
   const issueProblems = (planning.health?.issues ?? [])
+    .filter((issue) => issue.affectsDataFreshness !== false)
     .filter((issue) => issue.status !== "retrying")
     .map((issue) => ({
       provider: issue.source,

@@ -40,6 +40,15 @@ describe("Planning route health read transitions", () => {
     expect(markup).not.toContain("Есть проблемы");
   });
 
+  it("keeps a current Calendar read silent when Planning has only an operational warning", () => {
+    const markup = healthMarkup({
+      sourceStatus: "current",
+      hasConfirmedContent: true
+    });
+    expect(markup).toBe("");
+    expect(markup).not.toContain("Некоторые данные могут быть недоступны");
+  });
+
   it("keeps a cached target failure on the existing warning dwell path", () => {
     const markup = healthMarkup({
       sourceStatus: "current",

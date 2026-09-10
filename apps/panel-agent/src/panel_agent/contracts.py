@@ -133,7 +133,7 @@ class DiagnosticsTechnicalEvidence(BaseModel):
     provider: Optional[Literal["local", "icloud"]] = None
     providerId: Optional[str] = Field(default=None, max_length=128)
     status: Optional[str] = Field(default=None, max_length=32)
-    errorCode: Optional[str] = Field(default=None, max_length=120)
+    errorCode: Optional[str] = Field(default=None, max_length=128)
     consecutiveFailures: Optional[int] = Field(default=None, ge=0, le=1000)
     lastAttemptedAt: Optional[str] = None
     lastSuccessfulAt: Optional[str] = None

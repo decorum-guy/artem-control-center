@@ -120,6 +120,22 @@ PLANNING_EVENT_UPCOMING_DAYS = 7
 PLANNING_JITTER_RATIO = 0.10
 PLANNING_TRANSIENT_FAILURE_LIMIT = 2
 
+_PLANNING_DATA_INCIDENT_CODES = frozenset(
+    {
+        "planning.database_integrity_failure",
+        "planning.database_integrity_unknown",
+        "planning.database_unavailable",
+        "planning.storage_unavailable",
+    }
+)
+_PLANNING_OPERATIONAL_CONDITION_CODES = {
+    "scheduler": frozenset({"planning.scheduler_heartbeat_stale"}),
+    "outbox": frozenset({"planning.outbox_stuck"}),
+    "delivery": frozenset({"planning.delivery_terminal_failure"}),
+    "backup": frozenset({"planning.backup_failed", "planning.backup_overdue"}),
+    "restore": frozenset({"planning.restore_verification_failed"}),
+}
+
 _PLANNING_REFRESH_DOMAIN_GROUPS: tuple[tuple[str, tuple[int, ...]], ...] = (
     ("reminders", (0, 1, 2, 3, 4)),
     ("tasks", (5, 6, 7, 8)),
@@ -1099,6 +1115,16 @@ class PlanningAdapter:
             return False
         return action in set(self._last_status.capabilities.events)
 
+    def _calendar_mutation_projection_enabled(self) -> bool:
+        """Keep the browser writer gate fail-closed for broad operational health."""
+
+        return bool(
+            self.calendar_mutations_enabled
+            and self._last_status is not None
+            and self._domains_current
+            and not _status_is_degraded(self._last_status)
+        )
+
     def set_on_change(self, callback: Callable[[], Awaitable[None]] | None) -> None:
         self._on_change = callback
 
@@ -1177,7 +1203,7 @@ class PlanningAdapter:
             "health": self._health_evidence(),
             "reminderMutationsEnabled": self.reminder_mutations_enabled,
             "taskMutationsEnabled": self.task_mutations_enabled,
-            "calendarMutationsEnabled": self.calendar_mutations_enabled and source_status == "current" and self._domains_current,
+            "calendarMutationsEnabled": self._calendar_mutation_projection_enabled(),
             "capabilities": PlanningCapabilities(**self._effective_capabilities()),
         }
         if status.sources is not None:
@@ -2264,7 +2290,7 @@ class PlanningAdapter:
             health=self._health_evidence(),
             reminderMutationsEnabled=self.reminder_mutations_enabled,
             taskMutationsEnabled=self.task_mutations_enabled,
-            calendarMutationsEnabled=self.calendar_mutations_enabled and source_status == "current" and self._domains_current,
+            calendarMutationsEnabled=self._calendar_mutation_projection_enabled(),
             lastSyncedAt=last_synced_at,
             staleAfter=stale_after,
             reminders=mapped["reminders"],
@@ -2443,9 +2469,11 @@ class PlanningAdapter:
         """Return the server-owned aggregate; the argument is retained for callers."""
 
         if current:
-            if self._last_status is None or not _status_is_degraded(self._last_status):
+            if self._last_status is None:
                 return "current"
-            return "degraded"
+            if _status_data_freshness_problem(self._last_status) or _provider_health_problem(self._last_status):
+                return "degraded"
+            return "current"
         return self._aggregate_source_status()
 
     def _domain_health(self) -> list[PlanningDomainHealth]:
@@ -2485,14 +2513,18 @@ class PlanningAdapter:
         return result
 
     def _status_health_issue(self) -> PlanningHealthIssue | None:
-        if self._last_status is not None and _status_operationally_degraded(self._last_status):
-            return PlanningHealthIssue(
-                source="planning-status",
-                status="degraded",
-                consecutiveFailures=0,
-                lastAttemptedAt=self._status_last_attempt_text,
-                lastSuccessfulAt=self._status_last_success_text,
-            )
+        if self._last_status is not None:
+            data_error_code = _status_data_issue_code(self._last_status)
+            if data_error_code is not None:
+                return PlanningHealthIssue(
+                    source="planning-status",
+                    status="degraded",
+                    consecutiveFailures=0,
+                    lastAttemptedAt=self._status_last_attempt_text,
+                    lastSuccessfulAt=self._status_last_success_text,
+                    errorCode=data_error_code,
+                    affectsDataFreshness=True,
+                )
         if self._status_failure_count <= 0:
             return None
         last_success_at = self._status_last_success_at
@@ -2518,7 +2550,51 @@ class PlanningAdapter:
             consecutiveFailures=self._status_failure_count,
             lastAttemptedAt=self._status_last_attempt_text,
             lastSuccessfulAt=self._status_last_success_text,
+            errorCode=None,
+            affectsDataFreshness=True,
         )
+
+    def _status_operational_health_issues(self) -> list[PlanningHealthIssue]:
+        status = self._last_status
+        if status is None or status.planningHealth is None:
+            return []
+        health = status.planningHealth
+        data_issue = self._status_health_issue()
+        data_issue_code = data_issue.errorCode if data_issue and data_issue.affectsDataFreshness else None
+        issues: list[PlanningHealthIssue] = []
+        seen_codes: set[str] = set()
+        for incident in sorted(
+            (incident for incident in health.incidents if incident.active),
+            key=lambda incident: incident.code,
+        ):
+            if incident.code in seen_codes or incident.code == data_issue_code:
+                continue
+            seen_codes.add(incident.code)
+            issues.append(
+                PlanningHealthIssue(
+                    source="planning-status",
+                    status="degraded",
+                    consecutiveFailures=0,
+                    lastAttemptedAt=self._status_last_attempt_text,
+                    lastSuccessfulAt=self._status_last_success_text,
+                    errorCode=incident.code,
+                    affectsDataFreshness=incident.code in _PLANNING_DATA_INCIDENT_CODES,
+                )
+            )
+
+        if _status_has_unrepresented_operational_health(status, seen_codes):
+            issues.append(
+                PlanningHealthIssue(
+                    source="planning-status",
+                    status="degraded",
+                    consecutiveFailures=0,
+                    lastAttemptedAt=self._status_last_attempt_text,
+                    lastSuccessfulAt=self._status_last_success_text,
+                    errorCode=None,
+                    affectsDataFreshness=False,
+                )
+            )
+        return issues
 
     def _health_evidence(self) -> PlanningHealthEvidence:
         domains = self._domain_health()
@@ -2536,11 +2612,12 @@ class PlanningAdapter:
         status_issue = self._status_health_issue()
         if status_issue is not None:
             issues.append(status_issue)
+        issues.extend(self._status_operational_health_issues())
         return PlanningHealthEvidence(
             lastAttemptedAt=self._last_refresh_attempt_text,
             lastSuccessfulAt=self._last_refresh_success_text,
             consecutiveFailures=self._failure_count,
-            issues=issues,
+            issues=issues[:8],
             domains=domains,
         )
 
@@ -2643,6 +2720,64 @@ class PlanningAdapter:
 
 def _status_is_degraded(status: StatusEnvelope) -> bool:
     return _status_operationally_degraded(status) or _provider_health_problem(status)
+
+
+def _status_data_freshness_problem(status: StatusEnvelope) -> bool:
+    return _status_data_issue_code(status) is not None
+
+
+def _active_status_incident_codes(status: StatusEnvelope) -> set[str]:
+    health = status.planningHealth
+    if health is None:
+        return set()
+    return {incident.code for incident in health.incidents if incident.active}
+
+
+def _status_data_issue_code(status: StatusEnvelope) -> str | None:
+    if status.storageStatus != "available":
+        return "planning.storage_unavailable"
+    health = status.planningHealth
+    if health is None:
+        return None
+    if not health.dbAvailable:
+        return "planning.database_unavailable"
+    if health.dbIntegrityStatus != "ok":
+        return (
+            "planning.database_integrity_failure"
+            if health.dbIntegrityStatus == "failed"
+            else "planning.database_integrity_unknown"
+        )
+    for code in sorted(_active_status_incident_codes(status)):
+        if code in _PLANNING_DATA_INCIDENT_CODES:
+            return code
+    return None
+
+
+def _status_has_unrepresented_operational_health(
+    status: StatusEnvelope,
+    represented_codes: set[str],
+) -> bool:
+    health = status.planningHealth
+    if health is None:
+        return False
+    return (
+        (
+            health.schedulerHealth == "degraded"
+            and not represented_codes.intersection(_PLANNING_OPERATIONAL_CONDITION_CODES["scheduler"])
+        )
+        or (
+            health.backupStatus in {"unavailable", "failed", "overdue"}
+            and not represented_codes.intersection(_PLANNING_OPERATIONAL_CONDITION_CODES["backup"])
+        )
+        or (
+            health.lastRestoreVerificationStatus not in {"ok", "unknown", "disabled"}
+            and not represented_codes.intersection(_PLANNING_OPERATIONAL_CONDITION_CODES["restore"])
+        )
+        or (
+            health.terminalFailedReminderCount > 0
+            and not represented_codes.intersection(_PLANNING_OPERATIONAL_CONDITION_CODES["delivery"])
+        )
+    )
 
 
 def _status_operationally_degraded(status: StatusEnvelope) -> bool:

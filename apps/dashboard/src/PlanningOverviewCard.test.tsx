@@ -94,4 +94,30 @@ describe("Planning Overview domain composition", () => {
     const currentMarkup = overviewMarkup(withDomainStatus(empty, "current"));
     expect(currentMarkup).toContain("Событий нет");
   });
+
+  it("does not show a data warning for an operational-only Planning incident", () => {
+    const planning = {
+      ...planningFixtures.healthy,
+      sourceStatus: "current" as const,
+      health: {
+        lastAttemptedAt: "2026-08-12T12:00:00Z",
+        lastSuccessfulAt: "2026-08-12T11:59:00Z",
+        consecutiveFailures: 0,
+        issues: [{
+          source: "planning-status" as const,
+          status: "degraded" as const,
+          consecutiveFailures: 0,
+          lastAttemptedAt: "2026-08-12T12:00:00Z",
+          lastSuccessfulAt: "2026-08-12T11:59:00Z",
+          errorCode: "planning.backup_overdue",
+          affectsDataFreshness: false
+        }],
+        domains: []
+      }
+    };
+    const markup = overviewMarkup(planning);
+    expect(markup).not.toContain("planning-overview-health-action");
+    expect(markup).not.toContain("Есть проблемы");
+    expect(markup).not.toContain("Некоторые данные могут быть недоступны");
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DashboardSnapshot, DiagnosticsReport } from "@artem/contracts";
+import type { DashboardSnapshot, DiagnosticsReport, PlanningHealthIssue } from "@artem/contracts";
 import { emptyPlanningFixture, planningFixtures } from "./planningFixtures";
 import {
   copyDiagnosticsText,
@@ -116,7 +116,7 @@ describe("owner diagnostics problem model", () => {
         lastSuccessfulAt: null,
         consecutiveFailures: 1,
         domains: [],
-        issues: [{ source: "projects" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null }]
+        issues: [{ source: "projects" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: null, affectsDataFreshness: true }]
       }
     };
     const problems = currentProblemsForSnapshot(snapshot({ planning }));
@@ -124,25 +124,77 @@ describe("owner diagnostics problem model", () => {
     expect(problems[0].subsystem).toBe("Задачи");
   });
 
-  it("deduplicates Calendar, retains independent Tasks, and limits broad Дела attribution", () => {
+  it("deduplicates Calendar, retains independent Tasks, and keeps operational Дела attribution", () => {
     const planning = {
       ...planningFixtures.healthy,
       sourceStatus: "degraded" as const,
       health: {
         lastAttemptedAt: null, lastSuccessfulAt: null, consecutiveFailures: 1, domains: [],
         issues: [
-          { source: "calendar" as const, status: "stale" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null },
-          { source: "tasks" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null },
-          { source: "planning-status" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null }
+          { source: "calendar" as const, status: "stale" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: null, affectsDataFreshness: true },
+          { source: "tasks" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: null, affectsDataFreshness: true },
+          { source: "planning-status" as const, status: "degraded" as const, consecutiveFailures: 1, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: "planning.backup_overdue", affectsDataFreshness: false }
         ]
       },
       providerStatuses: [{ ...planningFixtures.healthy.providerStatuses[0], provider: "icloud" as const, status: "error" as const }]
     };
     const problems = currentProblemsForSnapshot(snapshot({ planning }));
-    expect(problems.map((item) => item.id)).toEqual(["planning:calendar", "planning:tasks"]);
+    expect(problems.map((item) => item.id)).toEqual(["planning:calendar", "planning:tasks", "planning:planning-status:planning.backup_overdue"]);
     expect(new Set(problems.map((item) => item.id)).size).toBe(problems.length);
+    expect(problems[2].technicalEvidence).toMatchObject({
+      source: "planning-status",
+      errorCode: "planning.backup_overdue"
+    });
     const broad = currentProblemsForSnapshot(snapshot({ planning: { ...planningFixtures.healthy, sourceStatus: "stale" as const } }));
     expect(broad).toMatchObject([{ subsystem: "Дела" }]);
+  });
+
+  it("keeps simultaneous operational Planning incidents distinct and browser-safe", () => {
+    const planning = {
+      ...planningFixtures.healthy,
+      health: {
+        lastAttemptedAt: null,
+        lastSuccessfulAt: null,
+        consecutiveFailures: 0,
+        issues: [
+          { source: "planning-status" as const, status: "degraded" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: "planning.backup_overdue", affectsDataFreshness: false },
+          { source: "planning-status" as const, status: "degraded" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: "planning.outbox_stuck", affectsDataFreshness: false }
+        ],
+        domains: []
+      }
+    };
+    const problems = currentProblemsForSnapshot(snapshot({ planning }));
+    expect(problems.map((item) => item.id)).toEqual([
+      "planning:planning-status:planning.backup_overdue",
+      "planning:planning-status:planning.outbox_stuck"
+    ]);
+    expect(problems.map((item) => item.technicalEvidence?.errorCode)).toEqual([
+      "planning.backup_overdue",
+      "planning.outbox_stuck"
+    ]);
+
+    const unsafeIssue = {
+      source: "planning-status" as const,
+      status: "degraded" as const,
+      consecutiveFailures: 0,
+      lastAttemptedAt: null,
+      lastSuccessfulAt: null,
+      errorCode: "https://private.example/secret",
+      affectsDataFreshness: false
+    } as unknown as PlanningHealthIssue;
+    const unsafePlanning = {
+      ...planningFixtures.healthy,
+      health: {
+        lastAttemptedAt: null,
+        lastSuccessfulAt: null,
+        consecutiveFailures: 0,
+        issues: [unsafeIssue],
+        domains: []
+      }
+    };
+    const unsafeProblem = currentProblemsForSnapshot(snapshot({ planning: unsafePlanning }))[0];
+    expect(unsafeProblem.id).toBe("planning:planning-status");
+    expect(unsafeProblem.technicalEvidence?.errorCode).toBeNull();
   });
 
   it("formats only the fixed sanitized technical record for copying", () => {
@@ -200,7 +252,9 @@ describe("owner diagnostics problem model", () => {
           status: "degraded" as const,
           consecutiveFailures: 2,
           lastAttemptedAt: "2026-08-25T12:00:00Z",
-          lastSuccessfulAt: "2026-08-25T11:59:00Z"
+          lastSuccessfulAt: "2026-08-25T11:59:00Z",
+          errorCode: null,
+          affectsDataFreshness: true
         }],
         domains: []
       }
