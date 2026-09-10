@@ -83,6 +83,11 @@ describe("action confirmation catalog", () => {
       .map((spec) => spec.id);
     expect(actionConfirmationCatalog["coffee-diary.bean.delete"].alwaysConfirm).toBe(true);
     expect(actionConfirmationCatalog["coffee-diary.extraction.delete"].alwaysConfirm).toBe(true);
-    expect(mandatory).toEqual(["system.runtime.shutdown", "coffee-diary.bean.delete", "coffee-diary.extraction.delete"]);
+    expect(actionConfirmationCatalog["settings.projects.delete"]).toMatchObject({
+      description: "Мониторинг проекта будет удалён из Control Center.",
+      confirmLabel: "Удалить проект",
+      alwaysConfirm: true
+    });
+    expect(mandatory).toEqual(["system.runtime.shutdown", "settings.projects.delete", "coffee-diary.bean.delete", "coffee-diary.extraction.delete"]);
   });
 });

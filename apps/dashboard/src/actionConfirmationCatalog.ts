@@ -14,6 +14,7 @@ export type ActionConfirmationId =
   | "planning.tasks.archive"
   | "planning.calendar.delete"
   | "settings.interface-copy.reset-all"
+  | "settings.projects.delete"
   | "coffee-diary.bean.delete"
   | "coffee-diary.extraction.delete";
 
@@ -186,6 +187,17 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     environment: "локальная панель",
     description: "Все пользовательские названия и подписи будут заменены стандартными.",
     confirmLabel: "Вернуть стандартные названия"
+  },
+  "settings.projects.delete": {
+    id: "settings.projects.delete",
+    level: "simple",
+    tone: "standard",
+    title: "Удалить проект?",
+    target: "Проект",
+    environment: "Настройки проектов",
+    description: "Мониторинг проекта будет удалён из Control Center.",
+    confirmLabel: "Удалить проект",
+    alwaysConfirm: true
   },
   "coffee-diary.bean.delete": {
     id: "coffee-diary.bean.delete",
