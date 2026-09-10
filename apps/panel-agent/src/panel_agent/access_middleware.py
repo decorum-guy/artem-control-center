@@ -27,6 +27,7 @@ _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
 _PLANNING_REMINDERS_PREFIX = "/api/v1/planning/reminders/"
 _PLANNING_TASKS_PREFIX = "/api/v1/planning/tasks/"
 _PLANNING_EVENTS_PREFIX = "/api/v1/planning/events/"
+_PROJECTS_PREFIX = "/api/v1/settings/projects/"
 
 
 def _planning_capability(method: str, path: str) -> str | None:
@@ -69,6 +70,12 @@ def capability_for_request(method: str, path: str) -> str | None:
     """Resolve the fixed access capability for a registered mutation route."""
     if method == "PATCH" and path.startswith("/api/v1/settings/ai/providers/") and path.endswith("/credential"):
         return "settings.ai.providers"
+    if method == "POST" and path == "/api/v1/settings/projects":
+        return "settings.projects.manage"
+    if path.startswith(_PROJECTS_PREFIX):
+        segments = path.removeprefix(_PROJECTS_PREFIX).split("/")
+        if len(segments) == 1 and segments[0] and method in {"PUT", "PATCH", "DELETE"}:
+            return "settings.projects.manage"
     return _MUTATION_CAPABILITIES.get((method, path)) or _planning_capability(method, path)
 
 

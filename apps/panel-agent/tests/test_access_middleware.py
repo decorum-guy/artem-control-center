@@ -152,6 +152,67 @@ def test_capability_settings_are_a_fixed_full_access_mutation():
     assert capability_for_request("POST", "/api/v1/system/runtime/apply-capabilities") == "settings.capabilities.manage"
 
 
+def test_project_registry_is_a_fixed_full_access_capability_and_get_is_readable():
+    assert CAPABILITIES["settings.projects.manage"] == "full"
+    assert capability_for_request("GET", "/api/v1/settings/projects") is None
+    assert capability_for_request("POST", "/api/v1/settings/projects") == "settings.projects.manage"
+    assert capability_for_request("PUT", "/api/v1/settings/projects/external-api") == "settings.projects.manage"
+    assert capability_for_request("PATCH", "/api/v1/settings/projects/external-api") == "settings.projects.manage"
+    assert capability_for_request("DELETE", "/api/v1/settings/projects/external-api") == "settings.projects.manage"
+    assert capability_for_request("PATCH", "/api/v1/settings/projects/external-api/extra") is None
+
+
+def build_project_registry_access_client(tmp_path):
+    store = AccessPolicyStore(tmp_path / "access-policy.json")
+    calls: list[str] = []
+    app = FastAPI()
+    app.add_middleware(AccessPolicyMiddleware, store=store)
+
+    @app.get("/api/v1/settings/projects")
+    def read():
+        calls.append("read")
+        return {"ok": True}
+
+    @app.post("/api/v1/settings/projects")
+    def create():
+        calls.append("create")
+        return {"ok": True}
+
+    @app.patch("/api/v1/settings/projects/{project_id}")
+    def update(project_id: str):
+        calls.append(f"update:{project_id}")
+        return {"ok": True}
+
+    @app.delete("/api/v1/settings/projects/{project_id}")
+    def delete(project_id: str):
+        calls.append(f"delete:{project_id}")
+        return {"ok": True}
+
+    return store, calls, TestClient(app)
+
+
+def test_read_only_and_standard_cannot_mutate_registry_but_full_can(tmp_path):
+    store, calls, client = build_project_registry_access_client(tmp_path)
+    mutation_requests = [
+        lambda: client.post("/api/v1/settings/projects"),
+        lambda: client.patch("/api/v1/settings/projects/external-api"),
+        lambda: client.delete("/api/v1/settings/projects/external-api"),
+    ]
+
+    assert client.get("/api/v1/settings/projects").status_code == 200
+    assert [request().status_code for request in mutation_requests] == [403, 403, 403]
+    assert calls == ["read"]
+
+    store.set_pin("2468")
+    store.set_profile("standard")
+    assert [request().status_code for request in mutation_requests] == [403, 403, 403]
+    assert calls == ["read"]
+
+    store.set_profile("full", pin="2468")
+    assert [request().status_code for request in mutation_requests] == [200, 200, 200]
+    assert calls == ["read", "create", "update:external-api", "delete:external-api"]
+
+
 def test_calendar_source_refresh_is_a_standard_owner_action():
     assert CAPABILITIES["planning.calendar_sources.refresh"] == "standard"
     assert capability_for_request("POST", "/api/v1/planning/calendar-sources/refresh") == "planning.calendar_sources.refresh"

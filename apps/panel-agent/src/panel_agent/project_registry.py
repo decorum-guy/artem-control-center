@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 LOGGER = logging.getLogger(__name__)
 
 PROJECT_CONFIG_VERSION = 1
+MAX_PROJECT_REGISTRY_REVISION = 2_147_483_647
 DEFAULT_PROJECTS_CONFIG_PATH = ".runtime/projects.yaml"
 MAX_PROJECT_CONFIG_BYTES = 256 * 1024
 MAX_PROJECT_ID_LENGTH = 32
@@ -148,6 +149,9 @@ class ProjectConfig(_ProjectModel):
 
 class ProjectConfigDocument(_ProjectModel):
     version: int
+    # Slice A documents omitted this field.  Pydantic's default keeps those
+    # documents at the initial revision while mutations persist it explicitly.
+    revision: int = Field(default=0, ge=0, le=MAX_PROJECT_REGISTRY_REVISION)
     projects: list[ProjectConfig] = Field(default_factory=list, max_length=128)
 
     @field_validator("version")
@@ -199,6 +203,7 @@ class ProjectRegistry:
 
     path: Path
     projects: tuple[ProjectConfig, ...] = ()
+    revision: int = 0
     available: bool = True
     error_code: str | None = None
 
@@ -268,6 +273,7 @@ def load_project_registry(path: str | Path = DEFAULT_PROJECTS_CONFIG_PATH) -> Pr
     return ProjectRegistry(
         path=config_path,
         projects=tuple(document.projects),
+        revision=document.revision,
         available=True,
     )
 
