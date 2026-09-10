@@ -57,6 +57,7 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "settings.interface_copy": "standard",
     "settings.device_visibility": "standard",
     "settings.capabilities.manage": "full",
+    "settings.projects.manage": "full",
     "planning.reminders.create": "standard",
     "planning.reminders.edit": "standard",
     "planning.reminders.complete": "standard",

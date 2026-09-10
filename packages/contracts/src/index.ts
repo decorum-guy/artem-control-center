@@ -711,6 +711,85 @@ export interface DeviceVisibilitySettings {
   writesEnabled: boolean;
 }
 
+/** Browser-safe monitor-only project registry inventory and mutation bodies. */
+export interface ProjectRegistryMonitor {
+  adapter: "http";
+  urlEnv: string;
+  intervalSeconds: number;
+  staleAfterSeconds: number;
+}
+
+export interface ProjectRegistryService {
+  id: string;
+  monitor: ProjectRegistryMonitor;
+  actions: [];
+  presentation: { widget: "core.generic-service" };
+}
+
+export interface ProjectRegistryEnvironment {
+  id: string;
+  services: ProjectRegistryService[];
+}
+
+export interface ProjectRegistryProject {
+  id: string;
+  name: string;
+  enabled: boolean;
+  category: "external";
+  environments: ProjectRegistryEnvironment[];
+}
+
+export interface ProjectRegistrySettings {
+  schemaVersion: "project.registry.v1";
+  revision: number;
+  available: boolean;
+  errorCode:
+    | "config_read_error"
+    | "config_not_a_file"
+    | "config_too_large"
+    | "malformed_yaml"
+    | "invalid_schema"
+    | "example_config_not_runtime"
+    | "config_unavailable"
+    | null;
+  projects: ProjectRegistryProject[];
+  writesEnabled: boolean;
+  manageCapability: "settings.projects.manage";
+  manageMinimumProfile: "full";
+}
+
+export interface ProjectRegistryProjectInput {
+  id: string;
+  name: string;
+  enabled?: boolean;
+  category: "external";
+  environments: Array<{
+    id: string;
+    services: Array<{
+      id: string;
+      capabilities: {
+        monitor: {
+          adapter: "http";
+          url_env: string;
+          interval_seconds?: number;
+          stale_after_seconds?: number;
+        };
+        actions?: [];
+      };
+      presentation?: { widget?: "core.generic-service" };
+    }>;
+  }>;
+}
+
+export interface ProjectRegistryMutationRequest {
+  expectedRevision: number;
+  project: ProjectRegistryProjectInput;
+}
+
+export interface ProjectRegistryDeleteRequest {
+  expectedRevision: number;
+}
+
 export interface PlanningSnapshot {
   schemaVersion: "planning.panel.v1";
   generatedAt: string;

@@ -47,6 +47,8 @@ from .fixtures import load_fixture_document, services_for_scenario
 from .diagnostics import DiagnosticsCollector
 from .integrations import IntegrationRuntime
 from .planning_api import build_planning_router
+from .project_registry_api import build_project_registry_router
+from .project_registry_store import ProjectRegistryStore
 from .runtime_control import router as runtime_control_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
@@ -158,6 +160,7 @@ def configured_mode() -> PanelMode:
 MODE = configured_mode()
 SETTINGS = IntegrationSettings.from_env()
 runtime = IntegrationRuntime(SETTINGS, mode=MODE)
+project_registry_store = ProjectRegistryStore(SETTINGS.projects_config_path)
 weather_service = WeatherService(mode=MODE)
 diagnostics_collector = DiagnosticsCollector(SETTINGS)
 snapshot_publisher = SnapshotPublisher(
@@ -254,6 +257,14 @@ app = FastAPI(
     title="Artem Control Center Panel Agent",
     version="0.2.0",
     lifespan=lifespan,
+)
+app.include_router(
+    build_project_registry_router(
+        project_registry_store,
+        runtime,
+        snapshot_rebuild=snapshot_publisher.rebuild,
+        writes_allowed=lambda: _project_registry_write_allowed(),
+    )
 )
 app.include_router(runtime_control_router)
 app.include_router(build_weather_router(weather_service))
@@ -1774,6 +1785,10 @@ def _write_allowed(narrow_gate: bool) -> bool:
         and SETTINGS.writes_enabled
         and narrow_gate
     )
+
+
+def _project_registry_write_allowed() -> bool:
+    return _write_allowed(True)
 
 
 def _overview_write_allowed() -> bool:

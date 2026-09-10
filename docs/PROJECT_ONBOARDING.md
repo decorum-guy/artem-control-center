@@ -12,11 +12,22 @@ Implemented in this slice:
 
 Still pending:
 
-- Settings onboarding wizard and add/edit/delete UI;
+- Settings onboarding wizard and add/edit/delete UI (the backend control
+  plane is available, but no Settings UI is included in this slice);
 - YAML import/export UI;
 - secret store;
 - additional adapters and capabilities;
 - deploy, actions, backups, restore and related write operations.
+
+## Slice B backend control plane
+
+The monitor-only registry can be inspected and changed through the server-owned
+`/api/v1/settings/projects` API. The API returns only declarative identifiers
+and monitor settings; endpoint values, secrets, raw YAML and the storage path
+never cross the browser boundary. Mutations carry the expected registry
+revision, require the `settings.projects.manage` Full-access capability, are
+persisted atomically, and reconcile the running monitor without restarting
+the other integrations.
 
 ## 1. Goal
 

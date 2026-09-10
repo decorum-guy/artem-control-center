@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Awaitable, Callable, List
 
 import httpx
@@ -43,11 +44,15 @@ class IntegrationRuntime:
             if project_registry is not None
             else load_project_registry(settings.projects_config_path)
         )
+        self._project_monitor_transport = project_monitor_transport
         self.project_monitor = DeclarativeProjectMonitor(
             self.project_registry,
             settings,
             transport=project_monitor_transport,
         )
+        self._runtime_started = False
+        self._project_registry_swap_lock: asyncio.Lock | None = None
+        self._project_registry_swap_loop: asyncio.AbstractEventLoop | None = None
         self.rog_g703 = RogG703Device(settings)
         fixture_planning = (
             mode in {"fixtures", "integration_test"}
@@ -87,6 +92,42 @@ class IntegrationRuntime:
         if self._coffee_schedule_callback is not None:
             await self._coffee_schedule_callback()
 
+    async def replace_project_registry(self, registry: ProjectRegistry) -> None:
+        """Swap the declarative monitor without restarting other adapters."""
+
+        loop = asyncio.get_running_loop()
+        if (
+            self._project_registry_swap_lock is None
+            or self._project_registry_swap_loop is not loop
+        ):
+            self._project_registry_swap_lock = asyncio.Lock()
+            self._project_registry_swap_loop = loop
+
+        async with self._project_registry_swap_lock:
+            previous_monitor = self.project_monitor
+            should_start = self._runtime_started or previous_monitor.running
+            replacement = DeclarativeProjectMonitor(
+                registry,
+                self.settings,
+                transport=self._project_monitor_transport,
+            )
+
+            # Stop the old task before starting the replacement.  This keeps
+            # one authoritative monitor collection and prevents duplicate
+            # polling during a revision swap.
+            await previous_monitor.close()
+            self.project_registry = registry
+            self.project_monitor = replacement
+            try:
+                if should_start:
+                    await replacement.start()
+            finally:
+                # Start without the callback so an initial health probe cannot
+                # race the route's explicit snapshot rebuild.  The callback
+                # is then attached to the live replacement for all future
+                # refreshes.
+                replacement.set_on_change(self._snapshot_callback)
+
     async def start(self) -> None:
         await self.home_assistant.start()
         await self.avalar_ssh.start()
@@ -94,6 +135,7 @@ class IntegrationRuntime:
         await self.project_monitor.start()
         await self.planning.start()
         await self.rog_g703.start()
+        self._runtime_started = True
 
     async def start_planning(self) -> None:
         """Start only the feature-gated Planning adapter in fixture modes."""
@@ -101,6 +143,7 @@ class IntegrationRuntime:
         await self.planning.start()
 
     async def close(self) -> None:
+        self._runtime_started = False
         await self.project_monitor.close()
         await self.http.close()
         await self.avalar_ssh.close()
