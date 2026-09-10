@@ -351,6 +351,10 @@ def ready(response: Response) -> dict:
             "planning": runtime.planning.enabled,
             "aiText": SETTINGS.ai_text_enabled,
         },
+        "projectRegistry": {
+            "available": runtime.project_registry.available,
+            "errorCode": runtime.project_registry.error_code,
+        },
     }
     if phase != "ready":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

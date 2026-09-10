@@ -1,5 +1,23 @@
 # Project and Service Onboarding
 
+## Slice A implementation status
+
+Implemented in this slice:
+
+- server-owned runtime loading of declarative, monitor-only HTTP projects from
+  `PANEL_PROJECTS_CONFIG_PATH`;
+- backend-only resolution of endpoint URLs from environment-variable names;
+- automatic materialization of enabled services through the existing
+  `core.generic-service` fallback.
+
+Still pending:
+
+- Settings onboarding wizard and add/edit/delete UI;
+- YAML import/export UI;
+- secret store;
+- additional adapters and capabilities;
+- deploy, actions, backups, restore and related write operations.
+
 ## 1. Goal
 
 Подключение нового проекта к Artem Control Center не должно требовать изменения core-кода панели и не должно подразумевать обязательное наличие управляющих кнопок.

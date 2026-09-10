@@ -19,6 +19,9 @@ test("development gallery keeps fixtures and registry mutation tools", async ({ 
   await page.getByTestId("add-service").click();
   await expect(page.getByText("Discovered Service")).toBeVisible();
   await expect(page.getByText("generic fallback").last()).toBeVisible();
+  const discoveredWidget = page.locator('[data-testid^="widget-discovered-"]');
+  await expect(discoveredWidget).toContainText("monitor-only");
+  await expect(discoveredWidget.getByRole("button")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Открыть продукт" }).click();
   await page.getByRole("link", { name: "Сервисы" }).click();

@@ -38,6 +38,18 @@ describe("widget registry", () => {
     ]);
   });
 
+  it("materializes a monitor-only declarative service without action chrome", () => {
+    const declarative = service("external-api.production.api", "service.health.v1");
+    const widgets = reconcileLayout([declarative]);
+
+    expect(resolveManifest(declarative).id).toBe("core.generic-service");
+    expect(declarative.actions).toEqual([]);
+    expect(widgets[0]).toEqual(expect.objectContaining({
+      serviceId: "external-api.production.api",
+      manifestId: "core.generic-service"
+    }));
+  });
+
   it("preserves existing layout and adds registry updates", () => {
     const existing: MaterializedWidget[] = [
       {
