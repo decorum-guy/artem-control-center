@@ -13,6 +13,7 @@ import { RouteHeader } from "./ShellPrimitives";
 import { useInterfaceCopy } from "./interfaceCopy";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { useInteractionLock } from "./InteractionLock";
+import { useNoticeCenter } from "./NoticeCenter";
 import { NumericKeypad } from "./NumericKeypad";
 import { normalizeNumericInput, numericInputValue } from "./coffeeDiaryNumeric";
 import { coffeeDiaryApiMessage } from "./coffeeDiaryMessages";
@@ -57,11 +58,6 @@ type BeanDraft = {
   roastNotes: string;
   origin: string;
   processing: string;
-};
-
-type CoffeeDiaryBeanUndo = {
-  beanId: string;
-  tombstoneVersion: number;
 };
 
 const preferredDrinkOptions: Array<{ value: CoffeeDiaryPreferredDrink | ""; label: string }> = [
@@ -115,6 +111,18 @@ function ratingValue(value: string): number | null {
 
 function isRevisionConflict(reason: unknown): boolean {
   return reason instanceof CoffeeDiaryApiError && reason.code === "revision_conflict";
+}
+
+function coffeeBeanUndoCorrelation(beanId: string, tombstoneVersion: number): string {
+  return `coffee-diary.bean.${beanId}.tombstone.${tombstoneVersion}`;
+}
+
+function coffeeBeanUndoNoticeId(beanId: string, tombstoneVersion: number): string {
+  return `coffee-diary.bean.undo.${beanId}.${tombstoneVersion}`;
+}
+
+function coffeeBeanRestoreNoticeId(beanId: string, tombstoneVersion: number): string {
+  return `coffee-diary.bean.restore.${beanId}.${tombstoneVersion}`;
 }
 
 function uploadSessionTimeCopy(seconds: number): string {
@@ -411,6 +419,7 @@ export function CoffeeDiaryPage() {
   const { copy } = useInterfaceCopy();
   const { confirmAction } = useActionConfirmation();
   const { guardMutation } = useInteractionLock();
+  const { showNotice } = useNoticeCenter();
   const [collection, setCollection] = useState<CoffeeDiaryCollection | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<{ bean: CoffeeDiaryBean; extractions: CoffeeDiaryExtraction[] } | null>(null);
@@ -421,11 +430,6 @@ export function CoffeeDiaryPage() {
   const [photoSession, setPhotoSession] = useState<CoffeeDiaryUploadSession | null>(null);
   const [photoSessionBusy, setPhotoSessionBusy] = useState(false);
   const photoSessionBusyRef = useRef(false);
-  const [beanUndo, setBeanUndo] = useState<CoffeeDiaryBeanUndo | null>(null);
-  const [beanUndoPendingId, setBeanUndoPendingId] = useState<string | null>(null);
-  const beanUndoRef = useRef<CoffeeDiaryBeanUndo | null>(null);
-  const beanUndoTimerRef = useRef<number | null>(null);
-  const beanUndoPendingRef = useRef<string | null>(null);
 
   const selectedBean = useMemo(() => collection?.beans.find((bean) => bean.id === selectedId) ?? null, [collection, selectedId]);
   const favorite = selectedBean && selectedDetail ? bestCoffeeDiaryExtraction(selectedBean, selectedDetail.extractions) : null;
@@ -434,40 +438,42 @@ export function CoffeeDiaryPage() {
     : [], [collection?.photos, selectedBean]);
   const [viewedPhotoId, setViewedPhotoId] = useState<string | null>(null);
 
-  function clearBeanUndoTimer() {
-    if (beanUndoTimerRef.current !== null) {
-      window.clearTimeout(beanUndoTimerRef.current);
-      beanUndoTimerRef.current = null;
-    }
-  }
-
-  function clearBeanUndo(expected?: CoffeeDiaryBeanUndo) {
-    const current = beanUndoRef.current;
-    if (expected && (!current || current.beanId !== expected.beanId || current.tombstoneVersion !== expected.tombstoneVersion)) return;
-    clearBeanUndoTimer();
-    beanUndoRef.current = null;
-    setBeanUndo(null);
-    setBeanUndoPendingId(null);
-  }
-
   function showBeanUndo(deleted: CoffeeDiaryBean) {
-    clearBeanUndoTimer();
-    const next = { beanId: deleted.id, tombstoneVersion: deleted.version };
-    beanUndoRef.current = next;
-    setBeanUndo(next);
-    setBeanUndoPendingId(null);
-    beanUndoTimerRef.current = window.setTimeout(() => {
-      beanUndoTimerRef.current = null;
-      if (beanUndoRef.current?.beanId !== next.beanId || beanUndoRef.current.tombstoneVersion !== next.tombstoneVersion) return;
-      beanUndoRef.current = null;
-      setBeanUndo(null);
-      setBeanUndoPendingId(null);
-    }, 10_000);
+    const beanId = deleted.id;
+    const tombstoneVersion = deleted.version;
+    const correlationId = coffeeBeanUndoCorrelation(beanId, tombstoneVersion);
+    showNotice({
+      id: coffeeBeanUndoNoticeId(beanId, tombstoneVersion),
+      correlationId,
+      severity: "warning",
+      title: "Кофе удалён",
+      detail: "Можно вернуть в течение 10 секунд.",
+      timeoutMs: 10_000,
+      testId: "coffee-diary-undo",
+      action: {
+        label: "Отменить",
+        onAction: () => restoreBeanUndo(beanId, tombstoneVersion)
+      }
+    });
   }
 
-  useEffect(() => () => {
-    if (beanUndoTimerRef.current !== null) window.clearTimeout(beanUndoTimerRef.current);
-  }, []);
+  function showBeanRestoreTerminal(
+    beanId: string,
+    tombstoneVersion: number,
+    severity: "success" | "error",
+    title: string,
+    detail: string
+  ) {
+    showNotice({
+      id: coffeeBeanRestoreNoticeId(beanId, tombstoneVersion),
+      correlationId: coffeeBeanUndoCorrelation(beanId, tombstoneVersion),
+      severity,
+      title,
+      detail,
+      timeoutMs: severity === "success" ? 4_000 : 12_000,
+      testId: severity === "success" ? "coffee-diary-restore-success" : "coffee-diary-restore-error"
+    });
+  }
 
   async function reload(): Promise<boolean> {
     setLoading(true);
@@ -508,31 +514,25 @@ export function CoffeeDiaryPage() {
     }
   }
 
-  async function undoBeanDelete() {
-    const currentUndo = beanUndoRef.current;
-    if (!currentUndo || beanUndoPendingRef.current === currentUndo.beanId || !guardMutation()) return;
-    beanUndoPendingRef.current = currentUndo.beanId;
-    setBeanUndoPendingId(currentUndo.beanId);
+  async function restoreBeanUndo(beanId: string, tombstoneVersion: number): Promise<boolean> {
+    if (!guardMutation()) return false;
     try {
-      const restored = await restoreCoffeeDiaryBean(currentUndo.beanId, currentUndo.tombstoneVersion);
-      if (await reload()) {
-        setSelectedId(restored.id);
-        clearBeanUndo(currentUndo);
+      const restored = await restoreCoffeeDiaryBean(beanId, tombstoneVersion);
+      if (!await reload()) {
+        showBeanRestoreTerminal(beanId, tombstoneVersion, "error", "Кофе не возвращён", "Не удалось подтвердить восстановление после ответа сервера.");
+        return true;
       }
+      setSelectedId(restored.id);
+      showBeanRestoreTerminal(beanId, tombstoneVersion, "success", "Кофе возвращён", "Кофе восстановлен в коллекции.");
     } catch (reason) {
       if (reason instanceof CoffeeDiaryApiError && reason.status === 409) {
-        clearBeanUndo(currentUndo);
         await reload();
-        setError(coffeeDiaryApiMessage(reason));
-        return;
+        showBeanRestoreTerminal(beanId, tombstoneVersion, "error", "Кофе не возвращён", coffeeDiaryApiMessage(reason));
+        return true;
       }
-      setError(coffeeDiaryApiMessage(reason));
-    } finally {
-      if (beanUndoPendingRef.current === currentUndo.beanId) {
-        beanUndoPendingRef.current = null;
-        setBeanUndoPendingId(null);
-      }
+      showBeanRestoreTerminal(beanId, tombstoneVersion, "error", "Кофе не возвращён", coffeeDiaryApiMessage(reason));
     }
+    return true;
   }
 
   async function deleteExtraction(extraction: CoffeeDiaryExtraction) {
@@ -599,7 +599,6 @@ export function CoffeeDiaryPage() {
         <div className="coffee-diary-page__actions"><button type="button" className="coffee-diary-secondary-button" onClick={() => void exportDiary()} data-testid="coffee-diary-export">Экспорт JSON</button><button type="button" className="coffee-diary-secondary-button" onClick={downloadCoffeeDiaryCsv} data-testid="coffee-diary-export-csv">Экспорт CSV</button><button type="button" className="coffee-diary-secondary-button" onClick={downloadCoffeeDiaryZip} data-testid="coffee-diary-export-zip">Экспорт ZIP</button><button type="button" className="coffee-diary-primary-button" onClick={() => setSheet("add-bean")} data-testid="coffee-diary-add-bean">Добавить кофе</button></div>
       </div>
       {error && <p className="coffee-diary-notice" role="alert">{error}</p>}
-      {beanUndo && <div className="coffee-diary-undo" data-testid="coffee-diary-undo" role="status" aria-live="polite"><span>Кофе удалён</span><button type="button" className="coffee-diary-undo-action" data-testid="coffee-diary-undo-action" disabled={beanUndoPendingId === beanUndo.beanId} aria-busy={beanUndoPendingId === beanUndo.beanId} onClick={() => void undoBeanDelete()}>{beanUndoPendingId === beanUndo.beanId ? "Возвращаем…" : "Отменить"}</button></div>}
       {loading && <p className="coffee-diary-state">Загружаем дневник…</p>}
       {!loading && collection && collection.beans.length === 0 && <section className="coffee-diary-empty" data-testid="coffee-diary-empty"><div className="coffee-diary-empty__cup">☕</div><h2>Кофе пока не добавлен</h2><p>Добавьте зерно, чтобы сохранить помол и первый лучший рецепт.</p><button type="button" className="coffee-diary-primary-button" onClick={() => setSheet("add-bean")}>Добавить кофе</button></section>}
       {!loading && collection && collection.beans.length > 0 && <div className="coffee-diary-layout">

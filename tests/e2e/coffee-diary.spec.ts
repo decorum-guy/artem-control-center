@@ -262,9 +262,11 @@ test.describe("Coffee Diary Slice 1", () => {
     await expect(page.getByTestId("coffee-diary-empty")).toBeVisible();
 
     const undo = page.getByTestId("coffee-diary-undo");
-    const undoAction = page.getByTestId("coffee-diary-undo-action");
+    const undoAction = undo.getByRole("button", { name: "Отменить" });
     await expect(undo).toContainText("Кофе удалён");
     await expect(undoAction).toHaveText("Отменить");
+    await expect(undo.locator(".global-notice__lifetime")).toHaveCount(1);
+    await expect(undo.locator(".global-notice__lifetime")).toHaveCSS("animation-duration", "10s");
     expect((await undoAction.boundingBox())?.height).toBeGreaterThanOrEqual(48);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
@@ -289,6 +291,9 @@ test.describe("Coffee Diary Slice 1", () => {
     await undoAction.click();
     await restoreStarted;
     await expect(undoAction).toBeDisabled();
+    await expect(undoAction).toHaveAttribute("aria-busy", "true");
+    await undoAction.dispatchEvent("click");
+    await expect.poll(() => restoreRequests.length).toBe(1);
     expect(restoreRequests).toEqual(['"2"']);
     expect(restoreBodies).toEqual([null]);
     expect(createRequests).toEqual([]);
@@ -301,10 +306,75 @@ test.describe("Coffee Diary Slice 1", () => {
     expect(restored.deletedAt).toBeNull();
     await expect(page.getByTestId("coffee-diary-detail")).toContainText(bean.name);
     await expect(page.getByTestId("coffee-diary-undo")).toHaveCount(0);
+    await expect(page.getByTestId("coffee-diary-restore-success")).toContainText("Кофе возвращён");
+    await expect(page.locator(".coffee-diary-bean-card.is-selected")).toContainText(bean.name);
     expect(createRequests).toEqual([]);
     expect(restoreRequests).toHaveLength(1);
     const collection = await page.request.get("/api/v1/coffee-diary").then((response) => response.json()) as { beans: BeanRecord[] };
     expect(collection.beans.map((item) => item.id)).toContain(bean.id);
+    await page.unroute(`**/api/v1/coffee-diary/beans/${bean.id}/restore`);
+  });
+
+  test("restore failure is a truthful global terminal notice", async ({ page }) => {
+    const bean = await seedBean(page, "Ошибка восстановления", "e2e-bean-undo-failure");
+    await page.route("**/api/v1/access", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(relaxedAccessStatus()) });
+        return;
+      }
+      await route.fallback();
+    });
+    await page.route(`**/api/v1/coffee-diary/beans/${bean.id}/restore`, async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "coffee_diary_store_unavailable" }) });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.goto("/coffee-diary");
+    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Удалить" }).click();
+    await page.getByTestId("action-confirmation").getByRole("button", { name: "Убрать из коллекции" }).click();
+    const undo = page.getByTestId("coffee-diary-undo");
+    await expect(undo).toBeVisible();
+    await undo.getByRole("button", { name: "Отменить" }).click();
+
+    const failure = page.getByTestId("coffee-diary-restore-error");
+    await expect(failure).toContainText("Кофе не возвращён");
+    await expect(page.getByTestId("coffee-diary-restore-success")).toHaveCount(0);
+    await expect(page.getByTestId("coffee-diary-empty")).toBeVisible();
+    await page.unroute(`**/api/v1/coffee-diary/beans/${bean.id}/restore`);
+  });
+
+  test("restore revision conflict reloads authoritatively without false success", async ({ page }) => {
+    const bean = await seedBean(page, "Конфликт восстановления", "e2e-bean-undo-conflict");
+    await page.route("**/api/v1/access", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(relaxedAccessStatus()) });
+        return;
+      }
+      await route.fallback();
+    });
+    await page.route(`**/api/v1/coffee-diary/beans/${bean.id}/restore`, async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "revision_conflict" }) });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.goto("/coffee-diary");
+    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Удалить" }).click();
+    await page.getByTestId("action-confirmation").getByRole("button", { name: "Убрать из коллекции" }).click();
+    const undo = page.getByTestId("coffee-diary-undo");
+    await expect(undo).toBeVisible();
+    await undo.getByRole("button", { name: "Отменить" }).click();
+
+    const conflict = page.getByTestId("coffee-diary-restore-error");
+    await expect(conflict).toContainText("Кофе не возвращён");
+    await expect(conflict).toContainText("Данные изменились");
+    await expect(page.getByTestId("coffee-diary-restore-success")).toHaveCount(0);
+    await expect(page.getByTestId("coffee-diary-empty")).toBeVisible();
     await page.unroute(`**/api/v1/coffee-diary/beans/${bean.id}/restore`);
   });
 
@@ -433,6 +503,48 @@ test.describe("Coffee Diary Slice 1", () => {
     await page.getByRole("button", { name: "Добавить кофе" }).first().click();
     await page.getByRole("button", { name: "Сохранить" }).last().click();
     expect(requests).toEqual([]);
+  });
+
+  test("interaction lock keeps Coffee Undo available when restore is blocked", async ({ page }) => {
+    test.skip(process.env.VITE_TOUCH_INPUT_LOCK_ENABLED !== "true", "Focused lock gate enables the shared Interaction Lock.");
+    const bean = await seedBean(page, "Undo при блокировке", "e2e-bean-undo-lock");
+    await page.route("**/api/v1/access", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(relaxedAccessStatus()) });
+        return;
+      }
+      await route.fallback();
+    });
+    const restoreRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes(`/api/v1/coffee-diary/beans/${bean.id}/restore`) && request.method() === "POST") restoreRequests.push(request.url());
+    });
+
+    await page.goto("/coffee-diary");
+    await page.getByTestId("coffee-diary-detail").getByRole("button", { name: "Удалить" }).click();
+    await page.getByTestId("action-confirmation").getByRole("button", { name: "Убрать из коллекции" }).click();
+    const undo = page.getByTestId("coffee-diary-undo");
+    const undoAction = undo.getByRole("button", { name: "Отменить" });
+    await expect(undo).toBeVisible();
+
+    const lockControl = page.getByTestId("interaction-lock-control");
+    await lockControl.hover();
+    await page.mouse.down();
+    await page.waitForTimeout(1_100);
+    await page.mouse.up();
+    await expect(page.getByTestId("interaction-lock-status")).toBeVisible();
+    await undoAction.click();
+    await expect(undoAction).toBeEnabled();
+    await expect(undo).toBeVisible();
+    expect(restoreRequests).toEqual([]);
+
+    await lockControl.hover();
+    await page.mouse.down();
+    await page.waitForTimeout(1_100);
+    await page.mouse.up();
+    await undoAction.click();
+    await expect.poll(() => restoreRequests.length).toBe(1);
+    await expect(page.getByTestId("coffee-diary-restore-success")).toBeVisible();
   });
 
   test("keeps diary controls usable at a 200 percent effective zoom", async ({ page }) => {

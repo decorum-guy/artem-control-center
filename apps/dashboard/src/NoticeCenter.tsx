@@ -13,9 +13,11 @@ import "./NoticeCenter.css";
 
 export type NoticeSeverity = "info" | "progress" | "success" | "warning" | "error";
 
+export type NoticeActionResult = boolean | void;
+
 export interface NoticeAction {
   label: string;
-  onAction: () => void | Promise<void>;
+  onAction: () => NoticeActionResult | Promise<NoticeActionResult>;
 }
 
 export interface NoticeInput {
@@ -39,7 +41,7 @@ export interface NoticeRecord extends Omit<NoticeInput, "timeoutMs"> {
 interface NoticeCenterContextValue {
   notices: NoticeRecord[];
   showNotice: (notice: NoticeInput) => void;
-  dismissNotice: (id: string) => void;
+  dismissNotice: (id: string, expectedNotice?: NoticeRecord) => void;
 }
 
 const NoticeCenterContext = createContext<NoticeCenterContextValue | null>(null);
@@ -152,12 +154,13 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const dismissNotice = useCallback((id: string) => {
+  const dismissNotice = useCallback((id: string, expectedNotice?: NoticeRecord) => {
     setNotices((current) => {
-      const dismissed = current.find((notice) => notice.id === id);
+      const dismissed = current.find((notice) => notice.id === id && (!expectedNotice || notice === expectedNotice));
+      if (!dismissed) return current;
       const key = dismissed && noticeDismissalKey(dismissed);
       if (key) rememberDismissedNoticeKey(dismissedKeysRef.current, key);
-      return current.filter((notice) => notice.id !== id);
+      return current.filter((notice) => notice !== dismissed);
     });
   }, []);
 
@@ -188,7 +191,29 @@ export function GlobalNoticeRegion() {
     : createPortal(region, document.body);
 }
 
-function NoticeRegion({ notices, dismissNotice }: { notices: NoticeRecord[]; dismissNotice: (id: string) => void }) {
+function NoticeRegion({ notices, dismissNotice }: { notices: NoticeRecord[]; dismissNotice: (id: string, expectedNotice?: NoticeRecord) => void }) {
+  const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(() => new Set());
+  const pendingActionIdsRef = useRef(new Set<string>());
+
+  const handleAction = useCallback(async (notice: NoticeRecord) => {
+    if (!notice.action || pendingActionIdsRef.current.has(notice.id)) return;
+
+    pendingActionIdsRef.current.add(notice.id);
+    setPendingActionIds(new Set(pendingActionIdsRef.current));
+
+    let accepted = false;
+    try {
+      accepted = (await notice.action.onAction()) !== false;
+    } catch {
+      // A rejected action remains available for a possible retry. Consumers
+      // that own an error lifecycle can replace it with a terminal notice.
+    }
+
+    if (accepted) dismissNotice(notice.id, notice);
+    pendingActionIdsRef.current.delete(notice.id);
+    setPendingActionIds(new Set(pendingActionIdsRef.current));
+  }, [dismissNotice]);
+
   const visible = [...notices]
     .sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity] || left.createdAt - right.createdAt)
     .slice(0, 3);
@@ -200,7 +225,7 @@ function NoticeRegion({ notices, dismissNotice }: { notices: NoticeRecord[]; dis
       {visible.map((notice) => (
         <article
           key={notice.id}
-          className={`global-notice global-notice--${notice.severity}`}
+          className={`global-notice global-notice--${notice.severity}${notice.action ? " global-notice--actionable" : ""}`}
           role={notice.severity === "error" ? "alert" : "status"}
           aria-live={notice.severity === "error" ? "assertive" : "polite"}
           aria-atomic="true"
@@ -231,10 +256,9 @@ function NoticeRegion({ notices, dismissNotice }: { notices: NoticeRecord[]; dis
               <button
                 type="button"
                 className="global-notice__action"
-                onClick={() => {
-                  void notice.action?.onAction();
-                  dismissNotice(notice.id);
-                }}
+                disabled={pendingActionIds.has(notice.id)}
+                aria-busy={pendingActionIds.has(notice.id)}
+                onClick={() => { void handleAction(notice); }}
               >
                 {notice.action.label}
               </button>
@@ -278,6 +302,34 @@ export function B0NoticeFixture() {
         title: "Требуется действие",
         detail: "Проверка безопасной кнопки уведомления.",
         action: { label: "Открыть", onAction: () => undefined }
+      });
+    }
+    if (mode === "notice-action-async") {
+      const correlationId = "b0-action-async";
+      let actionCalls = 0;
+      showNotice({
+        id: "b0.action-async",
+        correlationId,
+        severity: "warning",
+        title: "Требуется действие",
+        detail: "Проверка асинхронной кнопки уведомления.",
+        testId: "b0-action-async",
+        action: {
+          label: "Открыть",
+          onAction: async () => {
+            actionCalls += 1;
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+            showNotice({
+              id: "b0.action-async.success",
+              correlationId,
+              severity: "success",
+              title: "Действие завершено",
+              detail: `Колбэк выполнен ${actionCalls} раз.`,
+              timeoutMs: 4_000,
+              testId: "b0-action-async-success"
+            });
+          }
+        }
       });
     }
     let terminalTimer: number | undefined;

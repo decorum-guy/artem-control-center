@@ -4,6 +4,8 @@ import path from "node:path";
 
 test.describe.configure({ mode: "serial" });
 
+const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
+
 function temporaryAccessStatus() {
   return {
     schemaVersion: 1,
@@ -121,6 +123,45 @@ test("notice stack limits to three and deduplicates correlation IDs", async ({ p
   await expect(page.getByText("Дубликат устранён")).toBeVisible();
   await page.goto("/overview?b0=triple-notice");
   await expect(page.getByTestId("global-notice-stack").getByTestId("global-notice")).toHaveCount(3);
+});
+
+test("async NoticeCenter action is single-flight, settles, and fits the V2 rail", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/overview?b0=notice-action-async");
+
+  const stack = page.getByTestId("global-notice-stack");
+  const notice = page.getByTestId("b0-action-async");
+  const action = notice.getByRole("button", { name: "Открыть" });
+  const dismiss = notice.getByRole("button", { name: "Закрыть уведомление" });
+  await expect(notice).toBeVisible();
+  await expect(action).toBeEnabled();
+  const actionBox = await action.boundingBox();
+  expect(actionBox?.width).toBeGreaterThanOrEqual(48);
+  expect(actionBox?.height).toBeGreaterThanOrEqual(48);
+  await expect(notice.locator(".global-notice__lifetime")).toHaveCount(1);
+
+  if (visualShellEnabled) {
+    const stackBox = await stack.boundingBox();
+    const noticeBox = await notice.boundingBox();
+    const dismissBox = await dismiss.boundingBox();
+    expect(stackBox?.height).toBe(72);
+    expect(noticeBox?.height).toBe(72);
+    expect(dismissBox).not.toBeNull();
+    expect((actionBox?.x ?? 0) + (actionBox?.width ?? 0)).toBeLessThanOrEqual(dismissBox?.x ?? Number.POSITIVE_INFINITY);
+    expect(await notice.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  }
+  await expectNoDocumentOverflow(page);
+
+  await action.click();
+  await expect(action).toBeDisabled();
+  await expect(action).toHaveAttribute("aria-busy", "true");
+  await expect(notice).toBeVisible();
+  await action.dispatchEvent("click");
+
+  const terminal = page.getByTestId("b0-action-async-success");
+  await expect(terminal).toContainText("Колбэк выполнен 1 раз.");
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByTestId("global-notice-stack")).toBeVisible();
 });
 
 test("all visible product controls meet the touch target floor", async ({ page }) => {
