@@ -230,6 +230,39 @@ body:has(.v2-shell) {
     line-height: 16px;
   }
 
+  /* Keep an action-bearing notice inside the fixed 72px rail: copy remains
+     in the left column while the 48px action target gets its own lane before
+     the dismiss button. */
+  body:has(.v2-shell) .global-notice--actionable .global-notice__body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 8px;
+  }
+
+  body:has(.v2-shell) .global-notice--actionable .global-notice__heading {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  body:has(.v2-shell) .global-notice--actionable .global-notice__body > p {
+    grid-column: 1;
+    grid-row: 2;
+    margin-top: 2px;
+  }
+
+  body:has(.v2-shell) .global-notice--actionable .global-notice__action {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    max-width: 100%;
+    padding: 0 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   body:has(.v2-shell) .global-notice__dismiss {
     position: absolute;
     top: 11px;
@@ -296,6 +329,19 @@ body:has(.v2-shell) {
   body.cc-overlay-open:has(.v2-shell) .global-notice__dismiss {
     position: static;
     margin: -4px -4px 0 0;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice--actionable .global-notice__body {
+    grid-template-columns: none;
+    grid-template-rows: none;
+    column-gap: normal;
+  }
+
+  body.cc-overlay-open:has(.v2-shell) .global-notice--actionable .global-notice__heading,
+  body.cc-overlay-open:has(.v2-shell) .global-notice--actionable .global-notice__body > p,
+  body.cc-overlay-open:has(.v2-shell) .global-notice--actionable .global-notice__action {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 

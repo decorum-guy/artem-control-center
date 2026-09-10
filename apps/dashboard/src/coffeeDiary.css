@@ -10,10 +10,6 @@
 .coffee-diary-secondary-button:hover:not(:disabled), .coffee-diary-danger-button:hover:not(:disabled) { background: var(--surface-hover); }
 .coffee-diary-notice, .coffee-diary-state { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-secondary); background: var(--surface-secondary); }
 .coffee-diary-notice { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
-.coffee-diary-undo { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; margin: 0 0 16px; padding: 8px 10px 8px 14px; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-secondary); background: var(--surface-secondary); }
-.coffee-diary-undo > span { min-width: 0; overflow-wrap: anywhere; }
-.coffee-diary-undo-action { flex: 0 0 auto; min-height: 48px; border: 1px solid var(--border); border-radius: var(--radius-control); padding: 10px 16px; color: var(--text); background: var(--surface-inline); font-weight: 700; }
-.coffee-diary-undo-action:hover:not(:disabled) { background: var(--surface-hover); }
 .coffee-diary-empty { display: grid; justify-items: start; gap: 10px; max-width: 520px; padding: 36px; border: 1px solid var(--border); border-radius: var(--radius-section); background: var(--surface-primary); }
 .coffee-diary-empty__cup { font-size: 40px; line-height: 1; }
 .coffee-diary-empty h2, .coffee-diary-empty p { margin: 0; }
@@ -147,8 +143,6 @@
   .coffee-diary-detail__summary { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) {
-  .coffee-diary-undo { align-items: stretch; flex-direction: column; }
-  .coffee-diary-undo-action { width: 100%; }
   .coffee-diary-page__actions, .coffee-diary-detail__actions, .coffee-diary-sheet-actions { width: 100%; }
   .coffee-diary-page__actions > button, .coffee-diary-detail__actions > button, .coffee-diary-sheet-actions > button { flex: 1 1 100%; }
   .coffee-diary-detail { padding: 14px; }
