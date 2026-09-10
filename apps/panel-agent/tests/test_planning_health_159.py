@@ -389,7 +389,101 @@ def test_operational_health_remains_degraded_independently_of_provider(tmp_path)
     assert projection is not None and status is not None
     assert _status_operationally_degraded(status)
     assert projection.sourceStatus == "degraded"
-    assert any(issue.source == "planning-status" for issue in projection.health.issues)
+    issue = next(issue for issue in projection.health.issues if issue.source == "planning-status")
+    assert issue.errorCode == "planning.database_unavailable"
+    assert issue.affectsDataFreshness is True
+
+
+@pytest.mark.parametrize(
+    "incident_code",
+    [
+        "planning.backup_overdue",
+        "planning.backup_failed",
+        "planning.restore_verification_failed",
+        "planning.outbox_stuck",
+        "planning.delivery_terminal_failure",
+        "planning.scheduler_heartbeat_stale",
+    ],
+)
+def test_operational_incidents_are_visible_without_degrading_current_data(tmp_path, incident_code):
+    client = SelectiveRefreshClient()
+    client.provider_status = "current"
+    client.sources = provider_sources("current", None)
+    client.health_overrides = {
+        "incidents": [{"code": incident_code, "active": True, "aggregateCount": 1, "ageSeconds": 0}],
+    }
+    adapter = make_adapter(
+        tmp_path,
+        client,
+        [0.0],
+        panel_planning_task_mutations_enabled=True,
+        panel_planning_calendar_mutations_enabled=True,
+    )
+
+    async def exercise():
+        await adapter.start()
+        projection = adapter.projection
+        status_projection = adapter.read_status()
+        calendar_read = await adapter.read_events(
+            from_utc="2026-08-12T08:00:00Z",
+            to_utc="2026-08-12T10:00:00Z",
+            limit=20,
+            offset=0,
+        )
+        mutation_allowed = adapter.task_mutation_allowed("create")
+        await adapter.close()
+        return projection, status_projection, calendar_read, mutation_allowed
+
+    projection, status_projection, calendar_read, mutation_allowed = asyncio.run(exercise())
+    assert projection is not None
+    assert projection.sourceStatus == "current"
+    assert all(domain.status == "current" for domain in projection.health.domains)
+    assert status_projection.sourceStatus == "current"
+    assert calendar_read.sourceStatus == "current"
+    matching = [
+        issue for issue in projection.health.issues
+        if issue.source == "planning-status" and issue.errorCode == incident_code
+    ]
+    assert len(matching) == 1
+    assert matching[0].affectsDataFreshness is False
+    assert projection.calendarMutationsEnabled is False
+    assert mutation_allowed is False
+
+
+def test_database_integrity_failure_is_data_affecting_and_preserves_bounded_code(tmp_path):
+    client = SelectiveRefreshClient()
+    client.provider_status = "current"
+    client.sources = provider_sources("current", None)
+    client.health_overrides = {
+        "dbIntegrityStatus": "failed",
+        "incidents": [{
+            "code": "planning.database_integrity_failure",
+            "active": True,
+            "aggregateCount": 1,
+            "ageSeconds": 0,
+        }],
+    }
+    adapter = make_adapter(tmp_path, client, [0.0])
+
+    async def exercise():
+        await adapter.start()
+        projection = adapter.projection
+        calendar_read = await adapter.read_events(
+            from_utc="2026-08-12T08:00:00Z",
+            to_utc="2026-08-12T10:00:00Z",
+            limit=20,
+            offset=0,
+        )
+        await adapter.close()
+        return projection, calendar_read
+
+    projection, calendar_read = asyncio.run(exercise())
+    assert projection is not None
+    assert projection.sourceStatus == "degraded"
+    assert calendar_read.sourceStatus == "degraded"
+    issue = next(issue for issue in projection.health.issues if issue.source == "planning-status")
+    assert issue.errorCode == "planning.database_integrity_failure"
+    assert issue.affectsDataFreshness is True
 
 
 def test_current_provider_attempt_error_does_not_close_native_task_mutation_gate(tmp_path):
@@ -508,7 +602,13 @@ def test_recovery_confirms_status_before_slow_cadence_can_latch_degraded(tmp_pat
     async def exercise():
         client.status_degraded = True
         await adapter.start()
-        assert adapter.projection.sourceStatus == "degraded"
+        assert adapter.projection.sourceStatus == "current"
+        assert any(
+            issue.source == "planning-status"
+            and issue.errorCode == "planning.fixture_degraded"
+            and issue.affectsDataFreshness is False
+            for issue in adapter.projection.health.issues
+        )
         client.status_degraded = False
         client.failures = {"tasks"}
         monotonic[0] = 1

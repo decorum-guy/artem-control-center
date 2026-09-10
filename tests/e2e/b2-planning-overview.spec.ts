@@ -381,7 +381,17 @@ test.describe("B2 Planning Overview", () => {
           status: "degraded" as const,
           consecutiveFailures: 2,
           lastAttemptedAt: "2026-08-25T12:00:00Z",
-          lastSuccessfulAt: "2026-08-25T11:59:00Z"
+          lastSuccessfulAt: "2026-08-25T11:59:00Z",
+          errorCode: null,
+          affectsDataFreshness: true
+        }, {
+          source: "planning-status" as const,
+          status: "degraded" as const,
+          consecutiveFailures: 0,
+          lastAttemptedAt: "2026-08-25T12:00:00Z",
+          lastSuccessfulAt: "2026-08-25T11:59:00Z",
+          errorCode: "planning.backup_overdue",
+          affectsDataFreshness: false
         }],
         domains: []
       }
@@ -392,6 +402,7 @@ test.describe("B2 Planning Overview", () => {
     const details = page.getByTestId("planning-overview-health-details");
     await expect(details).toContainText("Задачи");
     await expect(details).toContainText("Не удалось обновить данные");
+    await expect(details).not.toContainText("Планирование");
     await expect(details).not.toContainText("конкретный источник определить не удалось");
   });
 

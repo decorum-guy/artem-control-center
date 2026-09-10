@@ -406,12 +406,94 @@ def test_planning_owner_problem_deduplication_and_internal_label_policy():
     planning.health.issues = [
         PlanningHealthIssue(source="calendar", status="stale", consecutiveFailures=1),
         PlanningHealthIssue(source="tasks", status="degraded", consecutiveFailures=1),
-        PlanningHealthIssue(source="planning-status", status="degraded", consecutiveFailures=1),
+        PlanningHealthIssue(
+            source="planning-status",
+            status="degraded",
+            consecutiveFailures=1,
+            errorCode="planning.backup_overdue",
+            affectsDataFreshness=False,
+        ),
     ]
     report = DiagnosticsCollector(IntegrationSettings()).report(make_snapshot(healthy_services(), planning=planning))
-    assert [problem.id for problem in report.problems] == ["planning:calendar", "planning:tasks"]
-    assert {problem.subsystem for problem in report.problems} == {"Календарь", "Задачи"}
+    assert [problem.id for problem in report.problems] == [
+        "planning:calendar",
+        "planning:tasks",
+        "planning:planning-status:planning.backup_overdue",
+    ]
+    assert {problem.subsystem for problem in report.problems} == {"Календарь", "Задачи", "Дела"}
+    operational = report.problems[2]
+    assert operational.technicalEvidence is not None
+    assert operational.technicalEvidence.errorCode == "planning.backup_overdue"
+    assert operational.technicalEvidence.source == "planning-status"
 
     planning.health.issues = [PlanningHealthIssue(source="projects", status="degraded", consecutiveFailures=1)]
     report = DiagnosticsCollector(IntegrationSettings()).report(make_snapshot(healthy_services(), planning=planning))
     assert [problem.subsystem for problem in report.problems] == ["Задачи", "Календарь"]
+
+
+def test_planning_diagnostics_retains_multiple_operational_incident_identities():
+    planning = empty_planning_projection(
+        generated_at="2026-08-25T12:00:00Z",
+        source_status="current",
+    )
+    planning.health.issues = [
+        PlanningHealthIssue(
+            source="planning-status",
+            status="degraded",
+            consecutiveFailures=0,
+            errorCode="planning.backup_overdue",
+            affectsDataFreshness=False,
+        ),
+        PlanningHealthIssue(
+            source="planning-status",
+            status="degraded",
+            consecutiveFailures=0,
+            errorCode="planning.outbox_stuck",
+            affectsDataFreshness=False,
+        ),
+    ]
+    report = DiagnosticsCollector(IntegrationSettings()).report(
+        make_snapshot(healthy_services(), planning=planning)
+    )
+
+    assert [problem.id for problem in report.problems] == [
+        "planning:planning-status:planning.backup_overdue",
+        "planning:planning-status:planning.outbox_stuck",
+    ]
+    assert [problem.technicalEvidence.errorCode for problem in report.problems if problem.technicalEvidence] == [
+        "planning.backup_overdue",
+        "planning.outbox_stuck",
+    ]
+
+
+def test_planning_diagnostics_keeps_data_and_operational_causes_separate():
+    planning = empty_planning_projection(
+        generated_at="2026-08-25T12:00:00Z",
+        source_status="degraded",
+    )
+    planning.health.issues = [
+        PlanningHealthIssue(
+            source="tasks",
+            status="degraded",
+            consecutiveFailures=2,
+            errorCode=None,
+            affectsDataFreshness=True,
+        ),
+        PlanningHealthIssue(
+            source="planning-status",
+            status="degraded",
+            consecutiveFailures=0,
+            errorCode="planning.delivery_terminal_failure",
+            affectsDataFreshness=False,
+        ),
+    ]
+    report = DiagnosticsCollector(IntegrationSettings()).report(
+        make_snapshot(healthy_services(), planning=planning)
+    )
+
+    assert report.planning.sourceStatus == "degraded"
+    assert {problem.id for problem in report.problems} == {
+        "planning:tasks",
+        "planning:planning-status:planning.delivery_terminal_failure",
+    }
+    assert report.problems[1].technicalEvidence.errorCode == "planning.delivery_terminal_failure"

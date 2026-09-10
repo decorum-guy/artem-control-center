@@ -215,6 +215,28 @@ def test_health_contract_rejects_raw_provider_error_text(provider_error_code):
         _validate_envelope(StatusEnvelope, payload)
 
 
+@pytest.mark.parametrize(
+    "incident_code",
+    [
+        "https://calendar.example.invalid/private",
+        "PLANNING_SECRET_159A3",
+        "RAW_EXCEPTION_159A3",
+    ],
+)
+def test_health_contract_rejects_unsafe_planning_incident_code(incident_code):
+    payload = _payload("/internal/planning/v1/status")
+    health = payload["planningHealth"]
+    assert isinstance(health, dict)
+    health["incidents"] = [{
+        "code": incident_code,
+        "active": True,
+        "aggregateCount": 1,
+        "ageSeconds": 0,
+    }]
+    with pytest.raises(PlanningUpstreamError, match="contract_mismatch"):
+        _validate_envelope(StatusEnvelope, payload)
+
+
 def test_health_contract_remains_strict_for_unknown_fields():
     payload = _payload("/internal/planning/v1/status")
     health = payload["planningHealth"]

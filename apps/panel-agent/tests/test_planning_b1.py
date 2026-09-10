@@ -245,7 +245,7 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
     assert "synthetic-panel-agent-secret" not in projection.model_dump_json()
 
 
-def test_upstream_degraded_status_does_not_become_current(tmp_path):
+def test_upstream_operational_degraded_status_keeps_current_data_current(tmp_path):
     adapter = PlanningAdapter(
         settings(tmp_path),
         transport=RecordingFixtureTransport("degraded"),
@@ -260,8 +260,12 @@ def test_upstream_degraded_status_does_not_become_current(tmp_path):
 
     projection = asyncio.run(exercise())
     assert projection is not None
-    assert projection.sourceStatus == "degraded"
+    assert projection.sourceStatus == "current"
     assert projection.tasks.today
+    assert any(
+        issue.source == "planning-status" and issue.affectsDataFreshness is False
+        for issue in projection.health.issues
+    )
 
 
 @pytest.mark.parametrize("scenario", ["malformed", "incompatible", "oversized"])
@@ -453,6 +457,20 @@ def test_last_good_cache_survives_restart_without_current_label(tmp_path):
         await first.start()
         await first.close()
         assert cache_path.exists()
+
+        legacy_snapshot = json.loads(cache_path.read_text(encoding="utf-8"))
+        legacy_snapshot["projection"]["health"]["issues"] = [{
+            "source": "planning-status",
+            "status": "degraded",
+            "consecutiveFailures": 0,
+            "lastAttemptedAt": None,
+            "lastSuccessfulAt": None,
+        }]
+        cache_path.write_text(json.dumps(legacy_snapshot), encoding="utf-8")
+        legacy_projection = PlanningProjectionCache(cache_path).load()
+        assert legacy_projection is not None
+        assert legacy_projection.health.issues[0].errorCode is None
+        assert legacy_projection.health.issues[0].affectsDataFreshness is True
 
         second_transport = RecordingFixtureTransport("offline")
         second = PlanningAdapter(

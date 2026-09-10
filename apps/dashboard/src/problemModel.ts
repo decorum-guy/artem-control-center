@@ -2,6 +2,7 @@ import type {
   DashboardSnapshot,
   DiagnosticsProblem,
   DiagnosticsProblemState,
+  DiagnosticsTechnicalEvidence,
   PlanningHealthIssue,
   ServiceSnapshot
 } from "@artem/contracts";
@@ -34,6 +35,7 @@ const rogIncidentErrorCodes = new Set([
   "ssh_client_unavailable", "ssh_identity_file_missing", "ssh_invalid_response", "ssh_known_hosts_file_missing",
   "ssh_output_too_large", "ssh_timeout", "ssh_transport_failed", "sleep_timeout", "wake_timeout", "wol_send_failed", "action_failed"
 ]);
+const safePlanningIssueCodePattern = /^[a-z][a-z0-9_.-]{0,127}$/;
 
 function diagnosticsStateForPlanningIssue(
   status: PlanningHealthIssue["status"]
@@ -82,6 +84,48 @@ function problem(
   };
 }
 
+function safePlanningIssueCode(value: unknown): string | null {
+  return typeof value === "string" && safePlanningIssueCodePattern.test(value) ? value : null;
+}
+
+function planningProblemId(issue: PlanningHealthIssue, ownerSource: string): string {
+  const prefix = "planning:planning-status:";
+  const code = safePlanningIssueCode(issue.errorCode);
+  if (issue.source !== "planning-status" || code === null) return `planning:${ownerSource}`;
+  if (code.length <= 120 - prefix.length) return `${prefix}${code}`;
+  let hash = 0x811c9dc5;
+  for (const character of code) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${prefix}hash-${hash.toString(16).padStart(8, "0")}`;
+}
+
+function planningIssueEvidence(
+  issue: PlanningHealthIssue,
+  planning: NonNullable<DashboardSnapshot["planning"]>,
+  observedAt: string,
+  ownerSource: string
+): DiagnosticsTechnicalEvidence {
+  return {
+    kind: "planning-domain",
+    source: issue.source,
+    domain: ownerSource === "reminders" || ownerSource === "tasks" || ownerSource === "calendar" ? ownerSource : null,
+    provider: null,
+    providerId: null,
+    status: issue.status,
+    errorCode: safePlanningIssueCode(issue.errorCode),
+    consecutiveFailures: Math.max(0, Math.min(1000, issue.consecutiveFailures)),
+    lastAttemptedAt: issue.lastAttemptedAt,
+    lastSuccessfulAt: issue.lastSuccessfulAt,
+    observedAt,
+    cacheUsed: planning.sourceStatus === "stale" || planning.sourceStatus === "offline",
+    fallbackUsed: null,
+    resultStatus: null,
+    projectionStatus: null
+  };
+}
+
 export function currentProblemsForSnapshot(
   snapshot: Pick<DashboardSnapshot, "services" | "planning" | "generatedAt">
 ): DiagnosticsProblem[] {
@@ -107,8 +151,8 @@ export function currentProblemsForSnapshot(
   const planning = snapshot.planning;
   const planningIssues = planning?.health?.issues ?? [];
   const ownerPlanningIssues = planningIssues.filter((issue) => diagnosticsStateForPlanningIssue(issue.status) !== null);
-  const hasAttributablePlanningIssue = ownerPlanningIssues.some((issue) => issue.source !== "planning-status");
-  if (planning && planning.sourceStatus !== "current" && ownerPlanningIssues.length === 0) {
+  const hasDataPlanningIssue = ownerPlanningIssues.some((issue) => issue.affectsDataFreshness !== false);
+  if (planning && planning.sourceStatus !== "current" && !hasDataPlanningIssue) {
     add(problem(
       "planning:source",
       "Дела",
@@ -120,15 +164,23 @@ export function currentProblemsForSnapshot(
   for (const issue of planningIssues) {
     const state = diagnosticsStateForPlanningIssue(issue.status);
     if (state === null) continue;
-    if (issue.source === "planning-status" && hasAttributablePlanningIssue) continue;
     const subsystem = planningIssueLabels[issue.source];
+    const ownerSource = issue.source === "projects" ? "tasks" : issue.source;
     add(problem(
-      `planning:${issue.source === "projects" ? "tasks" : issue.source}`,
+      planningProblemId(issue, ownerSource),
       subsystem,
       state,
       snapshot.generatedAt,
       issue.lastSuccessfulAt
     ));
+    const id = planningProblemId(issue, ownerSource);
+    const current = problems.get(id);
+    if (current) {
+      problems.set(id, {
+        ...current,
+        technicalEvidence: planningIssueEvidence(issue, planning!, snapshot.generatedAt, ownerSource)
+      });
+    }
   }
   const hasCalendarIssue = planningIssues.some((issue) => issue.source === "calendar" && diagnosticsStateForPlanningIssue(issue.status) !== null);
   for (const provider of planning?.providerStatuses ?? []) {

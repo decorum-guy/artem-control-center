@@ -480,6 +480,9 @@ export interface PlanningHealthIssue {
   consecutiveFailures: number;
   lastAttemptedAt: string | null;
   lastSuccessfulAt: string | null;
+  errorCode: string | null;
+  /** False means an owner/system incident that does not describe data freshness. */
+  affectsDataFreshness: boolean;
 }
 
 export interface PlanningDomainHealth {

@@ -767,6 +767,7 @@ def _project_items(scenario: str) -> list[dict[str, Any]]:
 
 def _status(scenario: str) -> dict[str, Any]:
     degraded = scenario in {"degraded", "overview-degraded"}
+    data_degraded = scenario == "overview-degraded"
     return {
         "schemaVersion": "planning.v1",
         "kind": "status",
@@ -778,7 +779,7 @@ def _status(scenario: str) -> dict[str, Any]:
             "projects": ["read"],
             "status": ["read"],
         },
-        "storageStatus": "available",
+        "storageStatus": "unavailable" if data_degraded else "available",
         "sourceStatus": "current",
         "lastSyncedAt": FIXTURE_TIMESTAMP,
         "staleAfter": FIXTURE_STALE_AFTER,
