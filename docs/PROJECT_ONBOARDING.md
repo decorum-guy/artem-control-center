@@ -10,17 +10,40 @@ Implemented in this slice:
 - automatic materialization of enabled services through the existing
   `core.generic-service` fallback.
 
-The parity-only AVALAR capability bridge is documented in
+The completed AVALAR production cutover is documented in
 [`docs/AVALAR_PROJECT_CAPABILITY_BRIDGE.md`](AVALAR_PROJECT_CAPABILITY_BRIDGE.md).
-It adds registered AVALAR monitor/details/actions without changing the
-monitor-only Settings editor or enabling production cutover.
 
-Still pending:
+## AVALAR production cutover
+
+The implemented production state is:
+
+- Project Registry is the canonical source of AVALAR identity,
+  environment/service membership, and exposed capabilities;
+- production startup atomically ensures the server-owned `avalar` project and
+  installs it into the runtime before polling begins;
+- the `main` and `stage` `website` services use the canonical identities
+  `avalar.main.website` and `avalar.stage.website`;
+- monitor, sanitized SSH details, and the registered fixed AVALAR actions are
+  served through the existing specialized adapters and executor;
+- the legacy HTTP integration no longer materializes AVALAR, while AliceTG
+  remains on that integration;
+- the reserved canonical project cannot be created, replaced, or deleted via
+  generic production registry CRUD, and its extended Settings entry is
+  read-only in the current editor;
+- action controls are driven by explicit declared descriptors, and successful
+  actions refresh the registry-backed AVALAR snapshots;
+- raw endpoint URLs, SSH configuration, credentials, secrets, and command
+  paths remain outside the registry/browser response surface.
+
+Backup execution is still pending under #8.
+
+Still pending for generalized onboarding (apart from the registered AVALAR
+capabilities above):
 
 - YAML import/export UI;
 - secret store;
 - additional adapters and capabilities beyond the registered AVALAR bridge;
-- deploy, actions, backups, restore and related write operations.
+- generalized deploy, actions, backups, restore and related write operations.
 
 ## Slice C implementation status
 
@@ -54,15 +77,16 @@ Still pending:
 - capability-level controls;
 - schema migrations and the remaining generalized onboarding flow.
 
-## PR A AVALAR capability bridge
+## AVALAR capability implementation
 
-An explicitly present `avalar` Project Registry declaration may contain `main`
-and `stage` environments, registered `avalar` health monitoring,
-`avalar-ssh` details, and fixed source-owned AVALAR action IDs. The server
-validates each action against its target environment and materializes ordinary
-service snapshots. The existing HTTP/SSH adapters and AVALAR executor remain
-the production path until a later migration slice performs the explicit legacy
-identity/layout mapping.
+The canonical production declaration contains `main` and `stage` environments,
+registered `avalar` health monitoring, `avalar-ssh` details, and fixed
+source-owned AVALAR action IDs. The server validates each action against its
+target environment and materializes ordinary service snapshots through the
+Project Registry monitor. The existing specialized HTTP health reader, SSH
+details adapter, and AVALAR executor remain the implementation behind those
+registered capabilities; they are no longer a parallel AVALAR service
+materialization path.
 
 ## Slice B backend control plane
 
