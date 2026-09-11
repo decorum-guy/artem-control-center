@@ -382,7 +382,8 @@ test.describe("Control Center runtime update UX", () => {
     await expect(dialog).toContainText(/Запускаем обновление|Обновление выполняется/);
   });
 
-  test("active progress view exposes only fixed activity and bounded approximate progress", async ({ page }) => {
+  test("active progress view exposes fixed activity and keeps touch-safe actions separated", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
     const api = await installRuntimeFixtures(page, "full");
     const zone = await openSystem(page);
     api.queueStatuses({
@@ -404,12 +405,76 @@ test.describe("Control Center runtime update UX", () => {
     await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
 
     const progress = dialog.getByTestId("runtime-update-progress");
+    const actions = dialog.locator(".action-confirmation__actions");
     await expect(progress).toBeVisible();
+    await expect(actions).toBeVisible();
     await expect(progress.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "66");
     await expect(progress).toContainText("Собираем панель");
     await expect(progress).toContainText("Проверяем обновление");
     await expect(progress).not.toContainText("SECRET");
     await expect(progress).not.toContainText("C:/private/repo");
+
+    const progressBox = await progress.boundingBox();
+    const actionsBox = await actions.boundingBox();
+    const dialogBox = await dialog.boundingBox();
+    if (!progressBox || !actionsBox || !dialogBox) throw new Error("Expected active update geometry to be measurable");
+
+    const actionMarginTop = await actions.evaluate((element) => Number.parseFloat(getComputedStyle(element).marginTop));
+    expect(actionMarginTop).toBe(16);
+    const gap = actionsBox.y - (progressBox.y + progressBox.height);
+    expect(gap).toBeGreaterThan(0);
+    expect(gap).toBeGreaterThanOrEqual(actionMarginTop - 1);
+
+    for (const button of await actions.getByRole("button").all()) {
+      await expect(button).toBeVisible();
+      const buttonBox = await button.boundingBox();
+      expect(buttonBox?.height ?? 0).toBeGreaterThanOrEqual(48);
+    }
+
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("Expected canonical viewport");
+    expect(dialogBox.x).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.y).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.x + dialogBox.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height + 1);
+
+    const activityStyle = await progress.getByTestId("runtime-update-activity").evaluate((element) => ({
+      maxHeight: Number.parseFloat(getComputedStyle(element).maxHeight),
+      overflowY: getComputedStyle(element).overflowY
+    }));
+    expect(activityStyle.maxHeight).toBeGreaterThan(0);
+    expect(activityStyle.overflowY).toBe("auto");
+
+    const canonicalOverflow = await page.evaluate(() => ({
+      document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      body: document.body.scrollWidth - document.body.clientWidth
+    }));
+    expect(canonicalOverflow.document).toBeLessThanOrEqual(1);
+    expect(canonicalOverflow.body).toBeLessThanOrEqual(1);
+
+    await page.setViewportSize({ width: 390, height: 720 });
+    await expect(progress).toBeVisible();
+    await expect(actions).toBeVisible();
+    const narrowProgressBox = await progress.boundingBox();
+    const narrowActionsBox = await actions.boundingBox();
+    const narrowDialogBox = await dialog.boundingBox();
+    if (!narrowProgressBox || !narrowActionsBox || !narrowDialogBox) throw new Error("Expected narrow update geometry to be measurable");
+    expect(narrowActionsBox.y - (narrowProgressBox.y + narrowProgressBox.height)).toBeGreaterThan(0);
+    expect(narrowDialogBox.x).toBeGreaterThanOrEqual(0);
+    expect(narrowDialogBox.y).toBeGreaterThanOrEqual(0);
+    expect(narrowDialogBox.x + narrowDialogBox.width).toBeLessThanOrEqual(390 + 1);
+    expect(narrowDialogBox.y + narrowDialogBox.height).toBeLessThanOrEqual(720 + 1);
+    for (const button of await actions.getByRole("button").all()) {
+      const buttonBox = await button.boundingBox();
+      expect(buttonBox?.height ?? 0).toBeGreaterThanOrEqual(48);
+    }
+
+    const narrowOverflow = await page.evaluate(() => ({
+      document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      body: document.body.scrollWidth - document.body.clientWidth
+    }));
+    expect(narrowOverflow.document).toBeLessThanOrEqual(1);
+    expect(narrowOverflow.body).toBeLessThanOrEqual(1);
   });
 
   test("eligible stale recovery is touch-safe, clears stale activity, and starts a fresh check", async ({ page }) => {
