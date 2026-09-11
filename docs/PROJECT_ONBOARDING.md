@@ -10,11 +10,16 @@ Implemented in this slice:
 - automatic materialization of enabled services through the existing
   `core.generic-service` fallback.
 
+The parity-only AVALAR capability bridge is documented in
+[`docs/AVALAR_PROJECT_CAPABILITY_BRIDGE.md`](AVALAR_PROJECT_CAPABILITY_BRIDGE.md).
+It adds registered AVALAR monitor/details/actions without changing the
+monitor-only Settings editor or enabling production cutover.
+
 Still pending:
 
 - YAML import/export UI;
 - secret store;
-- additional adapters and capabilities;
+- additional adapters and capabilities beyond the registered AVALAR bridge;
 - deploy, actions, backups, restore and related write operations.
 
 ## Slice C implementation status
@@ -48,6 +53,16 @@ Still pending:
 - additional adapters/capabilities;
 - capability-level controls;
 - schema migrations and the remaining generalized onboarding flow.
+
+## PR A AVALAR capability bridge
+
+An explicitly present `avalar` Project Registry declaration may contain `main`
+and `stage` environments, registered `avalar` health monitoring,
+`avalar-ssh` details, and fixed source-owned AVALAR action IDs. The server
+validates each action against its target environment and materializes ordinary
+service snapshots. The existing HTTP/SSH adapters and AVALAR executor remain
+the production path until a later migration slice performs the explicit legacy
+identity/layout mapping.
 
 ## Slice B backend control plane
 

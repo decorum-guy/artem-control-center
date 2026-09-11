@@ -1,9 +1,10 @@
-"""Bounded HTTP health monitoring for the Slice A project registry."""
+"""Bounded monitoring for the closed project capability registry."""
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from time import monotonic
@@ -12,8 +13,11 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .contracts import ServicePresentation, ServiceSnapshot
+from .avalar_actions import avalar_action_descriptor
+from .avalar_health import probe_avalar_health
+from .contracts import ActionDescriptor, ServicePresentation, ServiceSnapshot
 from .project_registry import (
+    ProjectDetailsConfig,
     ProjectMonitorConfig,
     ProjectRegistry,
     stable_service_snapshot_id,
@@ -23,6 +27,12 @@ from .settings import IntegrationSettings
 
 MAX_DECLARATIVE_REQUEST_TIMEOUT_SECONDS = 30.0
 MAX_DECLARATIVE_LATENCY_MS = int(MAX_DECLARATIVE_REQUEST_TIMEOUT_SECONDS * 1000)
+
+_SAFE_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_SAFE_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
+_SAFE_TIMESTAMP_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 DeclarativeHttpProbeCode = Literal[
     "reachable",
@@ -42,6 +52,9 @@ class DeclarativeHttpProbeResult:
     latency_ms: int | None = None
 
 
+ActionAvailabilityProvider = Callable[[str], bool]
+
+
 @dataclass(frozen=True)
 class _MonitorTarget:
     project_id: str
@@ -49,6 +62,9 @@ class _MonitorTarget:
     environment_id: str
     service_id: str
     monitor: ProjectMonitorConfig
+    details: ProjectDetailsConfig | None
+    action_ids: tuple[str, ...]
+    category: Literal["external", "work"]
     snapshot_id: str
     title: str
 
@@ -67,6 +83,22 @@ async def probe_declarative_http_monitor(
             "endpoint_not_configured"
             if resolution == "endpoint_not_configured"
             else "endpoint_invalid"
+        )
+
+    if monitor.adapter == "avalar":
+        probe = await probe_avalar_health(
+            endpoint,
+            settings.http_request_timeout_seconds,
+            transport=transport,
+        )
+        if probe.outcome == "unavailable":
+            return DeclarativeHttpProbeResult("unreachable")
+        # The connection-test contract reports reachability.  The full
+        # healthy/degraded mapping is materialized by DeclarativeProjectMonitor.
+        return DeclarativeHttpProbeResult(
+            "reachable",
+            http_status=200,
+            latency_ms=probe.latency_ms,
         )
 
     started = monotonic()
@@ -116,12 +148,16 @@ class DeclarativeProjectMonitor:
         transport: Optional[httpx.AsyncBaseTransport] = None,
         clock: Callable[[], float] = monotonic,
         on_change: Callable[[], Awaitable[None]] | None = None,
+        details_provider: object | None = None,
+        action_availability_provider: ActionAvailabilityProvider | None = None,
     ) -> None:
         self._registry = registry
         self._settings = settings
         self._transport = transport
         self._clock = clock
         self._on_change = on_change
+        self._details_provider = details_provider
+        self._action_availability_provider = action_availability_provider
         self._targets = self._build_targets(registry)
         self._services: Dict[str, ServiceSnapshot] = {
             target.snapshot_id: self._unavailable(target, "Health endpoint not configured")
@@ -148,6 +184,15 @@ class DeclarativeProjectMonitor:
         callback: Callable[[], Awaitable[None]] | None,
     ) -> None:
         self._on_change = callback
+
+    def set_details_provider(self, provider: object | None) -> None:
+        self._details_provider = provider
+
+    def set_action_availability_provider(
+        self,
+        provider: ActionAvailabilityProvider | None,
+    ) -> None:
+        self._action_availability_provider = provider
 
     async def start(self) -> None:
         if self.running or not self._targets:
@@ -284,6 +329,9 @@ class DeclarativeProjectMonitor:
         self,
         target: _MonitorTarget,
     ) -> tuple[ServiceSnapshot, bool, bool]:
+        if target.monitor.adapter == "avalar":
+            return await self._read_avalar_target(target)
+
         probe = await probe_declarative_http_monitor(
             target.monitor,
             self._settings,
@@ -305,6 +353,37 @@ class DeclarativeProjectMonitor:
             )
         return self._failed(target), False, True
 
+    async def _read_avalar_target(
+        self,
+        target: _MonitorTarget,
+    ) -> tuple[ServiceSnapshot, bool, bool]:
+        _, endpoint = _resolve_endpoint(target.monitor.url_env)
+        if endpoint is None:
+            return (
+                self._unavailable(target, "Health endpoint not configured"),
+                False,
+                False,
+            )
+
+        probe = await probe_avalar_health(
+            endpoint,
+            self._settings.http_request_timeout_seconds,
+            transport=self._transport,
+            clock=self._clock,
+        )
+        if probe.outcome == "unavailable":
+            return self._failed(target), False, True
+        return (
+            self._avalar_snapshot(
+                target,
+                health=probe.health or "degraded",
+                summary=probe.summary,
+                latency_ms=probe.latency_ms or 0,
+            ),
+            True,
+            True,
+        )
+
     def _with_last_known(
         self,
         target: _MonitorTarget,
@@ -313,6 +392,7 @@ class DeclarativeProjectMonitor:
         allow_last_known: bool,
     ) -> ServiceSnapshot:
         if current.source == "live":
+            current = self._refresh_action_descriptors(target, current)
             now = self._clock()
             self._last_success[target.snapshot_id] = (
                 current.model_copy(deep=True),
@@ -322,11 +402,11 @@ class DeclarativeProjectMonitor:
             return current
 
         if not allow_last_known:
-            return current
+            return self._refresh_action_descriptors(target, current)
 
         previous = self._last_success.get(target.snapshot_id)
         if previous is None:
-            return current
+            return self._refresh_action_descriptors(target, current)
 
         snapshot, successful_at, observed_at = previous
         age = max(0.0, self._clock() - successful_at)
@@ -349,6 +429,7 @@ class DeclarativeProjectMonitor:
             cached.health = "offline"
             cached.summary = "Health monitor unavailable"
         cached.data["lastSuccessfulObservedAt"] = observed_at
+        cached = self._refresh_action_descriptors(target, cached)
         if cached.presentation:
             cached.presentation.freshnessLabel = _age_label(age)
             cached.presentation.latencyMs = None
@@ -373,6 +454,9 @@ class DeclarativeProjectMonitor:
                             environment_id=environment.id,
                             service_id=service.id,
                             monitor=service.capabilities.monitor,
+                            details=service.capabilities.details,
+                            action_ids=tuple(service.capabilities.actions),
+                            category=project.category,
                             snapshot_id=snapshot_id,
                             title=title[:100],
                         )
@@ -382,7 +466,7 @@ class DeclarativeProjectMonitor:
     @staticmethod
     def _presentation(target: _MonitorTarget) -> ServicePresentation:
         return ServicePresentation(
-            category="external",
+            category=target.category,
             group="External services",
             overview="aggregate",
             priority=0,
@@ -413,10 +497,77 @@ class DeclarativeProjectMonitor:
             ),
         )
 
+    def _avalar_snapshot(
+        self,
+        target: _MonitorTarget,
+        *,
+        health: Literal["healthy", "degraded", "offline"],
+        summary: str,
+        latency_ms: int | None = None,
+        source: Literal["live", "unavailable"] = "live",
+        details: dict[str, object] | None = None,
+    ) -> ServiceSnapshot:
+        target_details = (
+            self._safe_avalar_details(details)
+            if details is not None
+            else self._details_for_target(target)
+        )
+        details_source = str(
+            target_details.get(
+                "details_source",
+                "unavailable" if target.details is not None else "disabled",
+            )
+        )
+        details_available = details_source in {"live", "stale"}
+        data: dict[str, object] = self._metadata(target)
+        data.update(
+            {
+                "environment": target.environment_id,
+                "version": target_details.get("version"),
+                "commit": target_details.get("commit"),
+                "branch": target_details.get("branch"),
+                "deploymentRevision": target_details.get("deployment_revision"),
+                "deployedAt": target_details.get("deployed_at"),
+                "workingTree": target_details.get("working_tree"),
+                "detailsAvailable": details_available,
+                "detailsSource": details_source,
+                "detailsObservedAt": target_details.get("details_observed_at"),
+                "executor": "avalar-fixed" if target.action_ids else "disabled",
+            }
+        )
+        return ServiceSnapshot(
+            id=target.snapshot_id,
+            title=target.title,
+            enabled=True,
+            dataContract="service.health.v1",
+            health=health,
+            summary=summary,
+            actions=self._avalar_action_descriptors(target),
+            source=source,
+            presentation=ServicePresentation(
+                category="work",
+                group="AVALAR",
+                overview="aggregate",
+                priority=90 if target.environment_id in {"main", "production"} else 80,
+                environment=target.environment_id,
+                freshnessLabel="только что" if source == "live" else None,
+                latencyMs=latency_ms,
+            ),
+            data=data,
+        )
+
     def _failed(self, target: _MonitorTarget) -> ServiceSnapshot:
         return self._unavailable(target, "Health endpoint unavailable")
 
     def _unavailable(self, target: _MonitorTarget, summary: str) -> ServiceSnapshot:
+        if target.monitor.adapter == "avalar":
+            return self._avalar_snapshot(
+                target,
+                health="offline",
+                summary=summary,
+                source="unavailable",
+                details={},
+            )
         return ServiceSnapshot(
             id=target.snapshot_id,
             title=target.title,
@@ -429,6 +580,76 @@ class DeclarativeProjectMonitor:
             data=self._metadata(target),
             presentation=self._presentation(target),
         )
+
+    def _details_for_target(self, target: _MonitorTarget) -> dict[str, object]:
+        if target.details is None or self._details_provider is None:
+            return {}
+        resolver = getattr(self._details_provider, "details_for_url_env", None)
+        if not callable(resolver):
+            return {}
+        try:
+            details = resolver(target.monitor.url_env)
+        except Exception:
+            return {}
+        return self._safe_avalar_details(details)
+
+    @staticmethod
+    def _safe_avalar_details(details: object) -> dict[str, object]:
+        if not isinstance(details, dict):
+            return {}
+        clean: dict[str, object] = {}
+        version = details.get("version")
+        if isinstance(version, str) and _SAFE_VERSION_PATTERN.fullmatch(version):
+            clean["version"] = version
+        for key in ("commit", "deployment_revision"):
+            value = details.get(key)
+            if isinstance(value, str) and _SAFE_COMMIT_PATTERN.fullmatch(value):
+                clean[key] = value
+        branch = details.get("branch")
+        if branch in {"main", "stage", "detached"}:
+            clean["branch"] = branch
+        working_tree = details.get("working_tree")
+        if working_tree in {"clean", "dirty"}:
+            clean["working_tree"] = working_tree
+        for key in ("deployed_at", "details_observed_at"):
+            value = details.get(key)
+            if isinstance(value, str) and _SAFE_TIMESTAMP_PATTERN.fullmatch(value):
+                clean[key] = value
+        source = details.get("details_source")
+        if source in {"live", "stale", "unavailable", "disabled"}:
+            clean["details_source"] = source
+        return clean
+
+    def _avalar_action_descriptors(
+        self,
+        target: _MonitorTarget,
+    ) -> list[ActionDescriptor]:
+        return [
+            avalar_action_descriptor(
+                action_id,
+                enabled=self._action_is_available(action_id),
+            )
+            for action_id in target.action_ids
+        ]
+
+    def _action_is_available(self, action_id: str) -> bool:
+        if self._action_availability_provider is None:
+            return False
+        try:
+            return bool(self._action_availability_provider(action_id))
+        except Exception:
+            return False
+
+    def _refresh_action_descriptors(
+        self,
+        target: _MonitorTarget,
+        snapshot: ServiceSnapshot,
+    ) -> ServiceSnapshot:
+        if target.monitor.adapter != "avalar":
+            return snapshot
+        refreshed = snapshot.model_copy(deep=True)
+        refreshed.actions = self._avalar_action_descriptors(target)
+        return refreshed
 
 
 def _resolve_endpoint(

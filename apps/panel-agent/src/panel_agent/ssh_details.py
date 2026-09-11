@@ -6,11 +6,16 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from .avalar_health import (
+    avalar_target_for_url_env,
+    legacy_avalar_service_id,
+)
 from .settings import IntegrationSettings
 
 _HOST_PATTERN = re.compile(r"^[A-Za-z0-9._@-]+$")
 _SCRIPT_PATTERN = re.compile(r"^[A-Za-z0-9._/~+-]+$")
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
 _BRANCH_PATTERN = re.compile(r"^(main|stage|detached)$")
 _TIMESTAMP_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
@@ -22,6 +27,7 @@ _OPERATIONS = {
 _ALLOWED_FIELDS = {
     "ok",
     "environment",
+    "version",
     "commit",
     "branch",
     "deployment_revision",
@@ -95,6 +101,14 @@ class AvalarSshDetailsAdapter:
 
     def details_for(self, service_id: str) -> Dict[str, Any]:
         return dict(self._details.get(service_id, {}))
+
+    def details_for_url_env(self, url_env: str) -> Dict[str, Any]:
+        """Resolve a registered project target to the existing SSH cache."""
+
+        target = avalar_target_for_url_env(url_env)
+        if target is None:
+            return {}
+        return self.details_for(legacy_avalar_service_id(target))
 
     async def _poll(self) -> None:
         while True:
@@ -188,6 +202,9 @@ def _sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise SshDetailsError("SSH details payload has invalid working tree")
     if not _COMMIT_PATTERN.fullmatch(str(payload.get("commit", ""))):
         raise SshDetailsError("SSH details payload has invalid commit")
+    version = payload.get("version")
+    if version is not None and not _VERSION_PATTERN.fullmatch(str(version)):
+        raise SshDetailsError("SSH details payload has invalid version")
     if not _BRANCH_PATTERN.fullmatch(str(payload.get("branch", ""))):
         raise SshDetailsError("SSH details payload has invalid branch")
     revision = payload.get("deployment_revision")

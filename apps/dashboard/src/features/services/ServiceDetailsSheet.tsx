@@ -1,7 +1,6 @@
 import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "../../AccessControls";
-import { avalarActionTitles } from "../../avalarApi";
-import { useAvalarActions } from "../../AvalarActions";
+import { titleForServiceAction, useAvalarActions } from "../../AvalarActions";
 import { Icon } from "../../icons";
 import { Sheet } from "../../Sheet";
 import { StatusText } from "../../ShellPrimitives";
@@ -64,7 +63,7 @@ export function ServiceDetailsSheet({
                   title={decision ? explainAvailability(decision.availability) : "Исполнитель недоступен"}
                   onClick={() => void avalar.run(service, actionId)}
                 >
-                  {avalarActionTitles[actionId]}
+                  {titleForServiceAction(service, actionId)}
                 </button>
               );
             })}

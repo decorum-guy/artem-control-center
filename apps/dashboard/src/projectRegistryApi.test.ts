@@ -78,6 +78,58 @@ describe("project registry API", () => {
     })).toThrow("invalid_url_env");
   });
 
+  it("accepts the closed AVALAR capability bridge without exposing resolved endpoints", () => {
+    const avalar = {
+      id: "avalar",
+      name: "AVALAR",
+      enabled: true,
+      category: "work" as const,
+      environments: [
+        {
+          id: "main",
+          services: [{
+            id: "website",
+            monitor: { adapter: "avalar" as const, urlEnv: "PANEL_AVALAR_MAIN_URL", intervalSeconds: 60, staleAfterSeconds: 180 },
+            details: { adapter: "avalar-ssh" as const },
+            actions: ["avalar.main.smoke", "avalar.main.restart", "avalar.main.deploy"],
+            presentation: { widget: "core.generic-service" as const }
+          }]
+        },
+        {
+          id: "stage",
+          services: [{
+            id: "website",
+            monitor: { adapter: "avalar" as const, urlEnv: "PANEL_AVALAR_STAGE_URL", intervalSeconds: 60, staleAfterSeconds: 180 },
+            details: { adapter: "avalar-ssh" as const },
+            actions: ["avalar.stage.smoke", "avalar.stage.restart", "avalar.stage.deploy"],
+            presentation: { widget: "core.generic-service" as const }
+          }]
+        }
+      ]
+    };
+    const parsed = parseProjectRegistry({ ...registry, projects: [avalar] });
+    expect(parsed.projects[0]).toEqual(avalar);
+    expect(JSON.stringify(parsed)).not.toContain("https://");
+    expect(JSON.stringify(parsed)).not.toContain("ssh_host");
+  });
+
+  it("rejects an unknown action ID at the browser contract boundary", () => {
+    const invalid = {
+      ...registry,
+      projects: [{
+        ...project,
+        environments: [{
+          ...project.environments[0],
+          services: [{
+            ...project.environments[0].services[0],
+            actions: ["avalar.main.unknown"]
+          }]
+        }]
+      }]
+    };
+    expect(() => parseProjectRegistry(invalid)).toThrow("invalid_service_actions");
+  });
+
   it("gets inventory with a fixed collection endpoint and no-store semantics", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(registry), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

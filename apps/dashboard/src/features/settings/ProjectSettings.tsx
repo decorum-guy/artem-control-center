@@ -40,11 +40,21 @@ function editableProject(project: ProjectRegistryProject): ProjectDraft | null {
   return projectDraftFromRegistry(project);
 }
 
-function projectEntries(project: ProjectRegistryProject): Array<{ environmentId: string; serviceId: string; urlEnv: string }> {
+function projectEntries(project: ProjectRegistryProject): Array<{
+  environmentId: string;
+  serviceId: string;
+  adapter: ProjectRegistryProject["environments"][number]["services"][number]["monitor"]["adapter"];
+  urlEnv: string;
+  details: boolean;
+  actions: number;
+}> {
   return project.environments.flatMap((environment) => environment.services.map((service) => ({
     environmentId: environment.id,
     serviceId: service.id,
-    urlEnv: service.monitor.urlEnv
+    adapter: service.monitor.adapter,
+    urlEnv: service.monitor.urlEnv,
+    details: Boolean(service.details),
+    actions: service.actions.length
   })));
 }
 
@@ -465,7 +475,11 @@ export function ProjectSettingsSheet({
                         <div className="project-settings-card__identity">
                           <h3>{project.name}</h3>
                           <span>ID: <code>{project.id}</code></span>
-                          <span className="project-settings-card__badge">Только мониторинг</span>
+                          <span className="project-settings-card__badge">
+                            {project.environments.some((environment) => environment.services.some((service) => service.details || service.actions.length > 0))
+                              ? "Зарегистрированы capabilities"
+                              : "Только мониторинг"}
+                          </span>
                         </div>
                         <div className="project-settings-card__enabled">
                           <strong>{project.enabled ? "Включён" : "Выключен"}</strong>
@@ -489,7 +503,11 @@ export function ProjectSettingsSheet({
                         {entries.length > 0 ? entries.map((entry) => (
                           <div className="project-settings-card__detail" key={`${entry.environmentId}:${entry.serviceId}`}>
                             <strong>{entry.environmentId} · {entry.serviceId}</strong>
-                            <span>HTTP · переменная {entry.urlEnv}</span>
+                            <span>
+                              {entry.adapter === "avalar" ? "AVALAR health" : "HTTP"} · переменная {entry.urlEnv}
+                              {entry.details ? " · details" : ""}
+                              {entry.actions > 0 ? ` · actions ${entry.actions}` : ""}
+                            </span>
                           </div>
                         )) : <span>Окружение и сервис пока не настроены.</span>}
                       </div>

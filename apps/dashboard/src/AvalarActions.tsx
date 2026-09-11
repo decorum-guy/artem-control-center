@@ -42,6 +42,15 @@ interface ActionNotice {
 
 const AvalarActionsContext = createContext<AvalarActionsContextValue | null>(null);
 
+const registeredAvalarActionIds = new Set<AvalarActionId>([
+  "avalar.main.smoke",
+  "avalar.stage.smoke",
+  "avalar.main.restart",
+  "avalar.stage.restart",
+  "avalar.stage.deploy",
+  "avalar.main.deploy"
+]);
+
 const progressCopy: Record<AvalarActionStatus, string> = {
   requested: "Запрос зарегистрирован",
   prechecking: "Проверяем доступность",
@@ -56,6 +65,30 @@ function servicePrefix(service: ServiceSnapshot): "avalar.main." | "avalar.stage
   if (service.id === "avalar-site-main") return "avalar.main.";
   if (service.id === "avalar-site-stage") return "avalar.stage.";
   return null;
+}
+
+function isRegisteredAvalarAction(value: string): value is AvalarActionId {
+  return registeredAvalarActionIds.has(value as AvalarActionId);
+}
+
+function declaredAvalarActions(service: ServiceSnapshot): AvalarActionId[] {
+  return service.actions
+    .map((action) => action.id)
+    .filter(isRegisteredAvalarAction);
+}
+
+export function titleForServiceAction(service: ServiceSnapshot, actionId: AvalarActionId): string {
+  // Keep the legacy widget's established localized labels. Registry-backed
+  // services use the descriptor supplied by their explicit declaration.
+  if (servicePrefix(service) !== null) return avalarActionTitles[actionId];
+  return service.actions.find((action) => action.id === actionId)?.title ?? avalarActionTitles[actionId];
+}
+
+function exposesAction(service: ServiceSnapshot, actionId: AvalarActionId): boolean {
+  if (!isRegisteredAvalarAction(actionId)) return false;
+  if (declaredAvalarActions(service).includes(actionId)) return true;
+  const prefix = servicePrefix(service);
+  return prefix !== null && actionId.startsWith(prefix);
 }
 
 function expectedRevision(service: ServiceSnapshot): string | undefined {
@@ -112,10 +145,15 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const actionsFor = useCallback((service: ServiceSnapshot) => {
+    const declared = declaredAvalarActions(service);
     const prefix = servicePrefix(service);
+    // Registry-backed services have no legacy service ID, so their explicit
+    // descriptors are authoritative. Legacy AVALAR rows retain the existing
+    // availability-driven action surface until PR B removes that path.
+    if (prefix === null) return declared;
     if (!prefix || !availability) return [];
     return (Object.keys(availability) as AvalarActionId[])
-      .filter((actionId) => actionId.startsWith(prefix))
+      .filter((actionId) => isRegisteredAvalarAction(actionId) && actionId.startsWith(prefix))
       .sort((left, right) => {
         const order = ["smoke", "restart", "deploy"];
         return order.indexOf(left.split(".").at(-1) ?? "") - order.indexOf(right.split(".").at(-1) ?? "");
@@ -130,7 +168,16 @@ export function AvalarActionsProvider({ children }: { children: ReactNode }) {
   const run = useCallback(async (service: ServiceSnapshot, actionId: AvalarActionId) => {
     if (!guardMutation()) return;
     if (pendingAction || confirmationOpen) return;
-    const actionTitle = avalarActionTitles[actionId];
+    const title = titleForServiceAction(service, actionId);
+    if (!exposesAction(service, actionId)) {
+      showNotice({
+        title,
+        message: "Действие не зарегистрировано для этого сервиса.",
+        tone: "warning"
+      }, 6_000);
+      return;
+    }
+    const actionTitle = title;
     let decision = availability?.[actionId];
     if (!decision) {
       showNotice({

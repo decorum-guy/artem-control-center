@@ -8,6 +8,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 import httpx
 
 from .contracts import ActionDescriptor, ServicePresentation, ServiceSnapshot
+from .avalar_actions import avalar_action_descriptor
+from .avalar_health import probe_avalar_health
 from .settings import IntegrationSettings
 
 
@@ -163,36 +165,18 @@ class HttpIntegrationAdapter:
                 priority,
                 actions,
             )
-        started = monotonic()
         details = (
             self._details_provider.details_for(service_id)
             if self._details_provider
             else {}
         )
-        try:
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.http_request_timeout_seconds,
-                transport=self._transport,
-            ) as client:
-                live_response, ready_response = await asyncio.gather(
-                    client.get("/health/live"),
-                    client.get("/health/ready"),
-                )
-            live_payload = live_response.json()
-            ready_payload = ready_response.json()
-            live = (
-                live_response.status_code == 200
-                and live_payload.get("status") == "live"
-            )
-            ready = (
-                ready_response.status_code == 200
-                and ready_payload.get("status") == "ready"
-            )
-            health = "healthy" if live and ready else "degraded"
-            summary = "Ready" if health == "healthy" else "Readiness check failed"
-            source = "live"
-        except (httpx.HTTPError, ValueError):
+        probe = await probe_avalar_health(
+            base_url,
+            self._settings.http_request_timeout_seconds,
+            transport=self._transport,
+            clock=self._clock,
+        )
+        if probe.outcome == "unavailable":
             return _avalar_unavailable(
                 service_id,
                 title,
@@ -201,15 +185,14 @@ class HttpIntegrationAdapter:
                 actions,
                 summary="Health endpoint unavailable",
             )
-        latency = int((monotonic() - started) * 1000)
         return ServiceSnapshot(
             id=service_id,
             title=title,
-            health=health,
-            summary=summary,
+            health=probe.health or "degraded",
+            summary=probe.summary,
             dataContract="service.health.v1",
             actions=actions,
-            source=source,
+            source="live",
             presentation=ServicePresentation(
                 category="work",
                 group="AVALAR",
@@ -217,7 +200,7 @@ class HttpIntegrationAdapter:
                 priority=priority,
                 environment=environment,
                 freshnessLabel="только что",
-                latencyMs=latency,
+                latencyMs=probe.latency_ms or 0,
             ),
             data={
                 "environment": environment,
@@ -321,24 +304,12 @@ class HttpIntegrationAdapter:
 
 
 def _avalar_actions(main: bool) -> List[ActionDescriptor]:
-    actions = [
-        ActionDescriptor(
-            id=f"avalar.{'main' if main else 'stage'}.smoke",
-            title="Smoke check",
-            enabled=False,
-            risk="low",
-        )
-    ]
-    if not main:
-        actions.append(
-            ActionDescriptor(
-                id="avalar.stage.deploy",
-                title="Deploy Stage",
-                enabled=False,
-                risk="high",
-            )
-        )
-    return actions
+    action_ids = (
+        ("avalar.main.smoke",)
+        if main
+        else ("avalar.stage.smoke", "avalar.stage.deploy")
+    )
+    return [avalar_action_descriptor(action_id) for action_id in action_ids]
 
 
 def _avalar_unavailable(

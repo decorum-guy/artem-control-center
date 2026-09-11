@@ -81,19 +81,20 @@ export function projectInputFromRegistry(project: ProjectRegistryProject): Proje
     id: project.id,
     name: project.name,
     enabled: project.enabled,
-    category: "external",
+    category: project.category,
     environments: project.environments.map((environment) => ({
       id: environment.id,
       services: environment.services.map((service) => ({
         id: service.id,
         capabilities: {
           monitor: {
-            adapter: "http",
+            adapter: service.monitor.adapter,
             url_env: service.monitor.urlEnv,
             interval_seconds: service.monitor.intervalSeconds,
             stale_after_seconds: service.monitor.staleAfterSeconds
           },
-          actions: []
+          ...(service.details ? { details: service.details } : {}),
+          actions: [...service.actions]
         },
         presentation: { widget: "core.generic-service" }
       }))

@@ -7,8 +7,7 @@ import type {
   WidgetManifest
 } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
-import { useAvalarActions } from "./AvalarActions";
-import { avalarActionTitles } from "./avalarApi";
+import { titleForServiceAction, useAvalarActions } from "./AvalarActions";
 import { coffeePresentation } from "./coffee";
 import { resolveWidgetAsset } from "./widgetAssets";
 import type { CoffeeAppearanceConfig } from "./features/overview/appearanceConfig";
@@ -470,7 +469,7 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
   const avalarActions = avalar.actionsFor(service);
 
   return (
-    <article className={`service-row ${service.id === "avalar-site-main" ? "service-row--production" : ""}`} data-testid={`widget-${service.id}`}>
+    <article className={`service-row ${service.presentation?.group === "AVALAR" && service.presentation.environment !== "stage" ? "service-row--production" : ""}`} data-testid={`widget-${service.id}`}>
       <div className="service-row__identity">
         <HealthMark health={service.health} compact />
         <div>
@@ -522,7 +521,7 @@ export function ServiceRow({ service }: { service: ServiceSnapshot }) {
               title={decision ? explainAvailability(decision.availability) : "Действие недоступно"}
               onClick={() => void avalar.run(service, actionId)}
             >
-              {locked ? "🔒 " : ""}{avalarActionTitles[actionId]}
+              {locked ? "🔒 " : ""}{titleForServiceAction(service, actionId)}
             </button>
           );
         })}

@@ -8,6 +8,7 @@ import type {
   ProjectRegistryService,
   ProjectRegistrySettings
 } from "@artem/contracts";
+import { avalarActionTitles } from "./avalarApi";
 
 export const PROJECT_REGISTRY_CAPABILITY = "settings.projects.manage" as const;
 export const PROJECT_REGISTRY_PATH = "/api/v1/settings/projects" as const;
@@ -19,6 +20,7 @@ const MIN_INTERVAL_SECONDS = 5;
 const MAX_INTERVAL_SECONDS = 3_600;
 const MIN_STALE_AFTER_SECONDS = 15;
 const MAX_STALE_AFTER_SECONDS = 86_400;
+const registeredProjectActionIds = new Set(Object.keys(avalarActionTitles));
 
 export type ProjectRegistryServerErrorCode =
   | "invalid_json"
@@ -83,10 +85,14 @@ function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function exactKeys(value: JsonObject, expected: readonly string[], label: string): void {
+function exactKeys(value: JsonObject, expected: readonly string[], label: string, optional: readonly string[] = []): void {
   const actual = Object.keys(value).sort();
-  const allowed = [...expected].sort();
-  if (actual.length !== allowed.length || actual.some((key, index) => key !== allowed[index])) {
+  const allowed = [...expected, ...optional].sort();
+  if (actual.some((key) => !allowed.includes(key))) {
+    throw new Error(`invalid_${label}`);
+  }
+  const missing = expected.filter((key) => !actual.includes(key));
+  if (missing.length > 0) {
     throw new Error(`invalid_${label}`);
   }
 }
@@ -125,26 +131,42 @@ function parseMonitor(value: unknown): ProjectRegistryMonitor {
   const intervalSeconds = integer(value.intervalSeconds, "interval_seconds", MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS);
   const staleAfterSeconds = integer(value.staleAfterSeconds, "stale_after_seconds", MIN_STALE_AFTER_SECONDS, MAX_STALE_AFTER_SECONDS);
   if (staleAfterSeconds < intervalSeconds) throw new Error("invalid_stale_after_seconds");
-  if (value.adapter !== "http") throw new Error("invalid_monitor_adapter");
+  if (value.adapter !== "http" && value.adapter !== "avalar") throw new Error("invalid_monitor_adapter");
   return {
-    adapter: "http",
+    adapter: value.adapter,
     urlEnv: urlEnv(value.urlEnv),
     intervalSeconds,
     staleAfterSeconds
   };
 }
 
+function parseDetails(value: unknown): { adapter: "avalar-ssh" } {
+  if (!isRecord(value)) throw new Error("invalid_details");
+  exactKeys(value, ["adapter"], "details");
+  if (value.adapter !== "avalar-ssh") throw new Error("invalid_details_adapter");
+  return { adapter: "avalar-ssh" };
+}
+
 function parseService(value: unknown): ProjectRegistryService {
   if (!isRecord(value)) throw new Error("invalid_service");
-  exactKeys(value, ["id", "monitor", "actions", "presentation"], "service");
-  if (!Array.isArray(value.actions) || value.actions.length !== 0) throw new Error("invalid_service_actions");
+  exactKeys(value, ["id", "monitor", "actions", "presentation"], "service", ["details"]);
+  if (!Array.isArray(value.actions) || value.actions.length > 8) {
+    throw new Error("invalid_service_actions");
+  }
+  const actions = value.actions.map((action) => {
+    if (typeof action !== "string" || action.length === 0 || /\p{C}/u.test(action) || !registeredProjectActionIds.has(action)) {
+      throw new Error("invalid_service_actions");
+    }
+    return action;
+  });
   if (!isRecord(value.presentation)) throw new Error("invalid_service_presentation");
   exactKeys(value.presentation, ["widget"], "service_presentation");
   if (value.presentation.widget !== "core.generic-service") throw new Error("invalid_service_widget");
   return {
     id: identifier(value.id, "service_id"),
     monitor: parseMonitor(value.monitor),
-    actions: [],
+    ...(value.details === undefined ? {} : { details: parseDetails(value.details) }),
+    actions,
     presentation: { widget: "core.generic-service" }
   };
 }
@@ -162,13 +184,13 @@ function parseEnvironment(value: unknown): ProjectRegistryEnvironment {
 function parseProject(value: unknown): ProjectRegistryProject {
   if (!isRecord(value)) throw new Error("invalid_project");
   exactKeys(value, ["id", "name", "enabled", "category", "environments"], "project");
-  if (typeof value.enabled !== "boolean" || value.category !== "external") throw new Error("invalid_project_metadata");
+  if (typeof value.enabled !== "boolean" || (value.category !== "external" && value.category !== "work")) throw new Error("invalid_project_metadata");
   if (!Array.isArray(value.environments) || value.environments.length > 32) throw new Error("invalid_project_environments");
   return {
     id: identifier(value.id, "project_id"),
     name: text(value.name, "project_name", 100),
     enabled: value.enabled,
-    category: "external",
+    category: value.category,
     environments: value.environments.map(parseEnvironment)
   };
 }
