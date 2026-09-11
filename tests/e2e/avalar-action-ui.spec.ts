@@ -86,14 +86,14 @@ test("AVALAR Stage smoke uses a readable status card without overlapping disable
 
   await page.goto("/services");
 
-  const stageRow = page.getByTestId("widget-avalar-site-stage");
-  const smoke = stageRow.getByRole("button", { name: "Проверить Stage" });
+  const stageRow = page.getByTestId("widget-avalar.stage.website");
+  const smoke = stageRow.getByRole("button", { name: "Smoke check" });
   await expect(smoke).toBeEnabled();
   await smoke.click();
 
   const notice = page.getByTestId("avalar-action-notice");
   await expect(notice).toBeVisible();
-  await expect(notice.locator("strong")).toHaveText("Проверить Stage");
+  await expect(notice.locator("strong")).toHaveText("Smoke check");
   await expect(notice).toContainText(/Отправляем защищённую команду|Выполняем на сервере|Успешно проверено/);
 
   const background = await notice.evaluate((element) => getComputedStyle(element).backgroundColor);
@@ -129,50 +129,11 @@ test("registry-backed AVALAR rows use the existing Services renderer and explici
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const snapshot = await response.json() as { services: Array<Record<string, unknown>> };
-    snapshot.services.push(
-      {
-        id: "avalar.main.website",
-        title: "AVALAR · main · website",
-        enabled: true,
-        dataContract: "service.health.v1",
-        health: "healthy",
-        source: "live",
-        summary: "Ready",
-        actions: [],
-        data: { projectId: "avalar", environmentId: "main", serviceId: "website" },
-        presentation: {
-          category: "work",
-          group: "AVALAR",
-          overview: "aggregate",
-          priority: 90,
-          environment: "main",
-          freshnessLabel: "только что",
-          latencyMs: 12,
-          incidents: 0
-        }
-      },
-      {
-        id: "avalar.stage.website",
-        title: "AVALAR · stage · website",
-        enabled: true,
-        dataContract: "service.health.v1",
-        health: "healthy",
-        source: "live",
-        summary: "Ready",
-        actions: [{ id: "avalar.stage.smoke", title: "Smoke check", enabled: true, risk: "low" }],
-        data: { projectId: "avalar", environmentId: "stage", serviceId: "website" },
-        presentation: {
-          category: "work",
-          group: "AVALAR",
-          overview: "aggregate",
-          priority: 80,
-          environment: "stage",
-          freshnessLabel: "только что",
-          latencyMs: 10,
-          incidents: 0
-        }
-      }
-    );
+    const main = snapshot.services.find((service) => service.id === "avalar.main.website");
+    const stage = snapshot.services.find((service) => service.id === "avalar.stage.website");
+    if (!main || !stage) throw new Error("canonical_avalar_fixture_missing");
+    main.actions = [];
+    stage.actions = [{ id: "avalar.stage.smoke", title: "Smoke check", enabled: true, risk: "low" }];
     await route.fulfill({ response, body: JSON.stringify(snapshot) });
   });
 

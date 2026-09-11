@@ -393,18 +393,7 @@ def test_bounded_ha_reconciliation_recovers_missed_external_climate_update(tmp_p
     asyncio.run(exercise())
 
 
-def test_http_adapters_keep_main_and_stage_capabilities_separate():
-    class Details:
-        def details_for(self, service_id: str):
-            return {
-                "environment": (
-                    "production" if service_id == "avalar-site-main" else "stage"
-                ),
-                "commit": "site-commit",
-                "deployment_revision": "deploy-1",
-                "details_source": "live",
-            }
-
+def test_http_adapter_preserves_alice_without_materializing_avalar():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health/live":
             return httpx.Response(200, json={"status": "live"})
@@ -430,21 +419,14 @@ def test_http_adapters_keep_main_and_stage_capabilities_separate():
             alice_health_url="https://bot.test",
         ),
         transport=httpx.MockTransport(handler),
-        details_provider=Details(),
     )
     asyncio.run(adapter.refresh())
     services = {service.id: service for service in adapter.services()}
 
-    main_actions = {action.id for action in services["avalar-site-main"].actions}
-    stage_actions = {action.id for action in services["avalar-site-stage"].actions}
-    assert main_actions == {"avalar.main.smoke"}
-    assert stage_actions == {"avalar.stage.smoke", "avalar.stage.deploy"}
-    assert all(not action.enabled for action in services["avalar-site-stage"].actions)
-    assert services["avalar-site-main"].presentation.priority > services[
-        "avalar-site-stage"
-    ].presentation.priority
+    assert set(services) == {"alice-tg-bot"}
+    assert "avalar-site-main" not in services
+    assert "avalar-site-stage" not in services
     assert services["alice-tg-bot"].data["coffeeTimingAuthority"] is False
-    assert services["avalar-site-main"].data["detailsSource"] == "live"
 
 
 def test_http_refresh_transitions_cached_stale_unavailable_and_recovers():
@@ -507,6 +489,7 @@ def test_http_refresh_publishes_service_health_change():
     adapter = HttpIntegrationAdapter(
         IntegrationSettings(
             avalar_main_url="https://main.test",
+            alice_health_url="https://bot.test",
             integration_stale_after_seconds=0,
             integration_unavailable_after_seconds=1,
         ),

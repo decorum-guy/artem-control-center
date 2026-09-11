@@ -5,6 +5,8 @@ from queue import Queue
 
 from fastapi.testclient import TestClient
 
+from panel_agent.project_registry_migration import canonical_avalar_project
+
 
 def load_app(monkeypatch, mode: str):
     monkeypatch.setenv("PANEL_AGENT_MODE", mode)
@@ -102,7 +104,11 @@ def test_shutdown_cancels_and_awaits_blocked_bootstrap(monkeypatch):
     assert module.startup_lifecycle.phase == "stopping"
 
 
-def test_production_scheduler_starts_after_bootstrap_and_closes_before_runtime(monkeypatch):
+def test_production_scheduler_starts_after_bootstrap_and_closes_before_runtime(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("PANEL_PROJECTS_CONFIG_PATH", str(tmp_path / "projects.yaml"))
     module = load_app(monkeypatch, "production")
     calls: list[str] = []
 
@@ -135,6 +141,9 @@ def test_production_scheduler_starts_after_bootstrap_and_closes_before_runtime(m
         client.portal.call(wait_for_task, module.startup_lifecycle.bootstrap_task)
         assert client.get("/health/ready").status_code == 200
         assert calls == ["runtime.start", "snapshot.rebuild", "scheduler.start"]
+        provisioned = module.project_registry_store.read()
+        assert provisioned.revision == 1
+        assert provisioned.projects == (canonical_avalar_project(),)
 
     assert calls == [
         "runtime.start",

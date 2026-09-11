@@ -238,7 +238,7 @@
       }
     },
     {
-      "id": "avalar-site-main",
+      "id": "avalar.main.website",
       "title": "AVALAR Main",
       "enabled": true,
       "dataContract": "service.health.v1",
@@ -251,6 +251,18 @@
           "title": "Smoke check",
           "enabled": false,
           "risk": "low"
+        },
+        {
+          "id": "avalar.main.restart",
+          "title": "Restart Main",
+          "enabled": false,
+          "risk": "high"
+        },
+        {
+          "id": "avalar.main.deploy",
+          "title": "Deploy Main",
+          "enabled": false,
+          "risk": "high"
         }
       ],
       "presentation": {
@@ -269,7 +281,7 @@
       }
     },
     {
-      "id": "avalar-site-stage",
+      "id": "avalar.stage.website",
       "title": "AVALAR Stage",
       "enabled": true,
       "dataContract": "service.health.v1",
@@ -282,6 +294,12 @@
           "title": "Smoke check",
           "enabled": false,
           "risk": "low"
+        },
+        {
+          "id": "avalar.stage.restart",
+          "title": "Restart Stage",
+          "enabled": false,
+          "risk": "high"
         },
         {
           "id": "avalar.stage.deploy",

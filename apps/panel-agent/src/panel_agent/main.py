@@ -49,6 +49,7 @@ from .integrations import IntegrationRuntime
 from .planning_api import build_planning_router
 from .project_registry_api import build_project_registry_router
 from .project_registry_store import ProjectRegistryStore
+from .project_registry_migration import ensure_canonical_avalar_project
 from .runtime_control import router as runtime_control_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
@@ -218,6 +219,9 @@ async def lifespan(_: FastAPI):
 
     async def bootstrap() -> None:
         try:
+            if MODE == "production":
+                registry = ensure_canonical_avalar_project(project_registry_store)
+                await runtime.replace_project_registry(registry)
             await runtime.start()
             await snapshot_publisher.rebuild()
             # The production scheduler depends on the runtime's initial state,

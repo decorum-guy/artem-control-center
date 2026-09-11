@@ -149,7 +149,7 @@ async function captureScreenshot(page: Page, filename: string) {
   await page.screenshot({ path: path.join(directory, filename), animations: "disabled" });
 }
 
-async function openAvalarServiceDetails(page: Page, serviceId: "avalar-site-main" | "avalar-site-stage") {
+async function openAvalarServiceDetails(page: Page, serviceId: "avalar.main.website" | "avalar.stage.website") {
   const group = page.getByTestId("healthy-group-avalar");
   const summary = group.locator(".collapsible-group__summary");
   if (await summary.getAttribute("aria-expanded") !== "true") await summary.click();
@@ -164,8 +164,8 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     const api = await installFixtures(page, "standard");
     await page.goto("/services");
     await unlockWithKeyboard(page);
-    await openAvalarServiceDetails(page, "avalar-site-stage");
-    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await openAvalarServiceDetails(page, "avalar.stage.website");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Restart Stage" }).click();
     await expect(page.getByTestId("action-confirmation")).toBeVisible();
     expect(api.getPostCount()).toBe(0);
     await captureScreenshot(page, "touch-lock-standard-confirmation.png");
@@ -175,8 +175,8 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     const api = await installFixtures(page, "full");
     await page.goto("/services");
     await unlockWithKeyboard(page);
-    await openAvalarServiceDetails(page, "avalar-site-stage");
-    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await openAvalarServiceDetails(page, "avalar.stage.website");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Restart Stage" }).click();
     await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
     await expect.poll(api.getPostCount).toBe(1);
     await expect(page.getByTestId("avalar-action-notice")).toContainText(/Отправляем|Успешно проверено/);
@@ -187,8 +187,8 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     const api = await installFixtures(page, "full");
     await page.goto("/services");
     await unlockWithKeyboard(page);
-    await openAvalarServiceDetails(page, "avalar-site-main");
-    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Обновить Main" }).click();
+    await openAvalarServiceDetails(page, "avalar.main.website");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Deploy Main" }).click();
     await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
     await expect.poll(api.getPostCount).toBe(1);
     expect(api.getLastBody()).not.toHaveProperty("confirmation");
@@ -200,8 +200,8 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await unlockWithKeyboard(page);
     await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
     api.setAccessProfile("standard");
-    await openAvalarServiceDetails(page, "avalar-site-stage");
-    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await openAvalarServiceDetails(page, "avalar.stage.website");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Restart Stage" }).click();
     await expect.poll(api.getAccessGetCount).toBeGreaterThan(1);
     await expect(page.getByTestId("action-confirmation")).toBeVisible();
     expect(api.getPostCount()).toBe(0);
@@ -215,8 +215,8 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await unlockWithKeyboard(page);
     await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
     api.setAccessProfile("full");
-    await openAvalarServiceDetails(page, "avalar-site-stage");
-    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await openAvalarServiceDetails(page, "avalar.stage.website");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Restart Stage" }).click();
     await expect.poll(api.getAccessGetCount).toBeGreaterThan(1);
     await expect(page.getByTestId("action-confirmation")).toHaveCount(0);
     await expect.poll(api.getPostCount).toBe(1);
@@ -228,8 +228,8 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await unlockWithKeyboard(page);
     await expect.poll(api.getAccessGetCount).toBeGreaterThan(0);
     api.failNextAccessRefresh();
-    await openAvalarServiceDetails(page, "avalar-site-stage");
-    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await openAvalarServiceDetails(page, "avalar.stage.website");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Restart Stage" }).click();
     await expect(page.getByTestId("action-confirmation")).toBeVisible();
     expect(api.getPostCount()).toBe(0);
     await page.getByTestId("action-confirmation").getByRole("button", { name: "Перезапустить Stage" }).click();
@@ -254,8 +254,8 @@ test.describe("#82 trusted Full Access and touch lock", () => {
     await expect(page.getByTestId("interaction-lock-control")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("v2-header-access")).toContainText("Полный доступ");
     await captureScreenshot(page, "touch-lock-locked-full-access.png");
-    await openAvalarServiceDetails(page, "avalar-site-stage");
-    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Перезапустить Stage" }).click();
+    await openAvalarServiceDetails(page, "avalar.stage.website");
+    await page.getByTestId("service-details-sheet").getByRole("button", { name: "Restart Stage" }).click();
     expect(api.getPostCount()).toBe(0);
     await page.getByTestId("service-details-sheet").getByRole("button", { name: "Закрыть" }).click();
     await page.locator(".v2-nav-link[data-nav-route='/weather']").click();

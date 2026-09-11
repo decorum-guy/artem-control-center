@@ -11,6 +11,7 @@ from .home_assistant import HomeAssistantAdapter
 from .http_integrations import HttpIntegrationAdapter
 from .project_monitor import DeclarativeProjectMonitor
 from .project_registry import ProjectRegistry, load_project_registry
+from .project_registry_migration import CANONICAL_AVALAR_SERVICE_IDS
 from .planning import PlanningProjection
 from .planning_adapter import PlanningAdapter
 from .planning_fixtures import PlanningFixtureTransport, fixture_reference_datetime
@@ -140,6 +141,11 @@ class IntegrationRuntime:
                 # is then attached to the live replacement for all future
                 # refreshes.
                 replacement.set_on_change(self._snapshot_callback)
+
+    async def refresh_avalar(self) -> None:
+        """Refresh only the server-owned canonical AVALAR services."""
+
+        await self.project_monitor.refresh(CANONICAL_AVALAR_SERVICE_IDS)
 
     async def start(self) -> None:
         await self.home_assistant.start()

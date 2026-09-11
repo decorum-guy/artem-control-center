@@ -14,7 +14,6 @@ from panel_agent.avalar_actions import (
     AvalarActionExecutor,
     avalar_action_descriptor,
 )
-from panel_agent.http_integrations import HttpIntegrationAdapter
 from panel_agent.integrations import IntegrationRuntime
 from panel_agent.project_monitor import DeclarativeProjectMonitor
 from panel_agent.project_registry import (
@@ -256,7 +255,7 @@ def test_duplicate_registered_action_ids_are_rejected():
         _document([project])
 
 
-def test_registry_avalar_health_matches_legacy_mapping_and_details_are_sanitized(monkeypatch):
+def test_registry_avalar_health_and_details_are_sanitized(monkeypatch):
     monkeypatch.setenv("PANEL_AVALAR_MAIN_URL", "https://main.test")
     monkeypatch.setenv("PANEL_AVALAR_STAGE_URL", "https://stage.test")
     transport = _AvalarTransport()
@@ -268,24 +267,14 @@ def test_registry_avalar_health_matches_legacy_mapping_and_details_are_sanitized
         details_provider=details,
         action_availability_provider=lambda action_id: action_id.endswith("smoke"),
     )
-    legacy = HttpIntegrationAdapter(_settings(), transport=transport)
-
     async def exercise() -> None:
-        await legacy.refresh()
         await registry_monitor.refresh()
 
-        legacy_by_environment = {
-            service.presentation.environment: service for service in legacy.services()
-            if service.presentation and service.presentation.group == "AVALAR"
-        }
         registry_by_environment = {
             service.presentation.environment: service for service in registry_monitor.services()
             if service.presentation and service.presentation.group == "AVALAR"
         }
-        assert registry_by_environment["main"].health == legacy_by_environment["production"].health
-        assert registry_by_environment["main"].summary == legacy_by_environment["production"].summary
-        assert registry_by_environment["stage"].health == legacy_by_environment["stage"].health
-        assert registry_by_environment["stage"].summary == legacy_by_environment["stage"].summary
+        assert set(registry_by_environment) == {"main", "stage"}
 
         main = registry_by_environment["main"]
         assert main.id == "avalar.main.website"
@@ -385,7 +374,7 @@ def test_action_gate_state_controls_registry_descriptor_and_executor_is_fixed(tm
     asyncio.run(exercise())
 
 
-def test_legacy_avalar_materialization_is_unchanged_without_registry_project():
+def test_empty_registry_does_not_materialize_avalar_fallback_services():
     runtime = IntegrationRuntime(
         _settings(),
         project_registry=ProjectRegistry.empty(Path("<test>")),
@@ -394,8 +383,63 @@ def test_legacy_avalar_materialization_is_unchanged_without_registry_project():
     async def exercise() -> None:
         try:
             ids = {service.id for service in runtime.services()}
-            assert {"avalar-site-main", "avalar-site-stage"}.issubset(ids)
+            assert "alice-tg-bot" in ids
             assert "avalar.main.website" not in ids
+            assert "avalar.stage.website" not in ids
+            assert "avalar-site-main" not in ids
+            assert "avalar-site-stage" not in ids
+        finally:
+            await runtime.close()
+
+    asyncio.run(exercise())
+
+
+def test_canonical_registry_runtime_publishes_each_avalar_service_once(monkeypatch):
+    monkeypatch.setenv("PANEL_AVALAR_MAIN_URL", "https://main.test")
+    monkeypatch.setenv("PANEL_AVALAR_STAGE_URL", "https://stage.test")
+    transport = _AvalarTransport()
+    runtime = IntegrationRuntime(
+        _settings(),
+        project_registry=_registry(_avalar_project()),
+        project_monitor_transport=transport,
+    )
+
+    async def exercise() -> None:
+        try:
+            await runtime.project_monitor.refresh()
+            services = runtime.services()
+            ids = [service.id for service in services]
+            assert ids.count("avalar.main.website") == 1
+            assert ids.count("avalar.stage.website") == 1
+            assert ids.count("avalar-site-main") == 0
+            assert ids.count("avalar-site-stage") == 0
+            assert ids.count("alice-tg-bot") == 1
+            by_id = {service.id: service for service in services}
+            assert by_id["avalar.main.website"].health == "healthy"
+            assert by_id["avalar.stage.website"].health == "healthy"
+        finally:
+            await runtime.close()
+
+    asyncio.run(exercise())
+
+
+def test_post_action_refresh_is_fixed_to_registry_avalar_services():
+    runtime = IntegrationRuntime(
+        _settings(),
+        project_registry=ProjectRegistry.empty(Path("<test>")),
+    )
+    calls: list[tuple[str, ...]] = []
+
+    async def refresh(service_ids=None):
+        calls.append(tuple(service_ids or ()))
+        return True
+
+    runtime.project_monitor.refresh = refresh  # type: ignore[method-assign]
+
+    async def exercise() -> None:
+        try:
+            await runtime.refresh_avalar()
+            assert calls == [("avalar.main.website", "avalar.stage.website")]
         finally:
             await runtime.close()
 

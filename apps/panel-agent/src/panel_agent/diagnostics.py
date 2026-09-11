@@ -45,8 +45,8 @@ _SERVICE_LABELS = {
     "coffee-machine": "Кофемашина",
     "kettle": "Чайник",
     "alice-tg-bot": "AliceTG",
-    "avalar-site-main": "AVALAR Main",
-    "avalar-site-stage": "AVALAR Stage",
+    "avalar.main.website": "AVALAR Main",
+    "avalar.stage.website": "AVALAR Stage",
     "rog_g703gi": "ROG",
     "panel-runtime": "Control Center runtime",
 }
