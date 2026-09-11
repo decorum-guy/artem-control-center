@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from .access_policy import AccessPolicyStore
+from .contracts import ActionDescriptor
 from .settings import IntegrationSettings
 
 ActionId = Literal[
@@ -45,6 +46,8 @@ class DetailsProvider(Protocol):
 
 _ACTIONS: dict[str, dict[str, Any]] = {
     "avalar.main.smoke": {
+        "title": "Smoke check",
+        "risk": "low",
         "operation": "smoke-main",
         "environment": "production",
         "service_id": "avalar-site-main",
@@ -52,6 +55,8 @@ _ACTIONS: dict[str, dict[str, Any]] = {
         "cooldown": 5,
     },
     "avalar.stage.smoke": {
+        "title": "Smoke check",
+        "risk": "low",
         "operation": "smoke-stage",
         "environment": "stage",
         "service_id": "avalar-site-stage",
@@ -59,6 +64,8 @@ _ACTIONS: dict[str, dict[str, Any]] = {
         "cooldown": 5,
     },
     "avalar.main.restart": {
+        "title": "Restart Main",
+        "risk": "high",
         "operation": "restart-main",
         "environment": "production",
         "service_id": "avalar-site-main",
@@ -66,6 +73,8 @@ _ACTIONS: dict[str, dict[str, Any]] = {
         "cooldown": 60,
     },
     "avalar.stage.restart": {
+        "title": "Restart Stage",
+        "risk": "high",
         "operation": "restart-stage",
         "environment": "stage",
         "service_id": "avalar-site-stage",
@@ -73,6 +82,8 @@ _ACTIONS: dict[str, dict[str, Any]] = {
         "cooldown": 60,
     },
     "avalar.stage.deploy": {
+        "title": "Deploy Stage",
+        "risk": "high",
         "operation": "deploy-stage",
         "environment": "stage",
         "service_id": "avalar-site-stage",
@@ -80,6 +91,8 @@ _ACTIONS: dict[str, dict[str, Any]] = {
         "cooldown": 300,
     },
     "avalar.main.deploy": {
+        "title": "Deploy Main",
+        "risk": "high",
         "operation": "deploy-main",
         "environment": "production",
         "service_id": "avalar-site-main",
@@ -87,6 +100,45 @@ _ACTIONS: dict[str, dict[str, Any]] = {
         "cooldown": 600,
     },
 }
+
+AVALAR_ACTION_IDS: tuple[str, ...] = tuple(_ACTIONS)
+
+
+def is_registered_avalar_action(action_id: str) -> bool:
+    """Return whether an action ID belongs to the fixed AVALAR registry."""
+
+    return action_id in _ACTIONS
+
+
+def avalar_action_target_environment(action_id: str) -> Literal["main", "stage"] | None:
+    """Return the server-owned target environment for a registered action."""
+
+    descriptor = _ACTIONS.get(action_id)
+    if descriptor is None:
+        return None
+    if descriptor["environment"] == "production":
+        return "main"
+    if descriptor["environment"] == "stage":
+        return "stage"
+    return None
+
+
+def avalar_action_descriptor(
+    action_id: str,
+    *,
+    enabled: bool = False,
+) -> ActionDescriptor:
+    """Build the browser-safe descriptor for one fixed registered action."""
+
+    descriptor = _ACTIONS.get(action_id)
+    if descriptor is None:
+        raise ValueError("unknown registered action ID")
+    return ActionDescriptor(
+        id=action_id,
+        title=descriptor["title"],
+        enabled=enabled,
+        risk=descriptor["risk"],
+    )
 
 _ALLOWED_RESULT_FIELDS = {
     "ok",
@@ -166,6 +218,13 @@ class AvalarActionExecutor:
             and self.settings.avalar_actions_enabled
             and getattr(self.settings, descriptor["gate"])
         )
+
+    def action_available(self, action_id: str) -> bool:
+        """Expose only the existing executor's full availability decision."""
+
+        if not is_registered_avalar_action(action_id):
+            return False
+        return bool(self.availability(action_id)["allowed"])
 
     def availability(self, action_id: str) -> dict[str, Any]:
         descriptor = _ACTIONS[action_id]

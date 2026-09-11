@@ -27,6 +27,7 @@ class IntegrationRuntime:
         mode: PanelMode = "read_only",
         project_registry: ProjectRegistry | None = None,
         project_monitor_transport: httpx.AsyncBaseTransport | None = None,
+        project_action_availability_provider: Callable[[str], bool] | None = None,
     ) -> None:
         self.settings = settings
         self.home_assistant = HomeAssistantAdapter(settings, panel_mode=mode)
@@ -45,10 +46,13 @@ class IntegrationRuntime:
             else load_project_registry(settings.projects_config_path)
         )
         self._project_monitor_transport = project_monitor_transport
+        self._project_action_availability_provider = project_action_availability_provider
         self.project_monitor = DeclarativeProjectMonitor(
             self.project_registry,
             settings,
             transport=project_monitor_transport,
+            details_provider=self.avalar_ssh,
+            action_availability_provider=project_action_availability_provider,
         )
         self._runtime_started = False
         self._project_registry_swap_lock: asyncio.Lock | None = None
@@ -86,6 +90,13 @@ class IntegrationRuntime:
     ) -> None:
         self._coffee_schedule_callback = callback
 
+    def set_project_action_availability_provider(
+        self,
+        provider: Callable[[str], bool] | None,
+    ) -> None:
+        self._project_action_availability_provider = provider
+        self.project_monitor.set_action_availability_provider(provider)
+
     async def _on_home_assistant_change(self) -> None:
         if self._snapshot_callback is not None:
             await self._snapshot_callback()
@@ -110,6 +121,8 @@ class IntegrationRuntime:
                 registry,
                 self.settings,
                 transport=self._project_monitor_transport,
+                details_provider=self.avalar_ssh,
+                action_availability_provider=self._project_action_availability_provider,
             )
 
             # Stop the old task before starting the replacement.  This keeps

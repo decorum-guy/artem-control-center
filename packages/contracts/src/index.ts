@@ -711,18 +711,23 @@ export interface DeviceVisibilitySettings {
   writesEnabled: boolean;
 }
 
-/** Browser-safe monitor-only project registry inventory and mutation bodies. */
+/** Browser-safe closed project registry inventory and mutation bodies. */
 export interface ProjectRegistryMonitor {
-  adapter: "http";
+  adapter: "http" | "avalar";
   urlEnv: string;
   intervalSeconds: number;
   staleAfterSeconds: number;
 }
 
+export interface ProjectRegistryDetails {
+  adapter: "avalar-ssh";
+}
+
 export interface ProjectRegistryService {
   id: string;
   monitor: ProjectRegistryMonitor;
-  actions: [];
+  details?: ProjectRegistryDetails;
+  actions: string[];
   presentation: { widget: "core.generic-service" };
 }
 
@@ -735,7 +740,7 @@ export interface ProjectRegistryProject {
   id: string;
   name: string;
   enabled: boolean;
-  category: "external";
+  category: "external" | "work";
   environments: ProjectRegistryEnvironment[];
 }
 
@@ -762,19 +767,20 @@ export interface ProjectRegistryProjectInput {
   id: string;
   name: string;
   enabled?: boolean;
-  category: "external";
+  category: "external" | "work";
   environments: Array<{
     id: string;
     services: Array<{
       id: string;
       capabilities: {
         monitor: {
-          adapter: "http";
+          adapter: "http" | "avalar";
           url_env: string;
           interval_seconds?: number;
           stale_after_seconds?: number;
         };
-        actions?: [];
+        details?: { adapter: "avalar-ssh" };
+        actions?: string[];
       };
       presentation?: { widget?: "core.generic-service" };
     }>;

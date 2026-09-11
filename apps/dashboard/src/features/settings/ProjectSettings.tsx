@@ -40,11 +40,21 @@ function editableProject(project: ProjectRegistryProject): ProjectDraft | null {
   return projectDraftFromRegistry(project);
 }
 
-function projectEntries(project: ProjectRegistryProject): Array<{ environmentId: string; serviceId: string; urlEnv: string }> {
+function projectEntries(project: ProjectRegistryProject): Array<{
+  environmentId: string;
+  serviceId: string;
+  adapter: ProjectRegistryProject["environments"][number]["services"][number]["monitor"]["adapter"];
+  urlEnv: string;
+  details: boolean;
+  actions: number;
+}> {
   return project.environments.flatMap((environment) => environment.services.map((service) => ({
     environmentId: environment.id,
     serviceId: service.id,
-    urlEnv: service.monitor.urlEnv
+    adapter: service.monitor.adapter,
+    urlEnv: service.monitor.urlEnv,
+    details: Boolean(service.details),
+    actions: service.actions.length
   })));
 }
 
@@ -394,8 +404,8 @@ export function ProjectSettingsSheet({
 
   const sheetTitle = editor ? (editor.projectId ? "Изменить проект" : "Добавить проект") : "Проекты";
   const sheetDescription = editor
-    ? "Только мониторинг: один HTTP-сервис без действий и учётных данных."
-    : "Зарегистрированные проекты только с мониторингом и их настройки проверки.";
+    ? "Один HTTP-сервис с мониторингом, без действий и учётных данных."
+    : "Зарегистрированные проекты, мониторинг и доступные действия.";
 
   return (
     <Sheet
@@ -465,7 +475,11 @@ export function ProjectSettingsSheet({
                         <div className="project-settings-card__identity">
                           <h3>{project.name}</h3>
                           <span>ID: <code>{project.id}</code></span>
-                          <span className="project-settings-card__badge">Только мониторинг</span>
+                          <span className="project-settings-card__badge">
+                            {project.environments.some((environment) => environment.services.some((service) => service.details || service.actions.length > 0))
+                              ? "Мониторинг и управление"
+                              : "Только мониторинг"}
+                          </span>
                         </div>
                         <div className="project-settings-card__enabled">
                           <strong>{project.enabled ? "Включён" : "Выключен"}</strong>
@@ -489,7 +503,11 @@ export function ProjectSettingsSheet({
                         {entries.length > 0 ? entries.map((entry) => (
                           <div className="project-settings-card__detail" key={`${entry.environmentId}:${entry.serviceId}`}>
                             <strong>{entry.environmentId} · {entry.serviceId}</strong>
-                            <span>HTTP · переменная {entry.urlEnv}</span>
+                            <span>
+                              {entry.adapter === "avalar" ? "Мониторинг AVALAR" : "HTTP-мониторинг"} · переменная {entry.urlEnv}
+                              {entry.details ? " · диагностика" : ""}
+                              {entry.actions > 0 ? ` · действий: ${entry.actions}` : ""}
+                            </span>
                           </div>
                         )) : <span>Окружение и сервис пока не настроены.</span>}
                       </div>
@@ -498,7 +516,7 @@ export function ProjectSettingsSheet({
                         <button type="button" data-testid={`project-edit-${project.id}`} className="planning-secondary-button" disabled={!canWrite || mutationPending || !draft} onClick={() => openEditor(project)}>Изменить</button>
                         <button type="button" data-testid={`project-delete-${project.id}`} className="project-settings-card__delete" disabled={!canWrite || mutationPending} onClick={() => void deleteProject(project)}>Удалить</button>
                       </div>
-                      {!draft && <small className="project-settings-card__note">Редактор доступен для одного окружения и одного HTTP-сервиса.</small>}
+                      {!draft && <small className="project-settings-card__note">Этот проект использует расширенные возможности и пока редактируется только через конфигурацию проекта.</small>}
                     </article>
                   );
                 })}

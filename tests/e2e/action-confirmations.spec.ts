@@ -48,7 +48,7 @@ async function mockAvalar(page: Page) {
   let lastBody: Record<string, unknown> | null = null;
   let activeAction: AvalarActionId = "avalar.stage.restart";
 
-  await page.route("**/api/v1/actions/avalar**", async (route) => {
+  await page.route(/\/api\/v1\/actions\/avalar(?:\/.*)?$/, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 

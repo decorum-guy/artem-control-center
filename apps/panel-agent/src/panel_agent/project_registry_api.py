@@ -1,4 +1,4 @@
-"""Sanitized Settings API for the monitor-only project registry."""
+"""Sanitized Settings API for the closed project capability registry."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ ProjectRegistryErrorCode = Literal[
 class ProjectRegistryMonitorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    adapter: Literal["http"]
+    adapter: Literal["http", "avalar"]
     urlEnv: str = Field(pattern=r"^[A-Z][A-Z0-9_]{0,63}$", max_length=64)
     intervalSeconds: int = Field(
         ge=MIN_MONITOR_INTERVAL_SECONDS,
@@ -65,6 +65,12 @@ class ProjectRegistryMonitorResponse(BaseModel):
         ge=MIN_MONITOR_STALE_AFTER_SECONDS,
         le=MAX_MONITOR_STALE_AFTER_SECONDS,
     )
+
+
+class ProjectRegistryDetailsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    adapter: Literal["avalar-ssh"]
 
 
 class ProjectRegistryPresentationResponse(BaseModel):
@@ -78,7 +84,11 @@ class ProjectRegistryServiceResponse(BaseModel):
 
     id: str = Field(min_length=1, max_length=32, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
     monitor: ProjectRegistryMonitorResponse
-    actions: list[str] = Field(default_factory=list, max_length=0)
+    details: ProjectRegistryDetailsResponse | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    actions: list[str] = Field(default_factory=list, max_length=8)
     presentation: ProjectRegistryPresentationResponse
 
 
@@ -95,7 +105,7 @@ class ProjectRegistryProjectResponse(BaseModel):
     id: str = Field(min_length=1, max_length=32, pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$")
     name: str = Field(min_length=1, max_length=100)
     enabled: bool
-    category: Literal["external"]
+    category: Literal["external", "work"]
     environments: list[ProjectRegistryEnvironmentResponse] = Field(default_factory=list, max_length=32)
 
 
@@ -350,7 +360,14 @@ def _response(registry: ProjectRegistry, *, writes_enabled: bool) -> ProjectRegi
                                     intervalSeconds=service.capabilities.monitor.interval_seconds,
                                     staleAfterSeconds=service.capabilities.monitor.stale_after_seconds,
                                 ),
-                                actions=[],
+                                details=(
+                                    ProjectRegistryDetailsResponse(
+                                        adapter=service.capabilities.details.adapter,
+                                    )
+                                    if service.capabilities.details is not None
+                                    else None
+                                ),
+                                actions=list(service.capabilities.actions),
                                 presentation=ProjectRegistryPresentationResponse(
                                     widget=service.presentation.widget,
                                 ),

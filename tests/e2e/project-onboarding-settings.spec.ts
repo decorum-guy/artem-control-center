@@ -8,18 +8,19 @@ type RegistryProject = {
   id: string;
   name: string;
   enabled: boolean;
-  category: "external";
+  category: "external" | "work";
   environments: Array<{
     id: string;
     services: Array<{
       id: string;
       monitor: {
-        adapter: "http";
+        adapter: "http" | "avalar";
         urlEnv: string;
         intervalSeconds: number;
         staleAfterSeconds: number;
       };
-      actions: [];
+      details?: { adapter: "avalar-ssh" };
+      actions: string[];
       presentation: { widget: "core.generic-service" };
     }>;
   }>;
@@ -40,19 +41,20 @@ type ProjectInput = {
   id: string;
   name: string;
   enabled?: boolean;
-  category: "external";
+  category: "external" | "work";
   environments: Array<{
     id: string;
     services: Array<{
       id: string;
       capabilities: {
         monitor: {
-          adapter: "http";
+          adapter: "http" | "avalar";
           url_env: string;
           interval_seconds?: number;
           stale_after_seconds?: number;
         };
-        actions?: [];
+        details?: { adapter: "avalar-ssh" };
+        actions?: string[];
       };
       presentation?: { widget?: "core.generic-service" };
     }>;
@@ -105,21 +107,53 @@ function projectFromInput(input: ProjectInput): RegistryProject {
     id: input.id,
     name: input.name,
     enabled: input.enabled ?? true,
-    category: "external",
+    category: input.category,
     environments: input.environments.map((environment) => ({
       id: environment.id,
       services: environment.services.map((service) => ({
         id: service.id,
         monitor: {
-          adapter: "http",
+          adapter: service.capabilities.monitor.adapter,
           urlEnv: service.capabilities.monitor.url_env,
           intervalSeconds: service.capabilities.monitor.interval_seconds ?? 60,
           staleAfterSeconds: service.capabilities.monitor.stale_after_seconds ?? 180
         },
-        actions: [],
+        ...(service.capabilities.details ? { details: service.capabilities.details } : {}),
+        actions: service.capabilities.actions ?? [],
         presentation: { widget: "core.generic-service" }
       }))
     }))
+  };
+}
+
+function avalarProject(enabled = true): RegistryProject {
+  return {
+    id: "avalar",
+    name: "AVALAR",
+    enabled,
+    category: "work",
+    environments: [
+      {
+        id: "main",
+        services: [{
+          id: "website",
+          monitor: { adapter: "avalar", urlEnv: "PANEL_AVALAR_MAIN_URL", intervalSeconds: 60, staleAfterSeconds: 180 },
+          details: { adapter: "avalar-ssh" },
+          actions: ["avalar.main.smoke", "avalar.main.restart", "avalar.main.deploy"],
+          presentation: { widget: "core.generic-service" }
+        }]
+      },
+      {
+        id: "stage",
+        services: [{
+          id: "website",
+          monitor: { adapter: "avalar", urlEnv: "PANEL_AVALAR_STAGE_URL", intervalSeconds: 60, staleAfterSeconds: 180 },
+          details: { adapter: "avalar-ssh" },
+          actions: ["avalar.stage.smoke", "avalar.stage.restart", "avalar.stage.deploy"],
+          presentation: { widget: "core.generic-service" }
+        }]
+      }
+    ]
   };
 }
 
@@ -387,10 +421,29 @@ test.describe("Slice C/D monitor-only project onboarding in Settings", () => {
     await expect(card).toContainText("ID: external-api");
     await expect(card).toContainText("Только мониторинг");
     await expect(card).toContainText("production · api");
+    await expect(card).toContainText("HTTP-мониторинг · переменная EXTERNAL_API_HEALTH_URL");
     await expect(card).toContainText("EXTERNAL_API_HEALTH_URL");
+    await expect(page.getByTestId("settings-projects-sheet")).toContainText("Зарегистрированные проекты, мониторинг и доступные действия.");
     await expect(page.getByTestId("settings-summary-projects")).toContainText("1 проект");
     await page.getByRole("button", { name: "Закрыть", exact: true }).click();
     await expect(page.getByTestId("settings-projects-sheet")).toHaveCount(0);
+  });
+
+  test("registry-backed AVALAR uses owner-facing copy and keeps advanced project controls safe", async ({ page }) => {
+    await openProjectSheet(page, await installFixtures(page, { initial: registry([avalarProject()]) }));
+    const card = page.getByTestId("project-card-avalar");
+
+    await expect(card).toContainText("Мониторинг и управление");
+    await expect(card).toContainText("main · website");
+    await expect(card).toContainText("Мониторинг AVALAR · переменная PANEL_AVALAR_MAIN_URL · диагностика · действий: 3");
+    await expect(card).toContainText("stage · website");
+    await expect(card).toContainText("Мониторинг AVALAR · переменная PANEL_AVALAR_STAGE_URL · диагностика · действий: 3");
+    await expect(card).toContainText("Этот проект использует расширенные возможности и пока редактируется только через конфигурацию проекта.");
+    await expect(card).not.toContainText(/capabilities|AVALAR health|\bdetails\b|\bactions 3\b/i);
+
+    await expect(card.getByTestId("project-edit-avalar")).toBeDisabled();
+    await expect(card.getByTestId("project-delete-avalar")).toBeEnabled();
+    await expect(card.getByRole("checkbox", { name: "Выключить проект «AVALAR»" })).toBeEnabled();
   });
 
   test("available=false is explicit and removes all mutation affordances", async ({ page }) => {
@@ -406,6 +459,7 @@ test.describe("Slice C/D monitor-only project onboarding in Settings", () => {
   test("Add editor has safe endpoint reference, exact defaults and canonical create success", async ({ page }) => {
     const fixture = await openProjectSheet(page, await installFixtures(page));
     const sheet = await fillNewProject(page);
+    await expect(sheet).toContainText("Один HTTP-сервис с мониторингом, без действий и учётных данных.");
     await expect(sheet.getByLabel("Окружение", { exact: true })).toHaveValue("production");
     await expect(sheet.getByLabel("Сервис", { exact: true })).toHaveValue("api");
     await expect(sheet.getByLabel("Интервал проверки, секунд", { exact: true })).toHaveValue("60");

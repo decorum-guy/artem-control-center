@@ -29,6 +29,7 @@ avalar_actions = AvalarActionExecutor(
     details_provider=runtime.avalar_ssh,
     refresh_callback=runtime.http.refresh,
 )
+runtime.set_project_action_availability_provider(avalar_actions.action_available)
 connectivity_actions = ConnectivityActionExecutor(
     SETTINGS,
     access_policy,
