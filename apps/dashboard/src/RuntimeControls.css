@@ -176,6 +176,10 @@
   font-variant-numeric: tabular-nums;
 }
 
+.runtime-update-progress + .action-confirmation__actions {
+  margin-top: var(--space-4);
+}
+
 .runtime-update-dialog .action-confirmation__actions button {
   min-height: 56px;
 }
