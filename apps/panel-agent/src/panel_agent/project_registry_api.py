@@ -1,19 +1,25 @@
-"""Sanitized Settings API for the Slice B monitor-only project registry."""
+"""Sanitized Settings API for the monitor-only project registry."""
 
 from __future__ import annotations
 
 import json
 from typing import Any, Awaitable, Callable, Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from .project_monitor import (
+    DeclarativeHttpProbeResult,
+    probe_declarative_http_monitor,
+)
 from .project_registry import (
     MAX_MONITOR_INTERVAL_SECONDS,
     MAX_MONITOR_STALE_AFTER_SECONDS,
     MIN_MONITOR_INTERVAL_SECONDS,
     MIN_MONITOR_STALE_AFTER_SECONDS,
     ProjectConfig,
+    ProjectMonitorConfig,
     ProjectRegistry,
 )
 from .project_registry_store import (
@@ -26,12 +32,14 @@ from .project_registry_store import (
     ProjectRegistryUnavailable,
     ProjectRegistryWriteFailed,
 )
+from .settings import IntegrationSettings
 
 
 PROJECT_REGISTRY_SCHEMA_VERSION = "project.registry.v1"
 PROJECT_REGISTRY_CAPABILITY = "settings.projects.manage"
 PROJECT_REGISTRY_MINIMUM_PROFILE = "full"
 MAX_PROJECT_REGISTRY_REQUEST_BYTES = 256 * 1024
+PROJECT_CONNECTION_TEST_SCHEMA_VERSION = "project.connection-test.v1"
 
 ProjectRegistryErrorCode = Literal[
     "config_read_error",
@@ -119,14 +127,80 @@ class ProjectRegistryDeleteRequest(BaseModel):
     expectedRevision: int = Field(ge=0, le=2_147_483_647)
 
 
+ProjectConnectionTestResult = Literal[
+    "reachable",
+    "endpoint_not_configured",
+    "endpoint_invalid",
+    "http_error",
+    "unreachable",
+]
+
+
+class ProjectConnectionTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    project: ProjectConfig
+    environmentId: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$",
+    )
+    serviceId: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$",
+    )
+
+
+class ProjectConnectionTestResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    schemaVersion: Literal["project.connection-test.v1"]
+    result: ProjectConnectionTestResult
+    reachable: bool
+    httpStatus: int | None = Field(default=None, ge=100, le=599)
+    latencyMs: int | None = Field(default=None, ge=0, le=30_000)
+    projectId: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$",
+    )
+    environmentId: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$",
+    )
+    serviceId: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$",
+    )
+
+    @model_validator(mode="after")
+    def _result_fields_are_consistent(self) -> "ProjectConnectionTestResponse":
+        if self.reachable is not (self.result == "reachable"):
+            raise ValueError("reachable does not match result")
+        if self.result == "reachable" and self.httpStatus is None:
+            raise ValueError("reachable requires an HTTP status")
+        if self.result in {"reachable", "http_error"} and self.latencyMs is None:
+            raise ValueError("HTTP result requires latency")
+        if self.result in {"endpoint_not_configured", "endpoint_invalid", "unreachable"}:
+            if self.httpStatus is not None or self.latencyMs is not None:
+                raise ValueError("non-HTTP result cannot expose response metadata")
+        return self
+
+
 def build_project_registry_router(
     store: ProjectRegistryStore,
     runtime: Any,
     *,
     snapshot_rebuild: Callable[[], Awaitable[Any]],
     writes_allowed: Callable[[], bool],
+    connection_test_settings: IntegrationSettings | None = None,
+    connection_test_transport: httpx.AsyncBaseTransport | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1/settings/projects", tags=["settings"])
+    probe_settings = connection_test_settings or IntegrationSettings()
 
     @router.get("", response_model=ProjectRegistryResponse)
     def get_projects(response: Response) -> ProjectRegistryResponse:
@@ -136,6 +210,24 @@ def build_project_registry_router(
         response.headers["X-Project-Registry-Writes-Enabled"] = str(writes_enabled).lower()
         response.headers["ETag"] = f'"{registry.revision}"'
         return _response(registry, writes_enabled=writes_enabled)
+
+    @router.post(
+        "/test-connection",
+        response_model=ProjectConnectionTestResponse,
+    )
+    async def test_connection(
+        request: Request,
+        response: Response,
+    ) -> ProjectConnectionTestResponse:
+        payload = await _parse_payload(request, ProjectConnectionTestRequest)
+        monitor = _connection_monitor(payload)
+        probe = await probe_declarative_http_monitor(
+            monitor,
+            probe_settings,
+            transport=connection_test_transport,
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return _connection_test_response(payload, probe)
 
     @router.post("", response_model=ProjectRegistryResponse, status_code=status.HTTP_201_CREATED)
     async def create_project(request: Request, response: Response) -> ProjectRegistryResponse:
@@ -194,6 +286,44 @@ def build_project_registry_router(
         return _mutation_response(response, saved, writes_allowed)
 
     return router
+
+
+def _connection_monitor(
+    payload: ProjectConnectionTestRequest,
+) -> ProjectMonitorConfig:
+    environments = [
+        candidate
+        for candidate in payload.project.environments
+        if candidate.id == payload.environmentId
+    ]
+    if len(environments) != 1:
+        raise HTTPException(status_code=422, detail="unknown_environment")
+    environment = environments[0]
+
+    services = [
+        candidate
+        for candidate in environment.services
+        if candidate.id == payload.serviceId
+    ]
+    if len(services) != 1:
+        raise HTTPException(status_code=422, detail="unknown_service")
+    return services[0].capabilities.monitor
+
+
+def _connection_test_response(
+    payload: ProjectConnectionTestRequest,
+    probe: DeclarativeHttpProbeResult,
+) -> ProjectConnectionTestResponse:
+    return ProjectConnectionTestResponse(
+        schemaVersion=PROJECT_CONNECTION_TEST_SCHEMA_VERSION,
+        result=probe.result,
+        reachable=probe.result == "reachable",
+        httpStatus=probe.http_status,
+        latencyMs=probe.latency_ms,
+        projectId=payload.project.id,
+        environmentId=payload.environmentId,
+        serviceId=payload.serviceId,
+    )
 
 
 def _response(registry: ProjectRegistry, *, writes_enabled: bool) -> ProjectRegistryResponse:

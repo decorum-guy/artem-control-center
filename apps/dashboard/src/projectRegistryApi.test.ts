@@ -4,9 +4,11 @@ import {
   createProject,
   deleteProject,
   getProjectRegistry,
+  parseProjectConnectionTest,
   parseProjectRegistry,
   ProjectRegistryApiError,
-  replaceProject
+  replaceProject,
+  testProjectConnection
 } from "./projectRegistryApi";
 
 const project: ProjectRegistrySettings["projects"][number] = {
@@ -135,5 +137,88 @@ describe("project registry API", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("DNS details must not escape")));
     await expect(getProjectRegistry()).rejects.toEqual(new ProjectRegistryApiError("network", 0));
+  });
+
+  it("sends one fixed connection-test request with the exact canonical draft and no revision", async () => {
+    const result = {
+      schemaVersion: "project.connection-test.v1",
+      result: "reachable",
+      reachable: true,
+      httpStatus: 204,
+      latencyMs: 42,
+      projectId: "new-project",
+      environmentId: "production",
+      serviceId: "api"
+    } as const;
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(result), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(testProjectConnection(projectInput, "production", "api")).resolves.toEqual(result);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/settings/projects/test-connection", expect.objectContaining({ method: "POST" }));
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      project: projectInput,
+      environmentId: "production",
+      serviceId: "api"
+    });
+    expect(String(init.body)).not.toContain("expectedRevision");
+  });
+
+  it.each([
+    { field: "projectId", value: "different-project" },
+    { field: "environmentId", value: "staging" },
+    { field: "serviceId", value: "worker" }
+  ] as const)("rejects a connection-test response with a mismatched $field", async ({ field, value }) => {
+    const result = {
+      schemaVersion: "project.connection-test.v1",
+      result: "reachable",
+      reachable: true,
+      httpStatus: 204,
+      latencyMs: 42,
+      projectId: "new-project",
+      environmentId: "production",
+      serviceId: "api",
+      [field]: value
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(result), { status: 200 })));
+
+    await expect(testProjectConnection(projectInput, "production", "api"))
+      .rejects.toEqual(new ProjectRegistryApiError("contract_invalid", 200));
+  });
+
+  it("strictly parses bounded result metadata and rejects response extras or mismatches", () => {
+    const result = {
+      schemaVersion: "project.connection-test.v1",
+      result: "reachable",
+      reachable: true,
+      httpStatus: 200,
+      latencyMs: 0,
+      projectId: "new-project",
+      environmentId: "production",
+      serviceId: "api"
+    };
+    expect(parseProjectConnectionTest(result)).toEqual(result);
+    expect(() => parseProjectConnectionTest({ ...result, resolvedUrl: "https://secret.example.test" })).toThrow();
+    expect(() => parseProjectConnectionTest({ ...result, reachable: false })).toThrow();
+    expect(() => parseProjectConnectionTest({ ...result, latencyMs: "42" })).toThrow();
+  });
+
+  it("keeps endpoint failure results separate from Panel Agent transport failures", async () => {
+    const endpointFailure = {
+      schemaVersion: "project.connection-test.v1",
+      result: "http_error",
+      reachable: false,
+      httpStatus: 503,
+      latencyMs: 18,
+      projectId: "new-project",
+      environmentId: "production",
+      serviceId: "api"
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(endpointFailure), { status: 200 })));
+    await expect(testProjectConnection(projectInput, "production", "api")).resolves.toMatchObject({ result: "http_error", httpStatus: 503 });
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("transport details must stay private")));
+    await expect(testProjectConnection(projectInput, "production", "api")).rejects.toEqual(new ProjectRegistryApiError("network", 0));
   });
 });
