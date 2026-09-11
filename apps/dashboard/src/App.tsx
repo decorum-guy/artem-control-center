@@ -9,6 +9,7 @@ import {
   SettingsPage,
   SystemPage
 } from "./pages";
+import { BackupsPage } from "./BackupsPage";
 import { CalendarPage, RemindersPage, TasksPage } from "./PlanningRoutes";
 import {
   planningRouteEnabled
@@ -532,6 +533,7 @@ export function App() {
               : <ServicesPage snapshot={snapshot} onNavigate={navigate} />
           )}
           {route === "/coffee-diary" && <CoffeeDiaryPage />}
+          {route === "/backups" && <BackupsPage />}
           {route === "/settings" && (
             v2VisualShellEnabled ? (
               <SettingsV2Page
@@ -555,7 +557,7 @@ export function App() {
           {route === "/tasks" && (planningRouteEnabled("/tasks") ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
           {route === "/calendar" && (planningRouteEnabled("/calendar") ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
           {route === "/reminders" && planningRouteEnabled("/reminders") && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
-          {!["/overview", "/weather", "/home", "/services", "/coffee-diary", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
+          {!["/overview", "/weather", "/home", "/services", "/coffee-diary", "/backups", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
             <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}
         </ProductShell>

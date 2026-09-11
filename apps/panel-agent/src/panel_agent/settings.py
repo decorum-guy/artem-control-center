@@ -4,8 +4,12 @@ import os
 import ipaddress
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+MAX_BACKUP_LOCAL_ROOT_CHARS = 1024
 
 
 @dataclass(frozen=True)
@@ -80,6 +84,8 @@ class IntegrationSettings:
     calendar_display_color_path: str = ".cache/calendar-display-colors.json"
     device_visibility_path: str = ".cache/device-visibility.json"
     projects_config_path: str = ".runtime/projects.yaml"
+    backup_local_root: str = ""
+    backup_min_free_bytes: int = 20 * 1024**3
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
     panel_planning_enabled: bool = False
@@ -350,6 +356,17 @@ class IntegrationSettings:
                 os.getenv("PANEL_PROJECTS_CONFIG_PATH", ".runtime/projects.yaml").strip()
                 or ".runtime/projects.yaml"
             ),
+            backup_local_root=_bounded_backup_local_root(
+                os.getenv("PANEL_BACKUP_LOCAL_ROOT", "").strip()
+                or _default_backup_local_root()
+            ),
+            backup_min_free_bytes=min(
+                1 * 1024**4,
+                max(
+                    1 * 1024**2,
+                    _int_env("PANEL_BACKUP_MIN_FREE_BYTES", 20 * 1024**3),
+                ),
+            ),
             access_temporary_minutes=max(
                 1,
                 int(os.getenv("PANEL_ACCESS_TEMPORARY_MINUTES", "30")),
@@ -444,6 +461,20 @@ def _bool_env(name: str, default: bool) -> bool:
     if not raw:
         return default
     return raw in {"1", "true", "yes", "on"}
+
+
+def _default_backup_local_root() -> str:
+    """Use the Windows runtime data root, never the Git checkout."""
+    local_app_data = os.getenv("LOCALAPPDATA", "").strip()
+    if not local_app_data:
+        return ""
+    return str(Path(local_app_data) / "ArtemControlCenter" / "backups")
+
+
+def _bounded_backup_local_root(value: str) -> str:
+    if len(value) > MAX_BACKUP_LOCAL_ROOT_CHARS:
+        return ""
+    return value
 
 
 def _int_env(name: str, default: int) -> int:

@@ -84,6 +84,8 @@ from .capabilities import (
 from .ai_settings import AIProviderSettingsStore
 from .ai_text import AITextService
 from .ai_api import build_ai_router
+from .access_policy import AccessPolicyStore
+from .backups import BackupEngine, PanelConfigSource, build_backup_router
 from .interface_copy import (
     FIXTURE_INTERFACE_COPY_SCENARIOS,
     InterfaceCopyRevisionConflict,
@@ -198,6 +200,22 @@ coffee_photo_storage = PhotoStorage(cleanup_staged=True)
 coffee_upload_registry = PhotoUploadRegistry(coffee_photo_storage)
 knowledge_reader = KnowledgeReader()
 startup_lifecycle = PanelStartupLifecycle()
+access_policy = AccessPolicyStore.from_environment(
+    temporary_minutes=SETTINGS.access_temporary_minutes,
+)
+backup_source = PanelConfigSource.from_store_paths(
+    overview_layout=overview_layout_store.path,
+    calendar_display_colors=calendar_display_preferences_store.path,
+    device_visibility=device_visibility_store.path,
+    interface_copy=interface_copy_store.path,
+    project_registry=project_registry_store.path,
+    capability_overrides=capability_override_store.path,
+)
+backup_engine = BackupEngine(
+    backup_source,
+    SETTINGS.backup_local_root,
+    min_free_bytes=SETTINGS.backup_min_free_bytes,
+)
 
 
 @asynccontextmanager
@@ -265,6 +283,7 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+app.include_router(build_backup_router(backup_engine, access_policy))
 app.include_router(
     build_project_registry_router(
         project_registry_store,

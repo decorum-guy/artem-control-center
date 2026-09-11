@@ -3,7 +3,7 @@ version: 1
 storage_destinations:
   - id: laptop-primary
     type: local_directory
-    path_env: BACKUP_LOCAL_ROOT
+    path_env: PANEL_BACKUP_LOCAL_ROOT
     required: true
     minimum_free_bytes: 21474836480
     encryption_supported: true
@@ -30,12 +30,9 @@ backup_profiles:
     service_id: panel-agent
     enabled: true
     source:
-      adapter: config_only
-      paths:
-        - .cache/overview-layout.json
-        - .cache/calendar-display-colors.json
-        - '%LOCALAPPDATA%/ArtemControlCenter/capability-overrides.json'
-      note: Dedicated Panel-owned layout, Calendar display-preference, and capability-override JSON; no secrets, credentials, endpoints, or runtime snapshots.
+      adapter: registered_handler
+      handler_ref: panel-config
+      note: Server-owned allow-list of Panel layout, Calendar display-preference, device-visibility, interface-copy, Project Registry, and capability-override state; no request-supplied paths, secrets, credentials, endpoints, or runtime snapshots.
     destinations:
       - id: laptop-primary
         mode: always
@@ -45,7 +42,7 @@ backup_profiles:
       checksum: sha256
       manifest_required: true
     restore:
-      semantics: Place files at PANEL_OVERVIEW_LAYOUT_PATH, PANEL_CALENDAR_DISPLAY_COLOR_PATH, and %LOCALAPPDATA%/ArtemControlCenter/capability-overrides.json; Panel Agent validates and recovers without overwriting bytes until an explicit save or capability Apply.
+      semantics: future-slice-only; restore is not executable in Slice A.
 
   - id: home-assistant-native
     project_id: home-stack
@@ -76,7 +73,7 @@ backup_profiles:
       restore_test_interval_days: 90
 
   - id: avalar-site-stage
-    project_id: avalar-site
+    project_id: avalar
     environment_id: stage
     service_id: website
     enabled: true
@@ -100,7 +97,7 @@ backup_profiles:
       manifest_required: true
 
   - id: avalar-site-main
-    project_id: avalar-site
+    project_id: avalar
     environment_id: main
     service_id: website
     enabled: true

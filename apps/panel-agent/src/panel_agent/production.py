@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from .access_middleware import AccessPolicyMiddleware
-from .access_policy import AccessPolicyStore, build_access_router
+from .access_policy import build_access_router
 from .avalar_actions import AvalarActionExecutor, build_avalar_action_router
 from .connectivity_actions import (
     ConnectivityActionExecutor,
@@ -13,16 +13,13 @@ from .home_assistant_actions import (
     HomeAssistantActionExecutor,
     build_home_assistant_action_router,
 )
-from .main import SETTINGS, app, effective_immediate_capability_enabled, runtime
+from .main import SETTINGS, access_policy, app, effective_immediate_capability_enabled, runtime
 from .rog_g703_power import RogG703ActionExecutor, build_rog_g703_action_router
 from .static_dashboard import install_dashboard_routes
 from .system_update import build_system_update_router
 
 logging.getLogger("uvicorn.access").disabled = True
 
-access_policy = AccessPolicyStore.from_environment(
-    temporary_minutes=SETTINGS.access_temporary_minutes,
-)
 avalar_actions = AvalarActionExecutor(
     SETTINGS,
     access_policy,
