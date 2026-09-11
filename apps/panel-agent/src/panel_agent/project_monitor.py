@@ -99,8 +99,9 @@ async def probe_declarative_http_monitor(
             http_status=bounded_status,
             latency_ms=latency_ms,
         )
-    except Exception:
-        # Do not expose transport, DNS, socket or upstream exception details.
+    except httpx.HTTPError:
+        # Preserve the monitor's established HTTPX failure boundary without
+        # exposing transport, DNS, socket or upstream exception details.
         return DeclarativeHttpProbeResult("unreachable")
 
 

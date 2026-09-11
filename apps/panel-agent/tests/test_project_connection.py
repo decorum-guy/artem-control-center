@@ -11,7 +11,11 @@ from fastapi.testclient import TestClient
 
 from panel_agent.access_middleware import AccessPolicyMiddleware
 from panel_agent.access_policy import AccessPolicyStore
-from panel_agent.project_monitor import DeclarativeProjectMonitor, probe_declarative_http_monitor
+from panel_agent.project_monitor import (
+    DeclarativeHttpProbeResult,
+    DeclarativeProjectMonitor,
+    probe_declarative_http_monitor,
+)
 from panel_agent.project_registry import ProjectConfigDocument, ProjectRegistry, load_project_registry
 from panel_agent.project_registry_api import build_project_registry_router
 from panel_agent.project_registry_store import ProjectRegistryStore
@@ -307,6 +311,36 @@ def test_timeout_or_network_failure_is_unreachable_without_exception_details(mon
     assert response.json()["httpStatus"] is None
     assert response.json()["latencyMs"] is None
     assert failure not in response.text
+
+
+def test_shared_probe_bounds_httpx_timeout_and_propagates_unexpected_transport_error(monkeypatch):
+    monkeypatch.setenv("EXTERNAL_API_HEALTH_URL", "https://offline.example.test/health")
+    document = ProjectConfigDocument.model_validate({"version": 1, "projects": [_project()]})
+    monitor_config = document.projects[0].environments[0].services[0].capabilities.monitor
+
+    async def timeout_handler(request):
+        raise httpx.ReadTimeout("socket details must not escape", request=request)
+
+    async def unexpected_handler(request):
+        raise AssertionError("test transport programming failure")
+
+    async def exercise():
+        timeout_probe = await probe_declarative_http_monitor(
+            monitor_config,
+            _settings(),
+            transport=_Transport(timeout_handler),
+        )
+        assert timeout_probe == DeclarativeHttpProbeResult("unreachable")
+
+        declarative_monitor = DeclarativeProjectMonitor(
+            ProjectRegistry(path="<test>", projects=tuple(document.projects)),
+            _settings(),
+            transport=_Transport(unexpected_handler),
+        )
+        with pytest.raises(AssertionError, match="test transport programming failure"):
+            await declarative_monitor.refresh()
+
+    asyncio.run(exercise())
 
 
 def test_test_does_not_mutate_registry_runtime_or_snapshot(monkeypatch, tmp_path):

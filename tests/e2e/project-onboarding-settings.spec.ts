@@ -451,6 +451,8 @@ test.describe("Slice C/D monitor-only project onboarding in Settings", () => {
     });
     expect(buttonSize.width).toBeGreaterThanOrEqual(48);
     expect(buttonSize.height).toBeGreaterThanOrEqual(48);
+    await expect(sheet).toContainText("Проверка не сохраняет изменения.");
+    await expect(sheet).not.toContainText(/\bdraft\b/i);
 
     await testButton.click();
     await expect(sheet.getByTestId("project-preview")).toContainText("Предпросмотр");

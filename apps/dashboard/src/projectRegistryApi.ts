@@ -350,11 +350,21 @@ export async function testProjectConnection(
     const detail = isRecord(body) ? body.detail : undefined;
     throw new ProjectRegistryApiError(safeServerErrorCode(detail), response.status);
   }
+
+  let result: ProjectConnectionTestResponse;
   try {
-    return parseProjectConnectionTest(body);
+    result = parseProjectConnectionTest(body);
   } catch {
     throw new ProjectRegistryApiError("contract_invalid", response.status);
   }
+  if (
+    result.projectId !== project.id
+    || result.environmentId !== environmentId
+    || result.serviceId !== serviceId
+  ) {
+    throw new ProjectRegistryApiError("contract_invalid", response.status);
+  }
+  return result;
 }
 
 export function getProjectRegistry(signal?: AbortSignal): Promise<ProjectRegistrySettings> {

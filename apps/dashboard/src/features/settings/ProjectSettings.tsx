@@ -588,7 +588,7 @@ export function ProjectSettingsSheet({
               >
                 {connectionTestPending ? "Проверяем…" : "Проверить соединение"}
               </button>
-              <small>Проверяет только текущий draft. Сохранение проекта остаётся отдельным действием.</small>
+              <small>Проверка не сохраняет изменения.</small>
             </div>
           </form>
         )}

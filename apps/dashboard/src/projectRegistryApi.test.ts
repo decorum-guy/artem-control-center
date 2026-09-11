@@ -165,6 +165,28 @@ describe("project registry API", () => {
     expect(String(init.body)).not.toContain("expectedRevision");
   });
 
+  it.each([
+    { field: "projectId", value: "different-project" },
+    { field: "environmentId", value: "staging" },
+    { field: "serviceId", value: "worker" }
+  ] as const)("rejects a connection-test response with a mismatched $field", async ({ field, value }) => {
+    const result = {
+      schemaVersion: "project.connection-test.v1",
+      result: "reachable",
+      reachable: true,
+      httpStatus: 204,
+      latencyMs: 42,
+      projectId: "new-project",
+      environmentId: "production",
+      serviceId: "api",
+      [field]: value
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(result), { status: 200 })));
+
+    await expect(testProjectConnection(projectInput, "production", "api"))
+      .rejects.toEqual(new ProjectRegistryApiError("contract_invalid", 200));
+  });
+
   it("strictly parses bounded result metadata and rejects response extras or mismatches", () => {
     const result = {
       schemaVersion: "project.connection-test.v1",
