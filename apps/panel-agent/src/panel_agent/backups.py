@@ -524,12 +524,13 @@ class BackupEngine:
 
     def _create_archive(self, target: Path, contents: Sequence[tuple[str, bytes]]) -> None:
         try:
-            with zipfile.ZipFile(target, mode="w", compression=zipfile.ZIP_DEFLATED, allowZip64=False) as archive:
-                for member_name, data in contents:
-                    if not _safe_member_name(member_name):
-                        raise BackupFailure("backup_archive_failed")
-                    archive.writestr(member_name, data)
-            with target.open("rb") as handle:
+            with target.open("wb") as handle:
+                with zipfile.ZipFile(handle, mode="w", compression=zipfile.ZIP_DEFLATED, allowZip64=False) as archive:
+                    for member_name, data in contents:
+                        if not _safe_member_name(member_name):
+                            raise BackupFailure("backup_archive_failed")
+                        archive.writestr(member_name, data)
+                handle.flush()
                 os.fsync(handle.fileno())
         except BackupFailure:
             raise
