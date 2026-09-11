@@ -49,7 +49,10 @@ from .integrations import IntegrationRuntime
 from .planning_api import build_planning_router
 from .project_registry_api import build_project_registry_router
 from .project_registry_store import ProjectRegistryStore
-from .project_registry_migration import ensure_canonical_avalar_project
+from .project_registry_migration import (
+    CANONICAL_AVALAR_PROJECT_ID,
+    ensure_canonical_avalar_project,
+)
 from .runtime_control import router as runtime_control_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
@@ -268,6 +271,11 @@ app.include_router(
         runtime,
         snapshot_rebuild=snapshot_publisher.rebuild,
         writes_allowed=lambda: _project_registry_write_allowed(),
+        protected_project_ids=(
+            frozenset({CANONICAL_AVALAR_PROJECT_ID})
+            if MODE == "production"
+            else frozenset()
+        ),
         connection_test_settings=SETTINGS,
     )
 )

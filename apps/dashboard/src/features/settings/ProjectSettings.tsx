@@ -487,7 +487,7 @@ export function ProjectSettingsSheet({
                             <input
                               type="checkbox"
                               checked={project.enabled}
-                              disabled={!canWrite || mutationPending}
+                              disabled={!canWrite || mutationPending || !draft}
                               aria-label={`${project.enabled ? "Выключить" : "Включить"} проект «${project.name}»`}
                               onChange={(event) => void toggleProject(project, event.target.checked)}
                             />
@@ -514,9 +514,9 @@ export function ProjectSettingsSheet({
 
                       <div className="project-settings-card__actions">
                         <button type="button" data-testid={`project-edit-${project.id}`} className="planning-secondary-button" disabled={!canWrite || mutationPending || !draft} onClick={() => openEditor(project)}>Изменить</button>
-                        <button type="button" data-testid={`project-delete-${project.id}`} className="project-settings-card__delete" disabled={!canWrite || mutationPending} onClick={() => void deleteProject(project)}>Удалить</button>
+                        <button type="button" data-testid={`project-delete-${project.id}`} className="project-settings-card__delete" disabled={!canWrite || mutationPending || !draft} onClick={() => void deleteProject(project)}>Удалить</button>
                       </div>
-                      {!draft && <small className="project-settings-card__note">Этот проект использует расширенные возможности и пока редактируется только через конфигурацию проекта.</small>}
+                      {!draft && <small className="project-settings-card__note">Расширенный проект доступен только для просмотра в текущем интерфейсе.</small>}
                     </article>
                   );
                 })}

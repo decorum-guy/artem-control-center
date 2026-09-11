@@ -67,7 +67,14 @@ class _FakeRuntime:
         self.registries.append(registry)
 
 
-def _client(path, *, writes_allowed: bool = True, runtime=None, rebuild=None):
+def _client(
+    path,
+    *,
+    writes_allowed: bool = True,
+    runtime=None,
+    rebuild=None,
+    protected_project_ids=frozenset(),
+):
     store = ProjectRegistryStore(path)
     runtime = runtime or _FakeRuntime()
     rebuild_calls = []
@@ -82,6 +89,7 @@ def _client(path, *, writes_allowed: bool = True, runtime=None, rebuild=None):
             runtime,
             snapshot_rebuild=rebuild or snapshot_rebuild,
             writes_allowed=lambda: writes_allowed,
+            protected_project_ids=protected_project_ids,
         )
     )
     return store, runtime, rebuild_calls, TestClient(app)
@@ -337,6 +345,93 @@ def test_delete_removes_project_and_increments_revision(tmp_path):
     assert load_project_registry(path).projects == ()
     assert len(runtime.registries) == 1
     assert len(rebuild_calls) == 1
+
+
+def test_protected_project_cannot_be_created_without_file_or_reconciliation(tmp_path):
+    path = tmp_path / "projects.yaml"
+    runtime = _FakeRuntime()
+    _, _, rebuild_calls, client = _client(
+        path,
+        runtime=runtime,
+        protected_project_ids={"avalar"},
+    )
+
+    response = client.post(
+        "/api/v1/settings/projects",
+        json=_body(_project(project_id="avalar")),
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "project_reserved"}
+    assert not path.exists()
+    assert runtime.registries == []
+    assert rebuild_calls == []
+
+
+@pytest.mark.parametrize("method", ["PUT", "PATCH"])
+def test_protected_project_cannot_be_replaced_without_mutation_or_reconciliation(
+    tmp_path,
+    method,
+):
+    path = tmp_path / "projects.yaml"
+    _write(path, {"version": 1, "revision": 7, "projects": [_project(project_id="avalar")]})
+    runtime = _FakeRuntime()
+    _, _, rebuild_calls, client = _client(
+        path,
+        runtime=runtime,
+        protected_project_ids={"avalar"},
+    )
+    before = path.read_bytes()
+
+    response = client.request(
+        method,
+        "/api/v1/settings/projects/avalar",
+        json=_body(_project(project_id="avalar", enabled=False), revision=7),
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "project_reserved"}
+    assert path.read_bytes() == before
+    assert load_project_registry(path).revision == 7
+    assert runtime.registries == []
+    assert rebuild_calls == []
+
+
+def test_protected_project_cannot_be_deleted_without_mutation_or_reconciliation(tmp_path):
+    path = tmp_path / "projects.yaml"
+    _write(path, {"version": 1, "revision": 7, "projects": [_project(project_id="avalar")]})
+    runtime = _FakeRuntime()
+    _, _, rebuild_calls, client = _client(
+        path,
+        runtime=runtime,
+        protected_project_ids={"avalar"},
+    )
+    before = path.read_bytes()
+
+    response = client.request(
+        "DELETE",
+        "/api/v1/settings/projects/avalar",
+        json={"expectedRevision": 7},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "project_reserved"}
+    assert path.read_bytes() == before
+    assert load_project_registry(path).revision == 7
+    assert runtime.registries == []
+    assert rebuild_calls == []
+
+
+def test_protected_project_get_remains_available(tmp_path):
+    path = tmp_path / "projects.yaml"
+    _write(path, {"version": 1, "revision": 7, "projects": [_project(project_id="avalar")]})
+    _, _, _, client = _client(path, protected_project_ids={"avalar"})
+
+    response = client.get("/api/v1/settings/projects")
+
+    assert response.status_code == 200
+    assert response.json()["revision"] == 7
+    assert response.json()["projects"][0]["id"] == "avalar"
 
 
 def test_stale_revision_returns_409_without_file_or_runtime_change(tmp_path):
