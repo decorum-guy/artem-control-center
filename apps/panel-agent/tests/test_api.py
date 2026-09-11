@@ -160,14 +160,21 @@ def test_avalar_main_and_stage_are_registry_services_with_separate_policy(monkey
     ]
 
     assert [service["id"] for service in avalar] == [
-        "avalar-site-main",
-        "avalar-site-stage",
+        "avalar.main.website",
+        "avalar.stage.website",
     ]
     main_actions = {action["id"] for action in avalar[0]["actions"]}
     stage_actions = {action["id"] for action in avalar[1]["actions"]}
-    assert "avalar.main.deploy" not in main_actions
-    assert main_actions == {"avalar.main.smoke"}
-    assert stage_actions == {"avalar.stage.smoke", "avalar.stage.deploy"}
+    assert main_actions == {
+        "avalar.main.smoke",
+        "avalar.main.restart",
+        "avalar.main.deploy",
+    }
+    assert stage_actions == {
+        "avalar.stage.smoke",
+        "avalar.stage.restart",
+        "avalar.stage.deploy",
+    }
     assert all(not action["enabled"] for service in avalar for action in service["actions"])
 
 
@@ -234,13 +241,14 @@ def test_coffee_narrow_gates_enable_only_their_contracts(monkeypatch):
     assert action.headers["cache-control"] == "no-store"
 
 
-def test_production_action_endpoint_rechecks_live_capability(monkeypatch):
+def test_production_action_endpoint_rechecks_live_capability(monkeypatch, tmp_path):
     monkeypatch.setenv("PANEL_WRITES_ENABLED", "true")
     monkeypatch.setenv("PANEL_COFFEE_ACTIONS_ENABLED", "true")
     monkeypatch.setenv("PANEL_HA_URL", "https://ha.test")
     monkeypatch.setenv("PANEL_HA_TOKEN", "test-token")
     monkeypatch.setenv("PANEL_ALICE_BASE_URL", "https://alice.test")
     monkeypatch.setenv("PANEL_ALICE_CONTROL_CENTER_TOKEN", "dedicated-token")
+    monkeypatch.setenv("PANEL_PROJECTS_CONFIG_PATH", str(tmp_path / "projects.yaml"))
     module = load_app(monkeypatch, "production")
     client = TestClient(module.app)
 

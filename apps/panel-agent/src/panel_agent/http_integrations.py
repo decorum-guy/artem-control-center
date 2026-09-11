@@ -7,9 +7,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 
 import httpx
 
-from .contracts import ActionDescriptor, ServicePresentation, ServiceSnapshot
-from .avalar_actions import avalar_action_descriptor
-from .avalar_health import probe_avalar_health
+from .contracts import ServicePresentation, ServiceSnapshot
 from .settings import IntegrationSettings
 
 
@@ -33,7 +31,7 @@ class HttpIntegrationAdapter:
         self._transport = transport
         self._details_provider = details_provider
         self._clock = clock
-        self._services = self._unavailable_services()
+        self._services = [_alice_unavailable()]
         self._last_success: Dict[str, tuple[ServiceSnapshot, float, str]] = {}
         self._lock: asyncio.Lock | None = None
         self._lock_loop: asyncio.AbstractEventLoop | None = None
@@ -68,25 +66,7 @@ class HttpIntegrationAdapter:
             self._lock = asyncio.Lock()
             self._lock_loop = loop
         async with self._lock:
-            results = await asyncio.gather(
-                self._read_avalar(
-                    "avalar-site-main",
-                    "AVALAR Main",
-                    self._settings.avalar_main_url,
-                    "production",
-                    90,
-                    main=True,
-                ),
-                self._read_avalar(
-                    "avalar-site-stage",
-                    "AVALAR Stage",
-                    self._settings.avalar_stage_url,
-                    "stage",
-                    80,
-                    main=False,
-                ),
-                self._read_alice(),
-            )
+            results = await asyncio.gather(self._read_alice())
             self._services = [self._with_last_known(result) for result in results]
             if self._on_change is not None:
                 await self._on_change()
@@ -145,77 +125,6 @@ class HttpIntegrationAdapter:
             cached.presentation.freshnessLabel = _age_label(age)
             cached.presentation.latencyMs = None
         return cached
-
-    async def _read_avalar(
-        self,
-        service_id: str,
-        title: str,
-        base_url: str,
-        environment: str,
-        priority: int,
-        *,
-        main: bool,
-    ) -> ServiceSnapshot:
-        actions = _avalar_actions(main)
-        if not base_url:
-            return _avalar_unavailable(
-                service_id,
-                title,
-                environment,
-                priority,
-                actions,
-            )
-        details = (
-            self._details_provider.details_for(service_id)
-            if self._details_provider
-            else {}
-        )
-        probe = await probe_avalar_health(
-            base_url,
-            self._settings.http_request_timeout_seconds,
-            transport=self._transport,
-            clock=self._clock,
-        )
-        if probe.outcome == "unavailable":
-            return _avalar_unavailable(
-                service_id,
-                title,
-                environment,
-                priority,
-                actions,
-                summary="Health endpoint unavailable",
-            )
-        return ServiceSnapshot(
-            id=service_id,
-            title=title,
-            health=probe.health or "degraded",
-            summary=probe.summary,
-            dataContract="service.health.v1",
-            actions=actions,
-            source="live",
-            presentation=ServicePresentation(
-                category="work",
-                group="AVALAR",
-                overview="aggregate",
-                priority=priority,
-                environment=environment,
-                freshnessLabel="только что",
-                latencyMs=probe.latency_ms or 0,
-            ),
-            data={
-                "environment": environment,
-                "version": details.get("version"),
-                "commit": details.get("commit"),
-                "branch": details.get("branch"),
-                "deploymentRevision": details.get("deployment_revision"),
-                "deployedAt": details.get("deployed_at"),
-                "workingTree": details.get("working_tree"),
-                "detailsAvailable": bool(details),
-                "detailsSource": details.get("details_source", "disabled"),
-                "detailsObservedAt": details.get("details_observed_at"),
-                "executor": "disabled",
-            },
-        )
 
     async def _read_alice(self) -> ServiceSnapshot:
         base_url = self._settings.alice_health_url
@@ -282,67 +191,6 @@ class HttpIntegrationAdapter:
                 "commit": details.get("commit"),
             },
         )
-
-    def _unavailable_services(self) -> List[ServiceSnapshot]:
-        return [
-            _avalar_unavailable(
-                "avalar-site-main",
-                "AVALAR Main",
-                "production",
-                90,
-                _avalar_actions(True),
-            ),
-            _avalar_unavailable(
-                "avalar-site-stage",
-                "AVALAR Stage",
-                "stage",
-                80,
-                _avalar_actions(False),
-            ),
-            _alice_unavailable(),
-        ]
-
-
-def _avalar_actions(main: bool) -> List[ActionDescriptor]:
-    action_ids = (
-        ("avalar.main.smoke",)
-        if main
-        else ("avalar.stage.smoke", "avalar.stage.deploy")
-    )
-    return [avalar_action_descriptor(action_id) for action_id in action_ids]
-
-
-def _avalar_unavailable(
-    service_id: str,
-    title: str,
-    environment: str,
-    priority: int,
-    actions: List[ActionDescriptor],
-    *,
-    summary: str = "Health adapter not configured",
-) -> ServiceSnapshot:
-    return ServiceSnapshot(
-        id=service_id,
-        title=title,
-        health="offline",
-        summary=summary,
-        dataContract="service.health.v1",
-        actions=actions,
-        source="unavailable",
-        presentation=ServicePresentation(
-            category="work",
-            group="AVALAR",
-            overview="aggregate",
-            priority=priority,
-            environment=environment,
-        ),
-        data={
-            "environment": environment,
-            "detailsSource": "disabled",
-            "executor": "disabled",
-        },
-    )
-
 
 def _alice_unavailable(summary: str = "Health adapter not configured") -> ServiceSnapshot:
     return ServiceSnapshot(

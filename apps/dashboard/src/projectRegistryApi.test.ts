@@ -173,6 +173,16 @@ describe("project registry API", () => {
     expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({ expectedRevision: 7 });
   });
 
+  it("keeps the protected-project server error in the closed contract", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: "project_reserved" }), { status: 409 })
+    ));
+
+    await expect(deleteProject("avalar", 7)).rejects.toEqual(
+      new ProjectRegistryApiError("project_reserved", 409)
+    );
+  });
+
   it("encodes a project id as one path segment", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...registry, projects: [] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

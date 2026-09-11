@@ -35,8 +35,8 @@ function Get-ServiceSnapshot {
 
 $ha = Get-ServiceSnapshot -ServiceId "home-assistant"
 $alice = Get-ServiceSnapshot -ServiceId "alice-tg-bot"
-$avalarMain = Get-ServiceSnapshot -ServiceId "avalar-site-main"
-$avalarStage = Get-ServiceSnapshot -ServiceId "avalar-site-stage"
+$avalarMain = Get-ServiceSnapshot -ServiceId "avalar.main.website"
+$avalarStage = Get-ServiceSnapshot -ServiceId "avalar.stage.website"
 $kiosk = Get-ArtemKioskStatus -Paths $paths -RuntimeReady $panelReady
 
 $status = [ordered]@{

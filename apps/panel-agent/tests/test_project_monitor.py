@@ -262,11 +262,13 @@ def test_integration_runtime_retains_existing_services_and_adds_declarative_serv
         assert {
             "home-assistant",
             "coffee-machine",
-            "avalar-site-main",
-            "avalar-site-stage",
             "alice-tg-bot",
             "external-api.production.api",
         }.issubset(ids)
+        assert "avalar.main.website" not in ids
+        assert "avalar.stage.website" not in ids
+        assert "avalar-site-main" not in ids
+        assert "avalar-site-stage" not in ids
         snapshot = publisher.snapshot
         assert snapshot is not None
         declarative = next(

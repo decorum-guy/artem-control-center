@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.avalar_actions import AvalarActionExecutor, AvalarActionRequest
+from panel_agent.integrations import IntegrationRuntime
+from panel_agent.project_registry import ProjectRegistry
 from panel_agent.settings import IntegrationSettings
 
 
@@ -182,5 +185,62 @@ def test_main_restart_confirmation_is_required_for_temporary_full_but_waived_for
                 )
             )
         assert deploy.value.detail == "gate_disabled"
+
+    asyncio.run(scenario())
+
+
+def test_successful_action_refreshes_registry_backed_avalar_services(tmp_path):
+    async def scenario() -> None:
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_pin("2468")
+        access.set_profile("full", pin="2468")
+        runtime = IntegrationRuntime(
+            settings(),
+            project_registry=ProjectRegistry.empty(Path(tmp_path / "projects.yaml")),
+        )
+        refreshed: list[tuple[str, ...]] = []
+
+        async def refresh(service_ids=None):
+            refreshed.append(tuple(service_ids or ()))
+            return True
+
+        runtime.project_monitor.refresh = refresh  # type: ignore[method-assign]
+
+        async def command_runner(operation: str):
+            return {
+                "ok": True,
+                "operation": operation,
+                "environment": "production",
+                "status": "verified",
+            }
+
+        executor = AvalarActionExecutor(
+            settings(),
+            access,
+            details_provider=FakeDetails(),
+            refresh_callback=runtime.refresh_avalar,
+            command_runner=command_runner,
+        )
+
+        async def healthy(_: str) -> None:
+            return None
+
+        executor._verify_public_health = healthy  # type: ignore[method-assign]
+        try:
+            execution = await executor.start(
+                AvalarActionRequest(
+                    actionId="avalar.main.smoke",
+                    expectedRevision="a" * 40,
+                )
+            )
+            for _ in range(50):
+                current = executor.get(execution.correlationId)
+                if current.status in {"success", "failed"}:
+                    break
+                await asyncio.sleep(0.01)
+            assert current.status == "success"
+            assert refreshed == [("avalar.main.website", "avalar.stage.website")]
+        finally:
+            await runtime.close()
 
     asyncio.run(scenario())

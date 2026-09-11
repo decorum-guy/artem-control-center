@@ -430,7 +430,7 @@ test.describe("Slice C/D monitor-only project onboarding in Settings", () => {
   });
 
   test("registry-backed AVALAR uses owner-facing copy and keeps advanced project controls safe", async ({ page }) => {
-    await openProjectSheet(page, await installFixtures(page, { initial: registry([avalarProject()]) }));
+    const fixture = await openProjectSheet(page, await installFixtures(page, { initial: registry([avalarProject()]) }));
     const card = page.getByTestId("project-card-avalar");
 
     await expect(card).toContainText("Мониторинг и управление");
@@ -438,12 +438,17 @@ test.describe("Slice C/D monitor-only project onboarding in Settings", () => {
     await expect(card).toContainText("Мониторинг AVALAR · переменная PANEL_AVALAR_MAIN_URL · диагностика · действий: 3");
     await expect(card).toContainText("stage · website");
     await expect(card).toContainText("Мониторинг AVALAR · переменная PANEL_AVALAR_STAGE_URL · диагностика · действий: 3");
-    await expect(card).toContainText("Этот проект использует расширенные возможности и пока редактируется только через конфигурацию проекта.");
+    await expect(card).toContainText("Расширенный проект доступен только для просмотра в текущем интерфейсе.");
     await expect(card).not.toContainText(/capabilities|AVALAR health|\bdetails\b|\bactions 3\b/i);
 
     await expect(card.getByTestId("project-edit-avalar")).toBeDisabled();
-    await expect(card.getByTestId("project-delete-avalar")).toBeEnabled();
-    await expect(card.getByRole("checkbox", { name: "Выключить проект «AVALAR»" })).toBeEnabled();
+    await expect(card.getByTestId("project-delete-avalar")).toBeDisabled();
+    const toggle = card.getByRole("checkbox", { name: "Выключить проект «AVALAR»" });
+    await expect(toggle).toBeDisabled();
+    await card.getByTestId("project-edit-avalar").evaluate((element) => (element as HTMLButtonElement).click());
+    await card.getByTestId("project-delete-avalar").evaluate((element) => (element as HTMLButtonElement).click());
+    await toggle.evaluate((element) => (element as HTMLInputElement).click());
+    expect(fixture.mutations).toHaveLength(0);
   });
 
   test("available=false is explicit and removes all mutation affordances", async ({ page }) => {

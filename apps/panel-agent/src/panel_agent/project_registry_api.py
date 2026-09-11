@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable, Literal
+from typing import AbstractSet, Any, Awaitable, Callable, Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -206,11 +206,13 @@ def build_project_registry_router(
     *,
     snapshot_rebuild: Callable[[], Awaitable[Any]],
     writes_allowed: Callable[[], bool],
+    protected_project_ids: AbstractSet[str] = frozenset(),
     connection_test_settings: IntegrationSettings | None = None,
     connection_test_transport: httpx.AsyncBaseTransport | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1/settings/projects", tags=["settings"])
     probe_settings = connection_test_settings or IntegrationSettings()
+    protected_ids = frozenset(protected_project_ids)
 
     @router.get("", response_model=ProjectRegistryResponse)
     def get_projects(response: Response) -> ProjectRegistryResponse:
@@ -242,6 +244,7 @@ def build_project_registry_router(
     @router.post("", response_model=ProjectRegistryResponse, status_code=status.HTTP_201_CREATED)
     async def create_project(request: Request, response: Response) -> ProjectRegistryResponse:
         payload = await _parse_payload(request, ProjectRegistryMutationRequest)
+        _require_project_not_reserved(payload.project.id, protected_ids)
         _require_writes(writes_allowed)
         try:
             saved = store.create(
@@ -263,6 +266,7 @@ def build_project_registry_router(
         request: Request,
         response: Response,
     ) -> ProjectRegistryResponse:
+        _require_project_not_reserved(project_id, protected_ids)
         payload = await _parse_payload(request, ProjectRegistryMutationRequest)
         _require_writes(writes_allowed)
         if payload.project.id != project_id:
@@ -283,6 +287,7 @@ def build_project_registry_router(
         request: Request,
         response: Response,
     ) -> ProjectRegistryResponse:
+        _require_project_not_reserved(project_id, protected_ids)
         payload = await _parse_payload(request, ProjectRegistryDeleteRequest)
         _require_writes(writes_allowed)
         try:
@@ -408,6 +413,14 @@ def _mutation_response(
 def _require_writes(writes_allowed: Callable[[], bool]) -> None:
     if not writes_allowed():
         raise HTTPException(status_code=403, detail="project_registry_write_disabled")
+
+
+def _require_project_not_reserved(
+    project_id: str,
+    protected_project_ids: AbstractSet[str],
+) -> None:
+    if project_id in protected_project_ids:
+        raise HTTPException(status_code=409, detail="project_reserved")
 
 
 async def _reconcile(

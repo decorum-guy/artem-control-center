@@ -1,7 +1,18 @@
-# AVALAR project capability bridge
+# AVALAR project capability bridge and production cutover
 
-This document describes the parity-only bridge for the capability-based Project
-Registry. It is intentionally not a production cutover plan.
+AVALAR has completed its production cutover to the capability-based Project
+Registry. The registry is the source of truth for AVALAR service identity,
+environment/service membership, and exposed capabilities.
+
+Production provisions the canonical `avalar` project during startup. Its
+runtime service identities are exactly:
+
+- `avalar.main.website`
+- `avalar.stage.website`
+
+The legacy `HttpIntegrationAdapter` no longer materializes AVALAR services.
+AliceTG remains materialized by that HTTP integration, and unrelated HTTP
+integration behavior is unchanged.
 
 ## Registry declaration
 
@@ -59,34 +70,78 @@ registered details reference; it never contains a URL, SSH host, user, key,
 command, script, password, or token.
 
 The `avalar` monitor reuses the fixed `/health/live` and `/health/ready` reader
-used by the legacy HTTP integration. The registry-backed runtime materializes
+used by the former HTTP integration. The registry-backed runtime materializes
 ordinary `ServiceSnapshot` values, including health, source/freshness, bounded
 latency, environment, sanitized details, and the declared fixed action
-descriptors. Action `enabled` state is supplied by the existing AVALAR executor
-availability decision, so access profiles, gates, confirmation, locks,
-cooldowns, revisions, verification, and audit remain authoritative.
+descriptors. Health, SSH details, and fixed actions continue to use the
+existing specialized adapters and AVALAR executor. Action `enabled` state is
+supplied by the executor availability decision, so access profiles, gates,
+confirmation, Interaction Lock, cooldowns, revisions, verification, and audit
+remain authoritative.
 
-## Coexistence and cutover boundary
+The action UI consumes explicit `service.actions` descriptors. It does not
+discover AVALAR actions from service ID strings. After a successful smoke,
+restart, or deploy, the fixed executor refreshes the canonical registry-backed
+AVALAR snapshots (`avalar.main.website` and `avalar.stage.website`), so
+subscribers observe the refreshed project-monitor state.
 
-This slice does not synthesize or persist an AVALAR project during startup. The
-legacy `HttpIntegrationAdapter`, SSH details adapter, action routes, and legacy
-snapshot IDs continue to serve the normal production path. A registry-backed
-AVALAR snapshot appears only when the project is explicitly present in the
-server-side Project Registry; this makes the bridge safe for parity fixtures and
-manual development configuration without creating production duplicates.
+## Production provisioning and protection
 
-## PR B identity/layout strategy
+The production startup path reads the current registry, safely ensures the
+canonical project, installs the resulting registry into `IntegrationRuntime`,
+and only then starts polling. Provisioning is bounded and uses the registry
+store's atomic persistence:
 
-The compatibility mapping for a later migration is explicit and deterministic:
+- a missing or empty valid registry (available revision `0`) receives the
+  canonical AVALAR project atomically;
+- unrelated projects are preserved unchanged;
+- a real addition increments the registry revision exactly once;
+- an already exact canonical project is a no-op with no revision bump;
+- a conflicting reserved `id: avalar` fails closed without overwriting or
+  merging owner data;
+- a corrupt or unavailable registry fails closed and is never replaced by a
+  clean registry;
+- repeated startup is idempotent.
+
+In production, the generic Project Registry API protects the reserved canonical
+project. POST create with `avalar`, PUT/PATCH replace, and DELETE return the
+bounded `409 project_reserved` error before any store mutation. GET and the
+read-only connection test remain available. Settings displays the extended
+AVALAR entry, but the current editor treats it as read-only: edit, enable/
+disable, and delete controls are disabled. Ordinary monitor-only projects keep
+their existing Settings CRUD behavior.
+
+There is no browser provisioning endpoint and no generic AVALAR executor.
+
+## Legacy service identities and reference audit
+
+`avalar-site-main` and `avalar-site-stage` are no longer production
+`ServiceSnapshot` identities. The only production AVALAR services exposed by
+`IntegrationRuntime.services()` come from `DeclarativeProjectMonitor`, and
+the main and stage services each appear once under their canonical IDs.
+
+The legacy strings remain only where they are intentionally useful as trusted
+internal compatibility keys: fixed executor/details lookup, the SSH details
+cache/mapping, health compatibility mapping, and tests, docs, or examples that
+explicitly model historical/internal behavior. They were not globally renamed.
+
+The source audit found no separate persisted owner-facing store containing
+legacy AVALAR service IDs. Overview persistence stores widget identity and
+configuration, not AVALAR service IDs, so no persisted layout/history rewrite
+migration was needed. Browser/runtime labels, fixtures, and status surfaces
+that represent production service identity use the canonical IDs.
 
 | Legacy service identity | Registry project/environment/service | Stable registry snapshot ID |
 | --- | --- | --- |
 | `avalar-site-main` | `avalar` / `main` / `website` | `avalar.main.website` |
 | `avalar-site-stage` | `avalar` / `stage` / `website` | `avalar.stage.website` |
 
-PR A does not rewrite layouts or history. Before PR B removes the legacy
-materialization, PR B must apply this mapping as an explicit, revisioned
-migration for every persisted layout/history reference and retain a rollback
-record. A new ID must not silently replace either legacy reference.
+The table is a historical/internal compatibility mapping, not a second
+production identity source. Unknown or unrelated service IDs are not rewritten.
 
-Backup execution remains outside this bridge and belongs to #8.
+## Backup boundary
+
+Backup execution is not implemented by this cutover. Issue #8 remains the
+owner of backup execution. A future backup implementation should attach to
+AVALAR as a Project Registry capability/profile; it must not restore a bespoke
+parallel AVALAR subsystem.

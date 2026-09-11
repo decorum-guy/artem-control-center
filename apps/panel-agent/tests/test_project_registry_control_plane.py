@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -11,6 +12,11 @@ from fastapi.testclient import TestClient
 from panel_agent.integrations import IntegrationRuntime
 from panel_agent.project_registry import ProjectRegistry, load_project_registry
 from panel_agent.project_registry_api import build_project_registry_router
+from panel_agent.project_registry_migration import (
+    ProjectRegistryMigrationError,
+    canonical_avalar_project,
+    ensure_canonical_avalar_project,
+)
 from panel_agent.project_registry_store import ProjectRegistryStore
 from panel_agent.snapshot import SnapshotPublisher
 from panel_agent.settings import IntegrationSettings
@@ -61,7 +67,14 @@ class _FakeRuntime:
         self.registries.append(registry)
 
 
-def _client(path, *, writes_allowed: bool = True, runtime=None, rebuild=None):
+def _client(
+    path,
+    *,
+    writes_allowed: bool = True,
+    runtime=None,
+    rebuild=None,
+    protected_project_ids=frozenset(),
+):
     store = ProjectRegistryStore(path)
     runtime = runtime or _FakeRuntime()
     rebuild_calls = []
@@ -76,6 +89,7 @@ def _client(path, *, writes_allowed: bool = True, runtime=None, rebuild=None):
             runtime,
             snapshot_rebuild=rebuild or snapshot_rebuild,
             writes_allowed=lambda: writes_allowed,
+            protected_project_ids=protected_project_ids,
         )
     )
     return store, runtime, rebuild_calls, TestClient(app)
@@ -93,6 +107,103 @@ def test_slice_a_document_without_revision_loads_as_revision_zero(tmp_path):
 
     assert registry.available is True
     assert registry.revision == 0
+
+
+@pytest.mark.parametrize("write_empty_document", [False, True])
+def test_provisioning_missing_or_empty_registry_creates_one_canonical_avalar(
+    tmp_path,
+    write_empty_document,
+):
+    path = tmp_path / "projects.yaml"
+    if write_empty_document:
+        _write(path, _document())
+
+    store = ProjectRegistryStore(path)
+    provisioned = ensure_canonical_avalar_project(store)
+
+    assert provisioned.available is True
+    assert provisioned.revision == 1
+    assert provisioned.projects == (canonical_avalar_project(),)
+    assert provisioned.projects[0].environments[0].services[0].capabilities.monitor.url_env == (
+        "PANEL_AVALAR_MAIN_URL"
+    )
+    serialized = json.dumps(provisioned.projects[0].model_dump(mode="json"))
+    assert "https://" not in serialized
+    assert "main.test" not in serialized
+    assert "stage.test" not in serialized
+    assert all(value not in serialized for value in ("host", "remote", "key", "token"))
+
+
+def test_provisioning_preserves_unrelated_projects_unchanged(tmp_path):
+    path = tmp_path / "projects.yaml"
+    unrelated = _project(project_id="unrelated")
+    _write(path, {"version": 1, "revision": 4, "projects": [unrelated]})
+    before = load_project_registry(path).projects[0]
+
+    provisioned = ensure_canonical_avalar_project(ProjectRegistryStore(path))
+
+    assert provisioned.revision == 5
+    assert provisioned.projects[0] == before
+    assert [project.id for project in provisioned.projects] == [
+        "unrelated",
+        "avalar",
+    ]
+
+
+def test_exact_canonical_provisioning_is_idempotent_without_revision_bump(tmp_path):
+    path = tmp_path / "projects.yaml"
+    first = ensure_canonical_avalar_project(ProjectRegistryStore(path))
+    before = path.read_bytes()
+
+    second = ensure_canonical_avalar_project(ProjectRegistryStore(path))
+
+    assert first.revision == 1
+    assert second.revision == 1
+    assert second.projects == (canonical_avalar_project(),)
+    assert path.read_bytes() == before
+
+
+def test_conflicting_avalar_project_fails_closed_without_overwrite(tmp_path):
+    path = tmp_path / "projects.yaml"
+    conflicting = canonical_avalar_project().model_copy(update={"name": "Owner AVALAR"})
+    _write(
+        path,
+        {
+            "version": 1,
+            "revision": 8,
+            "projects": [conflicting.model_dump(mode="python")],
+        },
+    )
+    before = path.read_bytes()
+
+    with pytest.raises(ProjectRegistryMigrationError) as error:
+        ensure_canonical_avalar_project(ProjectRegistryStore(path))
+
+    assert error.value.code == "avalar_definition_conflict"
+    assert path.read_bytes() == before
+    assert load_project_registry(path).projects[0].name == "Owner AVALAR"
+
+
+@pytest.mark.parametrize("corrupt_as_directory", [False, True])
+def test_unavailable_or_corrupt_registry_is_never_overwritten(
+    tmp_path,
+    corrupt_as_directory,
+):
+    path = tmp_path / "projects.yaml"
+    if corrupt_as_directory:
+        path.mkdir()
+    else:
+        path.write_text("version: [1\nprojects: []\n", encoding="utf-8")
+    before = path.read_bytes() if path.is_file() else None
+
+    with pytest.raises(ProjectRegistryMigrationError) as error:
+        ensure_canonical_avalar_project(ProjectRegistryStore(path))
+
+    assert error.value.code == "registry_unavailable"
+    if before is not None:
+        assert path.read_bytes() == before
+    else:
+        assert path.is_dir()
 
 
 def test_get_missing_registry_is_sanitized_empty_and_readable(tmp_path):
@@ -234,6 +345,93 @@ def test_delete_removes_project_and_increments_revision(tmp_path):
     assert load_project_registry(path).projects == ()
     assert len(runtime.registries) == 1
     assert len(rebuild_calls) == 1
+
+
+def test_protected_project_cannot_be_created_without_file_or_reconciliation(tmp_path):
+    path = tmp_path / "projects.yaml"
+    runtime = _FakeRuntime()
+    _, _, rebuild_calls, client = _client(
+        path,
+        runtime=runtime,
+        protected_project_ids={"avalar"},
+    )
+
+    response = client.post(
+        "/api/v1/settings/projects",
+        json=_body(_project(project_id="avalar")),
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "project_reserved"}
+    assert not path.exists()
+    assert runtime.registries == []
+    assert rebuild_calls == []
+
+
+@pytest.mark.parametrize("method", ["PUT", "PATCH"])
+def test_protected_project_cannot_be_replaced_without_mutation_or_reconciliation(
+    tmp_path,
+    method,
+):
+    path = tmp_path / "projects.yaml"
+    _write(path, {"version": 1, "revision": 7, "projects": [_project(project_id="avalar")]})
+    runtime = _FakeRuntime()
+    _, _, rebuild_calls, client = _client(
+        path,
+        runtime=runtime,
+        protected_project_ids={"avalar"},
+    )
+    before = path.read_bytes()
+
+    response = client.request(
+        method,
+        "/api/v1/settings/projects/avalar",
+        json=_body(_project(project_id="avalar", enabled=False), revision=7),
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "project_reserved"}
+    assert path.read_bytes() == before
+    assert load_project_registry(path).revision == 7
+    assert runtime.registries == []
+    assert rebuild_calls == []
+
+
+def test_protected_project_cannot_be_deleted_without_mutation_or_reconciliation(tmp_path):
+    path = tmp_path / "projects.yaml"
+    _write(path, {"version": 1, "revision": 7, "projects": [_project(project_id="avalar")]})
+    runtime = _FakeRuntime()
+    _, _, rebuild_calls, client = _client(
+        path,
+        runtime=runtime,
+        protected_project_ids={"avalar"},
+    )
+    before = path.read_bytes()
+
+    response = client.request(
+        "DELETE",
+        "/api/v1/settings/projects/avalar",
+        json={"expectedRevision": 7},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "project_reserved"}
+    assert path.read_bytes() == before
+    assert load_project_registry(path).revision == 7
+    assert runtime.registries == []
+    assert rebuild_calls == []
+
+
+def test_protected_project_get_remains_available(tmp_path):
+    path = tmp_path / "projects.yaml"
+    _write(path, {"version": 1, "revision": 7, "projects": [_project(project_id="avalar")]})
+    _, _, _, client = _client(path, protected_project_ids={"avalar"})
+
+    response = client.get("/api/v1/settings/projects")
+
+    assert response.status_code == 200
+    assert response.json()["revision"] == 7
+    assert response.json()["projects"][0]["id"] == "avalar"
 
 
 def test_stale_revision_returns_409_without_file_or_runtime_change(tmp_path):

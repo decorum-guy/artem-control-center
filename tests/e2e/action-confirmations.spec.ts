@@ -95,8 +95,8 @@ test("Stage restart uses touch confirmation and cancel never calls the action AP
   const api = await mockAvalar(page);
   await page.goto("/services");
 
-  const stage = page.getByTestId("widget-avalar-site-stage");
-  const restart = stage.getByRole("button", { name: "Перезапустить Stage" });
+  const stage = page.getByTestId("widget-avalar.stage.website");
+  const restart = stage.getByRole("button", { name: "Restart Stage" });
   await restart.click();
 
   const modal = page.getByTestId("action-confirmation");
@@ -139,8 +139,8 @@ test("Main deploy requires the exact production phrase and forwards it to backen
   });
 
   await page.goto("/services");
-  const main = page.getByTestId("widget-avalar-site-main");
-  await main.getByRole("button", { name: "Обновить Main" }).click();
+  const main = page.getByTestId("widget-avalar.main.website");
+  await main.getByRole("button", { name: "Deploy Main" }).click();
 
   const modal = page.getByTestId("action-confirmation");
   await expect(modal).toBeVisible();

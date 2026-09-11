@@ -27,6 +27,7 @@ export type ProjectRegistryServerErrorCode =
   | "invalid_content_length"
   | "project_registry_request_too_large"
   | "project_registry_write_disabled"
+  | "project_reserved"
   | "revision_conflict"
   | "project_exists"
   | "project_not_found"
@@ -240,6 +241,7 @@ const serverErrorCodes = new Set<ProjectRegistryServerErrorCode>([
   "invalid_content_length",
   "project_registry_request_too_large",
   "project_registry_write_disabled",
+  "project_reserved",
   "revision_conflict",
   "project_exists",
   "project_not_found",
