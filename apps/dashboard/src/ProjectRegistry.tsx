@@ -9,7 +9,7 @@ import {
   replaceProject as replaceProjectRequest
 } from "./projectRegistryApi";
 
-export type ProjectRegistryMutation = "create" | "replace" | "delete";
+export type ProjectRegistryMutation = "create" | "replace" | "delete" | "connection-test";
 
 export interface ProjectRegistryController {
   registry: ProjectRegistrySettings | null;

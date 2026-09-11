@@ -156,6 +156,8 @@ def test_project_registry_is_a_fixed_full_access_capability_and_get_is_readable(
     assert CAPABILITIES["settings.projects.manage"] == "full"
     assert capability_for_request("GET", "/api/v1/settings/projects") is None
     assert capability_for_request("POST", "/api/v1/settings/projects") == "settings.projects.manage"
+    assert capability_for_request("POST", "/api/v1/settings/projects/test-connection") == "settings.projects.manage"
+    assert capability_for_request("POST", "/api/v1/settings/projects/future-action") is None
     assert capability_for_request("PUT", "/api/v1/settings/projects/external-api") == "settings.projects.manage"
     assert capability_for_request("PATCH", "/api/v1/settings/projects/external-api") == "settings.projects.manage"
     assert capability_for_request("DELETE", "/api/v1/settings/projects/external-api") == "settings.projects.manage"

@@ -4,9 +4,12 @@ import { useActionConfirmation } from "../../ActionConfirmations";
 import { useAccess } from "../../AccessControls";
 import { useInteractionLock } from "../../InteractionLock";
 import { Sheet } from "../../Sheet";
+import { StatusText, type StatusTone } from "../../ShellPrimitives";
 import {
   PROJECT_REGISTRY_CAPABILITY,
-  ProjectRegistryApiError
+  ProjectRegistryApiError,
+  testProjectConnection,
+  type ProjectConnectionTestResponse
 } from "../../projectRegistryApi";
 import type { ProjectRegistryController } from "../../ProjectRegistry";
 import {
@@ -45,6 +48,79 @@ function projectEntries(project: ProjectRegistryProject): Array<{ environmentId:
   })));
 }
 
+function connectionTestPrimaryCopy(result: ProjectConnectionTestResponse, urlEnv: string): string {
+  if (result.result === "reachable") return "Соединение доступно";
+  if (result.result === "endpoint_not_configured") {
+    return `Переменная ${urlEnv} не настроена на компьютере панели.`;
+  }
+  if (result.result === "endpoint_invalid") return "В переменной указан некорректный адрес.";
+  if (result.result === "http_error") {
+    return result.httpStatus === null
+      ? "Сервис ответил с ошибкой HTTP."
+      : `Сервис ответил с ошибкой HTTP ${result.httpStatus}.`;
+  }
+  return "Не удалось подключиться к сервису.";
+}
+
+function connectionTestSecondaryCopy(result: ProjectConnectionTestResponse): string | null {
+  if (result.httpStatus === null || result.latencyMs === null) return null;
+  return `HTTP ${result.httpStatus} · ${result.latencyMs} мс`;
+}
+
+function connectionTestTone(result: ProjectConnectionTestResponse | null): StatusTone {
+  if (!result) return "neutral";
+  if (result.result === "reachable") return "success";
+  if (result.result === "http_error") return "danger";
+  if (result.result === "unreachable") return "offline";
+  return "warning";
+}
+
+function connectionTestFailureCopy(value: unknown): string {
+  const failure = value instanceof ProjectRegistryApiError
+    ? value
+    : new ProjectRegistryApiError("project_registry_unavailable", 503);
+  if (failure.status === 401 || failure.status === 403) {
+    return "Проверка соединения доступна владельцу панели.";
+  }
+  if (failure.status === 422) return "Проверьте настройки проекта.";
+  if (failure.code === "network") return "Панель не смогла выполнить проверку.";
+  if (failure.status >= 500 || failure.code === "contract_invalid") {
+    return "Не удалось проверить соединение.";
+  }
+  return "Не удалось проверить соединение.";
+}
+
+function ProjectPreview({
+  draft,
+  connectionTest
+}: {
+  draft: ProjectDraft;
+  connectionTest: ProjectConnectionTestResponse | null;
+}) {
+  const name = draft.name.trim() || "Название проекта";
+  const environmentId = draft.environmentId.trim() || "окружение";
+  const serviceId = draft.serviceId.trim() || "сервис";
+  const statusLabel = connectionTest
+    ? connectionTestPrimaryCopy(connectionTest, draft.urlEnv.trim())
+    : "Ещё не проверено";
+  const secondary = connectionTest ? connectionTestSecondaryCopy(connectionTest) : null;
+
+  return (
+    <section className="project-editor__preview" data-testid="project-preview" aria-labelledby="project-preview-title">
+      <div className="project-editor__preview-heading">
+        <p className="section-kicker">Предпросмотр</p>
+        <span className="project-settings-card__badge">Только мониторинг</span>
+      </div>
+      <h3 id="project-preview-title">{name}</h3>
+      <span className="project-editor__preview-target">{environmentId} · {serviceId}</span>
+      <div className="project-editor__preview-status">
+        <StatusText label={statusLabel} tone={connectionTestTone(connectionTest)} />
+        {secondary && <span>{secondary}</span>}
+      </div>
+    </section>
+  );
+}
+
 export function ProjectSettingsSheet({
   onClose,
   controller
@@ -52,15 +128,19 @@ export function ProjectSettingsSheet({
   onClose: () => void;
   controller: ProjectRegistryController;
 }) {
-  const { registry, loading, error, mutationPending, refresh } = controller;
+  const { registry, loading, error, mutationPending, mutationKind, refresh } = controller;
   const { guardMutation } = useInteractionLock();
   const { ensureCapability } = useAccess();
   const { confirmAction } = useActionConfirmation();
   const [editor, setEditor] = useState<ProjectEditorState | null>(null);
   const [fieldErrors, setFieldErrors] = useState<ProjectDraftErrors>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [connectionTest, setConnectionTest] = useState<ProjectConnectionTestResponse | null>(null);
   const [accessPending, setAccessPending] = useState(false);
   const accessPendingRef = useRef(false);
+  const connectionTestPendingRef = useRef(false);
+  const connectionTestGenerationRef = useRef(0);
+  const connectionTestPending = mutationPending && mutationKind === "connection-test";
 
   const canWrite = registry?.available === true && registry.writesEnabled && !error;
 
@@ -76,6 +156,8 @@ export function ProjectSettingsSheet({
     }
     setEditor({ projectId: project?.id ?? null, draft });
     setFieldErrors({});
+    connectionTestGenerationRef.current += 1;
+    setConnectionTest(null);
     setNotice(null);
   }
 
@@ -83,10 +165,15 @@ export function ProjectSettingsSheet({
     if (mutationPending) return;
     setEditor(null);
     setFieldErrors({});
+    connectionTestGenerationRef.current += 1;
+    setConnectionTest(null);
     setNotice(null);
   }
 
   function updateDraft<K extends keyof ProjectDraft>(field: K, value: ProjectDraft[K]) {
+    connectionTestGenerationRef.current += 1;
+    setConnectionTest(null);
+    setNotice(null);
     setEditor((current) => current ? { ...current, draft: { ...current.draft, [field]: value } } : current);
     setFieldErrors((current) => {
       if (!current[field]) return current;
@@ -97,6 +184,7 @@ export function ProjectSettingsSheet({
   }
 
   async function prepareMutation(kind: "create" | "replace" | "delete", title: string): Promise<boolean> {
+    if (connectionTestPendingRef.current || mutationPending) return false;
     if (!guardMutation()) {
       setNotice(lockNotice());
       return false;
@@ -163,7 +251,7 @@ export function ProjectSettingsSheet({
 
   async function submitEditor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editor) return;
+    if (!editor || mutationPending || connectionTestPendingRef.current) return;
     const normalized = normalizeProjectDraft(editor.draft);
     const errors = validateProjectDraft(normalized);
     setFieldErrors(errors);
@@ -186,6 +274,53 @@ export function ProjectSettingsSheet({
     } catch (value) {
       await reconcileMutationFailure(value);
     } finally {
+      controller.endMutation();
+    }
+  }
+
+  async function testConnection() {
+    if (!editor || mutationPending || connectionTestPendingRef.current) return;
+    const normalized = normalizeProjectDraft(editor.draft);
+    const errors = validateProjectDraft(normalized);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setNotice("Проверьте поля проекта.");
+      return;
+    }
+    if (!guardMutation()) {
+      setNotice(lockNotice());
+      return;
+    }
+    if (!controller.beginMutation("connection-test")) return;
+
+    connectionTestPendingRef.current = true;
+    const generation = connectionTestGenerationRef.current;
+    const projectId = editor.projectId ?? normalized.id;
+    setConnectionTest(null);
+    setNotice(null);
+    try {
+      if (!(await ensureCapability(PROJECT_REGISTRY_CAPABILITY, "Проверить соединение"))) {
+        setNotice("Проверка соединения доступна владельцу панели.");
+        return;
+      }
+      if (!guardMutation()) {
+        setNotice(lockNotice());
+        return;
+      }
+      const result = await testProjectConnection(
+        projectInputFromDraft({ ...normalized, id: projectId }),
+        normalized.environmentId,
+        normalized.serviceId
+      );
+      if (generation !== connectionTestGenerationRef.current) return;
+      setConnectionTest(result);
+      setNotice(connectionTestPrimaryCopy(result, normalized.urlEnv));
+    } catch (value) {
+      if (generation !== connectionTestGenerationRef.current) return;
+      setConnectionTest(null);
+      setNotice(connectionTestFailureCopy(value));
+    } finally {
+      connectionTestPendingRef.current = false;
       controller.endMutation();
     }
   }
@@ -274,8 +409,8 @@ export function ProjectSettingsSheet({
       footer={editor ? (
         <div className="project-settings__footer-actions">
           <button type="button" className="planning-secondary-button" disabled={mutationPending} onClick={closeEditor}>Отмена</button>
-          <button type="submit" form="project-editor-form" className="planning-primary-button" disabled={mutationPending} aria-busy={mutationPending}>
-            {mutationPending ? "Сохраняем…" : "Сохранить"}
+          <button type="submit" form="project-editor-form" className="planning-primary-button" disabled={mutationPending} aria-busy={mutationPending && !connectionTestPending}>
+            {mutationPending && !connectionTestPending ? "Сохраняем…" : "Сохранить"}
           </button>
         </div>
       ) : undefined}
@@ -439,6 +574,22 @@ export function ProjectSettingsSheet({
                 </label>
               </div>
             </fieldset>
+
+            <ProjectPreview draft={editor.draft} connectionTest={connectionTest} />
+
+            <div className="project-editor__connection-actions">
+              <button
+                type="button"
+                className="planning-secondary-button"
+                data-testid="project-test-connection"
+                disabled={mutationPending}
+                aria-busy={connectionTestPending}
+                onClick={() => void testConnection()}
+              >
+                {connectionTestPending ? "Проверяем…" : "Проверить соединение"}
+              </button>
+              <small>Проверяет только текущий draft. Сохранение проекта остаётся отдельным действием.</small>
+            </div>
           </form>
         )}
 

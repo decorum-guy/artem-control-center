@@ -19,6 +19,7 @@ _MUTATION_CAPABILITIES: dict[tuple[str, str], str] = {
     ("PATCH", "/api/v1/settings/device-visibility"): "settings.device_visibility",
     ("PATCH", "/api/v1/settings/capabilities"): "settings.capabilities.manage",
     ("POST", "/api/v1/system/runtime/apply-capabilities"): "settings.capabilities.manage",
+    ("POST", "/api/v1/settings/projects/test-connection"): "settings.projects.manage",
     ("POST", "/api/v1/actions/home/coffee"): "home.coffee.control",
     ("POST", "/api/v1/actions/home/coffee/delayed-start"): "home.coffee.control",
     ("DELETE", "/api/v1/actions/home/coffee/delayed-start"): "home.coffee.control",

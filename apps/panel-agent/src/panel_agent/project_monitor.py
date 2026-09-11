@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from time import monotonic
-from typing import Awaitable, Callable, Dict, Iterable, List, Optional
+from typing import Awaitable, Callable, Dict, Iterable, List, Literal, Optional
 from urllib.parse import urlsplit
 
 import httpx
@@ -22,6 +22,24 @@ from .settings import IntegrationSettings
 
 
 MAX_DECLARATIVE_REQUEST_TIMEOUT_SECONDS = 30.0
+MAX_DECLARATIVE_LATENCY_MS = int(MAX_DECLARATIVE_REQUEST_TIMEOUT_SECONDS * 1000)
+
+DeclarativeHttpProbeCode = Literal[
+    "reachable",
+    "endpoint_not_configured",
+    "endpoint_invalid",
+    "http_error",
+    "unreachable",
+]
+
+
+@dataclass(frozen=True)
+class DeclarativeHttpProbeResult:
+    """Safe, bounded result of one declarative HTTP health probe."""
+
+    result: DeclarativeHttpProbeCode
+    http_status: int | None = None
+    latency_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +51,57 @@ class _MonitorTarget:
     monitor: ProjectMonitorConfig
     snapshot_id: str
     title: str
+
+
+async def probe_declarative_http_monitor(
+    monitor: ProjectMonitorConfig,
+    settings: IntegrationSettings,
+    *,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+) -> DeclarativeHttpProbeResult:
+    """Execute the fixed read-only HTTP semantics used by project monitoring."""
+
+    resolution, endpoint = _resolve_endpoint(monitor.url_env)
+    if endpoint is None:
+        return DeclarativeHttpProbeResult(
+            "endpoint_not_configured"
+            if resolution == "endpoint_not_configured"
+            else "endpoint_invalid"
+        )
+
+    started = monotonic()
+    try:
+        async with httpx.AsyncClient(
+            timeout=min(
+                MAX_DECLARATIVE_REQUEST_TIMEOUT_SECONDS,
+                max(1.0, float(settings.http_request_timeout_seconds)),
+            ),
+            transport=transport,
+            follow_redirects=False,
+        ) as client:
+            # A fixed GET is intentional. The response body is not read or
+            # forwarded; this adapter is a health probe, not a proxy.
+            async with client.stream("GET", endpoint) as response:
+                status_code = int(response.status_code)
+
+        latency_ms = _bounded_latency_ms(started)
+        bounded_status = (
+            status_code if 100 <= status_code <= 599 else None
+        )
+        if 200 <= status_code < 300:
+            return DeclarativeHttpProbeResult(
+                "reachable",
+                http_status=bounded_status,
+                latency_ms=latency_ms,
+            )
+        return DeclarativeHttpProbeResult(
+            "http_error",
+            http_status=bounded_status,
+            latency_ms=latency_ms,
+        )
+    except Exception:
+        # Do not expose transport, DNS, socket or upstream exception details.
+        return DeclarativeHttpProbeResult("unreachable")
 
 
 class DeclarativeProjectMonitor:
@@ -214,8 +283,12 @@ class DeclarativeProjectMonitor:
         self,
         target: _MonitorTarget,
     ) -> tuple[ServiceSnapshot, bool, bool]:
-        endpoint = _resolve_endpoint(target.monitor.url_env)
-        if endpoint is None:
+        probe = await probe_declarative_http_monitor(
+            target.monitor,
+            self._settings,
+            transport=self._transport,
+        )
+        if probe.result in {"endpoint_not_configured", "endpoint_invalid"}:
             # A missing or unsafe env value is a configuration boundary, not a
             # transient outage eligible for last-known success.
             return (
@@ -223,30 +296,13 @@ class DeclarativeProjectMonitor:
                 False,
                 False,
             )
-
-        started = monotonic()
-        try:
-            async with httpx.AsyncClient(
-                timeout=min(
-                    MAX_DECLARATIVE_REQUEST_TIMEOUT_SECONDS,
-                    max(1.0, float(self._settings.http_request_timeout_seconds)),
-                ),
-                transport=self._transport,
-                follow_redirects=False,
-            ) as client:
-                # A fixed GET is intentional. The response body is not read or
-                # forwarded; this adapter is a health probe, not a proxy.
-                async with client.stream("GET", endpoint) as response:
-                    status_code = response.status_code
-            if 200 <= status_code < 300:
-                return (
-                    self._healthy(target, int((monotonic() - started) * 1000)),
-                    True,
-                    True,
-                )
-            return self._failed(target), False, True
-        except (httpx.HTTPError, ValueError, TypeError):
-            return self._failed(target), False, True
+        if probe.result == "reachable":
+            return (
+                self._healthy(target, probe.latency_ms or 0),
+                True,
+                True,
+            )
+        return self._failed(target), False, True
 
     def _with_last_known(
         self,
@@ -374,20 +430,31 @@ class DeclarativeProjectMonitor:
         )
 
 
-def _resolve_endpoint(url_env: str) -> str | None:
-    raw = os.getenv(url_env, "").strip()
+def _resolve_endpoint(
+    url_env: str,
+) -> tuple[Literal["valid", "endpoint_not_configured", "endpoint_invalid"], str | None]:
+    raw_value = os.environ.get(url_env)
+    if raw_value is None:
+        return "endpoint_not_configured", None
+
+    raw = raw_value.strip()
     if not raw or any(character.isspace() or ord(character) < 32 for character in raw):
-        return None
+        return "endpoint_invalid", None
     try:
         parsed = urlsplit(raw)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            return None
+            return "endpoint_invalid", None
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            return None
+            return "endpoint_invalid", None
         _ = parsed.port
     except ValueError:
-        return None
-    return raw
+        return "endpoint_invalid", None
+    return "valid", raw
+
+
+def _bounded_latency_ms(started: float) -> int:
+    elapsed_ms = max(0.0, (monotonic() - started) * 1000)
+    return min(MAX_DECLARATIVE_LATENCY_MS, int(elapsed_ms))
 
 
 def _age_label(age_seconds: float) -> str:

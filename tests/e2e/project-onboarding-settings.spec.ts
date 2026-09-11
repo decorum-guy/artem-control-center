@@ -61,6 +61,7 @@ type ProjectInput = {
 
 type MutationRecord = { method: string; url: string; body: Record<string, unknown> };
 type FailureMode = "conflict" | "reconcile503" | "notFound" | "validation";
+type ConnectionMode = "reachable" | "endpoint_not_configured" | "endpoint_invalid" | "http_error" | "unreachable" | "panel_500" | "panel_network";
 
 function project(id = "external-api", enabled = true, name = "External API"): RegistryProject {
   return {
@@ -155,18 +156,24 @@ async function installFixtures(
     initial?: Registry;
     access?: "full" | "elevation";
     failure?: FailureMode;
+    connection?: ConnectionMode;
     deferInitialGet?: boolean;
     deferMutation?: boolean;
+    deferConnectionTest?: boolean;
   } = {}
 ) {
   let current = options.initial ?? registry();
   let accessMode = options.access ?? "full";
   let failure = options.failure;
+  const connection = options.connection ?? "reachable";
   let initialGetRelease: (() => void) | null = null;
   let mutationRelease: (() => void) | null = null;
+  let connectionRelease: (() => void) | null = null;
   const initialGetGate = new Promise<void>((resolve) => { initialGetRelease = resolve; });
   const mutationGate = new Promise<void>((resolve) => { mutationRelease = resolve; });
+  const connectionGate = new Promise<void>((resolve) => { connectionRelease = resolve; });
   const mutations: MutationRecord[] = [];
+  const connectionTests: MutationRecord[] = [];
   let getCount = 0;
 
   await page.route("**/api/v1/access", async (route) => {
@@ -290,12 +297,52 @@ async function installFixtures(
     await route.fulfill({ status: request.method() === "POST" ? 201 : 200, contentType: "application/json", body: JSON.stringify(current) });
   });
 
+  await page.route("**/api/v1/settings/projects/test-connection", async (route) => {
+    const request = route.request();
+    if (request.method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    const body = request.postDataJSON() as Record<string, unknown>;
+    connectionTests.push({ method: request.method(), url: new URL(request.url()).pathname, body });
+    if (options.deferConnectionTest) await connectionGate;
+
+    if (connection === "panel_network") {
+      await route.abort("failed");
+      return;
+    }
+    if (connection === "panel_500") {
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "internal probe trace" }) });
+      return;
+    }
+
+    const projectInput = body.project as ProjectInput;
+    const result = connection === "reachable"
+      ? { result: "reachable", reachable: true, httpStatus: 204, latencyMs: 42 }
+      : connection === "endpoint_not_configured"
+        ? { result: "endpoint_not_configured", reachable: false, httpStatus: null, latencyMs: null }
+        : connection === "endpoint_invalid"
+          ? { result: "endpoint_invalid", reachable: false, httpStatus: null, latencyMs: null }
+          : connection === "http_error"
+            ? { result: "http_error", reachable: false, httpStatus: 503, latencyMs: 18 }
+            : { result: "unreachable", reachable: false, httpStatus: null, latencyMs: null };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      schemaVersion: "project.connection-test.v1",
+      ...result,
+      projectId: projectInput.id,
+      environmentId: body.environmentId,
+      serviceId: body.serviceId
+    }) });
+  });
+
   return {
     current: () => current,
     mutations,
+    connectionTests,
     getCount: () => getCount,
     releaseInitialGet: () => initialGetRelease?.(),
     releaseMutation: () => mutationRelease?.(),
+    releaseConnectionTest: () => connectionRelease?.(),
     setAccessMode: (next: "full" | "elevation") => { accessMode = next; }
   };
 }
@@ -318,7 +365,7 @@ async function fillNewProject(page: Page, suffix = "") {
   return sheet;
 }
 
-test.describe("Slice C monitor-only project onboarding in Settings", () => {
+test.describe("Slice C/D monitor-only project onboarding in Settings", () => {
   test.skip(!v2Enabled, "Run with VITE_V2_VISUAL_SHELL=true for the project Settings gate.");
 
   test("summary, loading and empty registry states are owner-facing", async ({ page }) => {
@@ -390,6 +437,166 @@ test.describe("Slice C monitor-only project onboarding in Settings", () => {
         }]
       }
     });
+  });
+
+  test("connection test is a separate current-draft operation with an explicit safe preview", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page));
+    const sheet = await fillNewProject(page);
+    const testButton = sheet.getByTestId("project-test-connection");
+
+    await expect(testButton).toBeVisible();
+    const buttonSize = await testButton.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    });
+    expect(buttonSize.width).toBeGreaterThanOrEqual(48);
+    expect(buttonSize.height).toBeGreaterThanOrEqual(48);
+
+    await testButton.click();
+    await expect(sheet.getByTestId("project-preview")).toContainText("Предпросмотр");
+    await expect(sheet.getByTestId("project-preview")).toContainText("Только мониторинг");
+    await expect(sheet.getByTestId("project-preview")).toContainText("Соединение доступно");
+    await expect(sheet.getByTestId("project-preview")).toContainText("HTTP 204 · 42 мс");
+    await expect(sheet.getByTestId("project-preview").getByRole("button")).toHaveCount(0);
+    await expect(page.getByTestId("project-card-my-api")).toHaveCount(0);
+
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.mutations).toHaveLength(0);
+    expect(fixture.current()).toMatchObject({ revision: 0, projects: [] });
+    expect(fixture.connectionTests[0]?.body).toMatchObject({
+      project: {
+        id: "my-api",
+        name: "Мой API",
+        environments: [{ id: "production", services: [{ id: "api" }] }]
+      },
+      environmentId: "production",
+      serviceId: "api"
+    });
+    expect(fixture.connectionTests[0]?.body).not.toHaveProperty("expectedRevision");
+
+    await page.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await page.goto("/services");
+    await expect(page.getByTestId("route-services-v2")).toBeVisible();
+    await expect(page.getByText("Мой API", { exact: true })).toHaveCount(0);
+  });
+
+  test("connection test is single-flight and blocks save until its response", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page, { deferConnectionTest: true }));
+    const sheet = await fillNewProject(page);
+    const testButton = sheet.getByTestId("project-test-connection");
+    await testButton.click();
+    await expect.poll(() => fixture.connectionTests.length).toBe(1);
+    await expect(testButton).toBeDisabled();
+    await expect(testButton).toHaveAttribute("aria-busy", "true");
+    await expect(testButton).toHaveText("Проверяем…");
+
+    await page.evaluate(() => document.getElementById("project-editor-form")?.requestSubmit());
+    await expect.poll(() => fixture.mutations.length).toBe(0);
+    await expect.poll(() => fixture.connectionTests.length).toBe(1);
+    fixture.releaseConnectionTest();
+    await expect(sheet.getByTestId("project-preview")).toContainText("Соединение доступно");
+    await expect(testButton).toBeEnabled();
+  });
+
+  test("editing tests the current draft URL-env name without changing the saved registry", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page, { initial: registry([project()]) }));
+    const sheet = page.getByTestId("settings-projects-sheet");
+    await page.getByTestId("project-edit-external-api").click();
+    await sheet.getByLabel("Переменная с адресом", { exact: true }).fill("NEW_API_HEALTH_URL");
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet.getByTestId("project-preview")).toContainText("Соединение доступно");
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.connectionTests[0]?.body).toMatchObject({
+      project: { environments: [{ services: [{ capabilities: { monitor: { url_env: "NEW_API_HEALTH_URL" } } }] }] }
+    });
+    expect(fixture.mutations).toHaveLength(0);
+    expect(fixture.current()).toMatchObject({ revision: 0, projects: [{ environments: [{ services: [{ monitor: { urlEnv: "EXTERNAL_API_HEALTH_URL" } }] }] }] });
+  });
+
+  test("missing endpoint value remains informative without disabling Save", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page, { connection: "endpoint_not_configured" }));
+    const sheet = await fillNewProject(page);
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet.getByTestId("project-preview")).toContainText("Переменная EXTERNAL_API_HEALTH_URL не настроена на компьютере панели.");
+    await expect(sheet.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.mutations).toHaveLength(0);
+  });
+
+  test("invalid endpoint value remains informative without disabling Save", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page, { connection: "endpoint_invalid" }));
+    const sheet = await fillNewProject(page);
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet.getByTestId("project-preview")).toContainText("В переменной указан некорректный адрес.");
+    await expect(sheet.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.mutations).toHaveLength(0);
+  });
+
+  test("invalid draft sends no connection-test request", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page));
+    const sheet = await fillNewProject(page);
+    await sheet.getByLabel("Название", { exact: true }).fill("");
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet.getByText("Введите название проекта.", { exact: true })).toBeVisible();
+    await expect(sheet).toContainText("Проверьте поля проекта.");
+    expect(fixture.connectionTests).toHaveLength(0);
+    expect(fixture.mutations).toHaveLength(0);
+  });
+
+  test("HTTP failure uses explicit owner-facing result copy and leaves Save available", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page, { connection: "http_error" }));
+    const sheet = await fillNewProject(page);
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet.getByTestId("project-preview")).toContainText("Сервис ответил с ошибкой HTTP 503.");
+    await expect(sheet.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.mutations).toHaveLength(0);
+  });
+
+  test("endpoint failure uses distinct owner-facing result copy and leaves Save available", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page, { connection: "unreachable" }));
+    const sheet = await fillNewProject(page);
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet.getByTestId("project-preview")).toContainText("Не удалось подключиться к сервису.");
+    await expect(sheet.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.mutations).toHaveLength(0);
+  });
+
+  test("Panel Agent failure is not presented as an external endpoint failure", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page, { connection: "panel_network" }));
+    const sheet = await fillNewProject(page);
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet).toContainText("Панель не смогла выполнить проверку.");
+    await expect(sheet).not.toContainText("Не удалось подключиться к сервису.");
+    await expect(sheet.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.mutations).toHaveLength(0);
+  });
+
+  test("Panel Agent API failure remains separate from endpoint status", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page, { connection: "panel_500" }));
+    const sheet = await fillNewProject(page);
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet).toContainText("Не удалось проверить соединение.");
+    await expect(sheet).not.toContainText("Не удалось подключиться к сервису.");
+    await expect(sheet.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.mutations).toHaveLength(0);
+  });
+
+  test("changing any draft field clears an earlier connection result without creating a write", async ({ page }) => {
+    const fixture = await openProjectSheet(page, await installFixtures(page));
+    const sheet = await fillNewProject(page);
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet.getByTestId("project-preview")).toContainText("Соединение доступно");
+    await sheet.getByLabel("Название", { exact: true }).fill("Изменённый API");
+    await expect(sheet.getByTestId("project-preview")).toContainText("Ещё не проверено");
+    await expect(sheet.getByTestId("project-preview")).not.toContainText("Соединение доступно");
+    await expect(sheet.getByRole("button", { name: "Сохранить", exact: true })).toBeEnabled();
+    expect(fixture.connectionTests).toHaveLength(1);
+    expect(fixture.mutations).toHaveLength(0);
   });
 
   test("create is single-flight and the editor stays pending until the server response", async ({ page }) => {
@@ -517,6 +724,9 @@ test.describe("Slice C monitor-only project onboarding in Settings", () => {
     await pinModal.getByRole("button", { name: "Разблокировать", exact: true }).click();
     await expect(page.getByRole("button", { name: "Добавить проект", exact: true })).toBeEnabled();
     const sheet = await fillNewProject(page);
+    await sheet.getByTestId("project-test-connection").click();
+    await expect(sheet.getByTestId("project-preview")).toContainText("Соединение доступно");
+    expect(fixture.connectionTests).toHaveLength(1);
     await sheet.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(page.getByTestId("project-card-my-api")).toBeVisible();
     expect(fixture.mutations).toHaveLength(1);
@@ -537,6 +747,29 @@ test.describe("Slice C monitor-only project onboarding in Settings", () => {
     await page.getByTestId("project-edit-external-api").click({ force: true });
     await page.getByRole("button", { name: "Сохранить", exact: true }).click({ force: true });
     await expect(page.getByTestId("project-settings")).toContainText("Панель заблокирована");
+    expect(fixture.mutations).toHaveLength(0);
+  });
+
+  test("interaction lock prevents a connection-test request", async ({ page }) => {
+    test.skip(!interactionLockEnabled, "Run with VITE_TOUCH_INPUT_LOCK_ENABLED=true for the lock gate.");
+    const fixture = await installFixtures(page);
+    await page.goto("/settings");
+    await unlockTouchLockIfNeeded(page);
+    const control = page.getByTestId("interaction-lock-control");
+    await control.focus();
+    await page.keyboard.down("Space");
+    await page.waitForTimeout(1_100);
+    await page.keyboard.up("Space");
+    await expect(control).toHaveAttribute("aria-pressed", "true");
+    await page.getByTestId("settings-summary-projects").click({ force: true });
+    const sheet = page.getByTestId("settings-projects-sheet");
+    await sheet.getByRole("button", { name: "Добавить проект", exact: true }).click({ force: true });
+    await sheet.getByLabel("Название", { exact: true }).fill("Мой API", { force: true });
+    await sheet.getByLabel("ID проекта", { exact: true }).fill("my-api", { force: true });
+    await sheet.getByLabel("Переменная с адресом", { exact: true }).fill("EXTERNAL_API_HEALTH_URL", { force: true });
+    await sheet.getByTestId("project-test-connection").click({ force: true });
+    await expect(sheet).toContainText("Панель заблокирована");
+    expect(fixture.connectionTests).toHaveLength(0);
     expect(fixture.mutations).toHaveLength(0);
   });
 

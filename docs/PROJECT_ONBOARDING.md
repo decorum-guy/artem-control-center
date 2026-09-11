@@ -29,6 +29,26 @@ runtime reconciliation failures.
 
 This is intentionally not the generalized onboarding wizard described below.
 
+## Slice D implementation status
+
+The Settings V2 editor now has a read-only connection test for the current
+monitor-only draft. The fixed backend endpoint resolves only the selected
+monitor's environment-variable name on the Panel Agent and shares the exact
+bounded GET, timeout and no-redirect semantics with the running declarative
+monitor. The test does not persist configuration, change the registry revision,
+replace runtime monitors or rebuild snapshots. The editor also shows a clearly
+marked, safe preview with the latest draft-scoped test state; it is not a live
+`ServiceSnapshot` and is not added to Services.
+
+Still pending:
+
+- endpoint/secret onboarding without manual machine ENV setup;
+- multiple environments/services UI;
+- YAML import/export;
+- additional adapters/capabilities;
+- capability-level controls;
+- schema migrations and the remaining generalized onboarding flow.
+
 ## Slice B backend control plane
 
 The monitor-only registry can be inspected and changed through the server-owned

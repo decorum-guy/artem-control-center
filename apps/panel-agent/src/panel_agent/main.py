@@ -264,6 +264,7 @@ app.include_router(
         runtime,
         snapshot_rebuild=snapshot_publisher.rebuild,
         writes_allowed=lambda: _project_registry_write_allowed(),
+        connection_test_settings=SETTINGS,
     )
 )
 app.include_router(runtime_control_router)

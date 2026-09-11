@@ -11,6 +11,7 @@ import type {
 
 export const PROJECT_REGISTRY_CAPABILITY = "settings.projects.manage" as const;
 export const PROJECT_REGISTRY_PATH = "/api/v1/settings/projects" as const;
+export const PROJECT_CONNECTION_TEST_PATH = "/api/v1/settings/projects/test-connection" as const;
 
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const URL_ENV_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -28,6 +29,8 @@ export type ProjectRegistryServerErrorCode =
   | "project_exists"
   | "project_not_found"
   | "project_id_mismatch"
+  | "unknown_environment"
+  | "unknown_service"
   | "invalid_project_payload"
   | "project_registry_runtime_reconciliation_failed"
   | "config_read_error"
@@ -45,6 +48,24 @@ export type ProjectRegistryServerErrorCode =
   | "project_registry_unavailable";
 
 export type ProjectRegistryApiErrorCode = ProjectRegistryServerErrorCode | "network" | "contract_invalid" | "http_error";
+
+export type ProjectConnectionTestResult =
+  | "reachable"
+  | "endpoint_not_configured"
+  | "endpoint_invalid"
+  | "http_error"
+  | "unreachable";
+
+export interface ProjectConnectionTestResponse {
+  schemaVersion: "project.connection-test.v1";
+  result: ProjectConnectionTestResult;
+  reachable: boolean;
+  httpStatus: number | null;
+  latencyMs: number | null;
+  projectId: string;
+  environmentId: string;
+  serviceId: string;
+}
 
 export class ProjectRegistryApiError extends Error {
   constructor(
@@ -75,6 +96,10 @@ function integer(value: unknown, label: string, minimum: number, maximum: number
     throw new Error(`invalid_${label}`);
   }
   return value;
+}
+
+function nullableInteger(value: unknown, label: string, minimum: number, maximum: number): number | null {
+  return value === null ? null : integer(value, label, minimum, maximum);
 }
 
 function text(value: unknown, label: string, maximum: number, required = true): string {
@@ -197,6 +222,8 @@ const serverErrorCodes = new Set<ProjectRegistryServerErrorCode>([
   "project_exists",
   "project_not_found",
   "project_id_mismatch",
+  "unknown_environment",
+  "unknown_service",
   "invalid_project_payload",
   "project_registry_runtime_reconciliation_failed",
   "config_read_error",
@@ -218,6 +245,37 @@ function safeServerErrorCode(value: unknown): ProjectRegistryApiErrorCode {
   return typeof value === "string" && serverErrorCodes.has(value as ProjectRegistryServerErrorCode)
     ? value as ProjectRegistryServerErrorCode
     : "http_error";
+}
+
+export function parseProjectConnectionTest(value: unknown): ProjectConnectionTestResponse {
+  if (!isRecord(value)) throw new Error("invalid_project_connection_test");
+  exactKeys(value, ["schemaVersion", "result", "reachable", "httpStatus", "latencyMs", "projectId", "environmentId", "serviceId"], "project_connection_test");
+  const result = value.result;
+  if (result !== "reachable" && result !== "endpoint_not_configured" && result !== "endpoint_invalid" && result !== "http_error" && result !== "unreachable") {
+    throw new Error("invalid_project_connection_test_result");
+  }
+  if (value.schemaVersion !== "project.connection-test.v1" || typeof value.reachable !== "boolean") {
+    throw new Error("invalid_project_connection_test_metadata");
+  }
+  if (value.reachable !== (result === "reachable")) throw new Error("invalid_project_connection_test_reachable");
+
+  const httpStatus = nullableInteger(value.httpStatus, "connection_http_status", 100, 599);
+  const latencyMs = nullableInteger(value.latencyMs, "connection_latency_ms", 0, 30_000);
+  if (result === "reachable" && httpStatus === null) throw new Error("invalid_project_connection_test_status");
+  if ((result === "reachable" || result === "http_error") && latencyMs === null) throw new Error("invalid_project_connection_test_latency");
+  if (result === "endpoint_not_configured" || result === "endpoint_invalid" || result === "unreachable") {
+    if (httpStatus !== null || latencyMs !== null) throw new Error("invalid_project_connection_test_metadata");
+  }
+  return {
+    schemaVersion: "project.connection-test.v1",
+    result,
+    reachable: value.reachable,
+    httpStatus,
+    latencyMs,
+    projectId: identifier(value.projectId, "connection_project_id"),
+    environmentId: identifier(value.environmentId, "connection_environment_id"),
+    serviceId: identifier(value.serviceId, "connection_service_id")
+  };
 }
 
 function projectPath(projectId: string): string {
@@ -270,6 +328,33 @@ async function requestProject(projectId: string, init?: RequestInit): Promise<Pr
     throw new ProjectRegistryApiError("network", 0);
   }
   return parseResponse(response);
+}
+
+export async function testProjectConnection(
+  project: ProjectRegistryProjectInput,
+  environmentId: string,
+  serviceId: string
+): Promise<ProjectConnectionTestResponse> {
+  let response: Response;
+  try {
+    response = await fetch(PROJECT_CONNECTION_TEST_PATH, requestInit({
+      method: "POST",
+      body: JSON.stringify({ project, environmentId, serviceId })
+    }));
+  } catch {
+    throw new ProjectRegistryApiError("network", 0);
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = isRecord(body) ? body.detail : undefined;
+    throw new ProjectRegistryApiError(safeServerErrorCode(detail), response.status);
+  }
+  try {
+    return parseProjectConnectionTest(body);
+  } catch {
+    throw new ProjectRegistryApiError("contract_invalid", response.status);
+  }
 }
 
 export function getProjectRegistry(signal?: AbortSignal): Promise<ProjectRegistrySettings> {
