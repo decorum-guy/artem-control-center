@@ -1,4 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
+
+const touchLockEnabled = process.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true";
+const startsLocked = process.env.VITE_TOUCH_INPUT_LOCK_START_LOCKED === "true";
 
 const profile = {
   id: "artem-control-center-config",
@@ -68,7 +72,7 @@ async function installBackupResponse(page: Page, initial: Record<string, unknown
   await page.route(/\/api\/v1\/backups$/, async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
   });
-  await page.route(/\/api\/v1\/backups\/[^/]+\/runs$/, async (route) => {
+  await page.route(/\/api\/v1\/backups\/artem-control-center-config\/runs$/, async (route) => {
     if (route.request().method() !== "POST") return route.fallback();
     payload = onStart?.() ?? payload;
     await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ schemaVersion: "backups.api.v1", run: payload.currentRun }) });
@@ -168,5 +172,52 @@ test.describe("verified local backups surface", () => {
     }));
     expect(narrow.height).toBeGreaterThanOrEqual(48);
     expect(narrow.documentWidth).toBeLessThanOrEqual(narrow.viewportWidth + 1);
+  });
+});
+
+test.describe("backup Interaction Lock gate", () => {
+  test.skip(
+    !touchLockEnabled || !startsLocked,
+    "Run with VITE_TOUCH_INPUT_LOCK_ENABLED=true and VITE_TOUCH_INPUT_LOCK_START_LOCKED=true."
+  );
+
+  test("blocks backup POST while locked and proceeds after reviewed unlock", async ({ page }) => {
+    let backupPostCount = 0;
+    const initialPayload = {
+      schemaVersion: "backups.api.v1",
+      profiles: [profile],
+      currentRun: null,
+      history: { schemaVersion: "backup.history.v1", available: true, entries: [], errorCode: null }
+    };
+
+    await installAccess(page);
+    await installBackupResponse(page, initialPayload, () => {
+      backupPostCount += 1;
+      return {
+        ...initialPayload,
+        currentRun: successRun(),
+        history: { ...initialPayload.history, entries: [{ ...successRun(), sha256: "a".repeat(64) }] }
+      };
+    });
+
+    await page.goto("/backups");
+    const lockControl = page.getByTestId("interaction-lock-control");
+    await expect(lockControl).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("interaction-lock-status")).toHaveText("Панель заблокирована");
+
+    const createButton = page.getByTestId("backup-create");
+    await expect(createButton).toBeEnabled();
+    await createButton.click();
+    await page.waitForTimeout(250);
+    expect(backupPostCount).toBe(0);
+    await expect(page.getByTestId("backups-current-status")).toHaveCount(0);
+
+    await unlockTouchLockIfNeeded(page);
+    await expect(lockControl).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("interaction-lock-status")).toHaveCount(0);
+
+    await createButton.click();
+    await expect.poll(() => backupPostCount).toBe(1);
+    await expect(page.getByTestId("backups-current-status")).toHaveText("Резервная копия проверена");
   });
 });
