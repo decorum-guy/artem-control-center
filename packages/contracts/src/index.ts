@@ -723,11 +723,20 @@ export interface ProjectRegistryDetails {
   adapter: "avalar-ssh";
 }
 
+export interface ProjectRegistryBackupCapabilities {
+  profiles: string[];
+}
+
+export interface ProjectRegistryProjectCapabilities {
+  backups: ProjectRegistryBackupCapabilities;
+}
+
 export interface ProjectRegistryService {
   id: string;
   monitor: ProjectRegistryMonitor;
   details?: ProjectRegistryDetails;
   actions: string[];
+  backupProfile?: string;
   presentation: { widget: "core.generic-service" };
 }
 
@@ -741,6 +750,7 @@ export interface ProjectRegistryProject {
   name: string;
   enabled: boolean;
   category: "external" | "work";
+  capabilities?: ProjectRegistryProjectCapabilities;
   environments: ProjectRegistryEnvironment[];
 }
 
@@ -768,6 +778,7 @@ export interface ProjectRegistryProjectInput {
   name: string;
   enabled?: boolean;
   category: "external" | "work";
+  capabilities?: ProjectRegistryProjectCapabilities;
   environments: Array<{
     id: string;
     services: Array<{
@@ -781,6 +792,7 @@ export interface ProjectRegistryProjectInput {
         };
         details?: { adapter: "avalar-ssh" };
         actions?: string[];
+        backupProfile?: string;
       };
       presentation?: { widget?: "core.generic-service" };
     }>;

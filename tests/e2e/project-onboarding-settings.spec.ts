@@ -9,6 +9,9 @@ type RegistryProject = {
   name: string;
   enabled: boolean;
   category: "external" | "work";
+  capabilities?: {
+    backups: { profiles: string[] };
+  };
   environments: Array<{
     id: string;
     services: Array<{
@@ -21,6 +24,7 @@ type RegistryProject = {
       };
       details?: { adapter: "avalar-ssh" };
       actions: string[];
+      backupProfile?: string;
       presentation: { widget: "core.generic-service" };
     }>;
   }>;
@@ -42,6 +46,9 @@ type ProjectInput = {
   name: string;
   enabled?: boolean;
   category: "external" | "work";
+  capabilities?: {
+    backups: { profiles: string[] };
+  };
   environments: Array<{
     id: string;
     services: Array<{
@@ -55,6 +62,7 @@ type ProjectInput = {
         };
         details?: { adapter: "avalar-ssh" };
         actions?: string[];
+        backupProfile?: string;
       };
       presentation?: { widget?: "core.generic-service" };
     }>;
@@ -108,6 +116,11 @@ function projectFromInput(input: ProjectInput): RegistryProject {
     name: input.name,
     enabled: input.enabled ?? true,
     category: input.category,
+    ...(input.capabilities ? {
+      capabilities: {
+        backups: { profiles: [...input.capabilities.backups.profiles] }
+      }
+    } : {}),
     environments: input.environments.map((environment) => ({
       id: environment.id,
       services: environment.services.map((service) => ({
@@ -120,6 +133,7 @@ function projectFromInput(input: ProjectInput): RegistryProject {
         },
         ...(service.capabilities.details ? { details: service.capabilities.details } : {}),
         actions: service.capabilities.actions ?? [],
+        ...(service.capabilities.backupProfile !== undefined ? { backupProfile: service.capabilities.backupProfile } : {}),
         presentation: { widget: "core.generic-service" }
       }))
     }))
@@ -132,6 +146,9 @@ function avalarProject(enabled = true): RegistryProject {
     name: "AVALAR",
     enabled,
     category: "work",
+    capabilities: {
+      backups: { profiles: ["avalar-main-site", "avalar-stage-site"] }
+    },
     environments: [
       {
         id: "main",
@@ -140,6 +157,7 @@ function avalarProject(enabled = true): RegistryProject {
           monitor: { adapter: "avalar", urlEnv: "PANEL_AVALAR_MAIN_URL", intervalSeconds: 60, staleAfterSeconds: 180 },
           details: { adapter: "avalar-ssh" },
           actions: ["avalar.main.smoke", "avalar.main.restart", "avalar.main.deploy"],
+          backupProfile: "avalar-main-site",
           presentation: { widget: "core.generic-service" }
         }]
       },
@@ -150,6 +168,7 @@ function avalarProject(enabled = true): RegistryProject {
           monitor: { adapter: "avalar", urlEnv: "PANEL_AVALAR_STAGE_URL", intervalSeconds: 60, staleAfterSeconds: 180 },
           details: { adapter: "avalar-ssh" },
           actions: ["avalar.stage.smoke", "avalar.stage.restart", "avalar.stage.deploy"],
+          backupProfile: "avalar-stage-site",
           presentation: { widget: "core.generic-service" }
         }]
       }
@@ -444,11 +463,22 @@ test.describe("Slice C/D monitor-only project onboarding in Settings", () => {
     await expect(card.getByTestId("project-edit-avalar")).toBeDisabled();
     await expect(card.getByTestId("project-delete-avalar")).toBeDisabled();
     const toggle = card.getByRole("checkbox", { name: "Выключить проект «AVALAR»" });
-    await expect(toggle).toBeDisabled();
+    await expect(toggle).toBeEnabled();
     await card.getByTestId("project-edit-avalar").evaluate((element) => (element as HTMLButtonElement).click());
     await card.getByTestId("project-delete-avalar").evaluate((element) => (element as HTMLButtonElement).click());
-    await toggle.evaluate((element) => (element as HTMLInputElement).click());
-    expect(fixture.mutations).toHaveLength(0);
+    await toggle.click();
+    await expect(card).toContainText("Выключен");
+    expect(fixture.mutations).toHaveLength(1);
+    expect(fixture.mutations[0]).toMatchObject({
+      method: "PUT",
+      url: "/api/v1/settings/projects/avalar"
+    });
+    const toggled = fixture.mutations[0]?.body.project as ProjectInput;
+    expect(toggled.enabled).toBe(false);
+    expect(toggled.capabilities).toEqual({
+      backups: { profiles: ["avalar-main-site", "avalar-stage-site"] }
+    });
+    expect(toggled.environments[1]?.services[0]?.capabilities.backupProfile).toBe("avalar-stage-site");
   });
 
   test("available=false is explicit and removes all mutation affordances", async ({ page }) => {

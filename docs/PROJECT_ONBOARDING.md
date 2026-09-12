@@ -214,6 +214,12 @@ UI `Settings → Projects → Add`:
 
 Подключение можно сделать и через YAML. UI и YAML используют одну schema и один validator.
 
+Для backup-capable проектов текущий runtime-контракт хранит только opaque
+profile IDs: project объявляет `capabilities.backups.profiles`, а service при
+необходимости указывает `capabilities.backupProfile` из этого списка. Реальная
+исполняемость определяется server-owned backup catalog; наличие декларации не
+создаёт executor и не раскрывает пути, команды, destinations или credentials.
+
 ## 6. Automatic UI materialization
 
 Onboarding не считается завершённым после одной записи backend-конфигурации.

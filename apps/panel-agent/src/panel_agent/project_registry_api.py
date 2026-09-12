@@ -14,6 +14,7 @@ from .project_monitor import (
     probe_declarative_http_monitor,
 )
 from .project_registry import (
+    MAX_BACKUP_PROFILE_REFERENCES,
     MAX_MONITOR_INTERVAL_SECONDS,
     MAX_MONITOR_STALE_AFTER_SECONDS,
     MIN_MONITOR_INTERVAL_SECONDS,
@@ -73,6 +74,18 @@ class ProjectRegistryDetailsResponse(BaseModel):
     adapter: Literal["avalar-ssh"]
 
 
+class ProjectRegistryBackupCapabilitiesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    profiles: list[str] = Field(default_factory=list, max_length=MAX_BACKUP_PROFILE_REFERENCES)
+
+
+class ProjectRegistryProjectCapabilitiesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    backups: ProjectRegistryBackupCapabilitiesResponse
+
+
 class ProjectRegistryPresentationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -89,6 +102,13 @@ class ProjectRegistryServiceResponse(BaseModel):
         exclude_if=lambda value: value is None,
     )
     actions: list[str] = Field(default_factory=list, max_length=8)
+    backupProfile: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,31}$",
+        exclude_if=lambda value: value is None,
+    )
     presentation: ProjectRegistryPresentationResponse
 
 
@@ -106,6 +126,10 @@ class ProjectRegistryProjectResponse(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     enabled: bool
     category: Literal["external", "work"]
+    capabilities: ProjectRegistryProjectCapabilitiesResponse | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     environments: list[ProjectRegistryEnvironmentResponse] = Field(default_factory=list, max_length=32)
 
 
@@ -353,6 +377,15 @@ def _response(registry: ProjectRegistry, *, writes_enabled: bool) -> ProjectRegi
                 name=project.name,
                 enabled=project.enabled,
                 category=project.category,
+                capabilities=(
+                    ProjectRegistryProjectCapabilitiesResponse(
+                        backups=ProjectRegistryBackupCapabilitiesResponse(
+                            profiles=list(project.capabilities.backups.profiles),
+                        ),
+                    )
+                    if project.capabilities is not None
+                    else None
+                ),
                 environments=[
                     ProjectRegistryEnvironmentResponse(
                         id=environment.id,
@@ -373,6 +406,7 @@ def _response(registry: ProjectRegistry, *, writes_enabled: bool) -> ProjectRegi
                                     else None
                                 ),
                                 actions=list(service.capabilities.actions),
+                                backupProfile=service.capabilities.backupProfile,
                                 presentation=ProjectRegistryPresentationResponse(
                                     widget=service.presentation.widget,
                                 ),

@@ -17,6 +17,25 @@ Slice A реализован только для verified local backup конф�
 
 Ожидают будущих slices: AVALAR `avalar/main|stage/website`, Home Assistant native backup, AliceTG runtime, cloud/external destinations, encryption, restore, retention deletion, scheduler и другие source handlers. Этот статус не означает завершение issue #8 целиком.
 
+## Project Registry bridge (Slice B1)
+
+Project Registry хранит только безопасные декларативные связи с backup profiles:
+
+```yaml
+capabilities:
+  backups:
+    profiles:
+      - avalar-main-site
+      - avalar-stage-site
+```
+
+У service может быть одна связь `capabilities.backupProfile`; такой ID обязан
+входить в project-level список. Registry не хранит paths, commands, handler
+configuration, destinations, hosts или credentials. Server-owned backup catalog
+отдельно определяет, зарегистрирован ли profile и есть ли для него executable
+handler. Поэтому декларация `avalar-stage-site` может быть валидной, но
+недоступной для запуска до отдельной реализации AVALAR backup slice.
+
 ## 2. Backup is not just file download
 
 Успешный backup означает:

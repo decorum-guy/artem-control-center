@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from panel_agent.integrations import IntegrationRuntime
-from panel_agent.project_registry import ProjectRegistry, load_project_registry
+from panel_agent.project_registry import ProjectConfig, ProjectRegistry, load_project_registry
 from panel_agent.project_registry_api import build_project_registry_router
 from panel_agent.project_registry_migration import (
     ProjectRegistryMigrationError,
@@ -49,6 +49,19 @@ def _project(*, project_id: str = "external-api", enabled: bool = True) -> dict:
             }
         ],
     }
+
+
+def _backup_project() -> dict:
+    project = _project(project_id="avalar", enabled=True)
+    project["name"] = "AVALAR"
+    project["category"] = "work"
+    project["capabilities"] = {
+        "backups": {"profiles": ["avalar-main-site", "avalar-stage-site"]}
+    }
+    project["environments"][0]["services"][0]["capabilities"]["backupProfile"] = (
+        "avalar-stage-site"
+    )
+    return project
 
 
 def _document(*projects: dict) -> dict:
@@ -252,6 +265,45 @@ def test_get_existing_registry_exposes_only_sanitized_monitor_fields(tmp_path, m
     assert endpoint not in serialized
     assert str(path) not in serialized
     assert "projects_config_path" not in serialized
+
+
+def test_store_write_read_round_trip_preserves_backup_declarations(tmp_path):
+    path = tmp_path / "projects.yaml"
+    project = ProjectConfig.model_validate(_backup_project())
+
+    saved = ProjectRegistryStore(path).create(project, expected_revision=0)
+    reloaded = load_project_registry(path)
+
+    assert saved.revision == 1
+    assert reloaded.projects[0].capabilities is not None
+    assert reloaded.projects[0].capabilities.backups.profiles == [
+        "avalar-main-site",
+        "avalar-stage-site",
+    ]
+    assert (
+        reloaded.projects[0]
+        .environments[0]
+        .services[0]
+        .capabilities.backupProfile
+        == "avalar-stage-site"
+    )
+
+
+def test_project_registry_api_preserves_backup_declarations(tmp_path):
+    path = tmp_path / "projects.yaml"
+    _write(path, _document(_backup_project()))
+    _, _, _, client = _client(path)
+
+    response = client.get("/api/v1/settings/projects")
+
+    assert response.status_code == 200
+    project = response.json()["projects"][0]
+    assert project["capabilities"] == {
+        "backups": {"profiles": ["avalar-main-site", "avalar-stage-site"]}
+    }
+    assert project["environments"][0]["services"][0]["backupProfile"] == (
+        "avalar-stage-site"
+    )
 
 
 def test_create_persists_revision_once_and_reconciles(tmp_path):

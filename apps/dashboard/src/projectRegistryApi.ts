@@ -20,6 +20,7 @@ const MIN_INTERVAL_SECONDS = 5;
 const MAX_INTERVAL_SECONDS = 3_600;
 const MIN_STALE_AFTER_SECONDS = 15;
 const MAX_STALE_AFTER_SECONDS = 86_400;
+const MAX_BACKUP_PROFILE_REFERENCES = 8;
 const registeredProjectActionIds = new Set(Object.keys(avalarActionTitles));
 
 export type ProjectRegistryServerErrorCode =
@@ -121,6 +122,19 @@ function identifier(value: unknown, label: string): string {
   return value;
 }
 
+function parseProjectCapabilities(value: unknown): { backups: { profiles: string[] } } {
+  if (!isRecord(value)) throw new Error("invalid_project_capabilities");
+  exactKeys(value, ["backups"], "project_capabilities");
+  if (!isRecord(value.backups)) throw new Error("invalid_project_backup_capabilities");
+  exactKeys(value.backups, ["profiles"], "project_backup_capabilities");
+  if (!Array.isArray(value.backups.profiles) || value.backups.profiles.length > MAX_BACKUP_PROFILE_REFERENCES) {
+    throw new Error("invalid_project_backup_profiles");
+  }
+  const profiles = value.backups.profiles.map((profile) => identifier(profile, "backup_profile_id"));
+  if (new Set(profiles).size !== profiles.length) throw new Error("invalid_project_backup_profiles");
+  return { backups: { profiles } };
+}
+
 function urlEnv(value: unknown): string {
   if (typeof value !== "string" || !URL_ENV_PATTERN.test(value)) throw new Error("invalid_url_env");
   return value;
@@ -150,7 +164,7 @@ function parseDetails(value: unknown): { adapter: "avalar-ssh" } {
 
 function parseService(value: unknown): ProjectRegistryService {
   if (!isRecord(value)) throw new Error("invalid_service");
-  exactKeys(value, ["id", "monitor", "actions", "presentation"], "service", ["details"]);
+  exactKeys(value, ["id", "monitor", "actions", "presentation"], "service", ["details", "backupProfile"]);
   if (!Array.isArray(value.actions) || value.actions.length > 8) {
     throw new Error("invalid_service_actions");
   }
@@ -168,6 +182,7 @@ function parseService(value: unknown): ProjectRegistryService {
     monitor: parseMonitor(value.monitor),
     ...(value.details === undefined ? {} : { details: parseDetails(value.details) }),
     actions,
+    ...(value.backupProfile === undefined ? {} : { backupProfile: identifier(value.backupProfile, "backup_profile_id") }),
     presentation: { widget: "core.generic-service" }
   };
 }
@@ -184,15 +199,24 @@ function parseEnvironment(value: unknown): ProjectRegistryEnvironment {
 
 function parseProject(value: unknown): ProjectRegistryProject {
   if (!isRecord(value)) throw new Error("invalid_project");
-  exactKeys(value, ["id", "name", "enabled", "category", "environments"], "project");
+  exactKeys(value, ["id", "name", "enabled", "category", "environments"], "project", ["capabilities"]);
   if (typeof value.enabled !== "boolean" || (value.category !== "external" && value.category !== "work")) throw new Error("invalid_project_metadata");
   if (!Array.isArray(value.environments) || value.environments.length > 32) throw new Error("invalid_project_environments");
+  const capabilities = value.capabilities === undefined ? undefined : parseProjectCapabilities(value.capabilities);
+  const environments = value.environments.map(parseEnvironment);
+  const declaredBackupProfiles = new Set(capabilities?.backups.profiles ?? []);
+  if (environments.some((environment) => environment.services.some((service) => (
+    service.backupProfile !== undefined && !declaredBackupProfiles.has(service.backupProfile)
+  )))) {
+    throw new Error("invalid_service_backup_profile");
+  }
   return {
     id: identifier(value.id, "project_id"),
     name: text(value.name, "project_name", 100),
     enabled: value.enabled,
     category: value.category,
-    environments: value.environments.map(parseEnvironment)
+    ...(capabilities === undefined ? {} : { capabilities }),
+    environments
   };
 }
 
@@ -224,12 +248,15 @@ export function parseProjectRegistry(value: unknown): ProjectRegistrySettings {
   if (!value.available && value.errorCode === null) throw new Error("invalid_project_registry_error");
   const revision = integer(value.revision, "revision", 0, 2_147_483_647);
   if (!Array.isArray(value.projects) || value.projects.length > 128) throw new Error("invalid_project_registry_projects");
+  const projects = value.projects.map(parseProject);
+  const backupProfileIds = projects.flatMap((project) => project.capabilities?.backups.profiles ?? []);
+  if (new Set(backupProfileIds).size !== backupProfileIds.length) throw new Error("invalid_project_backup_profiles");
   return {
     schemaVersion: "project.registry.v1",
     revision,
     available: value.available,
     errorCode: value.errorCode,
-    projects: value.projects.map(parseProject),
+    projects,
     writesEnabled: value.writesEnabled,
     manageCapability: PROJECT_REGISTRY_CAPABILITY,
     manageMinimumProfile: "full"

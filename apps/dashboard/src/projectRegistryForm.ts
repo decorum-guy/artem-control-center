@@ -29,10 +29,12 @@ const IDENTIFIER_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const URL_ENV_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 export function projectDraftFromRegistry(project: ProjectRegistryProject): ProjectDraft | null {
+  if (project.capabilities !== undefined) return null;
   if (project.environments.length !== 1) return null;
   const environment = project.environments[0];
   if (!environment || environment.services.length !== 1) return null;
   const service = environment.services[0];
+  if (service?.backupProfile !== undefined) return null;
   if (!service || service.actions.length !== 0 || service.presentation.widget !== "core.generic-service") return null;
   if (service.monitor.adapter !== "http") return null;
   return {
@@ -82,6 +84,13 @@ export function projectInputFromRegistry(project: ProjectRegistryProject): Proje
     name: project.name,
     enabled: project.enabled,
     category: project.category,
+    ...(project.capabilities ? {
+      capabilities: {
+        backups: {
+          profiles: [...project.capabilities.backups.profiles]
+        }
+      }
+    } : {}),
     environments: project.environments.map((environment) => ({
       id: environment.id,
       services: environment.services.map((service) => ({
@@ -94,7 +103,8 @@ export function projectInputFromRegistry(project: ProjectRegistryProject): Proje
             stale_after_seconds: service.monitor.staleAfterSeconds
           },
           ...(service.details ? { details: service.details } : {}),
-          actions: [...service.actions]
+          actions: [...service.actions],
+          ...(service.backupProfile !== undefined ? { backupProfile: service.backupProfile } : {})
         },
         presentation: { widget: "core.generic-service" }
       }))

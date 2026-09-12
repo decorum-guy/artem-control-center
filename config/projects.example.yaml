@@ -14,6 +14,26 @@ ui_materialization:
   never_overwrite_existing_layout: true
 
 projects:
+  - id: artem-control-center
+    name: Artem Control Center
+    enabled: true
+    category: work
+    capabilities:
+      backups:
+        profiles:
+          - artem-control-center-config
+    environments:
+      - id: local-panel
+        services:
+          - id: panel-agent
+            capabilities:
+              monitor:
+                adapter: http
+                url_env: PANEL_AGENT_HEALTH_URL
+              backupProfile: artem-control-center-config
+            presentation:
+              widget: core.generic-service
+
   - id: external-api
     name: External API
     enabled: true
@@ -40,6 +60,11 @@ projects:
     name: AVALAR Website
     enabled: true
     category: avalar
+    capabilities:
+      backups:
+        profiles:
+          - avalar-main-site
+          - avalar-stage-site
     repository: decorum-guy/AVALAR
     environments:
       - id: stage
@@ -57,7 +82,7 @@ projects:
               actions:
                 - avalar.stage.deploy
                 - avalar.stage.smoke
-              backups: []
+              backupProfile: avalar-stage-site
             presentation:
               widget: core.generic-service
       - id: main
@@ -74,7 +99,7 @@ projects:
                 url_env: AVALAR_MAIN_URL
               actions:
                 - avalar.main.smoke
-              backups: []
+              backupProfile: avalar-main-site
             presentation:
               widget: core.generic-service
 
@@ -82,6 +107,10 @@ projects:
     name: Proxy Server
     enabled: true
     category: infrastructure
+    capabilities:
+      backups:
+        profiles:
+          - proxy-config
     repository: null
     source_kind: server_managed
     note: No Git repository currently exists; integrate through a restricted host agent.
@@ -95,8 +124,7 @@ projects:
                 handler_ref: proxy_danted_health
               actions:
                 - proxy.danted.reload
-              backups:
-                - proxy-config
+              backupProfile: proxy-config
             presentation:
               widget: core.generic-service
           - id: telegram-proxy
@@ -106,8 +134,7 @@ projects:
                 handler_ref: proxy_telegram_health
               actions:
                 - proxy.telegram.restart
-              backups:
-                - proxy-config
+              backupProfile: proxy-config
             presentation:
               widget: core.generic-service
           - id: allow-list
@@ -118,8 +145,7 @@ projects:
               actions:
                 - proxy.allow_list.add
                 - proxy.allow_list.remove
-              backups:
-                - proxy-config
+              backupProfile: proxy-config
             presentation:
               widget: core.generic-service
 
@@ -127,6 +153,11 @@ projects:
     name: Home Assistant Stack
     enabled: true
     category: home
+    capabilities:
+      backups:
+        profiles:
+          - home-control-config
+          - alice-tg-bot-runtime
     repository: null
     source_kind: runtime_stack
     constraints:
@@ -145,8 +176,7 @@ projects:
               actions:
                 - home.create_backup
                 - home.run_registered_scene
-              backups:
-                - home-assistant-native
+              backupProfile: home-control-config
             presentation:
               widget: home.authority-status
 
@@ -211,8 +241,7 @@ projects:
                 ready_url_env: ALICE_TG_BOT_READY_URL
               actions:
                 - home.alice_bot.restart
-              backups:
-                - alice-tg-bot-runtime
+              backupProfile: alice-tg-bot-runtime
             presentation:
               widget: core.generic-service
 
