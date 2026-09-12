@@ -6,6 +6,17 @@ Artem Control Center должен уметь запускать резервно
 
 Backup capability является независимой: проект может поддерживать backup без restart/deploy, а monitor-only проект может не иметь backup вообще.
 
+## Slice A implementation status
+
+Slice A реализован только для verified local backup конфигурации самого Control Center:
+
+- fixed profile `artem-control-center-config` использует зарегистрированный handler `panel-config`;
+- allow-list включает только Panel-owned non-secret state: Overview layout, Calendar display colors, device visibility, interface-copy overrides, Project Registry и capability overrides;
+- первый destination — локальный SSD, зарегистрированный как `laptop-primary`, с backend-owned root, pre-flight free-space check, ZIP, отдельным versioned manifest и bounded atomic history;
+- API и `/backups` показывают только sanitized metadata, lifecycle и verification result.
+
+Ожидают будущих slices: AVALAR `avalar/main|stage/website`, Home Assistant native backup, AliceTG runtime, cloud/external destinations, encryption, restore, retention deletion, scheduler и другие source handlers. Этот статус не означает завершение issue #8 целиком.
+
 ## 2. Backup is not just file download
 
 Успешный backup означает:
@@ -44,7 +55,7 @@ Backup capability является независимой: проект може
 
 ```yaml
 id: avalar-site-stage
-project_id: avalar-site
+project_id: avalar
 source:
   adapter: restricted_ssh_bundle
   handler_ref: avalar_site_stage_backup

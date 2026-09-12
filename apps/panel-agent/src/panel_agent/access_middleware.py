@@ -69,6 +69,10 @@ def _planning_capability(method: str, path: str) -> str | None:
 
 def capability_for_request(method: str, path: str) -> str | None:
     """Resolve the fixed access capability for a registered mutation route."""
+    if method == "POST" and path.startswith("/api/v1/backups/") and path.endswith("/runs"):
+        profile_id = path.removeprefix("/api/v1/backups/").removesuffix("/runs")
+        if profile_id and "/" not in profile_id:
+            return "backup.create"
     if method == "PATCH" and path.startswith("/api/v1/settings/ai/providers/") and path.endswith("/credential"):
         return "settings.ai.providers"
     if method == "POST" and path == "/api/v1/settings/projects":

@@ -52,6 +52,9 @@ def test_ai_provider_settings_are_a_registered_standard_capability(tmp_path):
     assert capability_for_request("PATCH", "/api/v1/settings/interface-copy") == "settings.interface_copy"
     assert capability_for_request("POST", "/api/v1/actions/home/coffee/delayed-start") == "home.coffee.control"
     assert capability_for_request("DELETE", "/api/v1/actions/home/coffee/delayed-start") == "home.coffee.control"
+    assert capability_for_request("POST", "/api/v1/backups/artem-control-center-config/runs") == "backup.create"
+    assert capability_for_request("POST", "/api/v1/backups/arbitrary/runs") == "backup.create"
+    assert capability_for_request("POST", "/api/v1/backups/artem-control-center-config/runs/extra") is None
     assert CAPABILITIES["settings.reminder_delivery"] == "standard"
     assert CAPABILITIES["settings.interface_copy"] == "standard"
 

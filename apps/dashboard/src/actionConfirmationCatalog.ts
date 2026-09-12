@@ -15,6 +15,7 @@ export type ActionConfirmationId =
   | "planning.calendar.delete"
   | "settings.interface-copy.reset-all"
   | "settings.projects.delete"
+  | "backup.create"
   | "coffee-diary.bean.delete"
   | "coffee-diary.extraction.delete";
 
@@ -198,6 +199,16 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     description: "Мониторинг проекта будет удалён из Control Center.",
     confirmLabel: "Удалить проект",
     alwaysConfirm: true
+  },
+  "backup.create": {
+    id: "backup.create",
+    level: "simple",
+    tone: "standard",
+    title: "Создать резервную копию?",
+    target: "Control Center",
+    environment: "локальная панель",
+    description: "Сохраним конфигурацию панели на локальный SSD и проверим архив перед публикацией.",
+    confirmLabel: "Создать копию"
   },
   "coffee-diary.bean.delete": {
     id: "coffee-diary.bean.delete",
