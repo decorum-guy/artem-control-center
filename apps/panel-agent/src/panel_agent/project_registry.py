@@ -30,6 +30,7 @@ MAX_PROJECT_REGISTRY_REVISION = 2_147_483_647
 DEFAULT_PROJECTS_CONFIG_PATH = ".runtime/projects.yaml"
 MAX_PROJECT_CONFIG_BYTES = 256 * 1024
 MAX_PROJECT_ID_LENGTH = 32
+MAX_BACKUP_PROFILE_REFERENCES = 8
 MAX_SNAPSHOT_ID_LENGTH = 80
 MIN_MONITOR_INTERVAL_SECONDS = 5
 MAX_MONITOR_INTERVAL_SECONDS = 3600
@@ -94,10 +95,44 @@ class ProjectDetailsConfig(_ProjectModel):
     adapter: Literal["avalar-ssh"]
 
 
+class ProjectBackupCapabilities(_ProjectModel):
+    """Safe project-owned references to server-side backup profiles."""
+
+    profiles: list[str] = Field(default_factory=list, max_length=MAX_BACKUP_PROFILE_REFERENCES)
+
+    @field_validator("profiles")
+    @classmethod
+    def _profile_ids_are_unique_and_safe(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("duplicate backup profile ID")
+        for profile_id in value:
+            _validate_identifier(profile_id)
+        return value
+
+
+class ProjectLevelCapabilities(_ProjectModel):
+    """Project-level capabilities; implementation details stay server-owned."""
+
+    backups: ProjectBackupCapabilities
+
+
 class ProjectCapabilities(_ProjectModel):
     monitor: ProjectMonitorConfig
     details: ProjectDetailsConfig | None = None
     actions: list[str] = Field(default_factory=list, max_length=8)
+    backupProfile: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_PROJECT_ID_LENGTH,
+        exclude_if=lambda value: value is None,
+    )
+
+    @field_validator("backupProfile")
+    @classmethod
+    def _backup_profile_id_is_safe(cls, value: str | None) -> str | None:
+        if value is not None:
+            _validate_identifier(value)
+        return value
 
     @field_validator("actions")
     @classmethod
@@ -154,6 +189,10 @@ class ProjectConfig(_ProjectModel):
     name: str = Field(min_length=1, max_length=100)
     enabled: bool = True
     category: Literal["external", "work"] = "external"
+    capabilities: ProjectLevelCapabilities | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     environments: list[ProjectEnvironmentConfig] = Field(default_factory=list, max_length=32)
 
     @field_validator("id")
@@ -163,9 +202,19 @@ class ProjectConfig(_ProjectModel):
 
     @model_validator(mode="after")
     def _registered_targets_are_safe(self) -> "ProjectConfig":
+        declared_backup_profiles = (
+            set(self.capabilities.backups.profiles)
+            if self.capabilities is not None
+            else set()
+        )
         for environment in self.environments:
             environment_target = avalar_target_for_environment(environment.id)
             for service in environment.services:
+                backup_profile = service.capabilities.backupProfile
+                if backup_profile is not None and backup_profile not in declared_backup_profiles:
+                    raise ValueError(
+                        "service backup profile must be declared by its project"
+                    )
                 monitor = service.capabilities.monitor
                 if monitor.adapter == "avalar":
                     monitor_target = avalar_target_for_url_env(monitor.url_env)
@@ -194,6 +243,7 @@ class ProjectConfigDocument(_ProjectModel):
     @model_validator(mode="after")
     def _identities_are_unique(self) -> "ProjectConfigDocument":
         project_ids: set[str] = set()
+        backup_profile_ids: set[str] = set()
         stable_service_ids: set[str] = set()
         registered_action_ids: set[str] = set()
 
@@ -201,6 +251,12 @@ class ProjectConfigDocument(_ProjectModel):
             if project.id in project_ids:
                 raise ValueError("duplicate project identity")
             project_ids.add(project.id)
+
+            if project.capabilities is not None:
+                for profile_id in project.capabilities.backups.profiles:
+                    if profile_id in backup_profile_ids:
+                        raise ValueError("duplicate backup profile identity")
+                    backup_profile_ids.add(profile_id)
 
             environment_ids: set[str] = set()
             for environment in project.environments:

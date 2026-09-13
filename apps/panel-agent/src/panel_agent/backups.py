@@ -389,6 +389,63 @@ def _profile_inventory(destination_available: bool, destination_configured: bool
     }
 
 
+@dataclass(frozen=True)
+class BackupProfileRegistration:
+    """Server-owned identity and executability state for one backup profile."""
+
+    id: str
+    project: str
+    environment: str
+    service: str
+    registered: bool = True
+    executable: bool = True
+
+
+class BackupProfileCatalog:
+    """Small explicit catalog; it contains no request-controlled handlers."""
+
+    def __init__(self, profiles: Sequence[BackupProfileRegistration]) -> None:
+        by_id: dict[str, BackupProfileRegistration] = {}
+        for profile in profiles:
+            if profile.id in by_id:
+                raise ValueError("duplicate backup profile registration")
+            if profile.executable and not profile.registered:
+                raise ValueError("executable backup profile must be registered")
+            by_id[profile.id] = profile
+        self._profiles = by_id
+
+    def get(self, profile_id: str) -> BackupProfileRegistration | None:
+        return self._profiles.get(profile_id)
+
+    def resolve(self, profile_id: str) -> BackupProfileRegistration | None:
+        """Resolve only server-registered metadata; never project config."""
+
+        return self.get(profile_id)
+
+    def is_registered(self, profile_id: str) -> bool:
+        profile = self.get(profile_id)
+        return profile is not None and profile.registered
+
+    def is_executable(self, profile_id: str) -> bool:
+        profile = self.get(profile_id)
+        return profile is not None and profile.registered and profile.executable
+
+
+# This is deliberately an explicit server-owned list.  The Project Registry
+# may declare additional opaque IDs, but those declarations do not add catalog
+# entries or execution paths.
+BACKUP_PROFILE_CATALOG = BackupProfileCatalog(
+    (
+        BackupProfileRegistration(
+            id=PROFILE_ID,
+            project=PROJECT_ID,
+            environment=ENVIRONMENT_ID,
+            service=SERVICE_ID,
+        ),
+    )
+)
+
+
 class BackupEngine:
     """One fixed-profile executor with a bounded in-memory active run."""
 
@@ -884,7 +941,11 @@ def _error_status(code: str) -> int:
     return status.HTTP_409_CONFLICT
 
 
-def build_backup_router(engine: BackupEngine, access_policy: AccessPolicyStore) -> APIRouter:
+def build_backup_router(
+    engine: BackupEngine,
+    access_policy: AccessPolicyStore,
+    profile_catalog: BackupProfileCatalog = BACKUP_PROFILE_CATALOG,
+) -> APIRouter:
     router = APIRouter(prefix="/api/v1/backups", tags=["backups"])
 
     @router.get("")
@@ -900,6 +961,12 @@ def build_backup_router(engine: BackupEngine, access_policy: AccessPolicyStore) 
         except HTTPException as exc:
             access_policy.audit_capability("backup.create", result=f"http_{exc.status_code}")
             raise
+        if not profile_catalog.is_executable(profile_id):
+            access_policy.audit_capability("backup.create", result="backup_profile_unknown")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="backup_profile_unknown",
+            )
         try:
             run = engine.start(profile_id)
         except BackupRequestError as exc:

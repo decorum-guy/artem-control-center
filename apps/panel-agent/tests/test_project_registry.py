@@ -78,6 +78,131 @@ def test_zero_actions_is_valid(tmp_path):
     assert registry.projects[0].environments[0].services[0].capabilities.actions == []
 
 
+def test_project_and_service_backup_profile_declarations_load(tmp_path):
+    document = _document()
+    project = document["projects"][0]
+    project["capabilities"] = {
+        "backups": {"profiles": ["avalar-main-site", "avalar-stage-site"]}
+    }
+    project["environments"][0]["services"][0]["capabilities"]["backupProfile"] = (
+        "avalar-stage-site"
+    )
+    path = tmp_path / "projects.yaml"
+    _write(path, document)
+
+    registry = load_project_registry(path)
+
+    assert registry.available is True
+    assert registry.projects[0].capabilities is not None
+    assert registry.projects[0].capabilities.backups.profiles == [
+        "avalar-main-site",
+        "avalar-stage-site",
+    ]
+    assert (
+        registry.projects[0]
+        .environments[0]
+        .services[0]
+        .capabilities.backupProfile
+        == "avalar-stage-site"
+    )
+
+
+def test_duplicate_project_backup_profile_ids_are_rejected(tmp_path):
+    document = _document()
+    document["projects"][0]["capabilities"] = {
+        "backups": {"profiles": ["avalar-stage-site", "avalar-stage-site"]}
+    }
+    path = tmp_path / "projects.yaml"
+    _write(path, document)
+
+    registry = load_project_registry(path)
+
+    assert registry.available is False
+    assert registry.error_code == "invalid_schema"
+    assert registry.projects == ()
+
+
+def test_service_backup_profile_must_be_declared_by_project(tmp_path):
+    document = _document()
+    document["projects"][0]["capabilities"] = {
+        "backups": {"profiles": ["avalar-main-site"]}
+    }
+    document["projects"][0]["environments"][0]["services"][0]["capabilities"][
+        "backupProfile"
+    ] = "avalar-stage-site"
+    path = tmp_path / "projects.yaml"
+    _write(path, document)
+
+    registry = load_project_registry(path)
+
+    assert registry.available is False
+    assert registry.error_code == "invalid_schema"
+    assert registry.projects == ()
+
+
+@pytest.mark.parametrize(
+    "profile_id",
+    [
+        "../secret",
+        "/tmp/foo",
+        r"C:\foo",
+        "https://example.test/backup",
+        "avalar stage site",
+        "avalar\nstage",
+    ],
+)
+def test_unsafe_backup_profile_ids_are_rejected(tmp_path, profile_id):
+    document = _document()
+    document["projects"][0]["capabilities"] = {
+        "backups": {"profiles": [profile_id]}
+    }
+    path = tmp_path / "projects.yaml"
+    _write(path, document)
+
+    registry = load_project_registry(path)
+
+    assert registry.available is False
+    assert registry.error_code == "invalid_schema"
+    assert registry.projects == ()
+
+
+@pytest.mark.parametrize(
+    "profile_id",
+    ["../secret", "/tmp/foo", r"C:\foo", "https://example.test/backup", "avalar stage"],
+)
+def test_unsafe_service_backup_profile_ids_are_rejected(tmp_path, profile_id):
+    document = _document()
+    document["projects"][0]["capabilities"] = {
+        "backups": {"profiles": ["avalar-stage-site"]}
+    }
+    document["projects"][0]["environments"][0]["services"][0]["capabilities"][
+        "backupProfile"
+    ] = profile_id
+    path = tmp_path / "projects.yaml"
+    _write(path, document)
+
+    registry = load_project_registry(path)
+
+    assert registry.available is False
+    assert registry.error_code == "invalid_schema"
+    assert registry.projects == ()
+
+
+def test_unknown_backup_capability_fields_are_rejected(tmp_path):
+    document = _document()
+    document["projects"][0]["capabilities"] = {
+        "backups": {"profiles": [], "paths": ["/tmp/secret"]}
+    }
+    path = tmp_path / "projects.yaml"
+    _write(path, document)
+
+    registry = load_project_registry(path)
+
+    assert registry.available is False
+    assert registry.error_code == "invalid_schema"
+    assert registry.projects == ()
+
+
 def test_missing_project_config_is_an_empty_available_registry(tmp_path):
     registry = load_project_registry(tmp_path / "missing-projects.yaml")
 

@@ -113,6 +113,45 @@ describe("project registry API", () => {
     expect(JSON.stringify(parsed)).not.toContain("ssh_host");
   });
 
+  it("parses project backup declarations and service associations as opaque IDs", () => {
+    const backupProject = {
+      ...project,
+      capabilities: {
+        backups: { profiles: ["avalar-main-site", "avalar-stage-site"] }
+      },
+      environments: [{
+        ...project.environments[0],
+        services: [{
+          ...project.environments[0].services[0],
+          backupProfile: "avalar-stage-site"
+        }]
+      }]
+    };
+    const parsed = parseProjectRegistry({ ...registry, projects: [backupProject] });
+
+    expect(parsed.projects[0]?.capabilities).toEqual({
+      backups: { profiles: ["avalar-main-site", "avalar-stage-site"] }
+    });
+    expect(parsed.projects[0]?.environments[0]?.services[0]?.backupProfile).toBe("avalar-stage-site");
+    expect(() => parseProjectRegistry({
+      ...registry,
+      projects: [{
+        ...backupProject,
+        capabilities: { backups: { profiles: ["../secret"] } }
+      }]
+    })).toThrow("invalid_backup_profile_id");
+    expect(() => parseProjectRegistry({
+      ...registry,
+      projects: [{
+        ...backupProject,
+        environments: [{
+          ...backupProject.environments[0],
+          services: [{ ...backupProject.environments[0].services[0], backupProfile: "other-profile" }]
+        }]
+      }]
+    })).toThrow("invalid_service_backup_profile");
+  });
+
   it("rejects an unknown action ID at the browser contract boundary", () => {
     const invalid = {
       ...registry,

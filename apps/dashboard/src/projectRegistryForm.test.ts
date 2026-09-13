@@ -84,6 +84,9 @@ describe("monitor-only project editor", () => {
       name: "AVALAR",
       enabled: true,
       category: "work",
+      capabilities: {
+        backups: { profiles: ["avalar-main-site", "avalar-stage-site"] }
+      },
       environments: [
         {
           id: "main",
@@ -92,6 +95,7 @@ describe("monitor-only project editor", () => {
             monitor: { adapter: "avalar", urlEnv: "PANEL_AVALAR_MAIN_URL", intervalSeconds: 60, staleAfterSeconds: 180 },
             details: { adapter: "avalar-ssh" },
             actions: ["avalar.main.smoke", "avalar.main.deploy"],
+            backupProfile: "avalar-main-site",
             presentation: { widget: "core.generic-service" }
           }]
         },
@@ -102,14 +106,19 @@ describe("monitor-only project editor", () => {
             monitor: { adapter: "avalar", urlEnv: "PANEL_AVALAR_STAGE_URL", intervalSeconds: 60, staleAfterSeconds: 180 },
             details: { adapter: "avalar-ssh" },
             actions: ["avalar.stage.smoke", "avalar.stage.deploy"],
+            backupProfile: "avalar-stage-site",
             presentation: { widget: "core.generic-service" }
           }]
         }
       ]
     };
+    expect(projectDraftFromRegistry(avalar)).toBeNull();
     expect(projectInputFromRegistry({ ...avalar, enabled: false })).toMatchObject({
       category: "work",
       enabled: false,
+      capabilities: {
+        backups: { profiles: ["avalar-main-site", "avalar-stage-site"] }
+      },
       environments: avalar.environments.map((environment) => ({
         id: environment.id,
         services: [{
@@ -117,11 +126,18 @@ describe("monitor-only project editor", () => {
           capabilities: {
             monitor: expect.objectContaining({ adapter: "avalar", url_env: environment.id === "main" ? "PANEL_AVALAR_MAIN_URL" : "PANEL_AVALAR_STAGE_URL" }),
             details: { adapter: "avalar-ssh" },
-            actions: environment.id === "main" ? ["avalar.main.smoke", "avalar.main.deploy"] : ["avalar.stage.smoke", "avalar.stage.deploy"]
+            actions: environment.id === "main" ? ["avalar.main.smoke", "avalar.main.deploy"] : ["avalar.stage.smoke", "avalar.stage.deploy"],
+            backupProfile: environment.id === "main" ? "avalar-main-site" : "avalar-stage-site"
           }
         }]
       }))
     });
+
+    const toggled = projectInputFromRegistry({ ...avalar, enabled: false });
+    expect(toggled.capabilities).toEqual({
+      backups: { profiles: ["avalar-main-site", "avalar-stage-site"] }
+    });
+    expect(toggled.environments[1]?.services[0]?.capabilities.backupProfile).toBe("avalar-stage-site");
   });
 
   it("uses server-aligned validation bounds and does not accept a URL value", () => {

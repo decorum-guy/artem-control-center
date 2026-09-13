@@ -10,10 +10,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from panel_agent.integrations import IntegrationRuntime
-from panel_agent.project_registry import ProjectRegistry, load_project_registry
+from panel_agent.project_registry import ProjectConfig, ProjectRegistry, load_project_registry
 from panel_agent.project_registry_api import build_project_registry_router
 from panel_agent.project_registry_migration import (
     ProjectRegistryMigrationError,
+    _legacy_canonical_avalar_project,
     canonical_avalar_project,
     ensure_canonical_avalar_project,
 )
@@ -49,6 +50,19 @@ def _project(*, project_id: str = "external-api", enabled: bool = True) -> dict:
             }
         ],
     }
+
+
+def _backup_project() -> dict:
+    project = _project(project_id="avalar", enabled=True)
+    project["name"] = "AVALAR"
+    project["category"] = "work"
+    project["capabilities"] = {
+        "backups": {"profiles": ["avalar-main-site", "avalar-stage-site"]}
+    }
+    project["environments"][0]["services"][0]["capabilities"]["backupProfile"] = (
+        "avalar-stage-site"
+    )
+    return project
 
 
 def _document(*projects: dict) -> dict:
@@ -127,6 +141,18 @@ def test_provisioning_missing_or_empty_registry_creates_one_canonical_avalar(
     assert provisioned.projects[0].environments[0].services[0].capabilities.monitor.url_env == (
         "PANEL_AVALAR_MAIN_URL"
     )
+    project = provisioned.projects[0]
+    assert project.capabilities is not None
+    assert project.capabilities.backups.profiles == [
+        "avalar-main-site",
+        "avalar-stage-site",
+    ]
+    assert project.environments[0].services[0].capabilities.backupProfile == (
+        "avalar-main-site"
+    )
+    assert project.environments[1].services[0].capabilities.backupProfile == (
+        "avalar-stage-site"
+    )
     serialized = json.dumps(provisioned.projects[0].model_dump(mode="json"))
     assert "https://" not in serialized
     assert "main.test" not in serialized
@@ -150,6 +176,40 @@ def test_provisioning_preserves_unrelated_projects_unchanged(tmp_path):
     ]
 
 
+def test_legacy_canonical_avalar_is_upgraded_to_backup_declarations(tmp_path):
+    path = tmp_path / "projects.yaml"
+    unrelated = _project(project_id="unrelated")
+    _write(
+        path,
+        {
+            "version": 1,
+            "revision": 7,
+            "projects": [
+                unrelated,
+                _legacy_canonical_avalar_project().model_dump(mode="python"),
+            ],
+        },
+    )
+    before = load_project_registry(path)
+
+    provisioned = ensure_canonical_avalar_project(ProjectRegistryStore(path))
+
+    assert provisioned.revision == 8
+    assert provisioned.projects[0] == before.projects[0]
+    assert provisioned.projects[1] == canonical_avalar_project()
+    assert provisioned.projects[1].capabilities is not None
+    assert provisioned.projects[1].capabilities.backups.profiles == [
+        "avalar-main-site",
+        "avalar-stage-site",
+    ]
+    assert provisioned.projects[1].environments[0].services[0].capabilities.backupProfile == (
+        "avalar-main-site"
+    )
+    assert provisioned.projects[1].environments[1].services[0].capabilities.backupProfile == (
+        "avalar-stage-site"
+    )
+
+
 def test_exact_canonical_provisioning_is_idempotent_without_revision_bump(tmp_path):
     path = tmp_path / "projects.yaml"
     first = ensure_canonical_avalar_project(ProjectRegistryStore(path))
@@ -161,6 +221,29 @@ def test_exact_canonical_provisioning_is_idempotent_without_revision_bump(tmp_pa
     assert second.revision == 1
     assert second.projects == (canonical_avalar_project(),)
     assert path.read_bytes() == before
+
+
+def test_owner_modified_legacy_avalar_is_not_migrated(tmp_path):
+    path = tmp_path / "projects.yaml"
+    modified = _legacy_canonical_avalar_project().model_copy(
+        update={"name": "Owner AVALAR"}
+    )
+    _write(
+        path,
+        {
+            "version": 1,
+            "revision": 7,
+            "projects": [modified.model_dump(mode="python")],
+        },
+    )
+    before = path.read_bytes()
+
+    with pytest.raises(ProjectRegistryMigrationError) as error:
+        ensure_canonical_avalar_project(ProjectRegistryStore(path))
+
+    assert error.value.code == "avalar_definition_conflict"
+    assert path.read_bytes() == before
+    assert load_project_registry(path).revision == 7
 
 
 def test_conflicting_avalar_project_fails_closed_without_overwrite(tmp_path):
@@ -252,6 +335,70 @@ def test_get_existing_registry_exposes_only_sanitized_monitor_fields(tmp_path, m
     assert endpoint not in serialized
     assert str(path) not in serialized
     assert "projects_config_path" not in serialized
+
+
+def test_store_write_read_round_trip_preserves_backup_declarations(tmp_path):
+    path = tmp_path / "projects.yaml"
+    project = ProjectConfig.model_validate(_backup_project())
+
+    saved = ProjectRegistryStore(path).create(project, expected_revision=0)
+    reloaded = load_project_registry(path)
+
+    assert saved.revision == 1
+    assert reloaded.projects[0].capabilities is not None
+    assert reloaded.projects[0].capabilities.backups.profiles == [
+        "avalar-main-site",
+        "avalar-stage-site",
+    ]
+    assert (
+        reloaded.projects[0]
+        .environments[0]
+        .services[0]
+        .capabilities.backupProfile
+        == "avalar-stage-site"
+    )
+
+
+def test_project_registry_api_preserves_backup_declarations(tmp_path):
+    path = tmp_path / "projects.yaml"
+    _write(path, _document(_backup_project()))
+    _, _, _, client = _client(path)
+
+    response = client.get("/api/v1/settings/projects")
+
+    assert response.status_code == 200
+    project = response.json()["projects"][0]
+    assert project["capabilities"] == {
+        "backups": {"profiles": ["avalar-main-site", "avalar-stage-site"]}
+    }
+    assert project["environments"][0]["services"][0]["backupProfile"] == (
+        "avalar-stage-site"
+    )
+
+
+def test_provisioned_canonical_avalar_api_exposes_backup_declarations(tmp_path):
+    path = tmp_path / "projects.yaml"
+    ensure_canonical_avalar_project(ProjectRegistryStore(path))
+    _, _, _, client = _client(path)
+
+    response = client.get("/api/v1/settings/projects")
+
+    assert response.status_code == 200
+    project = response.json()["projects"][0]
+    assert project["capabilities"] == {
+        "backups": {"profiles": ["avalar-main-site", "avalar-stage-site"]}
+    }
+    assert project["environments"][0]["services"][0]["backupProfile"] == (
+        "avalar-main-site"
+    )
+    assert project["environments"][1]["services"][0]["backupProfile"] == (
+        "avalar-stage-site"
+    )
+    serialized = json.dumps(project)
+    assert all(
+        secret not in serialized
+        for secret in ("path", "command", "host", "key", "token")
+    )
 
 
 def test_create_persists_revision_once_and_reconciles(tmp_path):

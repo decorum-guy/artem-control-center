@@ -13,7 +13,9 @@ from fastapi.testclient import TestClient
 
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.backups import (
+    BACKUP_PROFILE_CATALOG,
     PANEL_SOURCE_ITEMS,
+    PROFILE_ID,
     BackupEngine,
     BackupFailure,
     BackupRequestError,
@@ -297,6 +299,33 @@ def test_concurrent_second_run_is_rejected(tmp_path: Path):
     assert engine.api_payload()["currentRun"]["backupId"] == first["backupId"]
     assert engine.api_payload()["currentRun"]["result"] == "success"
     assert successful_archive(root).exists()
+
+
+def test_server_owned_catalog_registers_only_the_fixed_executable_profile():
+    profile = BACKUP_PROFILE_CATALOG.get(PROFILE_ID)
+
+    assert profile is not None
+    assert profile.id == PROFILE_ID
+    assert profile.project == "artem-control-center"
+    assert profile.environment == "local-panel"
+    assert profile.service == "panel-agent"
+    assert profile.registered is True
+    assert profile.executable is True
+    assert BACKUP_PROFILE_CATALOG.is_registered("avalar-main-site") is False
+    assert BACKUP_PROFILE_CATALOG.is_registered("avalar-stage-site") is False
+    assert BACKUP_PROFILE_CATALOG.is_executable("avalar-main-site") is False
+    assert BACKUP_PROFILE_CATALOG.is_executable("avalar-stage-site") is False
+
+
+@pytest.mark.parametrize("profile_id", ["avalar-main-site", "avalar-stage-site"])
+def test_declared_avalar_profile_ids_cannot_start_the_fixed_engine(tmp_path: Path, profile_id: str):
+    engine, root, _ = make_engine(tmp_path)
+
+    with pytest.raises(BackupRequestError) as error:
+        engine.run_sync(profile_id)
+
+    assert getattr(error.value, "code", None) == "backup_profile_unknown"
+    assert not root.exists()
 
 
 def test_unknown_profile_is_rejected_without_execution(tmp_path: Path):
