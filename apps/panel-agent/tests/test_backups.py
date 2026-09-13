@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import io
+import tarfile
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,7 +21,10 @@ from panel_agent.backups import (
     BackupEngine,
     BackupFailure,
     BackupRequestError,
+    AvalarStageBackupEngine,
+    BackupService,
     PanelConfigSource,
+    _parse_sha256_inventory,
     build_backup_router,
 )
 from panel_agent.settings import IntegrationSettings
@@ -301,7 +306,7 @@ def test_concurrent_second_run_is_rejected(tmp_path: Path):
     assert successful_archive(root).exists()
 
 
-def test_server_owned_catalog_registers_only_the_fixed_executable_profile():
+def test_server_owned_catalog_registers_only_fixed_executable_profiles():
     profile = BACKUP_PROFILE_CATALOG.get(PROFILE_ID)
 
     assert profile is not None
@@ -312,9 +317,9 @@ def test_server_owned_catalog_registers_only_the_fixed_executable_profile():
     assert profile.registered is True
     assert profile.executable is True
     assert BACKUP_PROFILE_CATALOG.is_registered("avalar-main-site") is False
-    assert BACKUP_PROFILE_CATALOG.is_registered("avalar-stage-site") is False
+    assert BACKUP_PROFILE_CATALOG.is_registered("avalar-stage-site") is True
     assert BACKUP_PROFILE_CATALOG.is_executable("avalar-main-site") is False
-    assert BACKUP_PROFILE_CATALOG.is_executable("avalar-stage-site") is False
+    assert BACKUP_PROFILE_CATALOG.is_executable("avalar-stage-site") is True
 
 
 @pytest.mark.parametrize("profile_id", ["avalar-main-site", "avalar-stage-site"])
@@ -377,3 +382,81 @@ def test_api_unknown_profile_is_bounded(tmp_path: Path):
 
     assert response.status_code == 404
     assert response.json() == {"detail": "backup_profile_unknown"}
+
+
+def _stage_archive() -> tuple[bytes, dict]:
+    source_commit = "a" * 40
+    helper_sha = "b" * 64
+    data = b'{"items":[]}'
+    upload = b"upload bytes"
+    checksums = (
+        hashlib.sha256(data).hexdigest() + "  data.json\n"
+        + hashlib.sha256(upload).hexdigest() + "  uploads/a file.txt\n"
+    ).encode()
+    internal = {
+        "schemaVersion": "avalar.stage.backup.v1", "profileId": "avalar-stage-site",
+        "project": "avalar-site", "environment": "stage", "service": "website",
+        "sourceBranch": "stage", "sourceCommit": source_commit,
+        "helperContract": "avalar.stage.backup.v1", "helperSha256": helper_sha,
+        "includedScopes": ["data.json", "uploads"],
+        "excludedScopes": ["git", "legacy-backups", "secrets", "external-config", "control-center-state"],
+        "createdAt": "2026-09-14T00:00:00Z",
+    }
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+        for name, body in (("backup.manifest.json", json.dumps(internal).encode()), ("source-files.sha256", checksums), ("data.json", data), ("uploads/a file.txt", upload)):
+            info = tarfile.TarInfo(name); info.size = len(body); archive.addfile(info, io.BytesIO(body))
+    artifact = stream.getvalue()
+    return artifact, {"ok": True, "schemaVersion": "avalar.stage.backup.transport.v1", "profileId": "avalar-stage-site", "helperContract": "avalar.stage.backup.v1", "byteSize": len(artifact), "sha256": hashlib.sha256(artifact).hexdigest(), "sourceCommit": source_commit, "helperSha256": helper_sha}
+
+
+class _FakeProcess:
+    def __init__(self, archive: bytes, metadata: dict, returncode: int = 0):
+        self.stdout, self.stderr = io.BytesIO(archive), io.BytesIO(json.dumps(metadata).encode())
+        self.returncode = returncode
+    def wait(self, timeout=None): return self.returncode
+    def poll(self): return self.returncode
+    def kill(self): self.returncode = -9
+
+
+def test_stage_transport_is_binary_safe_and_publishes_only_after_verification(tmp_path: Path):
+    archive, metadata = _stage_archive(); seen = []
+    def popen(argv, **kwargs):
+        seen.append((argv, kwargs)); return _FakeProcess(archive, metadata)
+    engine = AvalarStageBackupEngine(tmp_path / "backups", enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=popen)
+    result = engine.run_sync()
+    assert result["result"] == "success"
+    assert result["sourceCommit"] == "a" * 40
+    saved = next((tmp_path / "backups").rglob("*.tar.gz"))
+    assert saved.read_bytes() == archive
+    assert seen[0][0] == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "avalar-backup", "control-center", "backup-stage"]
+    assert seen[0][1]["shell"] is False
+    assert not list((tmp_path / "backups").rglob("*.partial"))
+
+
+def test_stage_rejects_bad_transport_digest_without_publication(tmp_path: Path):
+    archive, metadata = _stage_archive(); metadata["sha256"] = "c" * 64
+    engine = AvalarStageBackupEngine(tmp_path / "backups", enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=lambda *args, **kwargs: _FakeProcess(archive, metadata))
+    result = engine.run_sync()
+    assert result["errorCode"] == "backup_transport_invalid"
+    assert not list((tmp_path / "backups").rglob("*.tar.gz"))
+
+
+def test_checksum_parser_supports_spaces_and_escaped_backslashes():
+    digest = "d" * 64
+    assert _parse_sha256_inventory((digest + "  uploads/a file.txt\n\\" + digest + "  uploads/a\\\\b.txt\n").encode()) == {"uploads/a file.txt": digest, "uploads/a\\b.txt": digest}
+    with pytest.raises(BackupFailure):
+        _parse_sha256_inventory((digest + "  ../bad\n").encode())
+    with pytest.raises(BackupFailure):
+        _parse_sha256_inventory(("\\" + digest + "  uploads/a\\q.txt\n").encode())
+
+
+def test_backup_service_serializes_profiles(tmp_path: Path):
+    panel, _, _ = make_engine(tmp_path)
+    stage = AvalarStageBackupEngine(tmp_path / "backups", enabled=False, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1)
+    service = BackupService(panel, stage)
+    run = service.start(PROFILE_ID)
+    with pytest.raises(BackupRequestError) as error:
+        service.start("avalar-stage-site")
+    assert run["profileId"] == PROFILE_ID
+    assert error.value.code == "backup_busy"

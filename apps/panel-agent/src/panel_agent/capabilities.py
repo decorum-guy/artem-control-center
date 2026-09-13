@@ -88,6 +88,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("rog_g703_psu_actions", "Управление блоками питания ASUS", "Разрешение выполнять фиксированные действия двух БП через Home Assistant.", "Дом", "PANEL_ROG_G703_PSU_ACTIONS_ENABLED", "immediate", "none", True),
     CapabilityDefinition("avalar_ssh", "Статус AVALAR по SSH", "Получение состояния инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SSH_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_actions", "Действия AVALAR", "Инфраструктурные действия внешнего сервиса.", "Инфраструктура", "PANEL_AVALAR_ACTIONS_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_stage_backup", "Резервная копия AVALAR Stage", "Разрешение фиксированного проверяемого backup-транспорта перед deploy Stage.", "Инфраструктура", "PANEL_AVALAR_STAGE_BACKUP_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_smoke", "Проверка AVALAR", "Smoke-проверка инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SMOKE_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_stage_restart", "Перезапуск AVALAR Stage", "Инфраструктурное разрешение перезапуска Stage.", "Инфраструктура", "PANEL_AVALAR_STAGE_RESTART_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_main_restart", "Перезапуск AVALAR Main", "Инфраструктурное разрешение перезапуска Main.", "Инфраструктура", "PANEL_AVALAR_MAIN_RESTART_ENABLED", "immediate", "none"),

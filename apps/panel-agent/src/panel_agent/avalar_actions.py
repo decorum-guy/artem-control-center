@@ -44,6 +44,11 @@ class DetailsProvider(Protocol):
     def details_for(self, service_id: str) -> Dict[str, Any]: ...
 
 
+class StageBackupRunner(Protocol):
+    def available(self, profile_id: str) -> bool: ...
+    def run_sync(self, profile_id: str) -> dict[str, Any]: ...
+
+
 _ACTIONS: dict[str, dict[str, Any]] = {
     "avalar.main.smoke": {
         "title": "Smoke check",
@@ -150,6 +155,9 @@ _ALLOWED_RESULT_FIELDS = {
     "checks",
     "commit_before",
     "commit_after",
+    "backupId",
+    "backupSha256",
+    "backupSourceCommit",
 }
 
 
@@ -194,12 +202,14 @@ class AvalarActionExecutor:
         details_provider: DetailsProvider,
         refresh_callback: Callable[[], Awaitable[None]] | None = None,
         command_runner: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        backup_service: StageBackupRunner | None = None,
     ) -> None:
         self.settings = settings
         self.access = access
         self.details_provider = details_provider
         self.refresh_callback = refresh_callback
         self.command_runner = command_runner or self._run_fixed_command
+        self.backup_service = backup_service
         self.executions: OrderedDict[str, AvalarActionExecution] = OrderedDict()
         self.active_correlation_id: str | None = None
         self.cooldowns: dict[str, datetime] = {}
@@ -226,6 +236,12 @@ class AvalarActionExecutor:
             return False
         return bool(self.availability(action_id)["allowed"])
 
+    def _integration_available(self, action_id: str) -> bool:
+        configured = bool(self.settings.avalar_action_ssh_host and self.settings.avalar_action_remote_script)
+        if action_id != "avalar.stage.deploy":
+            return configured
+        return bool(configured and self.backup_service is not None and self.backup_service.available("avalar-stage-site"))
+
     def availability(self, action_id: str) -> dict[str, Any]:
         descriptor = _ACTIONS[action_id]
         cooldown_until = self.cooldowns.get(action_id)
@@ -233,10 +249,7 @@ class AvalarActionExecutor:
         decision = self.access.authorize(
             action_id,
             gate_enabled=self.gate_enabled(action_id),
-            integration_available=bool(
-                self.settings.avalar_action_ssh_host
-                and self.settings.avalar_action_remote_script
-            ),
+            integration_available=self._integration_available(action_id),
             busy=self.active_correlation_id is not None,
             cooldown=cooldown,
         )
@@ -250,10 +263,7 @@ class AvalarActionExecutor:
         self.access.require(
             action_id,
             gate_enabled=self.gate_enabled(action_id),
-            integration_available=bool(
-                self.settings.avalar_action_ssh_host
-                and self.settings.avalar_action_remote_script
-            ),
+            integration_available=self._integration_available(action_id),
             busy=self.active_correlation_id is not None,
             cooldown=(
                 self.cooldowns.get(action_id) is not None
@@ -323,6 +333,21 @@ class AvalarActionExecutor:
                 self._update(correlation_id, "prechecking")
                 self._update(correlation_id, "accepted")
                 self._update(correlation_id, "running")
+                backup_result: dict[str, Any] | None = None
+                if action_id == "avalar.stage.deploy":
+                    if self.backup_service is None:
+                        raise RuntimeError("backup_remote_disabled")
+                    try:
+                        backup_result = await asyncio.to_thread(
+                            self.backup_service.run_sync,
+                            "avalar-stage-site",
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(str(exc)) from None
+                    if backup_result.get("result") != "success" or backup_result.get("verificationStatus") != "verified":
+                        raise RuntimeError(str(backup_result.get("errorCode") or "backup_failed"))
+                    if backup_result.get("sourceCommit") != revision_before:
+                        raise RuntimeError("backup_revision_mismatch")
                 result = await self.command_runner(descriptor["operation"])
                 self._update(correlation_id, "verifying")
                 await self._verify_public_health(descriptor["environment"])
@@ -336,6 +361,12 @@ class AvalarActionExecutor:
                 sanitized = {key: result.get(key) for key in _ALLOWED_RESULT_FIELDS if key in result}
                 sanitized["revisionBefore"] = revision_before
                 sanitized["revisionAfter"] = revision_after
+                if backup_result is not None:
+                    sanitized.update({
+                        "backupId": backup_result.get("backupId"),
+                        "backupSha256": backup_result.get("sha256"),
+                        "backupSourceCommit": backup_result.get("sourceCommit"),
+                    })
                 self.cooldowns[action_id] = _now() + timedelta(seconds=descriptor["cooldown"])
                 self._update(correlation_id, "success", result=sanitized)
                 self.access.audit_capability(
@@ -501,5 +532,19 @@ def _sanitize_error(error: Exception) -> str:
         "root_verification_failed",
         "restart_changed_revision",
         "environment_mismatch",
+        "backup_remote_disabled",
+        "backup_remote_busy",
+        "backup_remote_timeout",
+        "backup_remote_failed",
+        "backup_transport_invalid",
+        "backup_verification_failed",
+        "backup_destination_unavailable",
+        "backup_insufficient_free_space",
+        "backup_history_unavailable",
+        "backup_manifest_failed",
+        "backup_history_write_failed",
+        "backup_failed",
+        "backup_busy",
+        "backup_revision_mismatch",
     }
     return value if value in allowed else "action_failed"

@@ -13,7 +13,7 @@ from .home_assistant_actions import (
     HomeAssistantActionExecutor,
     build_home_assistant_action_router,
 )
-from .main import SETTINGS, access_policy, app, effective_immediate_capability_enabled, runtime
+from .main import SETTINGS, access_policy, app, backup_service, effective_immediate_capability_enabled, runtime
 from .rog_g703_power import RogG703ActionExecutor, build_rog_g703_action_router
 from .static_dashboard import install_dashboard_routes
 from .system_update import build_system_update_router
@@ -25,6 +25,7 @@ avalar_actions = AvalarActionExecutor(
     access_policy,
     details_provider=runtime.avalar_ssh,
     refresh_callback=runtime.refresh_avalar,
+    backup_service=backup_service,
 )
 runtime.set_project_action_availability_provider(avalar_actions.action_available)
 connectivity_actions = ConnectivityActionExecutor(

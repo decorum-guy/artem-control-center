@@ -244,3 +244,58 @@ def test_successful_action_refreshes_registry_backed_avalar_services(tmp_path):
             await runtime.close()
 
     asyncio.run(scenario())
+
+
+def test_stage_deploy_requires_new_verified_backup_matching_revision(tmp_path):
+    async def scenario() -> None:
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_pin("2468")
+        access.set_profile("full", pin="2468")
+        events: list[str] = []
+
+        class Backup:
+            def available(self, profile_id: str) -> bool:
+                return profile_id == "avalar-stage-site"
+            def run_sync(self, profile_id: str) -> dict:
+                events.append("backup")
+                return {"backupId": "b1", "result": "success", "verificationStatus": "verified", "sourceCommit": "b" * 40, "sha256": "c" * 64}
+
+        async def runner(operation: str) -> dict:
+            events.append(operation)
+            return {"ok": True, "operation": operation, "environment": "stage", "status": "verified"}
+
+        executor = AvalarActionExecutor(settings(), access, details_provider=FakeDetails(), command_runner=runner, backup_service=Backup())
+        async def healthy(_: str) -> None: return None
+        executor._verify_public_health = healthy  # type: ignore[method-assign]
+        accepted = await executor.start(AvalarActionRequest(actionId="avalar.stage.deploy", expectedRevision="b" * 40))
+        for _ in range(50):
+            current = executor.get(accepted.correlationId)
+            if current.status in {"success", "failed"}: break
+            await asyncio.sleep(0.01)
+        assert current.status == "success"
+        assert events == ["backup", "deploy-stage"]
+        assert current.result and current.result["backupSourceCommit"] == "b" * 40
+
+    asyncio.run(scenario())
+
+
+def test_stage_deploy_never_runs_command_after_backup_revision_mismatch(tmp_path):
+    async def scenario() -> None:
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_pin("2468")
+        access.set_profile("full", pin="2468")
+        calls: list[str] = []
+        class Backup:
+            def available(self, _: str) -> bool: return True
+            def run_sync(self, _: str) -> dict: return {"result": "success", "verificationStatus": "verified", "sourceCommit": "a" * 40}
+        async def runner(operation: str) -> dict:
+            calls.append(operation); return {"environment": "stage"}
+        executor = AvalarActionExecutor(settings(), access, details_provider=FakeDetails(), command_runner=runner, backup_service=Backup())
+        accepted = await executor.start(AvalarActionRequest(actionId="avalar.stage.deploy", expectedRevision="b" * 40))
+        for _ in range(50):
+            current = executor.get(accepted.correlationId)
+            if current.status in {"success", "failed"}: break
+            await asyncio.sleep(0.01)
+        assert current.error == "backup_revision_mismatch"
+        assert calls == []
+    asyncio.run(scenario())
