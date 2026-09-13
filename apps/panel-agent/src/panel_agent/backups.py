@@ -335,7 +335,7 @@ def _validate_history_entry(entry: Any) -> bool:
     profile_id = entry.get("profileId")
     if profile_id not in {PROFILE_ID, AVALAR_STAGE_PROFILE_ID} or entry.get("destinationId") != DESTINATION_ID:
         return False
-    if profile_id == AVALAR_STAGE_PROFILE_ID:
+    if profile_id == AVALAR_STAGE_PROFILE_ID and entry.get("result") == "success":
         if (
             entry.get("project") != AVALAR_STAGE_PROJECT_ID
             or entry.get("environment") != AVALAR_STAGE_ENVIRONMENT_ID
@@ -347,7 +347,7 @@ def _validate_history_entry(entry: Any) -> bool:
             or not SHA256_PATTERN.fullmatch(entry["helperSha256"])
         ):
             return False
-    else:
+    elif profile_id == PROFILE_ID:
         if "sourceCommit" in entry or "helperSha256" in entry:
             return False
     if (
@@ -380,6 +380,9 @@ def _validate_history_entry(entry: Any) -> bool:
         return False
     if entry.get("result") not in {"success", "failed"}:
         return False
+    if profile_id == AVALAR_STAGE_PROFILE_ID and entry["result"] == "failed":
+        if entry.get("sourceCommit") is not None or entry.get("helperSha256") is not None:
+            return False
     if entry["result"] == "success":
         if entry.get("artifactFilename") is None or entry.get("byteSize") is None or entry.get("sha256") is None:
             return False
@@ -1054,11 +1057,12 @@ def _parse_sha256_inventory(payload: bytes) -> dict[str, str]:
 
 
 def _safe_tar_member_name(name: str) -> bool:
-    if not isinstance(name, str) or not name or "\x00" in name or "\\" in name:
+    if not isinstance(name, str) or not name or "\x00" in name:
         return False
-    if name.startswith("/") or name.endswith("/"):
+    if name.startswith("/"):
         return False
-    return all(part not in {"", ".", ".."} for part in name.split("/"))
+    trimmed = name[:-1] if name.endswith("/") else name
+    return bool(trimmed) and all(part not in {"", ".", ".."} for part in trimmed.split("/"))
 
 
 def _safe_checksum_path(name: str) -> bool:
@@ -1222,20 +1226,32 @@ class AvalarStageBackupEngine:
         try:
             with tarfile.open(archive_path, "r:gz") as archive:
                 members = archive.getmembers()
-                names = [member.name for member in members]
-                if len(names) != len(set(names)):
-                    raise BackupFailure("backup_verification_failed")
                 regular: dict[str, tarfile.TarInfo] = {}
+                directory_identities: set[str] = set()
+                member_names: set[str] = set()
                 for member in members:
-                    if not _safe_tar_member_name(member.name):
+                    if not _safe_tar_member_name(member.name) or (member.isreg() and member.name.endswith("/")):
                         raise BackupFailure("backup_verification_failed")
-                    allowed = member.name in {"backup.manifest.json", "source-files.sha256", "data.json", "uploads"} or member.name.startswith("uploads/")
+                    canonical_name = member.name[:-1] if member.isdir() and member.name.endswith("/") else member.name
+                    if member.name in member_names:
+                        raise BackupFailure("backup_verification_failed")
+                    member_names.add(member.name)
+                    allowed = canonical_name in {"backup.manifest.json", "source-files.sha256", "data.json", "uploads"} or canonical_name.startswith("uploads/")
                     if not allowed or member.issym() or member.islnk() or member.isdev() or member.isfifo() or not (member.isdir() or member.isreg()):
                         raise BackupFailure("backup_verification_failed")
-                    if member.isdir() and member.name != "uploads" and not member.name.startswith("uploads/"):
+                    if member.isdir() and canonical_name != "uploads" and not canonical_name.startswith("uploads/"):
                         raise BackupFailure("backup_verification_failed")
-                    if member.isreg(): regular[member.name] = member
+                    if member.isdir():
+                        if canonical_name in directory_identities:
+                            raise BackupFailure("backup_verification_failed")
+                        directory_identities.add(canonical_name)
+                    if member.isreg():
+                        if canonical_name in regular:
+                            raise BackupFailure("backup_verification_failed")
+                        regular[canonical_name] = member
                 if {"backup.manifest.json", "source-files.sha256", "data.json"} - set(regular):
+                    raise BackupFailure("backup_verification_failed")
+                if "uploads" not in directory_identities:
                     raise BackupFailure("backup_verification_failed")
                 def read_member(name: str) -> bytes:
                     extracted = archive.extractfile(regular[name])
@@ -1259,7 +1275,12 @@ class AvalarStageBackupEngine:
                     raise BackupFailure("backup_verification_failed")
                 for name, expected_sha in inventory.items():
                     item = archive.extractfile(regular[name])
-                    if item is None or hashlib.sha256(item.read()).hexdigest() != expected_sha:
+                    if item is None:
+                        raise BackupFailure("backup_verification_failed")
+                    payload_digest = hashlib.sha256()
+                    for chunk in iter(lambda: item.read(64 * 1024), b""):
+                        payload_digest.update(chunk)
+                    if payload_digest.hexdigest() != expected_sha:
                         raise BackupFailure("backup_verification_failed")
         except BackupFailure:
             raise
@@ -1267,10 +1288,30 @@ class AvalarStageBackupEngine:
             raise BackupFailure("backup_verification_failed") from None
         return size, sha256
 
-    def run_sync(self, profile_id: str = AVALAR_STAGE_PROFILE_ID) -> dict[str, Any]:
+    def _failed_history_entry(self, run: Mapping[str, Any], code: str) -> dict[str, Any]:
+        return {
+            "backupId": run["backupId"], "profileId": AVALAR_STAGE_PROFILE_ID,
+            "project": AVALAR_STAGE_PROJECT_ID, "environment": AVALAR_STAGE_ENVIRONMENT_ID,
+            "service": AVALAR_STAGE_SERVICE_ID, "startedAt": run["startedAt"],
+            "completedAt": run["completedAt"], "artifactFilename": None, "byteSize": None,
+            "sha256": None, "archiveFormat": AVALAR_STAGE_ARCHIVE_FORMAT,
+            "includedSourceIds": [], "missingOptionalSourceIds": [],
+            "verificationStatus": "failed", "destinationId": DESTINATION_ID,
+            "result": "failed", "errorCode": code, "sourceCommit": None,
+            "helperSha256": None,
+        }
+
+    def run_sync(
+        self,
+        profile_id: str = AVALAR_STAGE_PROFILE_ID,
+        *,
+        run: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if profile_id != AVALAR_STAGE_PROFILE_ID:
             raise BackupRequestError("backup_profile_unknown")
-        run = self._new_run()
+        run = run or self._new_run()
+        if run.get("profileId") != AVALAR_STAGE_PROFILE_ID or not isinstance(run.get("backupId"), str):
+            raise BackupRequestError("backup_profile_unknown")
         partial = final = local_manifest = None
         history_path: Path | None = None
         entries: list[dict[str, Any]] | None = None
@@ -1303,9 +1344,29 @@ class AvalarStageBackupEngine:
         except BackupFailure as failure:
             _safe_unlink(partial); _safe_unlink(final); _safe_unlink(local_manifest)
             run.update({"state": "failed", "completedAt": _timestamp(self.now()), "verificationStatus": "failed", "result": "failed", "errorCode": failure.code})
+            if history_path is not None and entries is not None:
+                try:
+                    _atomic_json_write(
+                        history_path,
+                        _history_document([self._failed_history_entry(run, failure.code), *entries]),
+                        MAX_HISTORY_BYTES,
+                        "backup_history_write_failed",
+                    )
+                except BackupFailure:
+                    pass
         except Exception:
             _safe_unlink(partial); _safe_unlink(final); _safe_unlink(local_manifest)
             run.update({"state": "failed", "completedAt": _timestamp(self.now()), "verificationStatus": "failed", "result": "failed", "errorCode": "backup_failed"})
+            if history_path is not None and entries is not None:
+                try:
+                    _atomic_json_write(
+                        history_path,
+                        _history_document([self._failed_history_entry(run, "backup_failed"), *entries]),
+                        MAX_HISTORY_BYTES,
+                        "backup_history_write_failed",
+                    )
+                except BackupFailure:
+                    pass
         return run
 
 
@@ -1337,11 +1398,14 @@ class BackupService:
                     if self.panel._thread: self.panel._thread.join()
                     with self._lock: self._current = self.panel._safe_run()
                 self._thread = threading.Thread(target=join_panel, daemon=True); self._thread.start(); return run
-            run = {"profileId": profile_id, "state": "preparing"}; self._current = run
+            run = self.stage._new_run()
+            self._current = dict(run)
             def worker() -> None:
-                result = self.stage.run_sync(profile_id)
+                result = self.stage.run_sync(profile_id, run=run)
                 with self._lock: self._current = result
-            self._thread = threading.Thread(target=worker, name="avalar-stage-backup", daemon=True); self._thread.start(); return dict(run)
+            self._thread = threading.Thread(target=worker, name="avalar-stage-backup", daemon=True)
+            self._thread.start()
+            return dict(run)
     def available(self, profile_id: str) -> bool:
         return profile_id == PROFILE_ID or (profile_id == AVALAR_STAGE_PROFILE_ID and self.stage.available())
     def api_payload(self) -> dict[str, Any]:
