@@ -487,7 +487,7 @@ export function ProjectSettingsSheet({
                             <input
                               type="checkbox"
                               checked={project.enabled}
-                              disabled={!canWrite || mutationPending}
+                              disabled={!canWrite || mutationPending || !draft}
                               aria-label={`${project.enabled ? "Выключить" : "Включить"} проект «${project.name}»`}
                               onChange={(event) => void toggleProject(project, event.target.checked)}
                             />

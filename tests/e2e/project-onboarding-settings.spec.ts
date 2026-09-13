@@ -463,22 +463,12 @@ test.describe("Slice C/D monitor-only project onboarding in Settings", () => {
     await expect(card.getByTestId("project-edit-avalar")).toBeDisabled();
     await expect(card.getByTestId("project-delete-avalar")).toBeDisabled();
     const toggle = card.getByRole("checkbox", { name: "Выключить проект «AVALAR»" });
-    await expect(toggle).toBeEnabled();
+    await expect(toggle).toBeDisabled();
     await card.getByTestId("project-edit-avalar").evaluate((element) => (element as HTMLButtonElement).click());
     await card.getByTestId("project-delete-avalar").evaluate((element) => (element as HTMLButtonElement).click());
-    await toggle.click();
-    await expect(card).toContainText("Выключен");
-    expect(fixture.mutations).toHaveLength(1);
-    expect(fixture.mutations[0]).toMatchObject({
-      method: "PUT",
-      url: "/api/v1/settings/projects/avalar"
-    });
-    const toggled = fixture.mutations[0]?.body.project as ProjectInput;
-    expect(toggled.enabled).toBe(false);
-    expect(toggled.capabilities).toEqual({
-      backups: { profiles: ["avalar-main-site", "avalar-stage-site"] }
-    });
-    expect(toggled.environments[1]?.services[0]?.capabilities.backupProfile).toBe("avalar-stage-site");
+    await toggle.evaluate((element) => (element as HTMLInputElement).click());
+    await expect(toggle).toBeChecked();
+    expect(fixture.mutations).toHaveLength(0);
   });
 
   test("available=false is explicit and removes all mutation affordances", async ({ page }) => {
