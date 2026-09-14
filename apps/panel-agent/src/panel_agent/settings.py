@@ -86,6 +86,10 @@ class IntegrationSettings:
     projects_config_path: str = ".runtime/projects.yaml"
     backup_local_root: str = ""
     backup_min_free_bytes: int = 20 * 1024**3
+    avalar_stage_backup_enabled: bool = False
+    avalar_backup_ssh_host: str = "avalar-backup"
+    avalar_backup_command: str = "control-center"
+    avalar_backup_timeout_seconds: int = 180
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
     panel_planning_enabled: bool = False
@@ -366,6 +370,13 @@ class IntegrationSettings:
                     1 * 1024**2,
                     _int_env("PANEL_BACKUP_MIN_FREE_BYTES", 20 * 1024**3),
                 ),
+            ),
+            avalar_stage_backup_enabled=_bool_env("PANEL_AVALAR_STAGE_BACKUP_ENABLED", False),
+            avalar_backup_ssh_host=os.getenv("PANEL_AVALAR_BACKUP_SSH_HOST", "avalar-backup").strip(),
+            avalar_backup_command=os.getenv("PANEL_AVALAR_BACKUP_COMMAND", "control-center").strip(),
+            avalar_backup_timeout_seconds=min(
+                300,
+                max(10, _int_env("PANEL_AVALAR_BACKUP_TIMEOUT_SECONDS", 180)),
             ),
             access_temporary_minutes=max(
                 1,

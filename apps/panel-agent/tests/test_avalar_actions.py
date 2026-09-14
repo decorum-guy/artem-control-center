@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from panel_agent.access_policy import AccessPolicyStore
-from panel_agent.avalar_actions import AvalarActionExecutor, AvalarActionRequest
+from panel_agent.avalar_actions import AvalarActionExecution, AvalarActionExecutor, AvalarActionRequest
 from panel_agent.integrations import IntegrationRuntime
 from panel_agent.project_registry import ProjectRegistry
 from panel_agent.settings import IntegrationSettings
@@ -243,4 +243,137 @@ def test_successful_action_refreshes_registry_backed_avalar_services(tmp_path):
         finally:
             await runtime.close()
 
+    asyncio.run(scenario())
+
+
+def test_stage_deploy_requires_new_verified_backup_matching_revision(tmp_path):
+    async def scenario() -> None:
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_pin("2468")
+        access.set_profile("full", pin="2468")
+        events: list[str] = []
+
+        class Backup:
+            def available(self, profile_id: str) -> bool:
+                return profile_id == "avalar-stage-site"
+            def run_sync(self, profile_id: str) -> dict:
+                events.append("backup")
+                return {"backupId": "b1", "result": "success", "verificationStatus": "verified", "sourceCommit": "b" * 40, "sha256": "c" * 64}
+
+        async def runner(operation: str) -> dict:
+            events.append(operation)
+            return {"ok": True, "operation": operation, "environment": "stage", "status": "verified"}
+
+        executor = AvalarActionExecutor(settings(), access, details_provider=FakeDetails(), command_runner=runner, backup_service=Backup())
+        async def healthy(_: str) -> None: return None
+        executor._verify_public_health = healthy  # type: ignore[method-assign]
+        accepted = await executor.start(AvalarActionRequest(actionId="avalar.stage.deploy", expectedRevision="b" * 40))
+        for _ in range(50):
+            current = executor.get(accepted.correlationId)
+            if current.status in {"success", "failed"}: break
+            await asyncio.sleep(0.01)
+        assert current.status == "success"
+        assert events == ["backup", "deploy-stage"]
+        assert current.result and current.result["backupSourceCommit"] == "b" * 40
+
+    asyncio.run(scenario())
+
+
+def test_stage_deploy_never_runs_command_after_backup_revision_mismatch(tmp_path):
+    async def scenario() -> None:
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_pin("2468")
+        access.set_profile("full", pin="2468")
+        calls: list[str] = []
+        class Backup:
+            def available(self, _: str) -> bool: return True
+            def run_sync(self, _: str) -> dict: return {"result": "success", "verificationStatus": "verified", "sourceCommit": "a" * 40}
+        async def runner(operation: str) -> dict:
+            calls.append(operation); return {"environment": "stage"}
+        executor = AvalarActionExecutor(settings(), access, details_provider=FakeDetails(), command_runner=runner, backup_service=Backup())
+        accepted = await executor.start(AvalarActionRequest(actionId="avalar.stage.deploy", expectedRevision="b" * 40))
+        for _ in range(50):
+            current = executor.get(accepted.correlationId)
+            if current.status in {"success", "failed"}: break
+            await asyncio.sleep(0.01)
+        assert current.error == "backup_revision_mismatch"
+        assert calls == []
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("error", [
+    "backup_remote_disabled", "backup_busy", "backup_remote_busy",
+    "backup_remote_timeout", "backup_remote_failed", "backup_transport_invalid",
+    "backup_verification_failed", "backup_destination_unavailable",
+    "backup_insufficient_free_space", "backup_history_unavailable",
+    "backup_manifest_failed", "backup_history_write_failed", "backup_failed",
+    "backup_revision_mismatch",
+])
+def test_stage_deploy_never_calls_remote_command_for_any_backup_failure(tmp_path, error: str):
+    async def scenario() -> None:
+        access = AccessPolicyStore(tmp_path / f"policy-{error}.json")
+        access.set_pin("2468"); access.set_profile("full", pin="2468")
+        calls: list[str] = []
+        class Backup:
+            def available(self, _: str) -> bool: return True
+            def run_sync(self, _: str) -> dict:
+                if error == "backup_revision_mismatch":
+                    return {"result": "success", "verificationStatus": "verified", "sourceCommit": "a" * 40}
+                return {"result": "failed", "verificationStatus": "failed", "errorCode": error}
+        async def command_runner(operation: str) -> dict:
+            calls.append(operation); return {"environment": "stage"}
+        executor = AvalarActionExecutor(settings(), access, details_provider=FakeDetails(), command_runner=command_runner, backup_service=Backup())
+        correlation = "deterministic"
+        executor.executions[correlation] = AvalarActionExecution(correlationId=correlation, actionId="avalar.stage.deploy", environment="stage", status="requested", requestedAt="2026-01-01T00:00:00Z", updatedAt="2026-01-01T00:00:00Z")
+        executor.active_correlation_id = correlation
+        await executor._execute(correlation, "b" * 40)
+        assert executor.get(correlation).error == error
+        assert calls == []
+    asyncio.run(scenario())
+
+
+def test_only_stage_deploy_calls_backup_and_unavailable_backup_disables_it(tmp_path):
+    async def scenario() -> None:
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_pin("2468"); access.set_profile("full", pin="2468")
+        calls: list[str] = []
+        class Backup:
+            def available(self, _: str) -> bool: return True
+            def run_sync(self, _: str) -> dict:
+                calls.append("backup")
+                return {"result": "success", "verificationStatus": "verified", "sourceCommit": "b" * 40, "backupId": "id", "sha256": "c" * 64}
+        async def runner(operation: str) -> dict:
+            return {"environment": "stage" if operation.endswith("stage") else "production"}
+        async def healthy(_: str) -> None:
+            return None
+        executor = AvalarActionExecutor(settings(), access, details_provider=FakeDetails(), command_runner=runner, backup_service=Backup())
+        for action_id, revision in (("avalar.stage.restart", "b" * 40), ("avalar.stage.smoke", "b" * 40), ("avalar.main.smoke", "a" * 40), ("avalar.main.restart", "a" * 40), ("avalar.main.deploy", "a" * 40)):
+            correlation = action_id
+            executor.executions[correlation] = AvalarActionExecution(correlationId=correlation, actionId=action_id, environment="stage" if ".stage." in action_id else "production", status="requested", requestedAt="2026-01-01T00:00:00Z", updatedAt="2026-01-01T00:00:00Z")
+            executor.active_correlation_id = correlation
+            executor._verify_public_health = healthy  # type: ignore[method-assign]
+            await executor._execute(correlation, revision)
+        assert calls == []
+        class Unavailable:
+            def available(self, _: str) -> bool: return False
+            def run_sync(self, _: str) -> dict: raise AssertionError("must not run")
+        unavailable = AvalarActionExecutor(settings(), access, details_provider=FakeDetails(), backup_service=Unavailable())
+        assert unavailable.availability("avalar.stage.deploy")["availability"] == "integration_unavailable"
+    asyncio.run(scenario())
+
+
+def test_stage_deploy_revision_conflict_happens_before_backup(tmp_path):
+    async def scenario() -> None:
+        access = AccessPolicyStore(tmp_path / "policy.json")
+        access.set_pin("2468"); access.set_profile("full", pin="2468")
+        calls: list[str] = []
+        class Backup:
+            def available(self, _: str) -> bool: return True
+            def run_sync(self, _: str) -> dict:
+                calls.append("backup"); return {}
+        executor = AvalarActionExecutor(settings(), access, details_provider=FakeDetails(), backup_service=Backup())
+        with pytest.raises(HTTPException) as conflict:
+            await executor.start(AvalarActionRequest(actionId="avalar.stage.deploy", expectedRevision="a" * 40))
+        assert conflict.value.detail == "revision_conflict"
+        assert calls == []
     asyncio.run(scenario())

@@ -14,13 +14,16 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
 import threading
+import time
+import tarfile
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Response, status
@@ -50,6 +53,21 @@ MAX_SMALL_SOURCE_BYTES = 64 * 1024
 MAX_CAPABILITY_SOURCE_BYTES = 16 * 1024
 ACTIVE_STATES = frozenset({"preparing", "exporting", "verifying"})
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_B2A_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+AVALAR_STAGE_PROFILE_ID = "avalar-stage-site"
+AVALAR_STAGE_PROJECT_ID = "avalar-site"
+AVALAR_STAGE_ENVIRONMENT_ID = "stage"
+AVALAR_STAGE_SERVICE_ID = "website"
+AVALAR_STAGE_ARCHIVE_FORMAT = "tar.gz"
+AVALAR_TRANSPORT_SCHEMA = "avalar.stage.backup.transport.v1"
+AVALAR_MANIFEST_SCHEMA = "avalar.stage.backup.v1"
+AVALAR_HELPER_CONTRACT = "avalar.stage.backup.v1"
+AVALAR_BACKUP_OPERATION = "backup-stage"
+MAX_AVALAR_ARCHIVE_BYTES = 512 * 1024 * 1024
+MAX_AVALAR_METADATA_BYTES = 16 * 1024
+MAX_AVALAR_ARCHIVE_TEXT_BYTES = 256 * 1024
 
 
 class BackupFailure(Exception):
@@ -97,6 +115,11 @@ PUBLIC_ERROR_CODES = frozenset({
     "backup_verification_failed",
     "backup_manifest_failed",
     "backup_history_write_failed",
+    "backup_remote_disabled",
+    "backup_remote_busy",
+    "backup_remote_timeout",
+    "backup_remote_failed",
+    "backup_transport_invalid",
     "backup_failed",
 })
 
@@ -301,23 +324,50 @@ def _validate_history_entry(entry: Any) -> bool:
         "includedSourceIds", "missingOptionalSourceIds", "verificationStatus",
         "destinationId", "result",
     }
-    if set(entry) not in (required_keys, required_keys | {"errorCode"}):
+    stage_keys = required_keys | {"sourceCommit", "helperSha256"}
+    accepted = (
+        required_keys,
+        required_keys | {"errorCode"},
+        stage_keys,
+        stage_keys | {"errorCode"},
+    )
+    if set(entry) not in accepted:
         return False
-    if entry.get("profileId") != PROFILE_ID or entry.get("destinationId") != DESTINATION_ID:
+    profile_id = entry.get("profileId")
+    if profile_id not in {PROFILE_ID, AVALAR_STAGE_PROFILE_ID} or entry.get("destinationId") != DESTINATION_ID:
         return False
+    if profile_id == AVALAR_STAGE_PROFILE_ID:
+        if (
+            entry.get("project") != AVALAR_STAGE_PROJECT_ID
+            or entry.get("environment") != AVALAR_STAGE_ENVIRONMENT_ID
+            or entry.get("service") != AVALAR_STAGE_SERVICE_ID
+            or entry.get("archiveFormat") != AVALAR_STAGE_ARCHIVE_FORMAT
+            or entry.get("destinationId") != DESTINATION_ID
+            or entry.get("includedSourceIds") != []
+            or entry.get("missingOptionalSourceIds") != []
+        ):
+            return False
+    elif profile_id == PROFILE_ID:
+        if "sourceCommit" in entry or "helperSha256" in entry:
+            return False
     if (
+        not isinstance(entry.get("startedAt"), str)
+        or not isinstance(entry.get("completedAt"), str)
+        or not isinstance(entry.get("includedSourceIds"), list)
+        or not isinstance(entry.get("missingOptionalSourceIds"), list)
+    ):
+        return False
+    if profile_id == PROFILE_ID and (
         entry.get("project") != PROJECT_ID
         or entry.get("environment") != ENVIRONMENT_ID
         or entry.get("service") != SERVICE_ID
         or entry.get("archiveFormat") != ARCHIVE_FORMAT
-        or not isinstance(entry.get("startedAt"), str)
-        or not isinstance(entry.get("completedAt"), str)
-        or not isinstance(entry.get("includedSourceIds"), list)
-        or not isinstance(entry.get("missingOptionalSourceIds"), list)
         or not set(entry["includedSourceIds"]).issubset(PANEL_SOURCE_ID_SET)
         or not set(entry["missingOptionalSourceIds"]).issubset(PANEL_SOURCE_ID_SET)
         or set(entry["includedSourceIds"]) & set(entry["missingOptionalSourceIds"])
     ):
+        return False
+    if profile_id == AVALAR_STAGE_PROFILE_ID and (entry["includedSourceIds"] or entry["missingOptionalSourceIds"]):
         return False
     artifact = entry.get("artifactFilename")
     if artifact is not None and (not isinstance(artifact, str) or not _safe_member_name(artifact)):
@@ -330,6 +380,17 @@ def _validate_history_entry(entry: Any) -> bool:
         return False
     if entry.get("result") not in {"success", "failed"}:
         return False
+    if profile_id == AVALAR_STAGE_PROFILE_ID and entry["result"] == "failed":
+        if entry.get("sourceCommit") is not None or entry.get("helperSha256") is not None:
+            return False
+    if profile_id == AVALAR_STAGE_PROFILE_ID and entry["result"] == "success":
+        if (
+            not isinstance(entry.get("sourceCommit"), str)
+            or not _COMMIT_PATTERN.fullmatch(entry["sourceCommit"])
+            or not isinstance(entry.get("helperSha256"), str)
+            or not SHA256_PATTERN.fullmatch(entry["helperSha256"])
+        ):
+            return False
     if entry["result"] == "success":
         if entry.get("artifactFilename") is None or entry.get("byteSize") is None or entry.get("sha256") is None:
             return False
@@ -383,6 +444,9 @@ def _profile_inventory(destination_available: bool, destination_configured: bool
         "sourceHandlerId": SOURCE_HANDLER_ID,
         "destinationId": DESTINATION_ID,
         "archiveFormat": ARCHIVE_FORMAT,
+        "registered": True,
+        "executable": True,
+        "runtimeEnabled": True,
         "sourceItemCount": len(PANEL_SOURCE_ITEMS),
         "destinationConfigured": destination_configured,
         "available": destination_available,
@@ -441,6 +505,12 @@ BACKUP_PROFILE_CATALOG = BackupProfileCatalog(
             project=PROJECT_ID,
             environment=ENVIRONMENT_ID,
             service=SERVICE_ID,
+        ),
+        BackupProfileRegistration(
+            id=AVALAR_STAGE_PROFILE_ID,
+            project=AVALAR_STAGE_PROJECT_ID,
+            environment=AVALAR_STAGE_ENVIRONMENT_ID,
+            service=AVALAR_STAGE_SERVICE_ID,
         ),
     )
 )
@@ -929,6 +999,443 @@ class BackupEngine:
                 "errorCode": history_error,
             },
         }
+
+
+class BackupExecutor(Protocol):
+    def start(self, profile_id: str) -> dict[str, Any]: ...
+    def run_sync(self, profile_id: str) -> dict[str, Any]: ...
+    def inventory(self) -> dict[str, Any]: ...
+
+
+def _stage_inventory(*, enabled: bool, configured: bool, available: bool) -> dict[str, Any]:
+    return {
+        "id": AVALAR_STAGE_PROFILE_ID,
+        "name": "AVALAR Stage",
+        "project": AVALAR_STAGE_PROJECT_ID,
+        "environment": AVALAR_STAGE_ENVIRONMENT_ID,
+        "service": AVALAR_STAGE_SERVICE_ID,
+        "destinationId": DESTINATION_ID,
+        "archiveFormat": AVALAR_STAGE_ARCHIVE_FORMAT,
+        "registered": True,
+        "executable": True,
+        "runtimeEnabled": enabled,
+        "destinationConfigured": configured,
+        "available": available,
+    }
+
+
+def _parse_sha256_inventory(payload: bytes) -> dict[str, str]:
+    """Parse GNU sha256sum output without depending on a Unix utility."""
+    try:
+        lines = payload.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        raise BackupFailure("backup_verification_failed") from None
+    if not lines:
+        raise BackupFailure("backup_verification_failed")
+    result: dict[str, str] = {}
+    for line in lines:
+        escaped = line.startswith("\\")
+        offset = 1 if escaped else 0
+        if len(line) < offset + 66 or not SHA256_PATTERN.fullmatch(line[offset:offset + 64]):
+            raise BackupFailure("backup_verification_failed")
+        if line[offset + 64] != " " or line[offset + 65] not in {" ", "*"}:
+            raise BackupFailure("backup_verification_failed")
+        name = line[offset + 66:]
+        if not name:
+            raise BackupFailure("backup_verification_failed")
+        if escaped:
+            decoded: list[str] = []
+            index = 0
+            while index < len(name):
+                if name[index] != "\\":
+                    decoded.append(name[index])
+                    index += 1
+                    continue
+                if index + 1 >= len(name) or name[index + 1] not in {"\\", "n"}:
+                    raise BackupFailure("backup_verification_failed")
+                if name[index + 1] == "n":
+                    raise BackupFailure("backup_verification_failed")
+                decoded.append("\\")
+                index += 2
+            name = "".join(decoded)
+        if not _safe_checksum_path(name) or name in result:
+            raise BackupFailure("backup_verification_failed")
+        result[name] = line[offset:offset + 64]
+    return result
+
+
+def _safe_tar_member_name(name: str) -> bool:
+    if not isinstance(name, str) or not name or "\x00" in name:
+        return False
+    if name.startswith("/"):
+        return False
+    trimmed = name[:-1] if name.endswith("/") else name
+    return bool(trimmed) and all(part not in {"", ".", ".."} for part in trimmed.split("/"))
+
+
+def _safe_checksum_path(name: str) -> bool:
+    """Inventory format can represent a literal backslash; archive names cannot."""
+    if not isinstance(name, str) or not name or "\x00" in name or name.startswith("/"):
+        return False
+    return all(part not in {"", ".", ".."} for part in name.split("/"))
+
+
+class AvalarStageBackupEngine:
+    """Fixed, binary-safe consumer for the accepted AVALAR Stage transport."""
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        enabled: bool,
+        ssh_host: str,
+        ssh_command: str,
+        timeout_seconds: int,
+        min_free_bytes: int,
+        now: Callable[[], datetime] = _utc_now,
+        id_factory: Callable[[], str] | None = None,
+        popen_factory: Callable[..., Any] = subprocess.Popen,
+        verification_hook: Callable[[Path], None] | None = None,
+        json_writer: Callable[[Path, Mapping[str, Any], int, str], None] = _atomic_json_write,
+    ) -> None:
+        self.root = Path(root) if root else Path("")
+        self.enabled = enabled
+        self.ssh_host = ssh_host
+        self.ssh_command = ssh_command
+        self.timeout_seconds = max(10, min(300, int(timeout_seconds)))
+        self.min_free_bytes = max(MIN_FREE_SPACE_BYTES, min(MAX_FREE_SPACE_BYTES, int(min_free_bytes)))
+        self.now, self.id_factory, self.popen_factory = now, id_factory or (lambda: uuid4().hex), popen_factory
+        self.verification_hook, self.json_writer = verification_hook, json_writer
+
+    def _configured(self) -> bool:
+        return bool(self.root and _safe_server_path(self.root))
+
+    def available(self) -> bool:
+        if not self.enabled or not self._configured() or not self.ssh_host or not self.ssh_command:
+            return False
+        try:
+            return self.root.exists() and self.root.is_dir() or (not self.root.exists() and self.root.parent.is_dir())
+        except OSError:
+            return False
+
+    def inventory(self) -> dict[str, Any]:
+        return _stage_inventory(enabled=self.enabled, configured=self._configured(), available=self.available())
+
+    def start(self, profile_id: str = AVALAR_STAGE_PROFILE_ID) -> dict[str, Any]:
+        if profile_id != AVALAR_STAGE_PROFILE_ID:
+            raise BackupRequestError("backup_profile_unknown")
+        raise BackupRequestError("backup_failed")
+
+    def _new_run(self) -> dict[str, Any]:
+        return {"schemaVersion": RUN_SCHEMA, "backupId": self.id_factory(), "profileId": AVALAR_STAGE_PROFILE_ID,
+                "project": AVALAR_STAGE_PROJECT_ID, "environment": AVALAR_STAGE_ENVIRONMENT_ID, "service": AVALAR_STAGE_SERVICE_ID,
+                "state": "preparing", "startedAt": _timestamp(self.now()), "completedAt": None, "artifactFilename": None,
+                "byteSize": None, "verificationStatus": "pending", "destinationId": DESTINATION_ID, "includedSourceIds": [],
+                "missingOptionalSourceIds": [], "result": None, "errorCode": None, "sha256": None, "sourceCommit": None, "helperSha256": None}
+
+    def _stream_remote(self, partial: Path) -> dict[str, Any]:
+        argv = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={min(30, self.timeout_seconds)}", self.ssh_host, self.ssh_command, AVALAR_BACKUP_OPERATION]
+        try:
+            process = self.popen_factory(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+        except OSError:
+            raise BackupFailure("backup_remote_failed") from None
+        stderr = bytearray()
+        overflow = threading.Event()
+        stdout_done = threading.Event()
+        stdout_error: list[BackupFailure] = []
+        byte_count = [0]
+        def read_stderr() -> None:
+            stream = process.stderr
+            if stream is None:
+                return
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    return
+                if len(stderr) + len(chunk) > MAX_AVALAR_METADATA_BYTES:
+                    overflow.set()
+                    continue
+                if not overflow.is_set():
+                    stderr.extend(chunk)
+        reader = threading.Thread(target=read_stderr, name="avalar-backup-stderr", daemon=True)
+        reader.start()
+        output_reader: threading.Thread | None = None
+        deadline = time.monotonic() + self.timeout_seconds
+        try:
+            with partial.open("wb") as handle:
+                stream = process.stdout
+                if stream is None:
+                    raise BackupFailure("backup_remote_failed")
+                def read_stdout() -> None:
+                    try:
+                        while True:
+                            chunk = stream.read(64 * 1024)
+                            if not chunk:
+                                return
+                            byte_count[0] += len(chunk)
+                            if byte_count[0] > MAX_AVALAR_ARCHIVE_BYTES:
+                                stdout_error.append(BackupFailure("backup_transport_invalid"))
+                                return
+                            handle.write(chunk)
+                    except (OSError, ValueError):
+                        stdout_error.append(BackupFailure("backup_remote_failed"))
+                    finally:
+                        stdout_done.set()
+                output_reader = threading.Thread(target=read_stdout, name="avalar-backup-stdout", daemon=True)
+                output_reader.start()
+                while not stdout_done.wait(timeout=0.05):
+                    if overflow.is_set() or stdout_error:
+                        raise BackupFailure("backup_transport_invalid")
+                    if time.monotonic() > deadline:
+                        raise BackupFailure("backup_remote_timeout")
+                if overflow.is_set() or stdout_error:
+                    raise stdout_error[0] if stdout_error else BackupFailure("backup_transport_invalid")
+                handle.flush()
+                os.fsync(handle.fileno())
+            remaining = max(0.1, deadline - time.monotonic())
+            try:
+                returncode = process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                raise BackupFailure("backup_remote_timeout") from None
+            reader.join(timeout=1)
+            if overflow.is_set():
+                raise BackupFailure("backup_transport_invalid")
+            if returncode != 0:
+                raise BackupFailure({77: "backup_remote_disabled", 75: "backup_remote_busy", 124: "backup_remote_timeout"}.get(returncode, "backup_remote_failed"))
+            try:
+                metadata = json.loads(bytes(stderr).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise BackupFailure("backup_transport_invalid") from None
+            if not isinstance(metadata, dict) or b"\r" in stderr or bytes(stderr).count(b"\n") > 1:
+                raise BackupFailure("backup_transport_invalid")
+            required = {"ok", "schemaVersion", "profileId", "helperContract", "byteSize", "sha256", "sourceCommit", "helperSha256"}
+            if set(metadata) != required or metadata.get("ok") is not True or metadata.get("schemaVersion") != AVALAR_TRANSPORT_SCHEMA or metadata.get("profileId") != AVALAR_STAGE_PROFILE_ID or metadata.get("helperContract") != AVALAR_HELPER_CONTRACT:
+                raise BackupFailure("backup_transport_invalid")
+            if not isinstance(metadata.get("byteSize"), int) or metadata["byteSize"] <= 0 or not isinstance(metadata.get("sha256"), str) or not SHA256_PATTERN.fullmatch(metadata["sha256"]) or not isinstance(metadata.get("sourceCommit"), str) or not _COMMIT_PATTERN.fullmatch(metadata["sourceCommit"]) or not isinstance(metadata.get("helperSha256"), str) or not SHA256_PATTERN.fullmatch(metadata["helperSha256"]):
+                raise BackupFailure("backup_transport_invalid")
+            if byte_count[0] != metadata["byteSize"] or byte_count[0] == 0:
+                raise BackupFailure("backup_transport_invalid")
+            return metadata
+        except BackupFailure:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            raise
+        finally:
+            reader.join(timeout=1)
+            if output_reader is not None:
+                output_reader.join(timeout=1)
+
+    def _verify_archive(self, archive_path: Path, metadata: Mapping[str, Any]) -> tuple[int, str]:
+        digest = hashlib.sha256()
+        with archive_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(64 * 1024), b""):
+                digest.update(chunk)
+        size, sha256 = archive_path.stat().st_size, digest.hexdigest()
+        if size != metadata["byteSize"] or sha256 != metadata["sha256"]:
+            raise BackupFailure("backup_transport_invalid")
+        try:
+            with tarfile.open(archive_path, "r:gz") as archive:
+                members = archive.getmembers()
+                regular: dict[str, tarfile.TarInfo] = {}
+                directory_identities: set[str] = set()
+                member_names: set[str] = set()
+                for member in members:
+                    if not _safe_tar_member_name(member.name) or (member.isreg() and member.name.endswith("/")):
+                        raise BackupFailure("backup_verification_failed")
+                    canonical_name = member.name[:-1] if member.isdir() and member.name.endswith("/") else member.name
+                    if member.name in member_names:
+                        raise BackupFailure("backup_verification_failed")
+                    member_names.add(member.name)
+                    allowed = canonical_name in {"backup.manifest.json", "source-files.sha256", "data.json", "uploads"} or canonical_name.startswith("uploads/")
+                    if not allowed or member.issym() or member.islnk() or member.isdev() or member.isfifo() or not (member.isdir() or member.isreg()):
+                        raise BackupFailure("backup_verification_failed")
+                    if member.isdir() and canonical_name != "uploads" and not canonical_name.startswith("uploads/"):
+                        raise BackupFailure("backup_verification_failed")
+                    if member.isdir():
+                        if canonical_name in directory_identities:
+                            raise BackupFailure("backup_verification_failed")
+                        directory_identities.add(canonical_name)
+                    if member.isreg():
+                        if canonical_name in regular:
+                            raise BackupFailure("backup_verification_failed")
+                        regular[canonical_name] = member
+                if {"backup.manifest.json", "source-files.sha256", "data.json"} - set(regular):
+                    raise BackupFailure("backup_verification_failed")
+                if "uploads" not in directory_identities:
+                    raise BackupFailure("backup_verification_failed")
+                def read_member(name: str) -> bytes:
+                    extracted = archive.extractfile(regular[name])
+                    if extracted is None:
+                        raise BackupFailure("backup_verification_failed")
+                    data = extracted.read(MAX_AVALAR_ARCHIVE_TEXT_BYTES + 1)
+                    if len(data) > MAX_AVALAR_ARCHIVE_TEXT_BYTES:
+                        raise BackupFailure("backup_verification_failed")
+                    return data
+                try:
+                    manifest = json.loads(read_member("backup.manifest.json").decode("utf-8"))
+                    json.loads(read_member("data.json").decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    raise BackupFailure("backup_verification_failed") from None
+                expected = {"schemaVersion": AVALAR_MANIFEST_SCHEMA, "profileId": AVALAR_STAGE_PROFILE_ID, "project": AVALAR_STAGE_PROJECT_ID, "environment": AVALAR_STAGE_ENVIRONMENT_ID, "service": AVALAR_STAGE_SERVICE_ID, "sourceBranch": "stage", "sourceCommit": metadata["sourceCommit"], "helperContract": AVALAR_HELPER_CONTRACT, "helperSha256": metadata["helperSha256"], "includedScopes": ["data.json", "uploads"], "excludedScopes": ["git", "legacy-backups", "secrets", "external-config", "control-center-state"]}
+                required_manifest_keys = set(expected) | {"createdAt"}
+                if (
+                    not isinstance(manifest, dict)
+                    or set(manifest) != required_manifest_keys
+                    or any(manifest.get(key) != value for key, value in expected.items())
+                    or not isinstance(manifest.get("createdAt"), str)
+                    or not _B2A_TIMESTAMP_PATTERN.fullmatch(manifest["createdAt"])
+                ):
+                    raise BackupFailure("backup_verification_failed")
+                inventory = _parse_sha256_inventory(read_member("source-files.sha256"))
+                payload_files = {name for name in regular if name == "data.json" or name.startswith("uploads/")}
+                if set(inventory) != payload_files:
+                    raise BackupFailure("backup_verification_failed")
+                for name, expected_sha in inventory.items():
+                    item = archive.extractfile(regular[name])
+                    if item is None:
+                        raise BackupFailure("backup_verification_failed")
+                    payload_digest = hashlib.sha256()
+                    for chunk in iter(lambda: item.read(64 * 1024), b""):
+                        payload_digest.update(chunk)
+                    if payload_digest.hexdigest() != expected_sha:
+                        raise BackupFailure("backup_verification_failed")
+        except BackupFailure:
+            raise
+        except (OSError, tarfile.TarError):
+            raise BackupFailure("backup_verification_failed") from None
+        if self.verification_hook is not None:
+            self.verification_hook(archive_path)
+        return size, sha256
+
+    def _failed_history_entry(self, run: Mapping[str, Any], code: str) -> dict[str, Any]:
+        return {
+            "backupId": run["backupId"], "profileId": AVALAR_STAGE_PROFILE_ID,
+            "project": AVALAR_STAGE_PROJECT_ID, "environment": AVALAR_STAGE_ENVIRONMENT_ID,
+            "service": AVALAR_STAGE_SERVICE_ID, "startedAt": run["startedAt"],
+            "completedAt": run["completedAt"], "artifactFilename": None, "byteSize": None,
+            "sha256": None, "archiveFormat": AVALAR_STAGE_ARCHIVE_FORMAT,
+            "includedSourceIds": [], "missingOptionalSourceIds": [],
+            "verificationStatus": "failed", "destinationId": DESTINATION_ID,
+            "result": "failed", "errorCode": code, "sourceCommit": None,
+            "helperSha256": None,
+        }
+
+    def run_sync(
+        self,
+        profile_id: str = AVALAR_STAGE_PROFILE_ID,
+        *,
+        run: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if profile_id != AVALAR_STAGE_PROFILE_ID:
+            raise BackupRequestError("backup_profile_unknown")
+        run = run or self._new_run()
+        if run.get("profileId") != AVALAR_STAGE_PROFILE_ID or not isinstance(run.get("backupId"), str):
+            raise BackupRequestError("backup_profile_unknown")
+        partial = final = local_manifest = None
+        history_path: Path | None = None
+        entries: list[dict[str, Any]] | None = None
+        try:
+            if not self.enabled:
+                raise BackupFailure("backup_remote_disabled")
+            if not self._configured():
+                raise BackupFailure("backup_destination_unavailable")
+            _ensure_directory(self.root, create=True)
+            if shutil.disk_usage(self.root).free < self.min_free_bytes:
+                raise BackupFailure("backup_insufficient_free_space")
+            history_path = self.root / HISTORY_FILENAME
+            ok, entries = _read_history(history_path)
+            if not ok:
+                entries = None
+                raise BackupFailure("backup_history_unavailable")
+            now = self.now(); destination = self.root / AVALAR_STAGE_PROFILE_ID / now.strftime("%Y") / now.strftime("%m")
+            _ensure_directory(destination, create=True)
+            token = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{run['backupId']}"
+            filename = f"{AVALAR_STAGE_PROFILE_ID}-{token}.tar.gz"; final = destination / filename; local_manifest = destination / f"{AVALAR_STAGE_PROFILE_ID}-{token}.manifest.json"
+            if final.exists() or local_manifest.exists(): raise BackupFailure("backup_artifact_collision")
+            partial = destination / f".{filename}.partial"; run["state"] = "exporting"
+            metadata = self._stream_remote(partial); run["state"] = "verifying"
+            size, sha256 = self._verify_archive(partial, metadata)
+            os.replace(partial, final); partial = None; _fsync_directory(destination)
+            size, sha256 = self._verify_archive(final, metadata)
+            completed = _timestamp(self.now())
+            manifest = {"schemaVersion": MANIFEST_SCHEMA, "backupId": run["backupId"], "profileId": AVALAR_STAGE_PROFILE_ID, "project": AVALAR_STAGE_PROJECT_ID, "environment": AVALAR_STAGE_ENVIRONMENT_ID, "service": AVALAR_STAGE_SERVICE_ID, "startedAt": run["startedAt"], "completedAt": completed, "artifactFilename": filename, "byteSize": size, "sha256": sha256, "archiveFormat": AVALAR_STAGE_ARCHIVE_FORMAT, "includedSourceIds": [], "missingOptionalSourceIds": [], "verificationStatus": "verified", "destinationId": DESTINATION_ID, "result": "success", "sourceCommit": metadata["sourceCommit"], "helperSha256": metadata["helperSha256"]}
+            self.json_writer(local_manifest, manifest, MAX_MANIFEST_BYTES, "backup_manifest_failed")
+            history_entry = {key: value for key, value in manifest.items() if key != "schemaVersion"}
+            self.json_writer(history_path, _history_document([history_entry, *entries]), MAX_HISTORY_BYTES, "backup_history_write_failed")
+            run.update({"state": "success", "completedAt": completed, "artifactFilename": filename, "byteSize": size, "sha256": sha256, "verificationStatus": "verified", "result": "success", "sourceCommit": metadata["sourceCommit"], "helperSha256": metadata["helperSha256"]})
+        except BackupFailure as failure:
+            _safe_unlink(partial); _safe_unlink(final); _safe_unlink(local_manifest)
+            run.update({"state": "failed", "completedAt": _timestamp(self.now()), "verificationStatus": "failed", "result": "failed", "errorCode": failure.code})
+            if history_path is not None and entries is not None:
+                try:
+                    self.json_writer(
+                        history_path,
+                        _history_document([self._failed_history_entry(run, failure.code), *entries]),
+                        MAX_HISTORY_BYTES,
+                        "backup_history_write_failed",
+                    )
+                except BackupFailure:
+                    pass
+        except Exception:
+            _safe_unlink(partial); _safe_unlink(final); _safe_unlink(local_manifest)
+            run.update({"state": "failed", "completedAt": _timestamp(self.now()), "verificationStatus": "failed", "result": "failed", "errorCode": "backup_failed"})
+            if history_path is not None and entries is not None:
+                try:
+                    self.json_writer(
+                        history_path,
+                        _history_document([self._failed_history_entry(run, "backup_failed"), *entries]),
+                        MAX_HISTORY_BYTES,
+                        "backup_history_write_failed",
+                    )
+                except BackupFailure:
+                    pass
+        return run
+
+
+class BackupService:
+    """Explicit profile dispatch with one process-wide active backup."""
+    def __init__(self, panel: BackupEngine, stage: AvalarStageBackupEngine) -> None:
+        self.panel, self.stage = panel, stage
+        self._lock = threading.Lock(); self._current: dict[str, Any] | None = None; self._thread: threading.Thread | None = None
+    def _engine(self, profile_id: str) -> BackupEngine | AvalarStageBackupEngine:
+        if profile_id == PROFILE_ID: return self.panel
+        if profile_id == AVALAR_STAGE_PROFILE_ID: return self.stage
+        raise BackupRequestError("backup_profile_unknown")
+    def run_sync(self, profile_id: str) -> dict[str, Any]:
+        engine = self._engine(profile_id)
+        with self._lock:
+            if self._current and self._current.get("state") in ACTIVE_STATES: raise BackupRequestError("backup_busy")
+            self._current = {"state": "preparing", "profileId": profile_id}
+        result = engine.run_sync(profile_id)
+        with self._lock: self._current = dict(result)
+        return result
+    def start(self, profile_id: str) -> dict[str, Any]:
+        engine = self._engine(profile_id)
+        with self._lock:
+            if self._current and self._current.get("state") in ACTIVE_STATES: raise BackupRequestError("backup_busy")
+            if profile_id == PROFILE_ID:
+                run = engine.start(profile_id)
+                self._current = dict(run)
+                def join_panel() -> None:
+                    if self.panel._thread: self.panel._thread.join()
+                    with self._lock: self._current = self.panel._safe_run()
+                self._thread = threading.Thread(target=join_panel, daemon=True); self._thread.start(); return run
+            run = self.stage._new_run()
+            self._current = dict(run)
+            def worker() -> None:
+                result = self.stage.run_sync(profile_id, run=run)
+                with self._lock: self._current = result
+            self._thread = threading.Thread(target=worker, name="avalar-stage-backup", daemon=True)
+            self._thread.start()
+            return dict(run)
+    def available(self, profile_id: str) -> bool:
+        return profile_id == PROFILE_ID or (profile_id == AVALAR_STAGE_PROFILE_ID and self.stage.available())
+    def api_payload(self) -> dict[str, Any]:
+        base = self.panel.api_payload()
+        base["profiles"] = [*base["profiles"], self.stage.inventory()]
+        with self._lock: base["currentRun"] = dict(self._current) if self._current else None
+        return base
 
 
 def _error_status(code: str) -> int:

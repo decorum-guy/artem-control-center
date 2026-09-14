@@ -85,7 +85,7 @@ from .ai_settings import AIProviderSettingsStore
 from .ai_text import AITextService
 from .ai_api import build_ai_router
 from .access_policy import AccessPolicyStore
-from .backups import BackupEngine, PanelConfigSource, build_backup_router
+from .backups import AvalarStageBackupEngine, BackupEngine, BackupService, PanelConfigSource, build_backup_router
 from .interface_copy import (
     FIXTURE_INTERFACE_COPY_SCENARIOS,
     InterfaceCopyRevisionConflict,
@@ -216,6 +216,15 @@ backup_engine = BackupEngine(
     SETTINGS.backup_local_root,
     min_free_bytes=SETTINGS.backup_min_free_bytes,
 )
+avalar_stage_backup_engine = AvalarStageBackupEngine(
+    SETTINGS.backup_local_root,
+    enabled=SETTINGS.avalar_stage_backup_enabled,
+    ssh_host=SETTINGS.avalar_backup_ssh_host,
+    ssh_command=SETTINGS.avalar_backup_command,
+    timeout_seconds=SETTINGS.avalar_backup_timeout_seconds,
+    min_free_bytes=SETTINGS.backup_min_free_bytes,
+)
+backup_service = BackupService(backup_engine, avalar_stage_backup_engine)
 
 
 @asynccontextmanager
@@ -283,7 +292,7 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
-app.include_router(build_backup_router(backup_engine, access_policy))
+app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(
     build_project_registry_router(
         project_registry_store,
@@ -1282,7 +1291,8 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "coffee_notification_writes": SETTINGS.coffee_notification_writes_enabled,
         "coffee_actions": SETTINGS.coffee_actions_enabled,
         "avalar_ssh": SETTINGS.avalar_ssh_enabled,
-        "avalar_actions": SETTINGS.avalar_actions_enabled,
+            "avalar_actions": SETTINGS.avalar_actions_enabled,
+            "avalar_stage_backup": SETTINGS.avalar_stage_backup_enabled,
         "avalar_smoke": SETTINGS.avalar_smoke_enabled,
         "avalar_stage_restart": SETTINGS.avalar_stage_restart_enabled,
         "avalar_main_restart": SETTINGS.avalar_main_restart_enabled,
