@@ -385,10 +385,17 @@ def test_api_unknown_profile_is_bounded(tmp_path: Path):
     assert response.json() == {"detail": "backup_profile_unknown"}
 
 
-def _stage_archive() -> tuple[bytes, dict]:
+def _stage_archive(
+    *,
+    manifest_patch: dict | None = None,
+    manifest_remove: set[str] | None = None,
+    data: bytes = b'{"items":[]}',
+    checksum_override: bytes | None = None,
+    include_uploads_dir: bool = True,
+    extra_entries: tuple[tuple[str, bytes | None, bytes | None, str], ...] = (),
+) -> tuple[bytes, dict]:
     source_commit = "a" * 40
     helper_sha = "b" * 64
-    data = b'{"items":[]}'
     uploads = {
         "uploads/one.txt": b"one",
         "uploads/nested/two.txt": b"two",
@@ -402,7 +409,7 @@ def _stage_archive() -> tuple[bytes, dict]:
             "\\" + digest + "  " + name.replace("\\", "\\\\")
             if "\\" in name else digest + "  " + name
         )
-    checksums = ("\n".join(checksum_lines) + "\n").encode()
+    checksums = checksum_override if checksum_override is not None else ("\n".join(checksum_lines) + "\n").encode()
     internal = {
         "schemaVersion": "avalar.stage.backup.v1", "profileId": "avalar-stage-site",
         "project": "avalar-site", "environment": "stage", "service": "website",
@@ -412,12 +419,25 @@ def _stage_archive() -> tuple[bytes, dict]:
         "excludedScopes": ["git", "legacy-backups", "secrets", "external-config", "control-center-state"],
         "createdAt": "2026-09-14T00:00:00Z",
     }
+    if manifest_patch:
+        internal.update(manifest_patch)
+    if manifest_remove:
+        for key in manifest_remove:
+            internal.pop(key, None)
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w:gz") as archive:
-        for name in ("uploads/", "uploads/nested/"):
+        directories = ("uploads/", "uploads/nested/") if include_uploads_dir else ("uploads/nested/",)
+        for name in directories:
             info = tarfile.TarInfo(name); info.type = tarfile.DIRTYPE; archive.addfile(info)
         for name, body in (("backup.manifest.json", json.dumps(internal).encode()), ("source-files.sha256", checksums), ("data.json", data), *uploads.items()):
             info = tarfile.TarInfo(name); info.size = len(body); archive.addfile(info, io.BytesIO(body))
+        for name, body, member_type, linkname in extra_entries:
+            info = tarfile.TarInfo(name)
+            info.type = member_type or tarfile.REGTYPE
+            info.linkname = linkname
+            if body is not None:
+                info.size = len(body)
+            archive.addfile(info, io.BytesIO(body) if body is not None else None)
     artifact = stream.getvalue()
     return artifact, {"ok": True, "schemaVersion": "avalar.stage.backup.transport.v1", "profileId": "avalar-stage-site", "helperContract": "avalar.stage.backup.v1", "byteSize": len(artifact), "sha256": hashlib.sha256(artifact).hexdigest(), "sourceCommit": source_commit, "helperSha256": helper_sha}
 
@@ -432,6 +452,15 @@ class _FakeProcess:
         return self.returncode
     def poll(self): return self.returncode
     def kill(self): self.returncode = -9
+
+
+def _run_stage_archive(tmp_path: Path, archive: bytes, metadata: dict) -> dict:
+    engine = AvalarStageBackupEngine(
+        tmp_path / "backups", enabled=True, ssh_host="avalar-backup",
+        ssh_command="control-center", timeout_seconds=180, min_free_bytes=1,
+        popen_factory=lambda *args, **kwargs: _FakeProcess(archive, metadata),
+    )
+    return engine.run_sync()
 
 
 def test_stage_transport_is_binary_safe_and_publishes_only_after_verification(tmp_path: Path):
@@ -482,6 +511,117 @@ def test_stage_timeout_cleans_partial(tmp_path: Path):
     assert not list((tmp_path / "backups").rglob("*.partial"))
 
 
+@pytest.mark.parametrize(("name", "patch", "remove"), [
+    ("extra", {"extra": True}, None),
+    ("missing", None, {"helperSha256"}),
+    ("timestamp", {"createdAt": "2026-09-14T00:00:00+03:00"}, None),
+])
+def test_stage_rejects_noncanonical_internal_manifest(tmp_path: Path, name: str, patch: dict | None, remove: set[str] | None):
+    archive, metadata = _stage_archive(manifest_patch=patch, manifest_remove=remove)
+    assert _run_stage_archive(tmp_path, archive, metadata)["errorCode"] == "backup_verification_failed"
+
+
+def test_stage_accepts_exact_b2a_manifest_timestamp(tmp_path: Path):
+    archive, metadata = _stage_archive(manifest_patch={"createdAt": "2026-12-31T23:59:59Z"})
+    assert _run_stage_archive(tmp_path, archive, metadata)["result"] == "success"
+
+
+@pytest.mark.parametrize("extra", [
+    ("/absolute", b"x", None, ""),
+    ("uploads/../traversal", b"x", None, ""),
+    ("uploads/one.txt", b"duplicate", None, ""),
+    ("uploads/link", None, tarfile.SYMTYPE, "uploads/one.txt"),
+    ("uploads/hard", None, tarfile.LNKTYPE, "uploads/one.txt"),
+    ("uploads/fifo", None, tarfile.FIFOTYPE, ""),
+    ("uploads/device", None, tarfile.CHRTYPE, ""),
+    ("unexpected.txt", b"x", None, ""),
+])
+def test_stage_rejects_unsafe_archive_members(tmp_path: Path, extra):
+    archive, metadata = _stage_archive(extra_entries=(extra,))
+    result = _run_stage_archive(tmp_path, archive, metadata)
+    assert result["errorCode"] == "backup_verification_failed"
+    assert not list((tmp_path / "backups").rglob("*.tar.gz"))
+
+
+def test_stage_rejects_regular_uploads_and_missing_uploads_directory(tmp_path: Path):
+    archive, metadata = _stage_archive(include_uploads_dir=False, extra_entries=(("uploads", b"not-a-directory", None, ""),))
+    assert _run_stage_archive(tmp_path, archive, metadata)["errorCode"] == "backup_verification_failed"
+    archive, metadata = _stage_archive(include_uploads_dir=False)
+    assert _run_stage_archive(tmp_path / "missing", archive, metadata)["errorCode"] == "backup_verification_failed"
+
+
+def test_stage_rejects_invalid_data_json_and_transport_size_mismatch(tmp_path: Path):
+    archive, metadata = _stage_archive(data=b"not-json")
+    assert _run_stage_archive(tmp_path, archive, metadata)["errorCode"] == "backup_verification_failed"
+    archive, metadata = _stage_archive(); metadata["byteSize"] += 1
+    result = _run_stage_archive(tmp_path / "size", archive, metadata)
+    assert result["errorCode"] == "backup_transport_invalid"
+    assert not list((tmp_path / "size" / "backups").rglob("*.tar.gz"))
+    assert not list((tmp_path / "size" / "backups").rglob("*.partial"))
+    assert all(row["result"] != "success" for row in history(tmp_path / "size" / "backups")["entries"])
+
+
+@pytest.mark.parametrize("inventory", [
+    b"\\" + b"d" * 64 + b"  uploads/a\\q\n",
+    b"d" * 64 + b"  data.json\n" + b"d" * 64 + b"  data.json\n",
+    b"d" * 64 + b"  ../outside\n",
+    b"d" * 64 + b"  data.json\n",
+    b"d" * 64 + b"  uploads/missing.txt\n",
+    b"d" * 64 + b"  uploads\n",
+])
+def test_stage_rejects_invalid_checksum_inventory_end_to_end(tmp_path: Path, inventory: bytes):
+    archive, metadata = _stage_archive(checksum_override=inventory)
+    assert _run_stage_archive(tmp_path, archive, metadata)["errorCode"] == "backup_verification_failed"
+
+
+def test_stage_rejects_checksum_digest_mismatch_end_to_end(tmp_path: Path):
+    inventory = "\n".join([
+        "c" * 64 + "  data.json",
+        hashlib.sha256(b"one").hexdigest() + "  uploads/one.txt",
+        hashlib.sha256(b"two").hexdigest() + "  uploads/nested/two.txt",
+        hashlib.sha256(b"space").hexdigest() + "  uploads/space name.txt",
+        "\\" + hashlib.sha256(b"backslash").hexdigest() + "  uploads/back\\\\slash.txt",
+    ]).encode() + b"\n"
+    archive, metadata = _stage_archive(checksum_override=inventory)
+    assert _run_stage_archive(tmp_path, archive, metadata)["errorCode"] == "backup_verification_failed"
+
+
+def test_stage_rejects_duplicate_directory_identity(tmp_path: Path):
+    archive, metadata = _stage_archive(extra_entries=(("uploads/", None, tarfile.DIRTYPE, ""),))
+    assert _run_stage_archive(tmp_path, archive, metadata)["errorCode"] == "backup_verification_failed"
+
+
+def test_stage_post_publish_reverification_failure_removes_artifact(tmp_path: Path):
+    archive, metadata = _stage_archive()
+    def fail_final(path: Path) -> None:
+        if path.suffix == ".gz":
+            raise BackupFailure("backup_verification_failed")
+    engine = AvalarStageBackupEngine(tmp_path / "backups", enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=lambda *args, **kwargs: _FakeProcess(archive, metadata), verification_hook=fail_final)
+    result = engine.run_sync()
+    assert result["errorCode"] == "backup_verification_failed"
+    assert not list((tmp_path / "backups").rglob("*.tar.gz"))
+    assert not list((tmp_path / "backups").rglob("*.manifest.json"))
+    assert all(row["result"] != "success" for row in history(tmp_path / "backups")["entries"])
+
+
+@pytest.mark.parametrize(("failure_code", "expected"), [
+    ("backup_manifest_failed", "backup_manifest_failed"),
+    ("backup_history_write_failed", "backup_history_write_failed"),
+])
+def test_stage_local_persistence_failure_never_publishes_success(tmp_path: Path, failure_code: str, expected: str):
+    archive, metadata = _stage_archive()
+    def fail_selected(path: Path, payload, maximum: int, code: str) -> None:
+        if code == failure_code:
+            raise BackupFailure(code)
+        from panel_agent.backups import _atomic_json_write
+        _atomic_json_write(path, payload, maximum, code)
+    engine = AvalarStageBackupEngine(tmp_path / "backups", enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=lambda *args, **kwargs: _FakeProcess(archive, metadata), json_writer=fail_selected)
+    result = engine.run_sync()
+    assert result["errorCode"] == expected
+    assert not list((tmp_path / "backups").rglob("*.tar.gz"))
+    assert not list((tmp_path / "backups").rglob("*.manifest.json"))
+
+
 def test_checksum_parser_supports_spaces_and_escaped_backslashes():
     digest = "d" * 64
     assert _parse_sha256_inventory((digest + "  uploads/a file.txt\n\\" + digest + "  uploads/a\\\\b.txt\n").encode()) == {"uploads/a file.txt": digest, "uploads/a\\b.txt": digest}
@@ -529,6 +669,36 @@ def test_backup_service_rejects_panel_while_stage_is_active(tmp_path: Path):
     assert service.api_payload()["currentRun"]["backupId"] == stage_run["backupId"]
 
 
+def test_cross_profile_busy_preserves_seeded_shared_history(tmp_path: Path):
+    archive, metadata = _stage_archive()
+    root = tmp_path / "backups"
+    seed = AvalarStageBackupEngine(root, enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=lambda *args, **kwargs: _FakeProcess(archive, metadata))
+    assert seed.run_sync()["result"] == "success"
+    seeded_id = history(root)["entries"][0]["backupId"]
+    started, release = threading.Event(), threading.Event()
+    class BlockingStdout:
+        def __init__(self): self.sent = False
+        def read(self, _size: int) -> bytes:
+            if not self.sent:
+                started.set(); assert release.wait(timeout=3); self.sent = True; return archive
+            return b""
+    class BlockingProcess(_FakeProcess):
+        def __init__(self): super().__init__(b"", metadata); self.stdout = BlockingStdout()
+    panel, _, _ = make_engine(tmp_path)
+    stage = AvalarStageBackupEngine(root, enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=lambda *args, **kwargs: BlockingProcess())
+    service = BackupService(panel, stage)
+    accepted = service.start("avalar-stage-site")
+    assert started.wait(timeout=3)
+    with pytest.raises(BackupRequestError) as rejected:
+        service.start(PROFILE_ID)
+    assert rejected.value.code == "backup_busy"
+    release.set(); assert service._thread is not None; service._thread.join(timeout=3)
+    rows = history(root)["entries"]
+    assert [row["backupId"] for row in rows].count(seeded_id) == 1
+    assert [row["backupId"] for row in rows].count(accepted["backupId"]) == 1
+    assert len(rows) == 2 and all(row["result"] == "success" for row in rows)
+
+
 def test_stage_post_returns_the_worker_run_identity_and_main_stays_unknown(tmp_path: Path):
     archive, metadata = _stage_archive()
     panel, _, _ = make_engine(tmp_path)
@@ -567,6 +737,22 @@ def test_stage_remote_failure_records_strict_failed_history(tmp_path: Path):
     assert entry["result"] == "failed"
     assert entry["artifactFilename"] is None and entry["sourceCommit"] is None
     assert entry["helperSha256"] is None and entry["errorCode"] == "backup_remote_busy"
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("project", "wrong"), ("environment", "wrong"), ("service", "wrong"),
+    ("archiveFormat", "zip"),
+])
+def test_tampered_failed_stage_history_is_unavailable_and_not_overwritten(tmp_path: Path, field: str, value: str):
+    archive, metadata = _stage_archive()
+    engine = AvalarStageBackupEngine(tmp_path / "backups", enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=lambda *args, **kwargs: _FakeProcess(archive, metadata, returncode=75))
+    assert engine.run_sync()["errorCode"] == "backup_remote_busy"
+    path = tmp_path / "backups" / "backup-history.v1.json"
+    document = json.loads(path.read_text()); document["entries"][0][field] = value
+    path.write_text(json.dumps(document), encoding="utf-8")
+    tampered = path.read_bytes()
+    assert engine.run_sync()["errorCode"] == "backup_history_unavailable"
+    assert path.read_bytes() == tampered
 
 
 @pytest.mark.parametrize(("returncode", "error"), [(75, "backup_remote_busy"), (77, "backup_remote_disabled"), (69, "backup_remote_failed")])

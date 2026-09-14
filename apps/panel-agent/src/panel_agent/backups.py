@@ -54,6 +54,7 @@ MAX_CAPABILITY_SOURCE_BYTES = 16 * 1024
 ACTIVE_STATES = frozenset({"preparing", "exporting", "verifying"})
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_B2A_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 AVALAR_STAGE_PROFILE_ID = "avalar-stage-site"
 AVALAR_STAGE_PROJECT_ID = "avalar-site"
@@ -335,16 +336,15 @@ def _validate_history_entry(entry: Any) -> bool:
     profile_id = entry.get("profileId")
     if profile_id not in {PROFILE_ID, AVALAR_STAGE_PROFILE_ID} or entry.get("destinationId") != DESTINATION_ID:
         return False
-    if profile_id == AVALAR_STAGE_PROFILE_ID and entry.get("result") == "success":
+    if profile_id == AVALAR_STAGE_PROFILE_ID:
         if (
             entry.get("project") != AVALAR_STAGE_PROJECT_ID
             or entry.get("environment") != AVALAR_STAGE_ENVIRONMENT_ID
             or entry.get("service") != AVALAR_STAGE_SERVICE_ID
             or entry.get("archiveFormat") != AVALAR_STAGE_ARCHIVE_FORMAT
-            or not isinstance(entry.get("sourceCommit"), str)
-            or not _COMMIT_PATTERN.fullmatch(entry["sourceCommit"])
-            or not isinstance(entry.get("helperSha256"), str)
-            or not SHA256_PATTERN.fullmatch(entry["helperSha256"])
+            or entry.get("destinationId") != DESTINATION_ID
+            or entry.get("includedSourceIds") != []
+            or entry.get("missingOptionalSourceIds") != []
         ):
             return False
     elif profile_id == PROFILE_ID:
@@ -382,6 +382,14 @@ def _validate_history_entry(entry: Any) -> bool:
         return False
     if profile_id == AVALAR_STAGE_PROFILE_ID and entry["result"] == "failed":
         if entry.get("sourceCommit") is not None or entry.get("helperSha256") is not None:
+            return False
+    if profile_id == AVALAR_STAGE_PROFILE_ID and entry["result"] == "success":
+        if (
+            not isinstance(entry.get("sourceCommit"), str)
+            or not _COMMIT_PATTERN.fullmatch(entry["sourceCommit"])
+            or not isinstance(entry.get("helperSha256"), str)
+            or not SHA256_PATTERN.fullmatch(entry["helperSha256"])
+        ):
             return False
     if entry["result"] == "success":
         if entry.get("artifactFilename") is None or entry.get("byteSize") is None or entry.get("sha256") is None:
@@ -1087,6 +1095,8 @@ class AvalarStageBackupEngine:
         now: Callable[[], datetime] = _utc_now,
         id_factory: Callable[[], str] | None = None,
         popen_factory: Callable[..., Any] = subprocess.Popen,
+        verification_hook: Callable[[Path], None] | None = None,
+        json_writer: Callable[[Path, Mapping[str, Any], int, str], None] = _atomic_json_write,
     ) -> None:
         self.root = Path(root) if root else Path("")
         self.enabled = enabled
@@ -1095,6 +1105,7 @@ class AvalarStageBackupEngine:
         self.timeout_seconds = max(10, min(300, int(timeout_seconds)))
         self.min_free_bytes = max(MIN_FREE_SPACE_BYTES, min(MAX_FREE_SPACE_BYTES, int(min_free_bytes)))
         self.now, self.id_factory, self.popen_factory = now, id_factory or (lambda: uuid4().hex), popen_factory
+        self.verification_hook, self.json_writer = verification_hook, json_writer
 
     def _configured(self) -> bool:
         return bool(self.root and _safe_server_path(self.root))
@@ -1267,7 +1278,14 @@ class AvalarStageBackupEngine:
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     raise BackupFailure("backup_verification_failed") from None
                 expected = {"schemaVersion": AVALAR_MANIFEST_SCHEMA, "profileId": AVALAR_STAGE_PROFILE_ID, "project": AVALAR_STAGE_PROJECT_ID, "environment": AVALAR_STAGE_ENVIRONMENT_ID, "service": AVALAR_STAGE_SERVICE_ID, "sourceBranch": "stage", "sourceCommit": metadata["sourceCommit"], "helperContract": AVALAR_HELPER_CONTRACT, "helperSha256": metadata["helperSha256"], "includedScopes": ["data.json", "uploads"], "excludedScopes": ["git", "legacy-backups", "secrets", "external-config", "control-center-state"]}
-                if not isinstance(manifest, dict) or any(manifest.get(key) != value for key, value in expected.items()) or not isinstance(manifest.get("createdAt"), str) or not (1 <= len(manifest["createdAt"]) <= 80):
+                required_manifest_keys = set(expected) | {"createdAt"}
+                if (
+                    not isinstance(manifest, dict)
+                    or set(manifest) != required_manifest_keys
+                    or any(manifest.get(key) != value for key, value in expected.items())
+                    or not isinstance(manifest.get("createdAt"), str)
+                    or not _B2A_TIMESTAMP_PATTERN.fullmatch(manifest["createdAt"])
+                ):
                     raise BackupFailure("backup_verification_failed")
                 inventory = _parse_sha256_inventory(read_member("source-files.sha256"))
                 payload_files = {name for name in regular if name == "data.json" or name.startswith("uploads/")}
@@ -1286,6 +1304,8 @@ class AvalarStageBackupEngine:
             raise
         except (OSError, tarfile.TarError):
             raise BackupFailure("backup_verification_failed") from None
+        if self.verification_hook is not None:
+            self.verification_hook(archive_path)
         return size, sha256
 
     def _failed_history_entry(self, run: Mapping[str, Any], code: str) -> dict[str, Any]:
@@ -1325,7 +1345,9 @@ class AvalarStageBackupEngine:
                 raise BackupFailure("backup_insufficient_free_space")
             history_path = self.root / HISTORY_FILENAME
             ok, entries = _read_history(history_path)
-            if not ok: raise BackupFailure("backup_history_unavailable")
+            if not ok:
+                entries = None
+                raise BackupFailure("backup_history_unavailable")
             now = self.now(); destination = self.root / AVALAR_STAGE_PROFILE_ID / now.strftime("%Y") / now.strftime("%m")
             _ensure_directory(destination, create=True)
             token = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{run['backupId']}"
@@ -1338,15 +1360,16 @@ class AvalarStageBackupEngine:
             size, sha256 = self._verify_archive(final, metadata)
             completed = _timestamp(self.now())
             manifest = {"schemaVersion": MANIFEST_SCHEMA, "backupId": run["backupId"], "profileId": AVALAR_STAGE_PROFILE_ID, "project": AVALAR_STAGE_PROJECT_ID, "environment": AVALAR_STAGE_ENVIRONMENT_ID, "service": AVALAR_STAGE_SERVICE_ID, "startedAt": run["startedAt"], "completedAt": completed, "artifactFilename": filename, "byteSize": size, "sha256": sha256, "archiveFormat": AVALAR_STAGE_ARCHIVE_FORMAT, "includedSourceIds": [], "missingOptionalSourceIds": [], "verificationStatus": "verified", "destinationId": DESTINATION_ID, "result": "success", "sourceCommit": metadata["sourceCommit"], "helperSha256": metadata["helperSha256"]}
-            _atomic_json_write(local_manifest, manifest, MAX_MANIFEST_BYTES, "backup_manifest_failed")
-            _atomic_json_write(history_path, _history_document([manifest, *entries]), MAX_HISTORY_BYTES, "backup_history_write_failed")
+            self.json_writer(local_manifest, manifest, MAX_MANIFEST_BYTES, "backup_manifest_failed")
+            history_entry = {key: value for key, value in manifest.items() if key != "schemaVersion"}
+            self.json_writer(history_path, _history_document([history_entry, *entries]), MAX_HISTORY_BYTES, "backup_history_write_failed")
             run.update({"state": "success", "completedAt": completed, "artifactFilename": filename, "byteSize": size, "sha256": sha256, "verificationStatus": "verified", "result": "success", "sourceCommit": metadata["sourceCommit"], "helperSha256": metadata["helperSha256"]})
         except BackupFailure as failure:
             _safe_unlink(partial); _safe_unlink(final); _safe_unlink(local_manifest)
             run.update({"state": "failed", "completedAt": _timestamp(self.now()), "verificationStatus": "failed", "result": "failed", "errorCode": failure.code})
             if history_path is not None and entries is not None:
                 try:
-                    _atomic_json_write(
+                    self.json_writer(
                         history_path,
                         _history_document([self._failed_history_entry(run, failure.code), *entries]),
                         MAX_HISTORY_BYTES,
@@ -1359,7 +1382,7 @@ class AvalarStageBackupEngine:
             run.update({"state": "failed", "completedAt": _timestamp(self.now()), "verificationStatus": "failed", "result": "failed", "errorCode": "backup_failed"})
             if history_path is not None and entries is not None:
                 try:
-                    _atomic_json_write(
+                    self.json_writer(
                         history_path,
                         _history_document([self._failed_history_entry(run, "backup_failed"), *entries]),
                         MAX_HISTORY_BYTES,
