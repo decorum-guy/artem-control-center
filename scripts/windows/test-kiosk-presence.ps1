@@ -59,7 +59,7 @@ try {
     if (Test-ArtemKioskVisible -Paths $paths -Processes $wrongSessionKiosk -ConsoleSessionId 2) {
         throw "Fresh heartbeat plus Session 0 dedicated Edge must not count as owner-visible kiosk"
     }
-    if (-not (Test-ArtemKioskVisible -Paths $paths -Processes $consoleKiosk -ConsoleSessionId 2 -Diagnostic)) {
+    if (-not (Test-ArtemKioskVisible -Paths $paths -Processes $consoleKiosk -ConsoleSessionId 2)) {
         throw "Fresh application presence plus console-session panel Edge must be kiosk authority"
     }
 

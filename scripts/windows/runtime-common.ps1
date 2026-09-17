@@ -623,6 +623,7 @@ function Get-ArtemKioskSessionAlignment {
     )
 
     return [pscustomobject]@{
+        HasOwnedProcesses = $owned.Count -gt 0
         ConsoleSessionId = if ($hasConsole) { [int]$ConsoleSessionId } else { $null }
         ProcessSessionIds = @($distinctSessionIds)
         SessionAligned = $aligned
