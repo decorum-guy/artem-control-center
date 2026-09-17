@@ -230,11 +230,14 @@ async def _read_status_stdout(
             error = SshDetailsError("SSH output exceeded configured limit")
             if not ready.done(): ready.set_exception(error)
             raise error
-        try:
-            _parse_command_output(bytes(data), b"", 0, limit)
-        except SshDetailsError:
+        if b"\n" not in data:
             continue
-        if not ready.done(): ready.set_result(bytes(data))
+        if not data.endswith(b"\n") or data.count(b"\n") != 1:
+            if not ready.done():
+                ready.set_exception(SshDetailsError("SSH status command returned invalid JSON"))
+            continue
+        if not ready.done():
+            ready.set_result(bytes(data))
 
 
 async def _read_status_stderr(

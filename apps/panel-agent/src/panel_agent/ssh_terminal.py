@@ -45,7 +45,10 @@ class TerminalEnvelopeParser:
 
     def finish(self) -> None:
         if self._pending:
-            self._consume_line(bytes(self._pending), terminated=False)
+            if self._pending.startswith(PREFIX):
+                self.error = TerminalEnvelopeError("unterminated SSH terminal envelope")
+            else:
+                self._consume_line(bytes(self._pending), terminated=False)
             self._pending.clear()
         if self.error is not None:
             raise self.error

@@ -544,9 +544,11 @@ async def _read_action_stdout(
             error = RuntimeError("invalid_action_response")
             if not ready.done(): ready.set_exception(error)
             raise error
-        try:
-            _parse_action_payload(bytes(data))
-        except RuntimeError:
+        if b"\n" not in data:
+            continue
+        if not data.endswith(b"\n") or data.count(b"\n") != 1:
+            if not ready.done():
+                ready.set_exception(RuntimeError("invalid_action_response"))
             continue
         if not ready.done():
             ready.set_result(bytes(data))
