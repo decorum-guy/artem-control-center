@@ -832,6 +832,7 @@ $buildRoot = $null
 $rollbackRestored = $false
 $targetHandoffClaim = $null
 $stagingRoot = $null
+$postUpdateInteractiveKioskRecovery = $false
 
 try {
     # From the first instruction after lock acquisition onward, every exit is
@@ -978,13 +979,14 @@ try {
 
         if ($decision.Action -eq "up-to-date") {
             Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
-            Ensure-ArtemHealthyVisiblePanel `
+            $kioskConfirmed = Ensure-ArtemHealthyVisiblePanel `
                 -Paths $paths `
                 -LockRequestId $RequestId `
-                -ExpectedBuildRevision $targetHead | Out-Null
+                -ExpectedBuildRevision $targetHead
             Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
             Set-Content -LiteralPath $paths.LastKnownGood -Value $currentHead -Encoding ASCII
             Write-ArtemUpdateState -Paths $paths -Status "success" -Result "up_to_date" -ServedRevision $targetHead
+            $postUpdateInteractiveKioskRecovery = -not $kioskConfirmed
             Write-Host "Artem Control Center is already up to date and serving $currentHead"
             return
         }
@@ -1129,6 +1131,7 @@ try {
         Remove-Item -LiteralPath $paths.RollbackDashboard -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $buildRoot -Recurse -Force -ErrorAction SilentlyContinue
         Write-ArtemUpdateState -Paths $paths -Status "success" -Result "updated" -ServedRevision $targetHead
+        $postUpdateInteractiveKioskRecovery = -not $kioskConfirmed
         if (-not $kioskConfirmed) {
             Write-Warning "Production dashboard is verified, but kiosk presence remains unconfirmed"
         }
@@ -1213,6 +1216,20 @@ finally {
     }
     else {
         Remove-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
+    }
+    if ($postUpdateInteractiveKioskRecovery) {
+        # Software acceptance is already complete. The Interactive task has no
+        # UpdateRequestId, so only now (after the exact updater lease releases)
+        # may it perform owner-visible console-session recovery. A delayed or
+        # failed handoff is advisory and must never roll back a healthy build.
+        try {
+            if (-not (Start-ArtemInteractiveRuntimeTask -Paths $paths)) {
+                Write-Warning "Production dashboard is verified, but the Interactive kiosk recovery task is unavailable"
+            }
+        }
+        catch {
+            Write-Warning "Production dashboard is verified, but interactive kiosk recovery could not be requested: $($_.Exception.Message)"
+        }
     }
     if ($transcriptStarted) {
         Stop-Transcript -ErrorAction SilentlyContinue | Out-Null

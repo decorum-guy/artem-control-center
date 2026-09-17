@@ -55,14 +55,31 @@ function Test-ArtemKioskWatcherOwned {
 function Get-ArtemKioskStatus {
     param(
         [Parameter(Mandatory)]$Paths,
-        [bool]$RuntimeReady = $false
+        [bool]$RuntimeReady = $false,
+        [object[]]$Processes,
+        [object]$ConsoleSessionId
     )
-    $processOwned = Test-ArtemKioskRunning -Paths $Paths
+    $ownedProcesses = if ($PSBoundParameters.ContainsKey('Processes')) {
+        @(Get-ArtemKioskProcesses -Paths $Paths -Processes $Processes)
+    }
+    else {
+        @(Get-ArtemKioskProcesses -Paths $Paths)
+    }
+    $processOwned = $ownedProcesses.Count -gt 0
+    $session = if ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        Get-ArtemKioskSessionAlignment `
+            -Paths $Paths `
+            -OwnedProcesses $ownedProcesses `
+            -ConsoleSessionId $ConsoleSessionId
+    }
+    else {
+        Get-ArtemKioskSessionAlignment -Paths $Paths -OwnedProcesses $ownedProcesses
+    }
     $presenceRecent = Test-ArtemKioskPresenceRecent -Paths $Paths
     $watcherOwned = Test-ArtemKioskWatcherOwned -Paths $Paths
     $presenceFile = Test-Path -LiteralPath (Get-ArtemKioskPresencePath -Paths $Paths)
 
-    $status = if ($processOwned -and $presenceRecent) {
+    $status = if ($processOwned -and $session.SessionAligned -and $presenceRecent) {
         "running"
     }
     elseif ($processOwned -or $watcherOwned) {
@@ -84,6 +101,10 @@ function Get-ArtemKioskStatus {
         ProcessOwned = $processOwned
         PresenceRecent = $presenceRecent
         WatcherOwned = $watcherOwned
+        ConsoleSessionId = $session.ConsoleSessionId
+        ProcessSessionIds = $session.ProcessSessionIds
+        SessionAligned = $session.SessionAligned
+        HasWrongSessionProcess = $session.HasWrongSessionProcess
     }
 }
 
@@ -92,9 +113,29 @@ function Get-ArtemKioskStatus {
 # prevents an ordinary browser tab from impersonating the kiosk without using
 # deprecated desktop-window probing.
 function Test-ArtemKioskVisible {
-    param([Parameter(Mandatory)]$Paths)
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$Processes,
+        [object]$ConsoleSessionId
+    )
+    $ownedProcesses = if ($PSBoundParameters.ContainsKey('Processes')) {
+        @(Get-ArtemKioskProcesses -Paths $Paths -Processes $Processes)
+    }
+    else {
+        @(Get-ArtemKioskProcesses -Paths $Paths)
+    }
+    $session = if ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        Get-ArtemKioskSessionAlignment `
+            -Paths $Paths `
+            -OwnedProcesses $ownedProcesses `
+            -ConsoleSessionId $ConsoleSessionId
+    }
+    else {
+        Get-ArtemKioskSessionAlignment -Paths $Paths -OwnedProcesses $ownedProcesses
+    }
     return (
-        (Test-ArtemKioskRunning -Paths $Paths) -and
+        $ownedProcesses.Count -gt 0 -and
+        $session.SessionAligned -and
         (Test-ArtemKioskPresenceRecent -Paths $Paths)
     )
 }
@@ -241,6 +282,44 @@ function Ensure-ArtemKioskVisible {
         -LiteralPath (Join-Path $Paths.RuntimeRoot "kiosk-close-request.json") `
         -Force `
         -ErrorAction SilentlyContinue
+
+    $consoleSessionId = Get-ArtemActiveConsoleSessionId
+    if ($null -eq $consoleSessionId) {
+        if (Test-ArtemSoftwareUpdateActive -Paths $Paths) {
+            Write-Warning "Control Center runtime is healthy, but no active physical console session is available for kiosk recovery"
+            return $false
+        }
+        throw "No active physical console session is available for Control Center kiosk recovery"
+    }
+
+    $callerSessionId = Get-ArtemCurrentProcessSessionId
+    if ($null -eq $callerSessionId) {
+        if (Test-ArtemSoftwareUpdateActive -Paths $Paths) {
+            Write-Warning "Control Center runtime is healthy, but the kiosk caller session could not be identified"
+            return $false
+        }
+        throw "Unable to identify the kiosk caller Windows session"
+    }
+
+    if ([int]$callerSessionId -ne [int]$consoleSessionId) {
+        # The updater lease cannot be transferred to this task: it has no
+        # UpdateRequestId and would correctly reject an active transaction.
+        # Post-update recovery is requested only after that lease is released.
+        if (Test-ArtemSoftwareUpdateActive -Paths $Paths) {
+            Write-Warning "Control Center runtime is healthy, but interactive kiosk recovery is deferred until the software update lease is released"
+            return $false
+        }
+        if (-not (Start-ArtemInteractiveRuntimeTask -Paths $Paths)) {
+            throw "Interactive Control Center Runtime Scheduled Task is unavailable"
+        }
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            if (Test-ArtemKioskVisible -Paths $Paths) { return $true }
+            Start-Sleep -Milliseconds 250
+        }
+        throw "Interactive Control Center kiosk presence was not confirmed"
+    }
 
     $edge = Get-ArtemEdgeExecutable
     $edgeArguments = @(

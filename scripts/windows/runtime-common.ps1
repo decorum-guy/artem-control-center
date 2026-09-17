@@ -421,11 +421,42 @@ function Get-ArtemEdgeExecutable {
     throw "Microsoft Edge executable was not found"
 }
 
+function Get-ArtemActiveConsoleSessionId {
+    # WTSGetActiveConsoleSessionId is locale-independent and identifies the
+    # physical console desktop without parsing the localized quser output.
+    if ($null -eq ("ArtemControlCenter.ConsoleSessionNative" -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace ArtemControlCenter {
+    public static class ConsoleSessionNative {
+        [DllImport("kernel32.dll", SetLastError = false)]
+        public static extern uint WTSGetActiveConsoleSessionId();
+    }
+}
+'@
+    }
+
+    $sessionId = [ArtemControlCenter.ConsoleSessionNative]::WTSGetActiveConsoleSessionId()
+    if ($sessionId -eq [uint32]::MaxValue) { return $null }
+    return [int]$sessionId
+}
+
+function Get-ArtemCurrentProcessSessionId {
+    try {
+        return [int](Get-Process -Id $PID -ErrorAction Stop).SessionId
+    }
+    catch {
+        return $null
+    }
+}
+
 function Get-ArtemEdgeProcessSnapshot {
     try {
         return @(
             Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
-                Select-Object ProcessId, ParentProcessId, CommandLine, CreationDate
+                Select-Object ProcessId, ParentProcessId, CommandLine, CreationDate, SessionId
         )
     }
     catch {
@@ -530,6 +561,7 @@ function Get-ArtemOwnedEdgeProcesses {
             ParentProcessId = [int]$process.ParentProcessId
             CommandLine = $process.CommandLine
             CreationDate = $process.CreationDate
+            SessionId = $process.SessionId
             OwnershipDepth = [int]$depth[$key]
         }
     }
@@ -552,6 +584,70 @@ function Get-ArtemKioskProcesses {
 function Test-ArtemKioskRunning {
     param([Parameter(Mandatory)]$Paths)
     return (Get-ArtemKioskProcesses -Paths $Paths).Count -gt 0
+}
+
+function Get-ArtemKioskSessionAlignment {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$OwnedProcesses,
+        [object]$ConsoleSessionId
+    )
+
+    if (-not $PSBoundParameters.ContainsKey('OwnedProcesses')) {
+        $OwnedProcesses = @(Get-ArtemKioskProcesses -Paths $Paths)
+    }
+    $owned = @($OwnedProcesses | Where-Object { $null -ne $_ })
+    if (-not $PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        $ConsoleSessionId = Get-ArtemActiveConsoleSessionId
+    }
+
+    $sessionIds = New-Object System.Collections.Generic.List[int]
+    $hasUnknownSession = $false
+    foreach ($process in $owned) {
+        try {
+            if ($null -eq $process.SessionId) { throw "missing" }
+            $sessionIds.Add([int]$process.SessionId) | Out-Null
+        }
+        catch {
+            $hasUnknownSession = $true
+        }
+    }
+    $distinctSessionIds = @($sessionIds | Sort-Object -Unique)
+    $hasConsole = $null -ne $ConsoleSessionId
+    $aligned = (
+        $owned.Count -gt 0 -and
+        $hasConsole -and
+        -not $hasUnknownSession -and
+        $distinctSessionIds.Count -eq 1 -and
+        $distinctSessionIds[0] -eq [int]$ConsoleSessionId
+    )
+
+    return [pscustomobject]@{
+        ConsoleSessionId = if ($hasConsole) { [int]$ConsoleSessionId } else { $null }
+        ProcessSessionIds = @($distinctSessionIds)
+        SessionAligned = $aligned
+        HasUnknownSession = $hasUnknownSession
+        HasWrongSessionProcess = (
+            $owned.Count -gt 0 -and
+            (-not $hasConsole -or $hasUnknownSession -or -not $aligned)
+        )
+    }
+}
+
+function Start-ArtemInteractiveRuntimeTask {
+    param([Parameter(Mandatory)]$Paths)
+
+    # This is the one installed Interactive task. Restarting a currently-running
+    # invocation is required for Task Scheduler to create a fresh interactive
+    # session handoff; the healthy runtime itself is not stopped here.
+    $task = Get-ScheduledTask -TaskName "Artem Control Center Runtime" -ErrorAction SilentlyContinue
+    if ($null -eq $task) { return $false }
+    if ($task.State -eq "Running") {
+        Stop-ScheduledTask -TaskName "Artem Control Center Runtime" -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
+    Start-ScheduledTask -TaskName "Artem Control Center Runtime"
+    return $true
 }
 
 function Stop-ArtemKiosk {

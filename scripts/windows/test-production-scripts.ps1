@@ -149,6 +149,12 @@ try {
     if ($runtimeCommonText -match '(?i)HWND|MainWindowHandle' -or $kioskPresenceText -match '(?i)HWND|MainWindowHandle') {
         throw "Kiosk ownership and visibility must not use HWND/MainWindowHandle detection"
     }
+    if ($runtimeCommonText -notmatch 'WTSGetActiveConsoleSessionId' -or $runtimeCommonText -notmatch 'SessionId') {
+        throw "Kiosk visibility must retain locale-independent active-console and owned Edge SessionId evidence"
+    }
+    if ($runtimeCommonText -match 'PsExec|CreateProcessAsUser|UIAccess') {
+        throw "Kiosk session routing must reuse the installed Interactive task, not introduce a competing launcher"
+    }
     if ($kioskPresenceText -notmatch '(?m)^function Ensure-ArtemKioskVisible\b') {
         throw "Visible kiosk restoration must use the canonical kiosk-presence helper"
     }
@@ -164,8 +170,16 @@ try {
     if ($kioskPresenceText -notmatch 'Stop-ArtemKiosk[\s\S]*?Start-Process') {
         throw "Stale/background panel Edge must be cleared before relaunching the kiosk"
     }
+    if ($kioskPresenceText -notmatch 'Get-ArtemKioskSessionAlignment' -or $kioskPresenceText -notmatch 'Start-ArtemInteractiveRuntimeTask') {
+        throw "Kiosk status and Session 0 recovery must require console-session alignment and use the existing Interactive task"
+    }
     if ($openText -notmatch 'Ensure-ArtemKioskVisible') {
         throw "Open must prove that a visible kiosk exists"
+    }
+    $openManualStopIndex = $openText.IndexOf('Remove-Item -LiteralPath $paths.ManualStop')
+    $openEnsureIndex = $openText.IndexOf('Ensure-ArtemKioskVisible')
+    if ($openManualStopIndex -lt 0 -or $openEnsureIndex -le $openManualStopIndex) {
+        throw "Explicit Open must clear a stale manual-stop marker before starting a new kiosk watcher"
     }
 
     foreach ($gate in @(
@@ -204,6 +218,17 @@ try {
     }
     if ($startText -notmatch '-not\s+\$UpdateRequestId') {
         throw "Updater-owned restart must bypass the Scheduled Task path so its update lock identity is preserved"
+    }
+    if ($startText -notmatch 'Start-ArtemInteractiveRuntimeTask') {
+        throw "Normal explicit start and Session-aware recovery must share the installed Interactive task helper"
+    }
+    if ($updaterText -notmatch 'postUpdateInteractiveKioskRecovery' -or $updaterText -notmatch 'Start-ArtemInteractiveRuntimeTask') {
+        throw "A successful update with deferred kiosk confirmation must request post-lock Interactive recovery"
+    }
+    $updateLockReleaseIndex = $updaterText.LastIndexOf('Remove-ArtemUpdateLock')
+    $postUpdateTaskIndex = $updaterText.LastIndexOf('Start-ArtemInteractiveRuntimeTask')
+    if ($updateLockReleaseIndex -lt 0 -or $postUpdateTaskIndex -le $updateLockReleaseIndex) {
+        throw "Post-update Interactive kiosk recovery must occur only after the updater lease is released"
     }
 
     foreach ($helperText in @($installerText, $syncHelpersText)) {
