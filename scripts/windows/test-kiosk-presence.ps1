@@ -59,14 +59,8 @@ try {
     if (Test-ArtemKioskVisible -Paths $paths -Processes $wrongSessionKiosk -ConsoleSessionId 2) {
         throw "Fresh heartbeat plus Session 0 dedicated Edge must not count as owner-visible kiosk"
     }
-    $consoleVisible = Test-ArtemKioskVisible -Paths $paths -Processes $consoleKiosk -ConsoleSessionId 2
-    if (-not $consoleVisible) {
-        $fixtureOwned = @(Get-ArtemKioskProcesses -Paths $paths -Processes $consoleKiosk)
-        $fixtureAlignment = Get-ArtemKioskSessionAlignment `
-            -Paths $paths `
-            -OwnedProcesses $fixtureOwned `
-            -ConsoleSessionId 2
-        throw "Fresh application presence plus console-session panel Edge must be kiosk authority. Owned=$($fixtureOwned.Count) Sessions=$($fixtureAlignment.ProcessSessionIds -join ',') Aligned=$($fixtureAlignment.SessionAligned) Presence=$(Test-ArtemKioskPresenceRecent -Paths $paths)"
+    if (-not (Test-ArtemKioskVisible -Paths $paths -Processes $consoleKiosk -ConsoleSessionId 2)) {
+        throw "Fresh application presence plus console-session panel Edge must be kiosk authority"
     }
 
     $wrongStatus = Get-ArtemKioskStatus `
@@ -165,7 +159,6 @@ try {
     $script:interactiveTaskStarts = 0
     $script:directEdgeStarts = 0
     $script:testCallerSessionId = 0
-    function Test-ArtemKioskVisible { param($Paths) return $script:testVisible }
     function Get-ArtemCurrentProcessSessionId { return $script:testCallerSessionId }
     function Test-ArtemSoftwareUpdateActive { return $false }
     function Start-ArtemInteractiveRuntimeTask {
@@ -179,7 +172,7 @@ try {
         $script:testVisible = $true
         return $null
     }
-    if (-not (Ensure-ArtemKioskVisible -Paths $paths -TimeoutSeconds 1)) {
+    if (-not (Ensure-ArtemKioskVisible -Paths $paths -TimeoutSeconds 1 -VisibilityProbe { $script:testVisible })) {
         throw "Session 0 caller must be able to request console kiosk recovery through the Interactive task"
     }
     if ($script:interactiveTaskStarts -ne 1 -or $script:directEdgeStarts -ne 0) {
@@ -191,7 +184,7 @@ try {
     $script:interactiveTaskStarts = 0
     $script:directEdgeStarts = 0
     $script:testCallerSessionId = 2
-    if (-not (Ensure-ArtemKioskVisible -Paths $paths -TimeoutSeconds 1)) {
+    if (-not (Ensure-ArtemKioskVisible -Paths $paths -TimeoutSeconds 1 -VisibilityProbe { $script:testVisible })) {
         throw "Console-session caller must retain the direct kiosk launch path"
     }
     if ($script:interactiveTaskStarts -ne 0 -or $script:directEdgeStarts -ne 1) {

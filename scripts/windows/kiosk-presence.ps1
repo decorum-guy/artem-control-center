@@ -254,10 +254,17 @@ function Invoke-ArtemKioskWatcherLoop {
 function Ensure-ArtemKioskVisible {
     param(
         [Parameter(Mandatory)]$Paths,
-        [int]$TimeoutSeconds = 20
+        [int]$TimeoutSeconds = 20,
+        [scriptblock]$VisibilityProbe
     )
 
-    if (Test-ArtemKioskVisible -Paths $Paths) {
+    $isVisible = if ($null -ne $VisibilityProbe) {
+        [bool](& $VisibilityProbe)
+    }
+    else {
+        Test-ArtemKioskVisible -Paths $Paths
+    }
+    if ($isVisible) {
         Start-ArtemKioskWatcher -Paths $Paths
         return $true
     }
@@ -315,7 +322,13 @@ function Ensure-ArtemKioskVisible {
 
         $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
         while ((Get-Date) -lt $deadline) {
-            if (Test-ArtemKioskVisible -Paths $Paths) { return $true }
+            $isVisible = if ($null -ne $VisibilityProbe) {
+                [bool](& $VisibilityProbe)
+            }
+            else {
+                Test-ArtemKioskVisible -Paths $Paths
+            }
+            if ($isVisible) { return $true }
             Start-Sleep -Milliseconds 250
         }
         throw "Interactive Control Center kiosk presence was not confirmed"
@@ -338,7 +351,13 @@ function Ensure-ArtemKioskVisible {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if (Test-ArtemKioskVisible -Paths $Paths) {
+        $isVisible = if ($null -ne $VisibilityProbe) {
+            [bool](& $VisibilityProbe)
+        }
+        else {
+            Test-ArtemKioskVisible -Paths $Paths
+        }
+        if ($isVisible) {
             Start-ArtemKioskWatcher -Paths $Paths
             return $true
         }
