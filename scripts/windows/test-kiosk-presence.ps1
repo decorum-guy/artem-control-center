@@ -59,8 +59,14 @@ try {
     if (Test-ArtemKioskVisible -Paths $paths -Processes $wrongSessionKiosk -ConsoleSessionId 2) {
         throw "Fresh heartbeat plus Session 0 dedicated Edge must not count as owner-visible kiosk"
     }
-    if (-not (Test-ArtemKioskVisible -Paths $paths -Processes $consoleKiosk -ConsoleSessionId 2)) {
-        throw "Fresh application presence plus console-session panel Edge must be kiosk authority"
+    $consoleVisible = Test-ArtemKioskVisible -Paths $paths -Processes $consoleKiosk -ConsoleSessionId 2
+    if (-not $consoleVisible) {
+        $fixtureOwned = @(Get-ArtemKioskProcesses -Paths $paths -Processes $consoleKiosk)
+        $fixtureAlignment = Get-ArtemKioskSessionAlignment `
+            -Paths $paths `
+            -OwnedProcesses $fixtureOwned `
+            -ConsoleSessionId 2
+        throw "Fresh application presence plus console-session panel Edge must be kiosk authority. Owned=$($fixtureOwned.Count) Sessions=$($fixtureAlignment.ProcessSessionIds -join ',') Aligned=$($fixtureAlignment.SessionAligned) Presence=$(Test-ArtemKioskPresenceRecent -Paths $paths)"
     }
 
     $wrongStatus = Get-ArtemKioskStatus `
