@@ -106,7 +106,7 @@ test.describe("Overview V2 safe grid foundation", () => {
     await waitForGrid(page);
     await expect(page.getByTestId("overview-widget-unavailable")).toContainText("Виджет недоступен");
     await expect(page.locator(".overview-v2-grid script, .overview-v2-grid iframe, .overview-v2-grid object, .overview-v2-grid embed")).toHaveCount(0);
-    await expect(page.getByTestId("overview-grid-validation")).toHaveCount(0);
+    await expect(page.getByTestId("overview-grid-validation")).toContainText("ограничений безопасно");
     await expectNoDocumentOverflow(page);
   });
 

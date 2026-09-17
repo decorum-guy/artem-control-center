@@ -297,7 +297,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
         <Sheet
           title="Система"
           eyebrow="Диагностика"
-          description="Показывается текущее состояние системы и подключённых служб."
+          description="Показываются только существующие snapshot и runtime-контракты. Панель не создаёт host-метрики или update-состояния."
           onClose={() => setDetailsOpen(false)}
           testId="system-details-sheet"
         >
