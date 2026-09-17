@@ -699,7 +699,7 @@ def write_accepted_artifact(service: PanelUpdateService, revision: str) -> None:
     )
 
 
-def test_status_keeps_recent_transaction_active_during_lock_publication_gap(monkeypatch, tmp_path):
+def test_status_keeps_terminal_transition_active_when_lease_probe_misses(monkeypatch, tmp_path):
     client, service = make_client(
         monkeypatch,
         tmp_path,
@@ -712,9 +712,19 @@ def test_status_keeps_recent_transaction_active_during_lock_publication_gap(monk
         json.dumps({
             "schemaVersion": 1,
             "status": "updating",
+            "requestId": REQUEST,
+            "currentHead": CURRENT,
+            "targetHead": TARGET,
+            "phase": "verifying",
             "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "events": [{"code": "verifying"}],
         }),
         encoding="utf-8",
+    )
+    write_update_lock(
+        service.lock_path,
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        owner_pid=4242,
     )
     write_update_transaction(
         service.runtime_root / "update-transaction.json",
@@ -725,6 +735,9 @@ def test_status_keeps_recent_transaction_active_during_lock_publication_gap(monk
     assert payload["status"] == "updating"
     assert payload["currentHead"] == CURRENT
     assert payload["targetHead"] == TARGET
+    assert payload["phase"] == "verifying"
+    assert payload["progressPercent"] == 95
+    assert payload["events"] == [{"code": "verifying"}]
     assert "result" not in payload
 
 

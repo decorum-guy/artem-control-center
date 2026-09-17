@@ -100,6 +100,37 @@ describe("server-owned panel update observer", () => {
     stop();
   });
 
+  it("keeps the verifying transition active until its authoritative terminal success", async () => {
+    vi.useFakeTimers();
+    const events: UpdateObserverEvent[] = [];
+    const verifying: UpdateOwnerState = {
+      ...updating(),
+      phase: "verifying",
+      progressPercent: 95,
+      events: [{ code: "verifying" }]
+    };
+    let statusCalls = 0;
+    const stop = observePanelUpdate({
+      fetchStatus: async () => {
+        statusCalls += 1;
+        return statusCalls === 1 ? verifying : success();
+      },
+      fetchBuild: async () => ({
+        schemaVersion: "dashboard-build.v1",
+        revision: TARGET,
+        profile: "accepted-v2",
+        buildId: `${TARGET}:accepted-v2`
+      }),
+      onEvent: (event) => events.push(event)
+    });
+
+    await vi.advanceTimersByTimeAsync(250 + 750);
+
+    expect(events.map((event) => event.type)).toEqual(["active", "success"]);
+    expect(events.some((event) => event.type === "failure")).toBe(false);
+    stop();
+  });
+
   it("does not claim success when the returned runtime serves the wrong revision", async () => {
     vi.useFakeTimers();
     const events: UpdateObserverEvent[] = [];

@@ -593,6 +593,39 @@ test.describe("Control Center runtime update UX", () => {
     expect(api.getStatusCount()).toBeGreaterThan(80);
   });
 
+  test("verified terminal publication follows verifying without a false stale failure", async ({ page }) => {
+    await page.clock.install();
+    const api = await installRuntimeFixtures(page, "full");
+    const zone = await openSystem(page);
+    const verifying = {
+      schemaVersion: 1 as const,
+      status: "updating" as const,
+      currentHead: CURRENT,
+      targetHead: TARGET,
+      phase: "verifying",
+      progressPercent: 95,
+      events: [{ code: "verifying" }]
+    };
+    const terminal = {
+      ...verifying,
+      status: "success" as const,
+      result: "updated",
+      servedRevision: TARGET,
+      progressPercent: 100,
+      events: [{ code: "verifying" }, { code: "completed" }]
+    };
+    api.queueStatuses(verifying, terminal);
+
+    await zone.getByRole("button", { name: "Обновить панель" }).click();
+    const dialog = page.getByTestId("runtime-update-dialog");
+    await dialog.getByRole("button", { name: "Обновить", exact: true }).click();
+    await page.clock.runFor(1_000);
+
+    await expect(dialog).toHaveCount(0);
+    await expect(zone).toContainText("Обновление панели завершено.");
+    await expect(zone).not.toContainText("Обновление остановилось без подтверждённого результата.");
+  });
+
   test("temporary runtime disappearance reconnects and verifies the served target", async ({ page }) => {
     const api = await installRuntimeFixtures(page, "full");
     const zone = await openSystem(page);
