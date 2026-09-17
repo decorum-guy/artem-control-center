@@ -454,6 +454,21 @@ class _FakeProcess:
     def kill(self): self.returncode = -9
 
 
+class _HangingTerminalProcess(_FakeProcess):
+    """Remote helper is done, but Dropbear never supplies local exit/EOF."""
+    def __init__(self, archive: bytes, stderr: bytes):
+        super().__init__(archive, {}, returncode=None, stderr=stderr)
+        self.terminated = False
+    def wait(self, timeout=None):
+        if self.returncode is None:
+            raise subprocess.TimeoutExpired("ssh", timeout)
+        return self.returncode
+    def poll(self): return self.returncode
+    def terminate(self):
+        self.terminated = True
+        self.returncode = -15
+
+
 def _run_stage_archive(tmp_path: Path, archive: bytes, metadata: dict) -> dict:
     engine = AvalarStageBackupEngine(
         tmp_path / "backups", enabled=True, ssh_host="avalar-backup",
@@ -485,6 +500,27 @@ def test_stage_transport_is_binary_safe_and_publishes_only_after_verification(tm
     assert seen[0][0] == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "avalar-backup", "control-center", "backup-stage"]
     assert seen[0][1]["shell"] is False
     assert not list((tmp_path / "backups").rglob("*.partial"))
+
+
+def test_stage_terminal_envelope_accepts_complete_archive_and_reaps_hanging_ssh(tmp_path: Path):
+    archive, metadata = _stage_archive()
+    marker = b'__ARTEM_AVALAR_TERMINAL__{"schemaVersion":"avalar.ssh-terminal.v1","channel":"backup","operation":"backup-stage","exitCode":0}\n'
+    process = _HangingTerminalProcess(archive, json.dumps(metadata).encode() + b"\n" + marker)
+    engine = AvalarStageBackupEngine(tmp_path / "backups", enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=lambda *args, **kwargs: process)
+    result = engine.run_sync()
+    assert result["result"] == "success"
+    assert process.terminated is True
+
+
+def test_stage_nonzero_terminal_envelope_maps_disabled_and_reaps_hanging_ssh(tmp_path: Path):
+    marker = b'__ARTEM_AVALAR_TERMINAL__{"schemaVersion":"avalar.ssh-terminal.v1","channel":"backup","operation":"backup-stage","exitCode":77}\n'
+    process = _HangingTerminalProcess(b"", b"operation disabled by operator policy\n" + marker)
+    root = tmp_path / "backups"
+    engine = AvalarStageBackupEngine(root, enabled=True, ssh_host="avalar-backup", ssh_command="control-center", timeout_seconds=180, min_free_bytes=1, popen_factory=lambda *args, **kwargs: process)
+    result = engine.run_sync()
+    assert result["errorCode"] == "backup_remote_disabled"
+    assert process.terminated is True
+    assert not list(root.glob("*.partial"))
 
 
 def test_stage_rejects_bad_transport_digest_without_publication(tmp_path: Path):
