@@ -100,14 +100,6 @@ export function DashboardGrid({
       data-grid-columns={projection.profile.columns}
       data-grid-issue-count={projection.issues.length}
     >
-      {projection.issues.length > 0 && (
-        <p
-          className="overview-v2-grid__validation"
-          data-testid="overview-grid-validation"
-        >
-          Сетка обработала {projection.issues.length} ограничений безопасно.
-        </p>
-      )}
       {editMode && <p className="overview-edit-live-message" aria-live="polite" data-testid="overview-edit-live-message" />}
       <div className="overview-v2-grid" style={profileStyle}>
         {projection.items.map((item, index) => (
