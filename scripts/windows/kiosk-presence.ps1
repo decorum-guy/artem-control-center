@@ -133,11 +133,10 @@ function Test-ArtemKioskVisible {
     else {
         Get-ArtemKioskSessionAlignment -Paths $Paths -OwnedProcesses $ownedProcesses
     }
-    return (
-        $ownedProcesses.Count -gt 0 -and
-        $session.SessionAligned -and
-        (Test-ArtemKioskPresenceRecent -Paths $Paths)
-    )
+    $hasOwnedProcess = $ownedProcesses.Count -gt 0
+    $sessionAligned = [bool]$session.SessionAligned
+    $presenceRecent = Test-ArtemKioskPresenceRecent -Paths $Paths
+    return [bool]($hasOwnedProcess -and $sessionAligned -and $presenceRecent)
 }
 
 # Kiosk watcher lifecycle. A single failed presence probe must never close a
