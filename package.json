@@ -26,6 +26,7 @@
     "test:production-smoke": "node scripts/production-smoke.mjs",
     "test": "npm run lint && npm run typecheck && npm run test:unit && npm run test:python && npm run test:runtime && npm run test:production-profile",
     "test:e2e": "node scripts/playwright.mjs test",
+    "test:e2e:coffee-review": "node scripts/coffee-visual-review.mjs",
     "test:e2e:production": "node scripts/test-production-profile.mjs",
     "test:visual": "node scripts/playwright.mjs test --grep @visual",
     "visual:review": "node scripts/visual-review.mjs",
