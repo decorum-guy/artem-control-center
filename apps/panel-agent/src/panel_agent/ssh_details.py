@@ -11,6 +11,7 @@ from .avalar_health import (
     legacy_avalar_service_id,
 )
 from .settings import IntegrationSettings
+from .ssh_terminal import PREFIX, TerminalEnvelopeError, TerminalEnvelopeParser
 
 _HOST_PATTERN = re.compile(r"^[A-Za-z0-9._@-]+$")
 _SCRIPT_PATTERN = re.compile(r"^[A-Za-z0-9._/~+-]+$")
@@ -139,21 +140,43 @@ class AvalarSshDetailsAdapter:
             stderr=asyncio.subprocess.PIPE,
         )
         limit = self._settings.avalar_ssh_output_limit_bytes
+        envelope_ready: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+        payload_ready: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
+        parser = TerminalEnvelopeParser(channel="status", operation=operation)
+        deadline = asyncio.get_running_loop().time() + self._settings.avalar_ssh_timeout_seconds
+        stdout_task = asyncio.create_task(_read_status_stdout(process.stdout, limit, payload_ready))
+        stderr_task = asyncio.create_task(_read_status_stderr(process.stderr, limit, parser, envelope_ready))
+        wait_task = asyncio.create_task(process.wait())
         try:
-            stdout, stderr, returncode = await asyncio.wait_for(
-                asyncio.gather(
-                    _read_limited(process.stdout, limit),
-                    _read_limited(process.stderr, limit),
-                    process.wait(),
-                ),
-                timeout=self._settings.avalar_ssh_timeout_seconds,
+            done, _ = await asyncio.wait(
+                {wait_task, envelope_ready}, timeout=max(0.01, deadline - asyncio.get_running_loop().time()),
+                return_when=asyncio.FIRST_COMPLETED,
             )
-        except (asyncio.TimeoutError, SshDetailsError):
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
-            raise
-        return _parse_command_output(stdout, stderr, returncode, limit)
+            if not done:
+                raise asyncio.TimeoutError
+            if envelope_ready in done:
+                if envelope_ready.result() != 0:
+                    await _terminate_and_reap(process)
+                    raise SshDetailsError("SSH status command failed")
+                try:
+                    stdout = await asyncio.wait_for(
+                        asyncio.shield(payload_ready), timeout=max(0.01, deadline - asyncio.get_running_loop().time()),
+                    )
+                except (asyncio.TimeoutError, RuntimeError):
+                    await _terminate_and_reap(process)
+                    raise SshDetailsError("SSH status command returned invalid JSON") from None
+                await _terminate_and_reap(process)
+                return _parse_command_output(stdout, b"", 0, limit)
+            returncode = wait_task.result()
+            stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
+            return _parse_command_output(stdout, stderr, returncode, limit)
+        except (asyncio.TimeoutError, TerminalEnvelopeError):
+            await _terminate_and_reap(process)
+            raise SshDetailsError("SSH status command timed out" if not parser.error else "SSH terminal envelope is invalid") from None
+        finally:
+            for task in (stdout_task, stderr_task, wait_task):
+                if not task.done(): task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, wait_task, return_exceptions=True)
 
 
 async def _read_limited(
@@ -189,6 +212,63 @@ def _parse_command_output(
     if not isinstance(payload, dict):
         raise SshDetailsError("SSH status command must return a JSON object")
     return payload
+
+
+async def _read_status_stdout(
+    stream: asyncio.StreamReader | None, limit: int, ready: asyncio.Future[bytes],
+) -> bytes:
+    if stream is None:
+        raise SshDetailsError("SSH status stream is unavailable")
+    data = bytearray()
+    while True:
+        chunk = await stream.read(min(4096, limit + 1 - len(data)))
+        if not chunk:
+            if not ready.done(): ready.set_result(bytes(data))
+            return bytes(data)
+        data.extend(chunk)
+        if len(data) > limit or PREFIX in data:
+            error = SshDetailsError("SSH output exceeded configured limit")
+            if not ready.done(): ready.set_exception(error)
+            raise error
+        if b"\n" not in data:
+            continue
+        if not data.endswith(b"\n") or data.count(b"\n") != 1:
+            if not ready.done():
+                ready.set_exception(SshDetailsError("SSH status command returned invalid JSON"))
+            continue
+        if not ready.done():
+            ready.set_result(bytes(data))
+
+
+async def _read_status_stderr(
+    stream: asyncio.StreamReader | None, limit: int, parser: TerminalEnvelopeParser,
+    ready: asyncio.Future[int],
+) -> bytes:
+    if stream is None:
+        return b""
+    try:
+        while True:
+            chunk = await stream.read(4096)
+            if not chunk:
+                parser.finish()
+                return bytes(parser.output)
+            if len(parser.output) + len(chunk) > limit:
+                raise SshDetailsError("SSH output exceeded configured limit")
+            envelope = parser.feed(chunk)
+            if envelope is not None and not ready.done(): ready.set_result(envelope.exit_code)
+    except (TerminalEnvelopeError, SshDetailsError) as exc:
+        if not ready.done(): ready.set_exception(exc)
+        raise
+
+
+async def _terminate_and_reap(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is None:
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=0.25)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
 
 
 def _sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:

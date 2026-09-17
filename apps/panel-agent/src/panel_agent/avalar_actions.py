@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .access_policy import AccessPolicyStore
 from .contracts import ActionDescriptor
 from .settings import IntegrationSettings
+from .ssh_terminal import PREFIX, TerminalEnvelopeError, TerminalEnvelopeParser
 
 ActionId = Literal[
     "avalar.main.smoke",
@@ -434,29 +435,49 @@ class AvalarActionExecutor:
             stderr=asyncio.subprocess.PIPE,
         )
         limit = self.settings.avalar_action_output_limit_bytes
+        envelope_ready: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+        payload_ready: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
+        stderr_parser = TerminalEnvelopeParser(channel="action", operation=operation)
+        deadline = asyncio.get_running_loop().time() + self.settings.avalar_action_timeout_seconds
+        stdout_task = asyncio.create_task(_read_action_stdout(process.stdout, limit, payload_ready))
+        stderr_task = asyncio.create_task(_read_action_stderr(process.stderr, limit, stderr_parser, envelope_ready))
+        wait_task = asyncio.create_task(process.wait())
         try:
-            stdout, stderr, returncode = await asyncio.wait_for(
-                asyncio.gather(
-                    _read_limited(process.stdout, limit),
-                    _read_limited(process.stderr, limit),
-                    process.wait(),
-                ),
-                timeout=self.settings.avalar_action_timeout_seconds,
+            done, _ = await asyncio.wait(
+                {wait_task, envelope_ready},
+                timeout=max(0.01, deadline - asyncio.get_running_loop().time()),
+                return_when=asyncio.FIRST_COMPLETED,
             )
-        except asyncio.TimeoutError:
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
-            raise RuntimeError("action_timeout")
-        if returncode != 0:
-            raise RuntimeError(_map_return_code(returncode))
-        try:
-            payload = json.loads(stdout.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise RuntimeError("invalid_action_response")
-        if not isinstance(payload, dict) or payload.get("ok") is not True:
-            raise RuntimeError("action_reported_failure")
-        return payload
+            if not done:
+                raise asyncio.TimeoutError
+            if envelope_ready in done:
+                exit_code = envelope_ready.result()
+                if exit_code != 0:
+                    await _terminate_and_reap(process)
+                    raise RuntimeError(_map_return_code(exit_code))
+                try:
+                    stdout = await asyncio.wait_for(
+                        asyncio.shield(payload_ready),
+                        timeout=max(0.01, deadline - asyncio.get_running_loop().time()),
+                    )
+                except (asyncio.TimeoutError, RuntimeError):
+                    await _terminate_and_reap(process)
+                    raise RuntimeError("invalid_action_response") from None
+                await _terminate_and_reap(process)
+                return _parse_action_payload(stdout)
+            returncode = wait_task.result()
+            stdout, _stderr = await asyncio.gather(stdout_task, stderr_task)
+            if returncode != 0:
+                raise RuntimeError(_map_return_code(returncode))
+            return _parse_action_payload(stdout)
+        except (asyncio.TimeoutError, TerminalEnvelopeError):
+            await _terminate_and_reap(process)
+            raise RuntimeError("action_timeout" if not stderr_parser.error else "invalid_action_response") from None
+        finally:
+            for task in (stdout_task, stderr_task, wait_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(stdout_task, stderr_task, wait_task, return_exceptions=True)
 
 
 def build_avalar_action_router(executor: AvalarActionExecutor) -> APIRouter:
@@ -500,6 +521,79 @@ async def _read_limited(stream: asyncio.StreamReader | None, limit: int) -> byte
         data.extend(chunk)
         if len(data) > limit:
             raise RuntimeError("action_output_too_large")
+
+
+async def _read_action_stdout(
+    stream: asyncio.StreamReader | None, limit: int, ready: asyncio.Future[bytes],
+) -> bytes:
+    data = bytearray()
+    if stream is None:
+        raise RuntimeError("invalid_action_response")
+    while True:
+        chunk = await stream.read(min(4096, limit + 1 - len(data)))
+        if not chunk:
+            if not ready.done():
+                ready.set_result(bytes(data))
+            return bytes(data)
+        data.extend(chunk)
+        if len(data) > limit:
+            error = RuntimeError("action_output_too_large")
+            if not ready.done(): ready.set_exception(error)
+            raise error
+        if PREFIX in data:
+            error = RuntimeError("invalid_action_response")
+            if not ready.done(): ready.set_exception(error)
+            raise error
+        if b"\n" not in data:
+            continue
+        if not data.endswith(b"\n") or data.count(b"\n") != 1:
+            if not ready.done():
+                ready.set_exception(RuntimeError("invalid_action_response"))
+            continue
+        if not ready.done():
+            ready.set_result(bytes(data))
+
+
+async def _read_action_stderr(
+    stream: asyncio.StreamReader | None, limit: int, parser: TerminalEnvelopeParser,
+    ready: asyncio.Future[int],
+) -> bytes:
+    if stream is None:
+        return b""
+    try:
+        while True:
+            chunk = await stream.read(4096)
+            if not chunk:
+                parser.finish()
+                return bytes(parser.output)
+            if len(parser.output) + len(chunk) > limit:
+                raise RuntimeError("action_output_too_large")
+            envelope = parser.feed(chunk)
+            if envelope is not None and not ready.done():
+                ready.set_result(envelope.exit_code)
+    except (TerminalEnvelopeError, RuntimeError) as exc:
+        if not ready.done(): ready.set_exception(exc)
+        raise
+
+
+async def _terminate_and_reap(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is None:
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=0.25)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+
+
+def _parse_action_payload(stdout: bytes) -> dict[str, Any]:
+    try:
+        payload = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise RuntimeError("invalid_action_response") from None
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        raise RuntimeError("action_reported_failure")
+    return payload
 
 
 def _map_return_code(returncode: int) -> str:

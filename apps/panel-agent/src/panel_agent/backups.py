@@ -29,6 +29,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Response, status
 
 from .access_policy import AccessPolicyStore
+from .ssh_terminal import TerminalEnvelopeError, TerminalEnvelopeParser
 
 
 PROFILE_ID = "artem-control-center-config"
@@ -1080,6 +1081,33 @@ def _safe_checksum_path(name: str) -> bool:
     return all(part not in {"", ".", ".."} for part in name.split("/"))
 
 
+def _terminate_and_reap_popen(process: Any) -> None:
+    """Stop only this locally spawned SSH child after a proved terminal state."""
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=0.25)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def _parse_avalar_metadata(stderr: bytes) -> dict[str, Any]:
+    try:
+        metadata = json.loads(stderr.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise BackupFailure("backup_transport_invalid") from None
+    if not isinstance(metadata, dict) or b"\r" in stderr or stderr.count(b"\n") > 1:
+        raise BackupFailure("backup_transport_invalid")
+    required = {"ok", "schemaVersion", "profileId", "helperContract", "byteSize", "sha256", "sourceCommit", "helperSha256"}
+    if set(metadata) != required or metadata.get("ok") is not True or metadata.get("schemaVersion") != AVALAR_TRANSPORT_SCHEMA or metadata.get("profileId") != AVALAR_STAGE_PROFILE_ID or metadata.get("helperContract") != AVALAR_HELPER_CONTRACT:
+        raise BackupFailure("backup_transport_invalid")
+    if not isinstance(metadata.get("byteSize"), int) or metadata["byteSize"] <= 0 or not isinstance(metadata.get("sha256"), str) or not SHA256_PATTERN.fullmatch(metadata["sha256"]) or not isinstance(metadata.get("sourceCommit"), str) or not _COMMIT_PATTERN.fullmatch(metadata["sourceCommit"]) or not isinstance(metadata.get("helperSha256"), str) or not SHA256_PATTERN.fullmatch(metadata["helperSha256"]):
+        raise BackupFailure("backup_transport_invalid")
+    return metadata
+
+
 class AvalarStageBackupEngine:
     """Fixed, binary-safe consumer for the accepted AVALAR Stage transport."""
 
@@ -1139,24 +1167,28 @@ class AvalarStageBackupEngine:
             process = self.popen_factory(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
         except OSError:
             raise BackupFailure("backup_remote_failed") from None
-        stderr = bytearray()
         overflow = threading.Event()
         stdout_done = threading.Event()
         stdout_error: list[BackupFailure] = []
+        stderr_error: list[BackupFailure] = []
         byte_count = [0]
+        terminal = TerminalEnvelopeParser(channel="backup", operation=AVALAR_BACKUP_OPERATION)
         def read_stderr() -> None:
             stream = process.stderr
             if stream is None:
                 return
-            while True:
-                chunk = stream.read(4096)
-                if not chunk:
-                    return
-                if len(stderr) + len(chunk) > MAX_AVALAR_METADATA_BYTES:
-                    overflow.set()
-                    continue
-                if not overflow.is_set():
-                    stderr.extend(chunk)
+            try:
+                while True:
+                    chunk = stream.read(4096)
+                    if not chunk:
+                        terminal.finish()
+                        return
+                    if len(terminal.output) + len(chunk) > MAX_AVALAR_METADATA_BYTES:
+                        overflow.set()
+                        return
+                    terminal.feed(chunk)
+            except TerminalEnvelopeError:
+                stderr_error.append(BackupFailure("backup_transport_invalid"))
         reader = threading.Thread(target=read_stderr, name="avalar-backup-stderr", daemon=True)
         reader.start()
         output_reader: threading.Thread | None = None
@@ -1183,48 +1215,60 @@ class AvalarStageBackupEngine:
                         stdout_done.set()
                 output_reader = threading.Thread(target=read_stdout, name="avalar-backup-stdout", daemon=True)
                 output_reader.start()
-                while not stdout_done.wait(timeout=0.05):
+                metadata: dict[str, Any] | None = None
+                terminal_completion = False
+                while True:
                     if overflow.is_set() or stdout_error:
                         raise BackupFailure("backup_transport_invalid")
+                    if stderr_error:
+                        raise stderr_error[0]
+                    if terminal.envelope is not None:
+                        if terminal.envelope.exit_code != 0:
+                            raise BackupFailure({77: "backup_remote_disabled", 75: "backup_remote_busy", 124: "backup_remote_timeout"}.get(terminal.envelope.exit_code, "backup_remote_failed"))
+                        metadata = _parse_avalar_metadata(bytes(terminal.output))
+                        if byte_count[0] > metadata["byteSize"]:
+                            raise BackupFailure("backup_transport_invalid")
+                        if byte_count[0] == metadata["byteSize"]:
+                            terminal_completion = True
+                            break
+                    if stdout_done.wait(timeout=0.05):
+                        break
                     if time.monotonic() > deadline:
                         raise BackupFailure("backup_remote_timeout")
                 if overflow.is_set() or stdout_error:
                     raise stdout_error[0] if stdout_error else BackupFailure("backup_transport_invalid")
                 handle.flush()
                 os.fsync(handle.fileno())
-            remaining = max(0.1, deadline - time.monotonic())
-            try:
-                returncode = process.wait(timeout=remaining)
-            except subprocess.TimeoutExpired:
-                raise BackupFailure("backup_remote_timeout") from None
+            if terminal_completion:
+                _terminate_and_reap_popen(process)
+                returncode = 0
+            else:
+                remaining = max(0.1, deadline - time.monotonic())
+                try:
+                    returncode = process.wait(timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    raise BackupFailure("backup_remote_timeout") from None
             reader.join(timeout=1)
             if overflow.is_set():
                 raise BackupFailure("backup_transport_invalid")
             if returncode != 0:
                 raise BackupFailure({77: "backup_remote_disabled", 75: "backup_remote_busy", 124: "backup_remote_timeout"}.get(returncode, "backup_remote_failed"))
-            try:
-                metadata = json.loads(bytes(stderr).decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                raise BackupFailure("backup_transport_invalid") from None
-            if not isinstance(metadata, dict) or b"\r" in stderr or bytes(stderr).count(b"\n") > 1:
-                raise BackupFailure("backup_transport_invalid")
-            required = {"ok", "schemaVersion", "profileId", "helperContract", "byteSize", "sha256", "sourceCommit", "helperSha256"}
-            if set(metadata) != required or metadata.get("ok") is not True or metadata.get("schemaVersion") != AVALAR_TRANSPORT_SCHEMA or metadata.get("profileId") != AVALAR_STAGE_PROFILE_ID or metadata.get("helperContract") != AVALAR_HELPER_CONTRACT:
-                raise BackupFailure("backup_transport_invalid")
-            if not isinstance(metadata.get("byteSize"), int) or metadata["byteSize"] <= 0 or not isinstance(metadata.get("sha256"), str) or not SHA256_PATTERN.fullmatch(metadata["sha256"]) or not isinstance(metadata.get("sourceCommit"), str) or not _COMMIT_PATTERN.fullmatch(metadata["sourceCommit"]) or not isinstance(metadata.get("helperSha256"), str) or not SHA256_PATTERN.fullmatch(metadata["helperSha256"]):
-                raise BackupFailure("backup_transport_invalid")
+            if terminal_completion:
+                assert metadata is not None
+            else:
+                metadata = _parse_avalar_metadata(bytes(terminal.output))
             if byte_count[0] != metadata["byteSize"] or byte_count[0] == 0:
                 raise BackupFailure("backup_transport_invalid")
             return metadata
         except BackupFailure:
             if process.poll() is None:
-                process.kill()
-                process.wait(timeout=5)
+                _terminate_and_reap_popen(process)
             raise
         finally:
             reader.join(timeout=1)
             if output_reader is not None:
                 output_reader.join(timeout=1)
+
 
     def _verify_archive(self, archive_path: Path, metadata: Mapping[str, Any]) -> tuple[int, str]:
         digest = hashlib.sha256()
