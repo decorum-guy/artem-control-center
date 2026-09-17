@@ -55,14 +55,31 @@ function Test-ArtemKioskWatcherOwned {
 function Get-ArtemKioskStatus {
     param(
         [Parameter(Mandatory)]$Paths,
-        [bool]$RuntimeReady = $false
+        [bool]$RuntimeReady = $false,
+        [object[]]$Processes,
+        [object]$ConsoleSessionId
     )
-    $processOwned = Test-ArtemKioskRunning -Paths $Paths
+    $session = if ($PSBoundParameters.ContainsKey('Processes') -and $PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        Get-ArtemKioskSessionAlignment `
+            -Paths $Paths `
+            -OwnedProcesses $Processes `
+            -ConsoleSessionId $ConsoleSessionId
+    }
+    elseif ($PSBoundParameters.ContainsKey('Processes')) {
+        Get-ArtemKioskSessionAlignment -Paths $Paths -OwnedProcesses $Processes
+    }
+    elseif ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        Get-ArtemKioskSessionAlignment -Paths $Paths -ConsoleSessionId $ConsoleSessionId
+    }
+    else {
+        Get-ArtemKioskSessionAlignment -Paths $Paths
+    }
+    $processOwned = [bool]$session.HasOwnedProcesses
     $presenceRecent = Test-ArtemKioskPresenceRecent -Paths $Paths
     $watcherOwned = Test-ArtemKioskWatcherOwned -Paths $Paths
     $presenceFile = Test-Path -LiteralPath (Get-ArtemKioskPresencePath -Paths $Paths)
 
-    $status = if ($processOwned -and $presenceRecent) {
+    $status = if ($processOwned -and $session.SessionAligned -and $presenceRecent) {
         "running"
     }
     elseif ($processOwned -or $watcherOwned) {
@@ -84,6 +101,10 @@ function Get-ArtemKioskStatus {
         ProcessOwned = $processOwned
         PresenceRecent = $presenceRecent
         WatcherOwned = $watcherOwned
+        ConsoleSessionId = $session.ConsoleSessionId
+        ProcessSessionIds = $session.ProcessSessionIds
+        SessionAligned = $session.SessionAligned
+        HasWrongSessionProcess = $session.HasWrongSessionProcess
     }
 }
 
@@ -92,11 +113,30 @@ function Get-ArtemKioskStatus {
 # prevents an ordinary browser tab from impersonating the kiosk without using
 # deprecated desktop-window probing.
 function Test-ArtemKioskVisible {
-    param([Parameter(Mandatory)]$Paths)
-    return (
-        (Test-ArtemKioskRunning -Paths $Paths) -and
-        (Test-ArtemKioskPresenceRecent -Paths $Paths)
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$Processes,
+        [object]$ConsoleSessionId
     )
+    $session = if ($PSBoundParameters.ContainsKey('Processes') -and $PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        Get-ArtemKioskSessionAlignment `
+            -Paths $Paths `
+            -OwnedProcesses $Processes `
+            -ConsoleSessionId $ConsoleSessionId
+    }
+    elseif ($PSBoundParameters.ContainsKey('Processes')) {
+        Get-ArtemKioskSessionAlignment -Paths $Paths -OwnedProcesses $Processes
+    }
+    elseif ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        Get-ArtemKioskSessionAlignment -Paths $Paths -ConsoleSessionId $ConsoleSessionId
+    }
+    else {
+        Get-ArtemKioskSessionAlignment -Paths $Paths
+    }
+    $hasOwnedProcess = [bool]$session.HasOwnedProcesses
+    $sessionAligned = [bool]$session.SessionAligned
+    $presenceRecent = Test-ArtemKioskPresenceRecent -Paths $Paths
+    return [bool]($hasOwnedProcess -and $sessionAligned -and $presenceRecent)
 }
 
 # Kiosk watcher lifecycle. A single failed presence probe must never close a
@@ -213,10 +253,17 @@ function Invoke-ArtemKioskWatcherLoop {
 function Ensure-ArtemKioskVisible {
     param(
         [Parameter(Mandatory)]$Paths,
-        [int]$TimeoutSeconds = 20
+        [int]$TimeoutSeconds = 20,
+        [scriptblock]$VisibilityProbe
     )
 
-    if (Test-ArtemKioskVisible -Paths $Paths) {
+    $isVisible = if ($null -ne $VisibilityProbe) {
+        [bool](& $VisibilityProbe)
+    }
+    else {
+        Test-ArtemKioskVisible -Paths $Paths
+    }
+    if ($isVisible) {
         Start-ArtemKioskWatcher -Paths $Paths
         return $true
     }
@@ -242,6 +289,50 @@ function Ensure-ArtemKioskVisible {
         -Force `
         -ErrorAction SilentlyContinue
 
+    $consoleSessionId = Get-ArtemActiveConsoleSessionId
+    if ($null -eq $consoleSessionId) {
+        if (Test-ArtemSoftwareUpdateActive -Paths $Paths) {
+            Write-Warning "Control Center runtime is healthy, but no active physical console session is available for kiosk recovery"
+            return $false
+        }
+        throw "No active physical console session is available for Control Center kiosk recovery"
+    }
+
+    $callerSessionId = Get-ArtemCurrentProcessSessionId
+    if ($null -eq $callerSessionId) {
+        if (Test-ArtemSoftwareUpdateActive -Paths $Paths) {
+            Write-Warning "Control Center runtime is healthy, but the kiosk caller session could not be identified"
+            return $false
+        }
+        throw "Unable to identify the kiosk caller Windows session"
+    }
+
+    if ([int]$callerSessionId -ne [int]$consoleSessionId) {
+        # The updater lease cannot be transferred to this task: it has no
+        # UpdateRequestId and would correctly reject an active transaction.
+        # Post-update recovery is requested only after that lease is released.
+        if (Test-ArtemSoftwareUpdateActive -Paths $Paths) {
+            Write-Warning "Control Center runtime is healthy, but interactive kiosk recovery is deferred until the software update lease is released"
+            return $false
+        }
+        if (-not (Start-ArtemInteractiveRuntimeTask -Paths $Paths)) {
+            throw "Interactive Control Center Runtime Scheduled Task is unavailable"
+        }
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            $isVisible = if ($null -ne $VisibilityProbe) {
+                [bool](& $VisibilityProbe)
+            }
+            else {
+                Test-ArtemKioskVisible -Paths $Paths
+            }
+            if ($isVisible) { return $true }
+            Start-Sleep -Milliseconds 250
+        }
+        throw "Interactive Control Center kiosk presence was not confirmed"
+    }
+
     $edge = Get-ArtemEdgeExecutable
     $edgeArguments = @(
         "--kiosk",
@@ -259,7 +350,13 @@ function Ensure-ArtemKioskVisible {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if (Test-ArtemKioskVisible -Paths $Paths) {
+        $isVisible = if ($null -ne $VisibilityProbe) {
+            [bool](& $VisibilityProbe)
+        }
+        else {
+            Test-ArtemKioskVisible -Paths $Paths
+        }
+        if ($isVisible) {
             Start-ArtemKioskWatcher -Paths $Paths
             return $true
         }

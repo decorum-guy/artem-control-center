@@ -25,42 +25,49 @@ $processes = @(
         ParentProcessId = 50
         CommandLine = "msedge.exe --kiosk http://127.0.0.1:8787/overview --user-data-dir=`"$profile`""
         CreationDate = $started
+        SessionId = 2
     },
     [pscustomobject]@{
         ProcessId = 101
         ParentProcessId = 100
         CommandLine = "msedge.exe --type=renderer --renderer-client-id=1"
         CreationDate = $started.AddSeconds(1)
+        SessionId = 2
     },
     [pscustomobject]@{
         ProcessId = 102
         ParentProcessId = 101
         CommandLine = "msedge.exe --type=gpu-process"
         CreationDate = $started.AddSeconds(2)
+        SessionId = 2
     },
     [pscustomobject]@{
         ProcessId = 103
         ParentProcessId = 100
         CommandLine = "msedge.exe --type=utility"
         CreationDate = $started.AddMinutes(-2)
+        SessionId = 2
     },
     [pscustomobject]@{
         ProcessId = 200
         ParentProcessId = 20
         CommandLine = "msedge.exe --user-data-dir=C:\Users\Test User\PersonalEdge"
         CreationDate = $started
+        SessionId = 2
     },
     [pscustomobject]@{
         ProcessId = 201
         ParentProcessId = 200
         CommandLine = "msedge.exe --type=renderer"
         CreationDate = $started.AddSeconds(1)
+        SessionId = 2
     },
     [pscustomobject]@{
         ProcessId = 300
         ParentProcessId = 30
         CommandLine = "msedge.exe --user-data-dir=`"$profile-other`""
         CreationDate = $started
+        SessionId = 2
     }
 )
 
@@ -75,6 +82,28 @@ $child = $owned | Where-Object ProcessId -eq 101
 $grandchild = $owned | Where-Object ProcessId -eq 102
 if ($root.OwnershipDepth -ne 0 -or $child.OwnershipDepth -ne 1 -or $grandchild.OwnershipDepth -ne 2) {
     throw "Owned Edge descendants must preserve bounded tree depth"
+}
+if ($root.SessionId -ne 2 -or $child.SessionId -ne 2 -or $grandchild.SessionId -ne 2) {
+    throw "Owned Edge process snapshots must preserve their Windows SessionId"
+}
+
+$aligned = Get-ArtemKioskSessionAlignment -Paths $paths -OwnedProcesses $owned -ConsoleSessionId 2
+if (-not $aligned.SessionAligned -or ($aligned.ProcessSessionIds -join ',') -ne '2') {
+    throw "A dedicated Edge tree entirely in the active console session must be aligned"
+}
+$wrongSession = Get-ArtemKioskSessionAlignment `
+    -Paths $paths `
+    -OwnedProcesses @([pscustomobject]@{ SessionId = 0 }) `
+    -ConsoleSessionId 2
+if ($wrongSession.SessionAligned -or -not $wrongSession.HasWrongSessionProcess) {
+    throw "A dedicated Edge tree only in Session 0 must not be accepted for console Session 2"
+}
+$mixedSession = Get-ArtemKioskSessionAlignment `
+    -Paths $paths `
+    -OwnedProcesses @([pscustomobject]@{ SessionId = 2 }, [pscustomobject]@{ SessionId = 0 }) `
+    -ConsoleSessionId 2
+if ($mixedSession.SessionAligned -or -not $mixedSession.HasWrongSessionProcess -or ($mixedSession.ProcessSessionIds -join ',') -ne '0,2') {
+    throw "A mixed console and hidden dedicated Edge tree must remain degraded, not fully healthy"
 }
 
 # Kiosk visibility is proven by the application presence contract in
@@ -115,4 +144,4 @@ if ($reusedOwned.Count -ne 0) {
     throw "A dead profile root or reused PID without the exact profile seed must not claim an unrelated tree"
 }
 
-Write-Host "Validated panel-owned Edge process tree: exact profile ownership, unrelated rejection, bounded cleanup and PID-reuse safety."
+Write-Host "Validated panel-owned Edge process tree: exact profile ownership, SessionId alignment, unrelated rejection, bounded cleanup and PID-reuse safety."

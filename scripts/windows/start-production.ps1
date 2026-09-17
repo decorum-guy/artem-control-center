@@ -62,7 +62,6 @@ function Open-ArtemKioskBestEffort {
 }
 
 $paths = Get-ArtemRuntimePaths
-$taskName = "Artem Control Center Runtime"
 Initialize-ArtemRuntimeDirectories -Paths $paths
 Update-ArtemProcessPath
 Sync-ArtemDesktopHelpers
@@ -131,15 +130,9 @@ elseif (Test-ArtemCapabilityApplyActive -Paths $paths) {
 # though: the Scheduled Task cannot carry UpdateRequestId and would correctly
 # reject the updater's active lock as a competing software update.
 if (-not $AutoStart -and -not $UpdateRequestId) {
-    $scheduledTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($scheduledTask) {
-        if ($scheduledTask.State -eq "Running") {
-            Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 500
-        }
+    if (Start-ArtemInteractiveRuntimeTask -Paths $paths) {
         Remove-Item -LiteralPath $paths.State -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $paths.Command -Force -ErrorAction SilentlyContinue
-        Start-ScheduledTask -TaskName $taskName
         if (-not (Wait-ArtemPanelReady -Paths $paths -TimeoutSeconds 60)) {
             throw "Scheduled production runtime did not become ready within 60 seconds"
         }
