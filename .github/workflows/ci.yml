@@ -95,6 +95,20 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run install:browsers
 
+      - name: "Run focused #173 Coffee visual-review parity gate"
+        if: runner.os == 'Linux'
+        env:
+          ISSUE_173_ARTIFACT_DIR: artifacts/issue-173-coffee-review
+        run: npm run test:e2e:coffee-review
+
+      - name: Upload #173 Coffee visual-review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-173-coffee-review-${{ github.sha }}
+          path: artifacts/issue-173-coffee-review
+          if-no-files-found: error
+
       - name: Run focused Coffee Diary browser gate
         if: runner.os == 'Linux'
         env:
