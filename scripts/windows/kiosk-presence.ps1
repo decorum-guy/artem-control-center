@@ -116,7 +116,8 @@ function Test-ArtemKioskVisible {
     param(
         [Parameter(Mandatory)]$Paths,
         [object[]]$Processes,
-        [object]$ConsoleSessionId
+        [object]$ConsoleSessionId,
+        [switch]$Diagnostic
     )
     $ownedProcesses = if ($PSBoundParameters.ContainsKey('Processes')) {
         @(Get-ArtemKioskProcesses -Paths $Paths -Processes $Processes)
@@ -136,6 +137,9 @@ function Test-ArtemKioskVisible {
     $hasOwnedProcess = $ownedProcesses.Count -gt 0
     $sessionAligned = [bool]$session.SessionAligned
     $presenceRecent = Test-ArtemKioskPresenceRecent -Paths $Paths
+    if ($Diagnostic) {
+        Write-Host "Kiosk visibility fixture: owned=$hasOwnedProcess aligned=$sessionAligned presence=$presenceRecent"
+    }
     return [bool]($hasOwnedProcess -and $sessionAligned -and $presenceRecent)
 }
 
