@@ -104,9 +104,7 @@ async function assertCoffeeComposition(coffee: Locator) {
   const imageBox = await rect(image);
   expectContained(visualBox, assetBox);
   expectContained(imageBox, assetBox);
-  if (await coffee.locator(".coffee-panel__heading .section-kicker").count()) {
-    await expect(coffee.locator(".coffee-panel__heading .section-kicker")).toHaveText("Дом");
-  }
+  await expect(coffee.locator(".coffee-panel__heading .section-kicker")).toHaveText("Дом");
   await expect(coffee.locator(".coffee-panel__heading h2")).toHaveText("Кофемашина");
   await expect(coffee.locator(".coffee-state-marker")).toHaveCount(0);
 
@@ -358,7 +356,7 @@ test.describe("#173 Coffee composition stabilization", () => {
     const fadeInSamples = await fadeInSamplesPromise;
     const fadeInMid = fadeInSamples.find((sample) => sample.opacity > 0.05 && sample.opacity < 0.95);
     expect(warmingMidImage.x).toBeGreaterThan(offImage.x + 1);
-    expect(warmingMidImage.x).toBeLessThan(warmingImage.x);
+    expect(warmingMidImage.x).toBeLessThan(warmingImage.x - 0.05);
     expect(warmingMidImage.width).toBeGreaterThan(offImage.width + 1);
     expect(warmingMidImage.width).toBeLessThan(warmingImage.width - 0.05);
     expect(warmingImage.width).toBeGreaterThan(offImage.width + 5);
@@ -378,8 +376,8 @@ test.describe("#173 Coffee composition stabilization", () => {
     const fadeOutMid = fadeOutSamples.find((sample) =>
       sample.opacity > 0.05 && sample.opacity < 0.95 && sample.height > 1 && sample.height < warmingProgress.height - 1
     );
-    expect(readyMidImage.x).toBeLessThan(warmingImage.x - 0.1);
-    expect(readyMidImage.x).toBeGreaterThan(readyImage.x);
+    expect(readyMidImage.x).toBeLessThan(warmingImage.x - 1);
+    expect(readyMidImage.x).toBeGreaterThan(readyImage.x + 1);
     expect(Math.abs(readyImage.width - warmingImage.width)).toBeLessThanOrEqual(1);
     expect(fadeOutMid, "Expected an intermediate Overview progress fade-out sample").toBeDefined();
     expect(fadeOutMid!.marginBottom).toBeGreaterThan(0);
