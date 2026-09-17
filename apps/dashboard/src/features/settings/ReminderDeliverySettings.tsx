@@ -155,14 +155,14 @@ export function ReminderDeliverySettingsSheet({
   }, [endpoint, ensureCapability, guardMutation, inventory, phoneChannels, refresh, setInventory]);
 
   return (
-    <Sheet testId="settings-reminder-delivery-sheet" eyebrow="Напоминания" title="Доставка" description="Речевой endpoint и телефонные каналы настраиваются независимо. Секреты и адреса сервисов остаются на сервере." onClose={onClose}>
+    <Sheet testId="settings-reminder-delivery-sheet" eyebrow="Напоминания" title="Доставка" description="Речевой канал и телефонные каналы настраиваются независимо. Секреты и адреса сервисов остаются на сервере." onClose={onClose}>
       <div className="settings-v2-sheet-content reminder-delivery-settings" data-testid="reminder-delivery-settings">
         {loading && <p className="settings-notice" role="status">Проверяем каналы доставки…</p>}
         {error && !inventory && <p className="settings-notice" role="status">Настройки доставки временно недоступны.</p>}
         {inventory && <>
           <section className="reminder-delivery-settings__section" aria-labelledby="reminder-spoken-title">
-            <div className="reminder-delivery-settings__heading"><h2 id="reminder-spoken-title">Голос</h2><span>Один endpoint</span></div>
-            <div className="reminder-delivery-settings__options" role="radiogroup" aria-label="Речевой endpoint">
+            <div className="reminder-delivery-settings__heading"><h2 id="reminder-spoken-title">Голос</h2><span>Один канал</span></div>
+            <div className="reminder-delivery-settings__options" role="radiogroup" aria-label="Речевой канал">
               {(Object.keys(endpointLabels) as SpokenEndpoint[]).map((value) => {
                 const health = inventory.channelHealth.spoken[value];
                 return <label className="reminder-delivery-option" key={value}>
@@ -188,7 +188,7 @@ export function ReminderDeliverySettingsSheet({
           </section>
           <div className="reminder-delivery-settings__actions">
             <button type="button" className="primary-action" disabled={busy || !inventory.writesEnabled} aria-busy={busy} onClick={() => void save()}>{busy ? "Сохраняем…" : "Сохранить"}</button>
-            <small>Изменения применяются к новым попыткам доставки; уже начатая доставка сохраняет свой снимок политики.</small>
+            <small>Изменения применяются к новым попыткам доставки; уже начатая доставка сохраняет свои параметры.</small>
           </div>
           {notice && <p className="settings-notice" role="status" aria-live="polite">{notice}</p>}
         </>}
