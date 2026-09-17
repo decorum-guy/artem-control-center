@@ -1,4 +1,7 @@
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+import { installCanonicalCoffeeVisualReviewLayout } from "./coffeeVisualReviewFixture";
 
 const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 const overviewV2Enabled = process.env.VITE_OVERVIEW_V2_ENABLED === "true";
@@ -7,6 +10,13 @@ type Rect = { x: number; y: number; width: number; height: number; right: number
 type CoffeeTransitionFixture = "off" | "warming" | "ready" | null;
 
 let coffeeTransitionFixture: CoffeeTransitionFixture = null;
+
+async function reviewScreenshotPath(testInfo: TestInfo, filename: string): Promise<string> {
+  const artifactDirectory = process.env.ISSUE_173_ARTIFACT_DIR;
+  if (!artifactDirectory) return testInfo.outputPath(filename);
+  await mkdir(artifactDirectory, { recursive: true });
+  return path.join(artifactDirectory, filename);
+}
 
 async function waitForCoffee(page: Page, stage: string) {
   const coffee = page.getByTestId("widget-coffee-machine");
@@ -94,7 +104,7 @@ async function expectNoOverflow(page: Page) {
   expect(size.documentWidth).toBeLessThanOrEqual(size.viewportWidth + 1);
 }
 
-async function assertCoffeeComposition(coffee: Locator) {
+async function assertCoffeeComposition(coffee: Locator, variant: "overview" | "home-v2" = "overview") {
   const panelBox = await rect(coffee);
   const asset = coffee.locator(".coffee-asset");
   const visual = coffee.locator(".coffee-asset__visual");
@@ -104,7 +114,12 @@ async function assertCoffeeComposition(coffee: Locator) {
   const imageBox = await rect(image);
   expectContained(visualBox, assetBox);
   expectContained(imageBox, assetBox);
-  await expect(coffee.locator(".coffee-panel__heading .section-kicker")).toHaveText("Дом");
+  const kicker = coffee.locator(".coffee-panel__heading .section-kicker");
+  if (variant === "overview") {
+    await expect(kicker).toHaveText("Дом");
+  } else {
+    await expect(kicker).toHaveCount(0);
+  }
   await expect(coffee.locator(".coffee-panel__heading h2")).toHaveText("Кофемашина");
   await expect(coffee.locator(".coffee-state-marker")).toHaveCount(0);
 
@@ -189,6 +204,7 @@ test.describe("#173 Coffee composition stabilization", () => {
 
   test.beforeEach(async ({ page }) => {
     coffeeTransitionFixture = null;
+    await installCanonicalCoffeeVisualReviewLayout(page);
     await page.route("**/api/v1/access", async (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       await route.fulfill({
@@ -288,7 +304,7 @@ test.describe("#173 Coffee composition stabilization", () => {
       });
       expect(accent.width).toBe("2px");
       expect(accent.opacity).toBeGreaterThan(0);
-      await page.screenshot({ path: testInfo.outputPath(screenshotName) });
+      await page.screenshot({ path: await reviewScreenshotPath(testInfo, screenshotName) });
       await expectNoOverflow(page);
     }
 
@@ -439,23 +455,23 @@ test.describe("#173 Coffee composition stabilization", () => {
     for (const [scenario, stage, screenshotName] of states) {
       await page.goto(`/home?scenario=${scenario}&theme=night`);
       const coffee = await waitForCoffee(page, stage);
-      await assertCoffeeComposition(coffee);
+      await assertCoffeeComposition(coffee, "home-v2");
       await assertHomeCoffeeProportions(coffee, stage === "off");
-      await page.screenshot({ path: testInfo.outputPath(screenshotName), animations: "disabled", scale: "css" });
+      await page.screenshot({ path: await reviewScreenshotPath(testInfo, screenshotName), animations: "disabled", scale: "css" });
       await expectNoOverflow(page);
     }
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/home?scenario=coffee-off&theme=night");
     const narrowCoffee = await waitForCoffee(page, "off");
-    await assertCoffeeComposition(narrowCoffee);
+    await assertCoffeeComposition(narrowCoffee, "home-v2");
     const narrowPrimary = await rect(narrowCoffee.locator(".primary-action"));
     const narrowTimer = await rect(narrowCoffee.locator(".coffee-delayed-start-action"));
     expect(narrowPrimary.width).toBeGreaterThanOrEqual(48);
     expect(narrowPrimary.height).toBeGreaterThanOrEqual(48);
     expect(narrowTimer.width).toBeGreaterThanOrEqual(48);
     expect(narrowTimer.height).toBeGreaterThanOrEqual(48);
-    await page.screenshot({ path: testInfo.outputPath("home-coffee-off-390x844.png"), animations: "disabled", scale: "css" });
+    await page.screenshot({ path: await reviewScreenshotPath(testInfo, "home-coffee-off-390x844.png"), animations: "disabled", scale: "css" });
     await expectNoOverflow(page);
   });
 
@@ -472,7 +488,7 @@ test.describe("#173 Coffee composition stabilization", () => {
     for (const [scenario, stage, screenshotName] of states) {
       await page.goto(`/home?scenario=${scenario}&theme=night`);
       const coffee = await waitForCoffee(page, stage);
-      await assertCoffeeComposition(coffee);
+      await assertCoffeeComposition(coffee, "home-v2");
       await assertHomeCoffeeProportions(coffee, stage === "off");
       assetBoxes[stage] = await rect(coffee.locator(".coffee-asset"));
       imageBoxes[stage] = await rect(coffee.locator(".coffee-asset__image"));
@@ -511,7 +527,7 @@ test.describe("#173 Coffee composition stabilization", () => {
         await expect(coffee.getByTestId("coffee-progress")).toBeHidden();
       }
       expectVerticallyCentered(imageBoxes[stage], assetBoxes[stage]);
-      await page.screenshot({ path: testInfo.outputPath(screenshotName), animations: "disabled", scale: "css" });
+      await page.screenshot({ path: await reviewScreenshotPath(testInfo, screenshotName), animations: "disabled", scale: "css" });
       await expectNoOverflow(page);
     }
 
@@ -697,19 +713,19 @@ test.describe("#173 Coffee composition stabilization", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/home?scenario=coffee-off&theme=night");
     const narrowCoffee = await waitForCoffee(page, "off");
-    await assertCoffeeComposition(narrowCoffee);
+    await assertCoffeeComposition(narrowCoffee, "home-v2");
     const narrowTargets = await Promise.all([
       narrowCoffee.getByRole("button", { name: "Включить" }).boundingBox(),
       narrowCoffee.getByTestId("coffee-delayed-start-action").boundingBox()
     ]);
     expect(narrowTargets.every((target) => target && target.width >= 48 && target.height >= 48)).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath("coffee-off-narrow.png") });
+    await page.screenshot({ path: await reviewScreenshotPath(testInfo, "coffee-off-narrow.png") });
     await expectNoOverflow(page);
 
     await page.setViewportSize({ width: 640, height: 900 });
     await page.goto("/home?scenario=coffee-warming&theme=night");
     const coffee = await waitForCoffee(page, "warming");
-    await assertCoffeeComposition(coffee);
+    await assertCoffeeComposition(coffee, "home-v2");
     await expectNoOverflow(page);
   });
 });
