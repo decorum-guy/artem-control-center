@@ -89,7 +89,15 @@ function Get-ArtemJarvisVoiceRuntimeEnvironment {
         $trimmed = $line.Trim()
         if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
         $separator = $line.IndexOf("=")
-        if ($separator -lt 1) { continue }
+        if ($separator -lt 1) {
+            # Unrelated malformed runtime.env input remains outside this narrow
+            # parser. A malformed owned key, however, must not silently turn
+            # into an accidental disabled/unconfigured worker.
+            if ($allowed.Contains($trimmed)) {
+                throw "Invalid Jarvis voice runtime.env entry"
+            }
+            continue
+        }
         $key = $line.Substring(0, $separator).Trim()
         if ($allowed.Contains($key)) {
             # Keep everything after the first '=' literal, including quotes,
@@ -205,6 +213,80 @@ function Get-ArtemJarvisVoiceSessionAlignment {
         SessionAligned = $aligned
         HasUnknownSession = $unknown
     }
+}
+
+function Get-ArtemJarvisVoiceStartDecision {
+    param(
+        [Parameter(Mandatory)][object[]]$Workers,
+        [Parameter(Mandatory)][string]$TaskState,
+        [object]$ConsoleSessionId
+    )
+    $alignmentArgs = @{ Workers = $Workers }
+    if ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        $alignmentArgs.ConsoleSessionId = $ConsoleSessionId
+    }
+    $alignment = Get-ArtemJarvisVoiceSessionAlignment @alignmentArgs
+    if ($alignment.WorkerCount -eq 0) {
+        return [pscustomobject]@{ Action = "start"; Message = $null }
+    }
+    if ($alignment.WorkerCount -gt 1) {
+        return [pscustomobject]@{ Action = "reject"; Message = "Refusing to start duplicate Jarvis voice workers." }
+    }
+    if ($alignment.SessionAligned) {
+        return [pscustomobject]@{ Action = "no-op"; Message = $null }
+    }
+    if ($TaskState -eq "Running") {
+        return [pscustomobject]@{ Action = "restart"; Message = $null }
+    }
+    return [pscustomobject]@{
+        Action = "reject"
+        Message = "Refusing to start while an unowned or wrong-session Jarvis voice worker exists."
+    }
+}
+
+function Invoke-ArtemJarvisVoiceStartLifecycle {
+    param(
+        [Parameter(Mandatory)]$Voice,
+        [Parameter(Mandatory)][object[]]$Workers,
+        [Parameter(Mandatory)][string]$TaskState,
+        [scriptblock]$StopTask,
+        [Parameter(Mandatory)][scriptblock]$StartTask,
+        [Parameter(Mandatory)][scriptblock]$WorkerProvider,
+        [object]$ConsoleSessionId,
+        [ValidateRange(1, 60000)][int]$StopTimeoutMilliseconds = 10000,
+        [ValidateRange(1, 10000)][int]$PollMilliseconds = 250,
+        [scriptblock]$Sleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+    )
+    $decisionArgs = @{ Workers = $Workers; TaskState = $TaskState }
+    if ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        $decisionArgs.ConsoleSessionId = $ConsoleSessionId
+    }
+    $decision = Get-ArtemJarvisVoiceStartDecision @decisionArgs
+    if ($decision.Action -eq "reject") { throw $decision.Message }
+    if ($decision.Action -eq "no-op") { return $decision }
+    if ($decision.Action -eq "start") {
+        $null = & $StartTask
+        return $decision
+    }
+
+    # A misaligned worker is stopped only through the installed task. If it is
+    # not task-owned or fails to exit, do not create a duplicate and do not
+    # kill an arbitrary matching python process.
+    if ($null -eq $StopTask) { throw "Jarvis voice task stop callback is required for restart." }
+    $null = & $StopTask
+    $waited = 0
+    while ($true) {
+        $remaining = @(& $WorkerProvider)
+        if ($remaining.Count -eq 0) { break }
+        if ($waited -ge $StopTimeoutMilliseconds) {
+            throw "Jarvis voice worker did not stop after bounded task shutdown."
+        }
+        $delay = [Math]::Min($PollMilliseconds, $StopTimeoutMilliseconds - $waited)
+        & $Sleep $delay
+        $waited += $delay
+    }
+    $null = & $StartTask
+    return $decision
 }
 
 function Get-ArtemRuntimeVenvPath {

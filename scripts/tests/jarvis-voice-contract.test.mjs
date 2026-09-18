@@ -47,10 +47,12 @@ test("Windows voice task is interactive, launcher-owned, optional, and session-a
   assert.doesNotMatch(launcher, /Invoke-Expression/);
   assert.match(runtime, /function Get-ArtemJarvisVoiceRuntimeEnvironment/);
   assert.match(runtime, /function Set-ArtemJarvisVoiceWorkerEnvironment/);
+  assert.match(runtime, /function Get-ArtemJarvisVoiceStartDecision/);
+  assert.match(runtime, /function Invoke-ArtemJarvisVoiceStartLifecycle/);
   assert.match(runtime, /PANEL_JARVIS_VOICE_BRIDGE_TOKEN/);
   assert.match(runtime, /function Get-ArtemJarvisVoiceSessionAlignment/);
-  assert.match(start, /Refusing to start duplicate Jarvis voice workers/);
-  assert.match(start, /Get-ArtemJarvisVoiceSessionAlignment/);
+  assert.match(runtime, /Refusing to start duplicate Jarvis voice workers/);
+  assert.match(start, /Invoke-ArtemJarvisVoiceStartLifecycle/);
   assert.match(status, /Get-ArtemJarvisVoiceSessionAlignment/);
   assert.match(runtime, /Get-ArtemActiveConsoleSessionId/);
   assert.doesNotMatch(status, /Get-Process -Name explorer/);
