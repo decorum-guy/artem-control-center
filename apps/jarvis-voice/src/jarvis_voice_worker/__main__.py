@@ -20,6 +20,11 @@ class UnlockedUntilBridgeRejects:
         return False
 
 
+def microphone_device_from_environment() -> str | None:
+    """Return None for the canonical absent/empty default-microphone setting."""
+    return os.getenv("PANEL_JARVIS_MIC_DEVICE") or None
+
+
 async def main() -> None:
     enabled = os.getenv("PANEL_JARVIS_VOICE_ENABLED", "false").lower() == "true"
     token = os.getenv("PANEL_JARVIS_VOICE_BRIDGE_TOKEN", "")
@@ -46,7 +51,7 @@ async def main() -> None:
             turns=HttpJarvisTurnClient(bridge), publisher=publisher,
             lock=UnlockedUntilBridgeRejects(), clock=MonotonicClock(),
         )
-        await pipeline.run(SoundDeviceAudioInput(device=os.getenv("PANEL_JARVIS_MIC_DEVICE") or None))
+        await pipeline.run(SoundDeviceAudioInput(device=microphone_device_from_environment()))
     except AdapterUnavailable as exc:
         await publisher.publish(VoiceSnapshot(
             schema_version="jarvis.voice.v1", enabled=True, configured=True,

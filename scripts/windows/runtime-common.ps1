@@ -126,6 +126,9 @@ function Set-ArtemJarvisVoiceWorkerEnvironment {
         Remove-Item -LiteralPath ("Env:" + $entry.Name) -ErrorAction SilentlyContinue
     }
     foreach ($entry in $values.GetEnumerator()) {
+        # Empty optional inputs have one cross-shell representation: absent.
+        # Do not rely on Windows PowerShell's empty Env: assignment behavior.
+        if ([string]::IsNullOrEmpty([string]$entry.Value)) { continue }
         Set-Item -LiteralPath ("Env:" + $entry.Key) -Value ([string]$entry.Value)
     }
     return $values

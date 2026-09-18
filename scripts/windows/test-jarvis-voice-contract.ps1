@@ -112,15 +112,13 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
     $env:PYTHONPATH = (Join-Path $repoRoot "apps\jarvis-voice\src") + [IO.Path]::PathSeparator + (Join-Path $repoRoot "apps\panel-agent\src")
     $env:PANEL_UNRELATED_SHOULD_NOT_PROPAGATE = "must-not-reach-child"
-    $expectedJson = [ordered]@{}
-    foreach ($key in (Get-ArtemJarvisVoiceRuntimeKeys)) { $expectedJson[$key] = $allowed[$key] }
-    $expectedBytes = [Text.Encoding]::UTF8.GetBytes(($expectedJson | ConvertTo-Json -Compress))
-    $sha256 = [Security.Cryptography.SHA256]::Create()
-    try { $expectedHash = $sha256.ComputeHash($expectedBytes) }
-    finally { $sha256.Dispose() }
-    $env:JARVIS_VOICE_EXPECTED_HASH = ([BitConverter]::ToString($expectedHash).Replace("-", "")).ToLowerInvariant()
+    $expectedNonEmpty = [ordered]@{}
+    foreach ($key in (Get-ArtemJarvisVoiceRuntimeKeys)) {
+        if (-not [string]::IsNullOrEmpty([string]$allowed[$key])) { $expectedNonEmpty[$key] = $allowed[$key] }
+    }
+    $env:JARVIS_VOICE_EXPECTED_JSON = $expectedNonEmpty | ConvertTo-Json -Compress
     $null = Set-ArtemJarvisVoiceWorkerEnvironment -Paths $paths
-    & $python -c "import hashlib,json,os; import jarvis_voice_worker; import panel_agent.jarvis_voice; keys=['PANEL_JARVIS_VOICE_ENABLED','PANEL_JARVIS_VOICE_BRIDGE_TOKEN','PANEL_JARVIS_VOICE_PANEL_URL','PANEL_JARVIS_VOICE_MODEL_ROOT','PANEL_JARVIS_WAKE_MODEL','PANEL_JARVIS_STT_MODEL','PANEL_JARVIS_STT_PROFILE','PANEL_JARVIS_WAKE_THRESHOLD','PANEL_JARVIS_MIC_DEVICE']; actual={key:os.environ.get(key) for key in keys}; assert hashlib.sha256(json.dumps(actual,separators=(',',':')).encode()).hexdigest()==os.environ['JARVIS_VOICE_EXPECTED_HASH']; assert 'PANEL_UNRELATED_SHOULD_NOT_PROPAGATE' not in os.environ"
+    & $python -c "import json,os; expected=json.loads(os.environ.pop('JARVIS_VOICE_EXPECTED_JSON')); import jarvis_voice_worker; import panel_agent.jarvis_voice; assert all(key in os.environ and os.environ[key] == value for key,value in expected.items()); assert 'PANEL_JARVIS_MIC_DEVICE' not in os.environ; assert 'PANEL_UNRELATED_SHOULD_NOT_PROPAGATE' not in os.environ"
     if ($LASTEXITCODE -ne 0) { throw "Dedicated voice child did not receive the exact safe source/runtime contract" }
 
     $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot "run-jarvis-voice.ps1") -Raw

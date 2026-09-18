@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +11,11 @@ from panel_agent.jarvis_voice import (
     BoundedPcmBuffer, VoiceHealth, VoicePipeline, VoiceRuntimeConfig, VoiceSnapshot,
     VoiceState, VoiceStateMachine, VoiceTurnResult,
 )
+
+VOICE_WORKER_SOURCE = Path(__file__).resolve().parents[2] / "jarvis-voice" / "src"
+if str(VOICE_WORKER_SOURCE) not in sys.path:
+    sys.path.insert(0, str(VOICE_WORKER_SOURCE))
+from jarvis_voice_worker.__main__ import microphone_device_from_environment
 
 
 FRAME = b"\x00\x00" * 1_280  # 80 ms of canonical PCM
@@ -187,6 +194,11 @@ def test_disabled_never_opens_audio_or_attempts_models():
     asyncio.run(subject.run(Audio([FRAME])))
     assert turns.values == []
     assert publisher.snapshots == [VoiceSnapshot("jarvis.voice.v1", False, False, VoiceHealth.DISABLED, VoiceState.DISABLED, 0)]
+
+
+def test_absent_microphone_environment_uses_default_device(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("PANEL_JARVIS_MIC_DEVICE", raising=False)
+    assert microphone_device_from_environment() is None
 
 
 def test_cancel_transitions_to_cooldown_without_persistence():
