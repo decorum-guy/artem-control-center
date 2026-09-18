@@ -11,6 +11,7 @@ const launcher = read("../windows/run-jarvis-voice.ps1");
 const start = read("../windows/start-jarvis-voice.ps1");
 const status = read("../windows/status-jarvis-voice.ps1");
 const runtime = read("../windows/runtime-common.ps1");
+const windowsContract = read("../windows/test-jarvis-voice-contract.ps1");
 const ci = read("../../.github/workflows/ci.yml");
 
 test("voice core is bounded, adapter-only, and has no persistence primitive", () => {
@@ -57,6 +58,7 @@ test("Windows voice task is interactive, launcher-owned, optional, and session-a
   assert.match(runtime, /Get-ArtemActiveConsoleSessionId/);
   assert.doesNotMatch(status, /Get-Process -Name explorer/);
   assert.match(ci, /test-jarvis-voice-contract\.ps1/);
+  assert.doesNotMatch(windowsContract, /HashData|ToHexString/);
   assert.match(runtime, /jarvis-voice/);
   for (const source of [install, launcher, start, status, runtime]) {
     assert.doesNotMatch(source, /PsExec|CreateProcessAsUser|New-Service/);
