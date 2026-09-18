@@ -23,6 +23,20 @@ NAVIGATION_BY_INTENT: dict[str, NavigationPath] = {
 }
 
 
+def russian_event_count_label(count: int) -> str:
+    """Return the deterministic Russian noun form for a calendar event count."""
+
+    remainder_100 = abs(count) % 100
+    remainder_10 = abs(count) % 10
+    if 11 <= remainder_100 <= 14:
+        return "событий"
+    if remainder_10 == 1:
+        return "событие"
+    if 2 <= remainder_10 <= 4:
+        return "события"
+    return "событий"
+
+
 class JarvisTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     text: str = Field(min_length=1, max_length=MAX_JARVIS_TEXT_CODEPOINTS)
@@ -87,7 +101,7 @@ class JarvisTurnService:
             return self._response("unavailable", intent, "Данные планирования сейчас недоступны.")
         if intent.intent_id == "planning.calendar.read":
             items = projection.calendar.today
-            label = "событий" if len(items) != 1 else "событие"
+            label = russian_event_count_label(len(items))
             detail = f" Ближайшее: {items[0].title}." if items else ""
             return self._response("ready", intent, f"Сегодня {len(items)} {label}.{detail}")
         if intent.intent_id == "planning.tasks.read":
