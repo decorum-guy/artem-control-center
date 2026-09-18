@@ -57,6 +57,7 @@ from .runtime_control import router as runtime_control_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
 from .weather import WeatherService, build_weather_router
+from .jarvis_api import JarvisTurnService, build_jarvis_router
 from .overview_layout import (
     MAX_REQUEST_BYTES,
     OverviewLayoutStore,
@@ -168,6 +169,11 @@ SETTINGS = IntegrationSettings.from_env()
 runtime = IntegrationRuntime(SETTINGS, mode=MODE)
 project_registry_store = ProjectRegistryStore(SETTINGS.projects_config_path)
 weather_service = WeatherService(mode=MODE)
+jarvis_turn_service = JarvisTurnService(
+    planning=lambda: runtime.planning.projection,
+    weather=weather_service,
+    timezone_name=SETTINGS.panel_planning_timezone,
+)
 diagnostics_collector = DiagnosticsCollector(SETTINGS)
 snapshot_publisher = SnapshotPublisher(
     mode=MODE,
@@ -309,6 +315,7 @@ app.include_router(
 )
 app.include_router(runtime_control_router)
 app.include_router(build_weather_router(weather_service))
+app.include_router(build_jarvis_router(jarvis_turn_service))
 app.include_router(
     build_planning_router(
         runtime.planning,

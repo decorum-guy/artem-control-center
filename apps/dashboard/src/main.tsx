@@ -16,6 +16,7 @@ import { KioskPresenceHeartbeat } from "./KioskPresenceHeartbeat";
 import { InterfaceCopyProvider } from "./interfaceCopy";
 import { ProjectRegistryProvider } from "./ProjectRegistry";
 import "./InteractionLock.css";
+import "./JarvisOverlay.css";
 import "./ActionConfirmations.css";
 import "./AvalarActions.css";
 import "./ConnectivityActions.css";
