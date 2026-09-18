@@ -37,6 +37,7 @@ import { useInteractionLock } from "./InteractionLock";
 import { CoffeeDiaryPage } from "./CoffeeDiaryPage";
 import { useDeviceVisibility } from "./DeviceVisibility";
 import { visiblePresentationSnapshot } from "./deviceVisibilityPresentation";
+import { JarvisOverlay } from "./JarvisOverlay";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -573,6 +574,7 @@ export function App() {
           onClose={() => setCoffeeDelayedStartDialogOpen(false)}
         />
       )}
+      <JarvisOverlay onNavigate={navigate} />
       <GlobalNoticeRegion />
       <B0NoticeFixture />
     </div>
