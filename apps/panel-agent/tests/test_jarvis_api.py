@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from panel_agent.jarvis_api import JarvisTurnService
+from panel_agent.jarvis_api import JarvisTurnService, russian_event_count_label
 from panel_agent.weather import WeatherCandidate, fixture_forecast
 
 
@@ -66,3 +66,9 @@ def test_navigation_is_fixed_and_mutations_are_truthfully_unavailable(monkeypatc
     unsupported = client.post("/api/v1/jarvis/turn", json={"text": "Включи кофемашину"}).json()
     assert unsupported["status"] == "unavailable"
     assert unsupported["navigation"] is None
+
+
+def test_russian_calendar_event_pluralization_is_deterministic():
+    assert [russian_event_count_label(count) for count in (1, 2, 3, 4, 5, 11, 21, 22)] == [
+        "событие", "события", "события", "события", "событий", "событий", "событие", "события"
+    ]

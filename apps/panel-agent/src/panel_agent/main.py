@@ -58,6 +58,7 @@ from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
 from .weather import WeatherService, build_weather_router
 from .jarvis_api import JarvisTurnService, build_jarvis_router
+from .jarvis_voice_api import VoiceBridgeState, build_jarvis_voice_router
 from .overview_layout import (
     MAX_REQUEST_BYTES,
     OverviewLayoutStore,
@@ -173,6 +174,18 @@ jarvis_turn_service = JarvisTurnService(
     planning=lambda: runtime.planning.projection,
     weather=weather_service,
     timezone_name=SETTINGS.panel_planning_timezone,
+)
+_jarvis_voice_enabled = os.getenv("PANEL_JARVIS_VOICE_ENABLED", "false").strip().lower() == "true"
+_jarvis_voice_token = os.getenv("PANEL_JARVIS_VOICE_BRIDGE_TOKEN")
+_jarvis_voice_configured = (
+    _jarvis_voice_enabled
+    and os.getenv("PANEL_JARVIS_VOICE_CONFIGURED", "false").strip().lower() == "true"
+    and bool(_jarvis_voice_token)
+)
+jarvis_voice_bridge = VoiceBridgeState(
+    enabled=_jarvis_voice_enabled,
+    configured=_jarvis_voice_configured,
+    token=_jarvis_voice_token,
 )
 diagnostics_collector = DiagnosticsCollector(SETTINGS)
 snapshot_publisher = SnapshotPublisher(
@@ -316,6 +329,7 @@ app.include_router(
 app.include_router(runtime_control_router)
 app.include_router(build_weather_router(weather_service))
 app.include_router(build_jarvis_router(jarvis_turn_service))
+app.include_router(build_jarvis_voice_router(service=jarvis_turn_service, bridge=jarvis_voice_bridge))
 app.include_router(
     build_planning_router(
         runtime.planning,

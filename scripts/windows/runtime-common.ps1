@@ -49,6 +49,252 @@ function Get-ArtemRuntimePaths {
     }
 }
 
+function Get-ArtemJarvisVoicePaths {
+    param([Parameter(Mandatory)]$Paths)
+    $root = Join-Path $Paths.RuntimeRoot "jarvis-voice"
+    [pscustomobject]@{
+        Root = $root
+        Config = Join-Path $root "config"
+        Models = Join-Path $root "models"
+        Venv = Join-Path $root "venv"
+        State = Join-Path $root "state"
+        TaskName = "Artem Control Center Jarvis Voice"
+        WorkerModule = "jarvis_voice_worker"
+        LauncherScript = Join-Path $Paths.RepoRoot "scripts\windows\run-jarvis-voice.ps1"
+    }
+}
+
+function Get-ArtemJarvisVoiceRuntimeKeys {
+    return @(
+        "PANEL_JARVIS_VOICE_ENABLED", "PANEL_JARVIS_VOICE_BRIDGE_TOKEN",
+        "PANEL_JARVIS_VOICE_PANEL_URL", "PANEL_JARVIS_VOICE_MODEL_ROOT",
+        "PANEL_JARVIS_WAKE_MODEL", "PANEL_JARVIS_STT_MODEL",
+        "PANEL_JARVIS_STT_PROFILE", "PANEL_JARVIS_WAKE_THRESHOLD",
+        "PANEL_JARVIS_MIC_DEVICE"
+    )
+}
+
+function Get-ArtemJarvisVoiceRuntimeEnvironment {
+    param([Parameter(Mandatory)]$Paths)
+
+    # This is intentionally not a generic runtime.env importer. Values are
+    # data, never PowerShell expressions, and only the worker's fixed inputs
+    # cross this process boundary.
+    $allowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($key in (Get-ArtemJarvisVoiceRuntimeKeys)) { [void]$allowed.Add($key) }
+
+    $result = [ordered]@{}
+    if (-not (Test-Path -LiteralPath $Paths.RuntimeEnv)) { return $result }
+    foreach ($line in Get-Content -LiteralPath $Paths.RuntimeEnv) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
+        $separator = $line.IndexOf("=")
+        if ($separator -lt 1) {
+            # Unrelated malformed runtime.env input remains outside this narrow
+            # parser. A malformed owned key, however, must not silently turn
+            # into an accidental disabled/unconfigured worker.
+            if ($allowed.Contains($trimmed)) {
+                throw "Invalid Jarvis voice runtime.env entry"
+            }
+            continue
+        }
+        $key = $line.Substring(0, $separator).Trim()
+        if ($allowed.Contains($key)) {
+            # Keep everything after the first '=' literal, including quotes,
+            # dollar signs and any additional '=' characters.
+            $result[$key] = $line.Substring($separator + 1)
+        }
+    }
+    return $result
+}
+
+function Set-ArtemJarvisVoiceWorkerEnvironment {
+    param([Parameter(Mandatory)]$Paths)
+
+    $values = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $Paths
+    $allowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($key in (Get-ArtemJarvisVoiceRuntimeKeys)) {
+        [void]$allowed.Add($key)
+        Remove-Item -LiteralPath ("Env:" + $key) -ErrorAction SilentlyContinue
+    }
+    # A task can inherit PANEL_* values from its parent account. The voice
+    # child must receive neither those unrelated settings nor any unlisted
+    # secret; its entire PANEL_* boundary is the fixed allow-list above.
+    foreach ($entry in @(Get-ChildItem Env: | Where-Object {
+        $_.Name.StartsWith("PANEL_", [StringComparison]::OrdinalIgnoreCase) -and -not $allowed.Contains($_.Name)
+    })) {
+        Remove-Item -LiteralPath ("Env:" + $entry.Name) -ErrorAction SilentlyContinue
+    }
+    foreach ($entry in $values.GetEnumerator()) {
+        # Empty optional inputs have one cross-shell representation: absent.
+        # Do not rely on Windows PowerShell's empty Env: assignment behavior.
+        if ([string]::IsNullOrEmpty([string]$entry.Value)) { continue }
+        Set-Item -LiteralPath ("Env:" + $entry.Key) -Value ([string]$entry.Value)
+    }
+    return $values
+}
+
+function Get-ArtemJarvisVoiceConfiguration {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [System.Collections.IDictionary]$Environment
+    )
+
+    if (-not $PSBoundParameters.ContainsKey('Environment')) {
+        $Environment = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $Paths
+    }
+    $value = { param([string]$Key) if ($Environment.Contains($Key)) { [string]$Environment[$Key] } else { "" } }
+    $enabled = (& $value "PANEL_JARVIS_VOICE_ENABLED") -eq "true"
+    $token = & $value "PANEL_JARVIS_VOICE_BRIDGE_TOKEN"
+    $panelUrl = & $value "PANEL_JARVIS_VOICE_PANEL_URL"
+    $modelRoot = & $value "PANEL_JARVIS_VOICE_MODEL_ROOT"
+    $wakeModel = & $value "PANEL_JARVIS_WAKE_MODEL"
+    $sttModel = & $value "PANEL_JARVIS_STT_MODEL"
+    $profile = & $value "PANEL_JARVIS_STT_PROFILE"
+    $threshold = & $value "PANEL_JARVIS_WAKE_THRESHOLD"
+    $localPanel = $false
+    try {
+        $uri = [Uri]$panelUrl
+        $localPanel = $uri.Scheme -eq "http" -and $uri.IsLoopback
+    }
+    catch { $localPanel = $false }
+    $thresholdValue = 0.0
+    $validThreshold = [double]::TryParse($threshold, [ref]$thresholdValue) -and $thresholdValue -ge 0.1 -and $thresholdValue -le 0.95
+    $configured = (
+        $enabled -and $token.Length -gt 0 -and $localPanel -and
+        $modelRoot.Length -gt 0 -and $wakeModel.Length -gt 0 -and $sttModel.Length -gt 0 -and
+        $profile -in @("base", "small") -and $validThreshold
+    )
+    $modelsReady = $configured -and
+        (Test-Path -LiteralPath $modelRoot -PathType Container) -and
+        (Test-Path -LiteralPath $wakeModel) -and
+        (Test-Path -LiteralPath $sttModel)
+    return [pscustomobject]@{
+        Enabled = $enabled
+        Configured = $configured
+        ModelsReady = $modelsReady
+        Environment = $Environment
+    }
+}
+
+function Get-ArtemJarvisVoiceWorkers {
+    param([Parameter(Mandatory)]$Voice)
+    return @(Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -ieq "python.exe" -and $_.CommandLine -like "*$($Voice.WorkerModule)*"
+    })
+}
+
+function Get-ArtemJarvisVoiceSessionAlignment {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Workers,
+        [object]$ConsoleSessionId
+    )
+    if (-not $PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        $ConsoleSessionId = Get-ArtemActiveConsoleSessionId
+    }
+    $sessionIds = New-Object System.Collections.Generic.List[object]
+    $unknown = $false
+    foreach ($worker in $Workers) {
+        try {
+            if ($null -eq $worker.SessionId) { throw "missing" }
+            $sessionIds.Add([int]$worker.SessionId) | Out-Null
+        }
+        catch {
+            $sessionIds.Add($null) | Out-Null
+            $unknown = $true
+        }
+    }
+    $hasConsole = $null -ne $ConsoleSessionId
+    $aligned = (
+        $Workers.Count -eq 1 -and $hasConsole -and [int]$ConsoleSessionId -ne 0 -and
+        -not $unknown -and $sessionIds.Count -eq 1 -and [int]$sessionIds[0] -eq [int]$ConsoleSessionId
+    )
+    return [pscustomobject]@{
+        WorkerCount = $Workers.Count
+        # Materialize the generic list before constructing the PSCustomObject.
+        # Windows PowerShell 5.1 can throw "Argument types do not match" when
+        # a generic List[object] is embedded through the array-subexpression.
+        WorkerSessionIds = [object[]]$sessionIds.ToArray()
+        ConsoleSessionId = if ($hasConsole) { [int]$ConsoleSessionId } else { $null }
+        SessionAligned = $aligned
+        HasUnknownSession = $unknown
+    }
+}
+
+function Get-ArtemJarvisVoiceStartDecision {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Workers,
+        [Parameter(Mandatory)][string]$TaskState,
+        [object]$ConsoleSessionId
+    )
+    $alignmentArgs = @{ Workers = $Workers }
+    if ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        $alignmentArgs.ConsoleSessionId = $ConsoleSessionId
+    }
+    $alignment = Get-ArtemJarvisVoiceSessionAlignment @alignmentArgs
+    if ($alignment.WorkerCount -eq 0) {
+        return [pscustomobject]@{ Action = "start"; Message = $null }
+    }
+    if ($alignment.WorkerCount -gt 1) {
+        return [pscustomobject]@{ Action = "reject"; Message = "Refusing to start duplicate Jarvis voice workers." }
+    }
+    if ($alignment.SessionAligned) {
+        return [pscustomobject]@{ Action = "no-op"; Message = $null }
+    }
+    if ($TaskState -eq "Running") {
+        return [pscustomobject]@{ Action = "restart"; Message = $null }
+    }
+    return [pscustomobject]@{
+        Action = "reject"
+        Message = "Refusing to start while an unowned or wrong-session Jarvis voice worker exists."
+    }
+}
+
+function Invoke-ArtemJarvisVoiceStartLifecycle {
+    param(
+        [Parameter(Mandatory)]$Voice,
+        [Parameter(Mandatory)][object[]]$Workers,
+        [Parameter(Mandatory)][string]$TaskState,
+        [scriptblock]$StopTask,
+        [Parameter(Mandatory)][scriptblock]$StartTask,
+        [Parameter(Mandatory)][scriptblock]$WorkerProvider,
+        [object]$ConsoleSessionId,
+        [ValidateRange(1, 60000)][int]$StopTimeoutMilliseconds = 10000,
+        [ValidateRange(1, 10000)][int]$PollMilliseconds = 250,
+        [scriptblock]$Sleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+    )
+    $decisionArgs = @{ Workers = $Workers; TaskState = $TaskState }
+    if ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        $decisionArgs.ConsoleSessionId = $ConsoleSessionId
+    }
+    $decision = Get-ArtemJarvisVoiceStartDecision @decisionArgs
+    if ($decision.Action -eq "reject") { throw $decision.Message }
+    if ($decision.Action -eq "no-op") { return $decision }
+    if ($decision.Action -eq "start") {
+        $null = & $StartTask
+        return $decision
+    }
+
+    # A misaligned worker is stopped only through the installed task. If it is
+    # not task-owned or fails to exit, do not create a duplicate and do not
+    # kill an arbitrary matching python process.
+    if ($null -eq $StopTask) { throw "Jarvis voice task stop callback is required for restart." }
+    $null = & $StopTask
+    $waited = 0
+    while ($true) {
+        $remaining = @(& $WorkerProvider)
+        if ($remaining.Count -eq 0) { break }
+        if ($waited -ge $StopTimeoutMilliseconds) {
+            throw "Jarvis voice worker did not stop after bounded task shutdown."
+        }
+        $delay = [Math]::Min($PollMilliseconds, $StopTimeoutMilliseconds - $waited)
+        & $Sleep $delay
+        $waited += $delay
+    }
+    $null = & $StartTask
+    return $decision
+}
+
 function Get-ArtemRuntimeVenvPath {
     param(
         [Parameter(Mandatory)]$Paths,

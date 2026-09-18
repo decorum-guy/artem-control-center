@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "jarvis.voice.models.v1",
+  "rvc": {
+    "physicalAcceptance": true,
+    "purpose": "future output timbre conversion only",
+    "assets": [
+      {
+        "path": "runtime-assets/jarvis/rvc/Jarvis_RU_6m_200e_7600s.pth",
+        "sha256": "4d4b41b57d07ec373a410522e9535d485fa3f9d94bd3312560120575975a3563"
+      },
+      {
+        "path": "runtime-assets/jarvis/rvc/Jarvis_RU_6m.index",
+        "sha256": "d147c8957b04579f219a7961fcb3e549bea657a593d61c7c7fd05b5d053ba3d5"
+      }
+    ]
+  },
+  "wake": {
+    "engine": "openwakeword",
+    "model": "hey_jarvis",
+    "physicalAcceptance": false,
+    "modelStorage": "%LOCALAPPDATA%\\ArtemControlCenter\\jarvis-voice\\models\\wake",
+    "autoDownload": false,
+    "notes": "English baseline only; Russian Джарвис has not been measured or accepted."
+  },
+  "stt": {
+    "engine": "faster-whisper",
+    "device": "cpu",
+    "computeType": "int8",
+    "language": "ru",
+    "modelProfile": "base",
+    "physicalAcceptance": false,
+    "modelStorage": "%LOCALAPPDATA%\\ArtemControlCenter\\jarvis-voice\\models\\stt",
+    "autoDownload": false
+  }
+}
