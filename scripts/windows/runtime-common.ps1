@@ -183,7 +183,7 @@ function Get-ArtemJarvisVoiceWorkers {
 
 function Get-ArtemJarvisVoiceSessionAlignment {
     param(
-        [Parameter(Mandatory)][object[]]$Workers,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Workers,
         [object]$ConsoleSessionId
     )
     if (-not $PSBoundParameters.ContainsKey('ConsoleSessionId')) {
@@ -220,7 +220,7 @@ function Get-ArtemJarvisVoiceSessionAlignment {
 
 function Get-ArtemJarvisVoiceStartDecision {
     param(
-        [Parameter(Mandatory)][object[]]$Workers,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Workers,
         [Parameter(Mandatory)][string]$TaskState,
         [object]$ConsoleSessionId
     )
