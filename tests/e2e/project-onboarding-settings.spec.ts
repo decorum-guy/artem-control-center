@@ -41,33 +41,7 @@ type Registry = {
   manageMinimumProfile: "full";
 };
 
-type ProjectInput = {
-  id: string;
-  name: string;
-  enabled?: boolean;
-  category: "external" | "work";
-  capabilities?: {
-    backups: { profiles: string[] };
-  };
-  environments: Array<{
-    id: string;
-    services: Array<{
-      id: string;
-      capabilities: {
-        monitor: {
-          adapter: "http" | "avalar";
-          url_env: string;
-          interval_seconds?: number;
-          stale_after_seconds?: number;
-        };
-        details?: { adapter: "avalar-ssh" };
-        actions?: string[];
-        backupProfile?: string;
-      };
-      presentation?: { widget?: "core.generic-service" };
-    }>;
-  }>;
-};
+import type { ProjectRegistryProjectInput } from "@artem/contracts";
 
 type MutationRecord = { method: string; url: string; body: Record<string, unknown> };
 type FailureMode = "conflict" | "reconcile503" | "notFound" | "validation";
@@ -110,7 +84,7 @@ function registry(projects: RegistryProject[] = [], overrides: Partial<Registry>
   };
 }
 
-function projectFromInput(input: ProjectInput): RegistryProject {
+function projectFromInput(input: ProjectRegistryProjectInput): RegistryProject {
   return {
     id: input.id,
     name: input.name,
@@ -273,13 +247,13 @@ async function installFixtures(
       }
       if (failure === "reconcile503") {
         failure = undefined;
-        const input = body.project as ProjectInput;
+        const input = body.project as ProjectRegistryProjectInput;
         current = { ...current, revision: current.revision + 1, projects: [...current.projects, projectFromInput(input)] };
         await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "project_registry_runtime_reconciliation_failed" }) });
         return;
       }
 
-      const input = body.project as ProjectInput;
+      const input = body.project as ProjectRegistryProjectInput;
       const saved = projectFromInput(input);
       current = { ...current, revision: current.revision + 1, projects: [...current.projects, saved] };
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(current) });
@@ -319,7 +293,7 @@ async function installFixtures(
     }
     if (failure === "reconcile503") {
       failure = undefined;
-      const input = body.project as ProjectInput;
+      const input = body.project as ProjectRegistryProjectInput;
       current = { ...current, revision: current.revision + 1, projects: [...current.projects, projectFromInput(input)] };
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "project_registry_runtime_reconciliation_failed" }) });
       return;
@@ -336,7 +310,7 @@ async function installFixtures(
       const projectId = decodeURIComponent(new URL(request.url()).pathname.split("/").at(-1) ?? "");
       current = { ...current, revision: current.revision + 1, projects: current.projects.filter((entry) => entry.id !== projectId) };
     } else {
-      const input = body.project as ProjectInput;
+      const input = body.project as ProjectRegistryProjectInput;
       const saved = projectFromInput(input);
       const exists = current.projects.some((entry) => entry.id === saved.id);
       current = {
@@ -369,7 +343,7 @@ async function installFixtures(
       return;
     }
 
-    const projectInput = body.project as ProjectInput;
+    const projectInput = body.project as ProjectRegistryProjectInput;
     const result = connection === "reachable"
       ? { result: "reachable", reachable: true, httpStatus: 204, latencyMs: 42 }
       : connection === "endpoint_not_configured"
