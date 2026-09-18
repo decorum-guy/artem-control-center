@@ -37,6 +37,20 @@ test("Jarvis renders server text as text and has touch-sized controls", async ({
   expect(violations).toEqual([]);
 });
 
+test("a newer ephemeral voice update auto-opens Jarvis without a second overlay", async ({ page }) => {
+  await page.route("**/api/v1/jarvis/voice/state", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      schemaVersion: "jarvis.voice.v1", enabled: true, configured: true, health: "healthy",
+      state: "listening", sequence: 1, recognizedText: null, responseText: null,
+      safeErrorCode: null, wakeLatencyMs: 10, sttLatencyMs: null
+    }) });
+  });
+  await page.goto("/overview");
+  await expect(page.getByTestId("jarvis-panel")).toBeVisible();
+  await expect(page.getByTestId("jarvis-state")).toHaveText("Слушаю");
+  await expect(page.locator("[data-testid=jarvis-panel]")).toHaveCount(1);
+});
+
 test("a critical confirmation stays above the Jarvis layer", async ({ page }) => {
   await page.goto("/overview?scenario=coffee-off");
   await page.getByTestId("jarvis-launcher").click();

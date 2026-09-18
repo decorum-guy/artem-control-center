@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useInteractionLock } from "./InteractionLock";
 import { Icon } from "./icons";
 import { sendJarvisTurn, type JarvisNavigation } from "./jarvisApi";
+import { getJarvisVoiceState, syncJarvisVoiceInteractionLock, type JarvisVoiceSnapshot } from "./jarvisVoiceApi";
 
 const MAX_MESSAGES = 24;
 const MAX_TEXT = 512;
 
 type Message = { role: "owner" | "jarvis"; text: string };
-type OverlayState = "idle" | "processing" | "ready" | "error";
+type OverlayState = "idle" | "processing" | "listening" | "transcribing" | "submitting" | "ready" | "error";
 
 export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNavigation) => void }) {
   const { locked } = useInteractionLock();
@@ -16,6 +17,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
   const [messages, setMessages] = useState<Message[]>([]);
   const [state, setState] = useState<OverlayState>("idle");
   const inputRef = useRef<HTMLInputElement>(null);
+  const voiceSequence = useRef(-1);
 
   useEffect(() => {
     if (!open || locked) return;
@@ -28,6 +30,39 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
       setOpen(false);
       setState("idle");
     }
+  }, [locked]);
+
+  useEffect(() => {
+    // This best-effort boolean is mirrored to the Panel Agent, where the
+    // loopback voice turn is rejected while locked.  It carries no command.
+    void syncJarvisVoiceInteractionLock(locked).catch(() => undefined);
+  }, [locked]);
+
+  useEffect(() => {
+    let disposed = false;
+    let controller: AbortController | null = null;
+    const apply = (voice: JarvisVoiceSnapshot | null) => {
+      if (!voice || disposed || voice.sequence <= voiceSequence.current || locked) return;
+      voiceSequence.current = voice.sequence;
+      if (voice.state === "wake_detected" || voice.state === "listening") { setOpen(true); setState("listening"); return; }
+      if (voice.state === "transcribing") { setOpen(true); setState("transcribing"); return; }
+      if (voice.state === "submitting") { setOpen(true); setState("submitting"); return; }
+      if (voice.state === "ready") {
+        setOpen(true);
+        if (voice.recognizedText) append({ role: "owner", text: voice.recognizedText });
+        if (voice.responseText) append({ role: "jarvis", text: voice.responseText });
+        setState("ready");
+        return;
+      }
+      if (voice.state === "error") { setOpen(true); setState("error"); }
+    };
+    const poll = () => {
+      controller?.abort(); controller = new AbortController();
+      void getJarvisVoiceState(controller.signal).then(apply).catch(() => undefined);
+    };
+    poll();
+    const timer = window.setInterval(poll, 750);
+    return () => { disposed = true; controller?.abort(); window.clearInterval(timer); };
   }, [locked]);
 
   function append(message: Message): void {
@@ -71,7 +106,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
             <div><p>JARVIS · TEXT</p><h2>Jarvis</h2></div>
             <div className="jarvis-panel__header-actions">
               <span className={`jarvis-state jarvis-state--${state}`} data-testid="jarvis-state">{
-                state === "processing" ? "Обрабатываю" : state === "error" ? "Ошибка" : state === "ready" ? "Готово" : "Ожидаю"
+                state === "processing" || state === "submitting" ? "Обрабатываю" : state === "listening" ? "Слушаю" : state === "transcribing" ? "Распознаю" : state === "error" ? "Ошибка" : state === "ready" ? "Готово" : "Ожидаю"
               }</span>
               <button type="button" className="jarvis-icon-button" aria-label="Закрыть Jarvis" onClick={() => setOpen(false)}><Icon name="close" /></button>
             </div>
