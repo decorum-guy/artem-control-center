@@ -201,6 +201,25 @@ test("terminal update state records the verified served target for dashboard rec
   assert.match(updater, /Status "success" -Result "up_to_date" -ServedRevision \$targetHead/);
 });
 
+test("target success is published before its terminal transaction evidence is removed", () => {
+  const targetPhase = updater.indexOf("if ($targetPhase)");
+  const servedVerification = updater.indexOf("Assert-ArtemServedProductionBuildIdentity", targetPhase);
+  const lastKnownGood = updater.indexOf("Set-Content -LiteralPath $paths.LastKnownGood", servedVerification);
+  const terminalSuccess = updater.indexOf('Write-ArtemUpdateState -Paths $paths -Status "success" -Result "updated"', lastKnownGood);
+  const removeTransaction = updater.indexOf("Remove-ArtemUpdateTransaction -Paths $paths", terminalSuccess);
+  const removeRollback = updater.indexOf("Remove-Item -LiteralPath $paths.RollbackDashboard", removeTransaction);
+  const removeBuild = updater.indexOf("Remove-Item -LiteralPath $buildRoot", removeRollback);
+  const releaseLease = updater.indexOf("Remove-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId", terminalSuccess);
+
+  assert.ok(targetPhase >= 0);
+  assert.ok(servedVerification > targetPhase);
+  assert.ok(lastKnownGood > servedVerification);
+  assert.ok(terminalSuccess > lastKnownGood);
+  assert.ok(removeTransaction > terminalSuccess);
+  assert.ok(removeRollback > removeTransaction && removeBuild > removeRollback);
+  assert.ok(releaseLease > removeBuild);
+});
+
 test("the updater keeps the protected process and repository boundaries", () => {
   assert.doesNotMatch(updater, /git(?:\.exe)?\s+clean/);
   assert.match(updater, /git\.exe[\s\S]*?merge[\s\S]*?--ff-only[\s\S]*?\$targetHead/);

@@ -1127,10 +1127,13 @@ try {
         Assert-ArtemProductionBuildIdentity -DashboardRoot $paths.DashboardDist -ExpectedRevision $targetHead | Out-Null
         Assert-ArtemServedProductionBuildIdentity -Paths $paths -ExpectedRevision $targetHead | Out-Null
         Set-Content -LiteralPath $paths.LastKnownGood -Value $targetHead -Encoding ASCII
+        # The accepted target is now durably verified and served. Publish that
+        # terminal truth while the transaction still provides independent
+        # active evidence to an owner-state poll with a transient lease probe.
+        Write-ArtemUpdateState -Paths $paths -Status "success" -Result "updated" -ServedRevision $targetHead
         Remove-ArtemUpdateTransaction -Paths $paths
         Remove-Item -LiteralPath $paths.RollbackDashboard -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $buildRoot -Recurse -Force -ErrorAction SilentlyContinue
-        Write-ArtemUpdateState -Paths $paths -Status "success" -Result "updated" -ServedRevision $targetHead
         $postUpdateInteractiveKioskRecovery = -not $kioskConfirmed
         if (-not $kioskConfirmed) {
             Write-Warning "Production dashboard is verified, but kiosk presence remains unconfirmed"
