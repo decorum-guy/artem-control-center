@@ -61,6 +61,13 @@ PANEL_COFFEE_TIMING_WRITES_ENABLED=false
 PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED=false
 PANEL_COFFEE_ACTIONS_ENABLED=false
 
+# Jarvis A2 voice input is optional and disabled until its separate local
+# worker, model files, microphone selection, and physical acceptance are done.
+# The normal Panel Agent never imports voice ML/audio dependencies.
+PANEL_JARVIS_VOICE_ENABLED=false
+PANEL_JARVIS_VOICE_CONFIGURED=false
+# PANEL_JARVIS_VOICE_BRIDGE_TOKEN=<local secret, never commit>
+
 # Coffee Diary phone upload stays disabled until a real phone-reachable origin
 # and the dedicated narrow ingress are configured explicitly.
 # PANEL_COFFEE_DIARY_UPLOAD_ORIGIN=http://<samsung-lan-address>:8788

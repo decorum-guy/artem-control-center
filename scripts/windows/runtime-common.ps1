@@ -49,6 +49,20 @@ function Get-ArtemRuntimePaths {
     }
 }
 
+function Get-ArtemJarvisVoicePaths {
+    param([Parameter(Mandatory)]$Paths)
+    $root = Join-Path $Paths.RuntimeRoot "jarvis-voice"
+    [pscustomobject]@{
+        Root = $root
+        Config = Join-Path $root "config"
+        Models = Join-Path $root "models"
+        Venv = Join-Path $root "venv"
+        State = Join-Path $root "state"
+        TaskName = "Artem Control Center Jarvis Voice"
+        WorkerModule = "jarvis_voice_worker"
+    }
+}
+
 function Get-ArtemRuntimeVenvPath {
     param(
         [Parameter(Mandatory)]$Paths,
