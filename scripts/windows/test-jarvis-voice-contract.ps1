@@ -126,7 +126,7 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     $installer = Get-Content -LiteralPath (Join-Path $PSScriptRoot "install-jarvis-voice.ps1") -Raw
     $status = Get-Content -LiteralPath (Join-Path $PSScriptRoot "status-jarvis-voice.ps1") -Raw
     $common = Get-Content -LiteralPath (Join-Path $PSScriptRoot "runtime-common.ps1") -Raw
-    Assert-JarvisVoice ($installer -match "\$voice\.LauncherScript" -and $common -match "run-jarvis-voice\.ps1") "Scheduled Task must use the owned launcher"
+    Assert-JarvisVoice ($installer -match '\$voice\.LauncherScript' -and $common -match "run-jarvis-voice\.ps1") "Scheduled Task must use the owned launcher"
     Assert-JarvisVoice ($launcher -match "apps\\jarvis-voice\\src" -and $launcher -match "apps\\panel-agent\\src") "Launcher must set both source roots"
     Assert-JarvisVoice ($launcher -match "Set-ArtemJarvisVoiceWorkerEnvironment" -and $launcher -notmatch "Invoke-Expression") "Launcher must use safe allow-list loading"
     Assert-JarvisVoice ($starter -match "Invoke-ArtemJarvisVoiceStartLifecycle" -and $starter -notmatch "Stop-Process") "Starter must use bounded task-owned lifecycle logic only"
