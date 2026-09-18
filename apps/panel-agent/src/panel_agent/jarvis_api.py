@@ -10,11 +10,11 @@ from fastapi import APIRouter, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .jarvis_core import MAX_JARVIS_TEXT_CODEPOINTS, JarvisIntentEnvelope, classify_jarvis_text
+from .jarvis_navigation import NavigationPath
 from .planning import PlanningProjection
 from .weather import WeatherError, WeatherService
 
 MAX_RESPONSE_CODEPOINTS = 500
-NavigationPath = Literal["/overview", "/calendar", "/tasks", "/reminders", "/settings", "/system", "/coffee-diary"]
 NAVIGATION_BY_INTENT: dict[str, NavigationPath] = {
     "navigation.overview": "/overview", "navigation.calendar": "/calendar",
     "navigation.tasks": "/tasks", "navigation.reminders": "/reminders",

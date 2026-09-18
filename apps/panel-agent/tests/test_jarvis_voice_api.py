@@ -68,3 +68,15 @@ def test_worker_restart_is_server_monotonic_but_old_updates_remain_ignored():
     before = browser.get("/api/v1/jarvis/voice/state").json()["sequence"]
     assert browser.post("/api/v1/jarvis/voice/state", json=starting, headers=headers).status_code == 204
     assert browser.get("/api/v1/jarvis/voice/state").json()["sequence"] == before + 1
+
+
+def test_voice_state_allows_only_canonical_navigation():
+    browser = client()
+    headers = {"X-Jarvis-Voice-Token": "local-only-token"}
+    payload = {"schemaVersion": "jarvis.voice.v1", "enabled": True, "configured": True, "health": "starting", "state": "starting", "sequence": 1,
+               "recognizedText": None, "responseText": None, "safeErrorCode": None, "wakeLatencyMs": None, "sttLatencyMs": None,
+               "navigation": "/settings"}
+    assert browser.post("/api/v1/jarvis/voice/state", json=payload, headers=headers).status_code == 204
+    assert browser.get("/api/v1/jarvis/voice/state").json()["navigation"] == "/settings"
+    for invalid in ("https://example.com", "javascript:alert(1)", "/not-a-real-jarvis-route"):
+        assert browser.post("/api/v1/jarvis/voice/state", json={**payload, "navigation": invalid}, headers=headers).status_code == 422

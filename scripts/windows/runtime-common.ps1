@@ -60,6 +60,150 @@ function Get-ArtemJarvisVoicePaths {
         State = Join-Path $root "state"
         TaskName = "Artem Control Center Jarvis Voice"
         WorkerModule = "jarvis_voice_worker"
+        LauncherScript = Join-Path $Paths.RepoRoot "scripts\windows\run-jarvis-voice.ps1"
+    }
+}
+
+function Get-ArtemJarvisVoiceRuntimeKeys {
+    return @(
+        "PANEL_JARVIS_VOICE_ENABLED", "PANEL_JARVIS_VOICE_BRIDGE_TOKEN",
+        "PANEL_JARVIS_VOICE_PANEL_URL", "PANEL_JARVIS_VOICE_MODEL_ROOT",
+        "PANEL_JARVIS_WAKE_MODEL", "PANEL_JARVIS_STT_MODEL",
+        "PANEL_JARVIS_STT_PROFILE", "PANEL_JARVIS_WAKE_THRESHOLD",
+        "PANEL_JARVIS_MIC_DEVICE"
+    )
+}
+
+function Get-ArtemJarvisVoiceRuntimeEnvironment {
+    param([Parameter(Mandatory)]$Paths)
+
+    # This is intentionally not a generic runtime.env importer. Values are
+    # data, never PowerShell expressions, and only the worker's fixed inputs
+    # cross this process boundary.
+    $allowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($key in (Get-ArtemJarvisVoiceRuntimeKeys)) { [void]$allowed.Add($key) }
+
+    $result = [ordered]@{}
+    if (-not (Test-Path -LiteralPath $Paths.RuntimeEnv)) { return $result }
+    foreach ($line in Get-Content -LiteralPath $Paths.RuntimeEnv) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
+        $separator = $line.IndexOf("=")
+        if ($separator -lt 1) { continue }
+        $key = $line.Substring(0, $separator).Trim()
+        if ($allowed.Contains($key)) {
+            # Keep everything after the first '=' literal, including quotes,
+            # dollar signs and any additional '=' characters.
+            $result[$key] = $line.Substring($separator + 1)
+        }
+    }
+    return $result
+}
+
+function Set-ArtemJarvisVoiceWorkerEnvironment {
+    param([Parameter(Mandatory)]$Paths)
+
+    $values = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $Paths
+    $allowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($key in (Get-ArtemJarvisVoiceRuntimeKeys)) {
+        [void]$allowed.Add($key)
+        Remove-Item -LiteralPath ("Env:" + $key) -ErrorAction SilentlyContinue
+    }
+    # A task can inherit PANEL_* values from its parent account. The voice
+    # child must receive neither those unrelated settings nor any unlisted
+    # secret; its entire PANEL_* boundary is the fixed allow-list above.
+    foreach ($entry in @(Get-ChildItem Env: | Where-Object {
+        $_.Name.StartsWith("PANEL_", [StringComparison]::OrdinalIgnoreCase) -and -not $allowed.Contains($_.Name)
+    })) {
+        Remove-Item -LiteralPath ("Env:" + $entry.Name) -ErrorAction SilentlyContinue
+    }
+    foreach ($entry in $values.GetEnumerator()) {
+        Set-Item -LiteralPath ("Env:" + $entry.Key) -Value ([string]$entry.Value)
+    }
+    return $values
+}
+
+function Get-ArtemJarvisVoiceConfiguration {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [System.Collections.IDictionary]$Environment
+    )
+
+    if (-not $PSBoundParameters.ContainsKey('Environment')) {
+        $Environment = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $Paths
+    }
+    $value = { param([string]$Key) if ($Environment.Contains($Key)) { [string]$Environment[$Key] } else { "" } }
+    $enabled = (& $value "PANEL_JARVIS_VOICE_ENABLED") -eq "true"
+    $token = & $value "PANEL_JARVIS_VOICE_BRIDGE_TOKEN"
+    $panelUrl = & $value "PANEL_JARVIS_VOICE_PANEL_URL"
+    $modelRoot = & $value "PANEL_JARVIS_VOICE_MODEL_ROOT"
+    $wakeModel = & $value "PANEL_JARVIS_WAKE_MODEL"
+    $sttModel = & $value "PANEL_JARVIS_STT_MODEL"
+    $profile = & $value "PANEL_JARVIS_STT_PROFILE"
+    $threshold = & $value "PANEL_JARVIS_WAKE_THRESHOLD"
+    $localPanel = $false
+    try {
+        $uri = [Uri]$panelUrl
+        $localPanel = $uri.Scheme -eq "http" -and $uri.IsLoopback
+    }
+    catch { $localPanel = $false }
+    $thresholdValue = 0.0
+    $validThreshold = [double]::TryParse($threshold, [ref]$thresholdValue) -and $thresholdValue -ge 0.1 -and $thresholdValue -le 0.95
+    $configured = (
+        $enabled -and $token.Length -gt 0 -and $localPanel -and
+        $modelRoot.Length -gt 0 -and $wakeModel.Length -gt 0 -and $sttModel.Length -gt 0 -and
+        $profile -in @("base", "small") -and $validThreshold
+    )
+    $modelsReady = $configured -and
+        (Test-Path -LiteralPath $modelRoot -PathType Container) -and
+        (Test-Path -LiteralPath $wakeModel) -and
+        (Test-Path -LiteralPath $sttModel)
+    return [pscustomobject]@{
+        Enabled = $enabled
+        Configured = $configured
+        ModelsReady = $modelsReady
+        Environment = $Environment
+    }
+}
+
+function Get-ArtemJarvisVoiceWorkers {
+    param([Parameter(Mandatory)]$Voice)
+    return @(Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -ieq "python.exe" -and $_.CommandLine -like "*$($Voice.WorkerModule)*"
+    })
+}
+
+function Get-ArtemJarvisVoiceSessionAlignment {
+    param(
+        [Parameter(Mandatory)][object[]]$Workers,
+        [object]$ConsoleSessionId
+    )
+    if (-not $PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        $ConsoleSessionId = Get-ArtemActiveConsoleSessionId
+    }
+    $sessionIds = New-Object System.Collections.Generic.List[object]
+    $unknown = $false
+    foreach ($worker in $Workers) {
+        try {
+            if ($null -eq $worker.SessionId) { throw "missing" }
+            $sessionIds.Add([int]$worker.SessionId) | Out-Null
+        }
+        catch {
+            $sessionIds.Add($null) | Out-Null
+            $unknown = $true
+        }
+    }
+    $hasConsole = $null -ne $ConsoleSessionId
+    $aligned = (
+        $Workers.Count -eq 1 -and $hasConsole -and [int]$ConsoleSessionId -ne 0 -and
+        -not $unknown -and $sessionIds.Count -eq 1 -and [int]$sessionIds[0] -eq [int]$ConsoleSessionId
+    )
+    return [pscustomobject]@{
+        WorkerCount = $Workers.Count
+        WorkerSessionIds = @($sessionIds)
+        ConsoleSessionId = if ($hasConsole) { [int]$ConsoleSessionId } else { $null }
+        SessionAligned = $aligned
+        HasUnknownSession = $unknown
     }
 }
 

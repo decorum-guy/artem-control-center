@@ -1,4 +1,5 @@
 export type JarvisNavigation = "/overview" | "/calendar" | "/tasks" | "/reminders" | "/settings" | "/system" | "/coffee-diary";
+export const JARVIS_NAVIGATION_PATHS: readonly JarvisNavigation[] = ["/overview", "/calendar", "/tasks", "/reminders", "/settings", "/system", "/coffee-diary"];
 
 export interface JarvisTurnResponse {
   schemaVersion: "jarvis.turn.v1";
@@ -25,9 +26,7 @@ export async function sendJarvisTurn(text: string, signal?: AbortSignal): Promis
     || typeof turn.intentId !== "string"
     || typeof turn.responseText !== "string"
     || turn.responseText.length > 500
-    || (turn.navigation !== null && turn.navigation !== undefined && ![
-      "/overview", "/calendar", "/tasks", "/reminders", "/settings", "/system", "/coffee-diary"
-    ].includes(String(turn.navigation)))
+    || (turn.navigation !== null && turn.navigation !== undefined && !JARVIS_NAVIGATION_PATHS.includes(turn.navigation as JarvisNavigation))
   ) throw new Error("jarvis_turn_invalid");
   return { ...turn, navigation: turn.navigation ?? null } as JarvisTurnResponse;
 }

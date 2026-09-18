@@ -42,7 +42,7 @@ test("a newer ephemeral voice update auto-opens Jarvis without a second overlay"
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({
       schemaVersion: "jarvis.voice.v1", enabled: true, configured: true, health: "healthy",
       state: "listening", sequence: 1, recognizedText: null, responseText: null,
-      safeErrorCode: null, wakeLatencyMs: 10, sttLatencyMs: null
+      safeErrorCode: null, wakeLatencyMs: 10, sttLatencyMs: null, navigation: null
     }) });
   });
   await page.goto("/overview");

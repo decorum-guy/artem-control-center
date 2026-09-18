@@ -5,19 +5,23 @@ $ErrorActionPreference = "Stop"
 $paths = Get-ArtemRuntimePaths
 $voice = Get-ArtemJarvisVoicePaths -Paths $paths
 $task = Get-ScheduledTask -TaskName $voice.TaskName -ErrorAction SilentlyContinue
-$consoleSession = (Get-Process -Name explorer -ErrorAction SilentlyContinue | Select-Object -First 1).SessionId
-$workers = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq "python.exe" -and $_.CommandLine -like "*$($voice.WorkerModule)*" })
-$workerSessionIds = @($workers | ForEach-Object { $_.SessionId })
-$wrongSession = @($workerSessionIds | Where-Object { $_ -eq 0 -or $_ -ne $consoleSession }).Count -gt 0
-$healthy = ($workers.Count -eq 1 -and -not $wrongSession -and $consoleSession -ne 0)
+$configuration = Get-ArtemJarvisVoiceConfiguration -Paths $paths
+$workers = @(Get-ArtemJarvisVoiceWorkers -Voice $voice)
+$alignment = Get-ArtemJarvisVoiceSessionAlignment -Workers $workers
+$installed = $null -ne $task -and (Test-Path -LiteralPath $voice.LauncherScript) -and
+    (Test-Path -LiteralPath (Join-Path $paths.RepoRoot "scripts\windows\runtime-common.ps1")) -and
+    (Test-Path -LiteralPath (Join-Path $voice.Venv "Scripts\python.exe"))
+$healthy = $configuration.Enabled -and $configuration.Configured -and $configuration.ModelsReady -and $alignment.SessionAligned
 $status = [ordered]@{
-    configured = Test-Path -LiteralPath $voice.Config
-    installed = $null -ne $task
+    installed = $installed
+    enabled = $configuration.Enabled
+    configured = $configuration.Configured
+    modelsReady = $configuration.ModelsReady
     taskState = if ($task) { [string]$task.State } else { $null }
-    workerCount = $workers.Count
-    workerSessionIds = $workerSessionIds
-    consoleSessionId = $consoleSession
-    wrongSession = $wrongSession
+    workerCount = $alignment.WorkerCount
+    workerSessionIds = $alignment.WorkerSessionIds
+    consoleSessionId = $alignment.ConsoleSessionId
+    sessionAligned = $alignment.SessionAligned
     healthy = $healthy
 }
 if ($Json) { $status | ConvertTo-Json -Depth 4 } else { $status.GetEnumerator() | ForEach-Object { "{0,-20} {1}" -f $_.Key, $_.Value } }

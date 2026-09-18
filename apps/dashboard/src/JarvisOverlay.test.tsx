@@ -8,7 +8,7 @@ import { JarvisOverlay } from "./JarvisOverlay";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const disabled = { schemaVersion: "jarvis.voice.v1", enabled: false, configured: false, health: "disabled", state: "disabled", sequence: 0,
-  recognizedText: null, responseText: null, safeErrorCode: null, wakeLatencyMs: null, sttLatencyMs: null };
+  recognizedText: null, responseText: null, safeErrorCode: null, wakeLatencyMs: null, sttLatencyMs: null, navigation: null };
 
 describe("JarvisOverlay voice foundation", () => {
   let root: Root | null = null;
@@ -20,7 +20,7 @@ describe("JarvisOverlay voice foundation", () => {
     vi.useRealTimers(); vi.unstubAllGlobals();
   });
 
-  async function mount(voice: () => object) {
+  async function mount(voice: () => object, onNavigate = () => undefined) {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       if (String(input).endsWith("/voice/state")) return Promise.resolve(new Response(JSON.stringify(voice()), { status: 200 }));
       if (String(input).endsWith("/interaction-lock")) return Promise.resolve(new Response(null, { status: 204 }));
@@ -30,7 +30,7 @@ describe("JarvisOverlay voice foundation", () => {
     vi.stubGlobal("fetch", fetchMock);
     host = document.createElement("div"); document.body.append(host); root = createRoot(host);
     await act(async () => {
-      root?.render(<InteractionLockProvider><JarvisOverlay onNavigate={() => undefined} /></InteractionLockProvider>);
+      root?.render(<InteractionLockProvider><JarvisOverlay onNavigate={onNavigate} /></InteractionLockProvider>);
       await Promise.resolve(); await Promise.resolve();
     });
     return fetchMock;
@@ -66,5 +66,16 @@ describe("JarvisOverlay voice foundation", () => {
     expect(host?.textContent).toContain("<img src=x onerror=alert(1)>");
     expect(host?.querySelector("img")).toBeNull();
     expect(host?.textContent).toContain("Готово.");
+  });
+
+  it("passes canonical voice navigation through the existing callback", async () => {
+    vi.useFakeTimers();
+    let voice: object = disabled;
+    const onNavigate = vi.fn();
+    await mount(() => voice, onNavigate);
+    voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "ready", sequence: 1,
+      recognizedText: "Открой настройки", responseText: "Открываю раздел.", navigation: "/settings" };
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    expect(onNavigate).toHaveBeenCalledWith("/settings");
   });
 });

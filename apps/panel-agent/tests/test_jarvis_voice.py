@@ -68,12 +68,13 @@ class Stt:
 
 
 class Turns:
-    def __init__(self) -> None:
+    def __init__(self, navigation: str | None = None) -> None:
         self.values: list[str] = []
+        self.navigation = navigation
 
     async def turn(self, text: str) -> VoiceTurnResult:
         self.values.append(text)
-        return VoiceTurnResult("Сейчас 12:34.")
+        return VoiceTurnResult("Сейчас 12:34.", self.navigation)  # type: ignore[arg-type]
 
 
 class Publisher:
@@ -102,8 +103,8 @@ class Clock:
 
 
 def pipeline(*, wake_at: int | None = 1, vad_speech: set[int] | None = None,
-             stt: Stt | None = None, lock: Lock | None = None):
-    publisher, turns = Publisher(), Turns()
+             stt: Stt | None = None, lock: Lock | None = None, navigation: str | None = None):
+    publisher, turns = Publisher(), Turns(navigation)
     subject = VoicePipeline(
         config=VoiceRuntimeConfig(enabled=True, configured=True, trailing_silence_ms=160, cooldown_ms=1),
         wake=Wake(wake_at), vad=Vad(vad_speech or {1}), recognizer=stt or Stt(), turns=turns,
@@ -139,6 +140,18 @@ def test_wake_vad_endpoint_stt_and_one_canonical_turn():
     ]
     ready = next(item for item in publisher.snapshots if item.state is VoiceState.READY)
     assert ready.recognized_text == "Который час?" and ready.response_text == "Сейчас 12:34."
+
+
+def test_canonical_navigation_survives_voice_pipeline_and_arbitrary_paths_do_not():
+    accepted, accepted_updates, _ = pipeline(navigation="/settings")
+    asyncio.run(accepted.run(Audio([FRAME] * 4)))
+    ready = next(item for item in accepted_updates.snapshots if item.state is VoiceState.READY)
+    assert ready.navigation == "/settings"
+
+    rejected, rejected_updates, _ = pipeline(navigation="javascript:alert(1)")
+    asyncio.run(rejected.run(Audio([FRAME] * 4)))
+    ready = next(item for item in rejected_updates.snapshots if item.state is VoiceState.READY)
+    assert ready.navigation is None
 
 
 def test_no_wake_does_not_start_stt_or_turn():

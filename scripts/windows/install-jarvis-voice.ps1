@@ -14,7 +14,11 @@ if (-not (Test-Path -LiteralPath $python)) {
     throw "Jarvis voice venv is not provisioned. Install its dedicated runtime before registering the task."
 }
 $currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$action = New-ScheduledTaskAction -Execute $python -Argument "-m $($voice.WorkerModule)" -WorkingDirectory $paths.RepoRoot
+if (-not (Test-Path -LiteralPath $voice.LauncherScript)) {
+    throw "Jarvis voice launcher is missing from this checkout."
+}
+$powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+$action = New-ScheduledTaskAction -Execute $powershell -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$($voice.LauncherScript)`"" -WorkingDirectory $paths.RepoRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUserSid
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 $principal = New-ScheduledTaskPrincipal -UserId $currentUserSid -LogonType Interactive -RunLevel Limited

@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
 
+from .jarvis_navigation import NavigationPath, is_jarvis_navigation
+
 
 SAMPLE_RATE_HZ = 16_000
 PCM_BYTES_PER_SECOND = SAMPLE_RATE_HZ * 2  # signed 16-bit, mono
@@ -85,6 +87,7 @@ class VoiceSnapshot:
     safe_error_code: str | None = None
     wake_latency_ms: int | None = None
     stt_latency_ms: int | None = None
+    navigation: NavigationPath | None = None
 
 
 class AudioInput(Protocol):
@@ -124,7 +127,7 @@ class Clock(Protocol):
 @dataclass(frozen=True)
 class VoiceTurnResult:
     response_text: str
-    navigation: str | None = None
+    navigation: NavigationPath | None = None
 
 
 class BoundedPcmBuffer:
@@ -195,7 +198,7 @@ class VoiceStateMachine:
     def transition(self, state: VoiceState, *, health: VoiceHealth | None = None,
                    recognized_text: str | None = None, response_text: str | None = None,
                    safe_error_code: str | None = None, wake_latency_ms: int | None = None,
-                   stt_latency_ms: int | None = None) -> VoiceSnapshot | None:
+                   stt_latency_ms: int | None = None, navigation: NavigationPath | None = None) -> VoiceSnapshot | None:
         if not is_legal_voice_transition(self.state, state):
             return None
         if safe_error_code is not None and safe_error_code not in SAFE_ERROR_CODES:
@@ -209,7 +212,7 @@ class VoiceStateMachine:
             health=self.health, state=state, sequence=self.sequence,
             recognized_text=recognized_text, response_text=response_text,
             safe_error_code=safe_error_code, wake_latency_ms=wake_latency_ms,
-            stt_latency_ms=stt_latency_ms,
+            stt_latency_ms=stt_latency_ms, navigation=navigation,
         )
 
 
@@ -317,9 +320,12 @@ class VoicePipeline:
         except Exception:
             await self._failure("turn_failed")
             return
+        # Adapters are an external boundary even on loopback: only preserve a
+        # route that belongs to Jarvis A1's canonical allow-list.
+        navigation = result.navigation if is_jarvis_navigation(result.navigation) else None
         await self._transition(VoiceState.READY, recognized_text=text, response_text=result.response_text,
                                wake_latency_ms=None if wake_at is None else max(0, started - wake_at),
-                               stt_latency_ms=stt_latency)
+                               stt_latency_ms=stt_latency, navigation=navigation)
         await self._cooldown()
 
     async def _cooldown(self) -> None:

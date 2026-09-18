@@ -18,6 +18,8 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
   const [state, setState] = useState<OverlayState>("idle");
   const inputRef = useRef<HTMLInputElement>(null);
   const voiceSequence = useRef(-1);
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
 
   useEffect(() => {
     if (!open || locked) return;
@@ -51,6 +53,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
         setOpen(true);
         if (voice.recognizedText) append({ role: "owner", text: voice.recognizedText });
         if (voice.responseText) append({ role: "jarvis", text: voice.responseText });
+        if (voice.navigation) onNavigateRef.current(voice.navigation);
         setState("ready");
         return;
       }

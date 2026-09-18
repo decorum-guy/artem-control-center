@@ -15,6 +15,7 @@ from fastapi import APIRouter, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from .jarvis_api import JarvisTurnResponse, JarvisTurnService
+from .jarvis_navigation import NavigationPath
 from .jarvis_core import MAX_JARVIS_TEXT_CODEPOINTS
 from .jarvis_voice import VoiceHealth, VoiceSnapshot, VoiceState, is_legal_voice_transition
 
@@ -37,6 +38,7 @@ class VoiceStateResponse(BaseModel):
     ] | None = Field(default=None, alias="safeErrorCode")
     wake_latency_ms: int | None = Field(default=None, ge=0, alias="wakeLatencyMs")
     stt_latency_ms: int | None = Field(default=None, ge=0, alias="sttLatencyMs")
+    navigation: NavigationPath | None = None
 
 
 class VoiceStateUpdate(VoiceStateResponse):
@@ -98,7 +100,7 @@ class VoiceBridgeState:
             health=VoiceHealth(update.health), state=next_state, sequence=self._snapshot.sequence + 1,
             recognized_text=update.recognized_text, response_text=update.response_text,
             safe_error_code=update.safe_error_code, wake_latency_ms=update.wake_latency_ms,
-            stt_latency_ms=update.stt_latency_ms,
+            stt_latency_ms=update.stt_latency_ms, navigation=update.navigation,
         )
         return True
 

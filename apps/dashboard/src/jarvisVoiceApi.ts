@@ -1,3 +1,5 @@
+import { JARVIS_NAVIGATION_PATHS, type JarvisNavigation } from "./jarvisApi";
+
 export type JarvisVoiceState = "disabled" | "starting" | "idle" | "wake_detected" | "listening" | "transcribing" | "submitting" | "ready" | "error" | "cooldown";
 export type JarvisVoiceHealth = "disabled" | "unconfigured" | "starting" | "healthy" | "degraded" | "unavailable";
 
@@ -13,6 +15,7 @@ export interface JarvisVoiceSnapshot {
   safeErrorCode: string | null;
   wakeLatencyMs: number | null;
   sttLatencyMs: number | null;
+  navigation: JarvisNavigation | null;
 }
 
 const states = new Set<JarvisVoiceState>(["disabled", "starting", "idle", "wake_detected", "listening", "transcribing", "submitting", "ready", "error", "cooldown"]);
@@ -28,6 +31,7 @@ export function parseJarvisVoiceSnapshot(value: unknown): JarvisVoiceSnapshot | 
   const numeric = (field: string) => item[field] === null || (typeof item[field] === "number" && Number.isFinite(item[field]) && item[field] >= 0);
   if (!numeric("wakeLatencyMs") || !numeric("sttLatencyMs") || (item.safeErrorCode !== null && typeof item.safeErrorCode !== "string")) return null;
   if ((item.recognizedText !== null && typeof item.recognizedText !== "string") || (item.responseText !== null && typeof item.responseText !== "string")) return null;
+  if (item.navigation !== null && !JARVIS_NAVIGATION_PATHS.includes(item.navigation as JarvisNavigation)) return null;
   return item as unknown as JarvisVoiceSnapshot;
 }
 

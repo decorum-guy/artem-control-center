@@ -12,6 +12,7 @@ import httpx
 from panel_agent.jarvis_voice import (
     AudioInput, JarvisTurnClient, VoiceSnapshot, VoiceStatePublisher, VoiceTurnResult,
 )
+from panel_agent.jarvis_navigation import is_jarvis_navigation
 
 
 class AdapterUnavailable(RuntimeError):
@@ -41,7 +42,7 @@ class HttpVoiceStatePublisher(VoiceStatePublisher):
             "state": snapshot.state.value, "sequence": snapshot.sequence,
             "recognizedText": snapshot.recognized_text, "responseText": snapshot.response_text,
             "safeErrorCode": snapshot.safe_error_code, "wakeLatencyMs": snapshot.wake_latency_ms,
-            "sttLatencyMs": snapshot.stt_latency_ms,
+            "sttLatencyMs": snapshot.stt_latency_ms, "navigation": snapshot.navigation,
         }
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.post(f"{self._bridge.base_url}/api/v1/jarvis/voice/state",
@@ -59,7 +60,10 @@ class HttpJarvisTurnClient(JarvisTurnClient):
                                          headers=self._bridge.headers, json={"text": text})
             response.raise_for_status()
         value = response.json()
-        return VoiceTurnResult(response_text=str(value["responseText"]), navigation=value.get("navigation"))
+        navigation = value.get("navigation")
+        if navigation is not None and not is_jarvis_navigation(navigation):
+            raise ValueError("jarvis_voice_turn_invalid_navigation")
+        return VoiceTurnResult(response_text=str(value["responseText"]), navigation=navigation)
 
 
 class MonotonicClock:
