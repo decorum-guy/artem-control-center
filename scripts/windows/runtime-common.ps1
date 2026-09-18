@@ -208,7 +208,10 @@ function Get-ArtemJarvisVoiceSessionAlignment {
     )
     return [pscustomobject]@{
         WorkerCount = $Workers.Count
-        WorkerSessionIds = @($sessionIds)
+        # Materialize the generic list before constructing the PSCustomObject.
+        # Windows PowerShell 5.1 can throw "Argument types do not match" when
+        # a generic List[object] is embedded through the array-subexpression.
+        WorkerSessionIds = [object[]]$sessionIds.ToArray()
         ConsoleSessionId = if ($hasConsole) { [int]$ConsoleSessionId } else { $null }
         SessionAligned = $aligned
         HasUnknownSession = $unknown
