@@ -1,0 +1,8 @@
+# Dedicated optional Windows voice-worker environment.  It is intentionally not
+# part of apps/panel-agent/pyproject.toml, and CI never installs its models.
+httpx==0.28.1
+numpy==2.2.6
+sounddevice==0.5.3
+openwakeword==0.6.0
+webrtcvad-wheels==2.0.14
+faster-whisper==1.2.1
