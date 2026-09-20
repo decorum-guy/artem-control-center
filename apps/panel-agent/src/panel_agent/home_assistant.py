@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,12 @@ WATCHED_ENTITIES = (
     PSU_2_ENTITY,
 )
 
+LOGGER = logging.getLogger(__name__)
+_STATE_CHANGED_SUBSCRIPTION_ID = 1
+_YANDEX_INTENT_SUBSCRIPTION_ID = 2
+_MAX_PRE_ACK_EVENTS = 16
+YandexIntentHandler = Callable[[dict[str, Any]], Awaitable[None]]
+
 
 class HomeAssistantAdapter:
     def __init__(
@@ -72,6 +79,7 @@ class HomeAssistantAdapter:
         self._stale_task: Optional[asyncio.Task[None]] = None
         self._panel_mode = panel_mode
         self._on_change = on_change
+        self._yandex_intent_handler: YandexIntentHandler | None = None
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._load_cache()
 
@@ -84,6 +92,30 @@ class HomeAssistantAdapter:
         callback: Callable[[], Awaitable[None]] | None,
     ) -> None:
         self._on_change = callback
+
+    def set_yandex_intent_handler(
+        self,
+        handler: YandexIntentHandler | None,
+    ) -> None:
+        """Install the narrow handler for HA's yandex_dialogs ingress."""
+
+        self._yandex_intent_handler = handler
+
+    async def respond_to_yandex_intent(self, text: str) -> None:
+        """Send one fixed yandex_dialogs response event to Home Assistant."""
+
+        async with httpx.AsyncClient(
+            base_url=self._settings.ha_url,
+            headers={"Authorization": f"Bearer {self._settings.ha_token}"},
+            timeout=5,
+            follow_redirects=False,
+            transport=self._transport,
+        ) as client:
+            response = await client.post(
+                "/api/events/yandex_intent_response",
+                json={"text": text, "end_session": True},
+            )
+            response.raise_for_status()
 
     async def start(self) -> None:
         if not self.configured:
@@ -631,38 +663,8 @@ class HomeAssistantAdapter:
                     auth = json.loads(await socket.recv())
                     if auth.get("type") != "auth_ok":
                         raise ValueError("Home Assistant WebSocket authentication failed")
-                    await socket.send(
-                        json.dumps(
-                            {
-                                "id": 1,
-                                "type": "subscribe_events",
-                                "event_type": "state_changed",
-                            }
-                        )
-                    )
-                    subscription = json.loads(await socket.recv())
-                    if (
-                        subscription.get("type") != "result"
-                        or subscription.get("id") != 1
-                        or not subscription.get("success")
-                    ):
-                        raise ValueError(
-                            "Home Assistant WebSocket subscription failed"
-                        )
-                    await self._mark_websocket_connected()
-                    try:
-                        await self.fetch_initial_snapshot()
-                    except (httpx.HTTPError, ValueError):
-                        await self._mark_cached_or_unavailable()
+                    await self._subscribe_socket(socket)
                     delay = 1
-                    async for raw in socket:
-                        message = json.loads(raw)
-                        event = message.get("event", {})
-                        data = event.get("data", {})
-                        entity_id = data.get("entity_id")
-                        new_state = data.get("new_state")
-                        if entity_id in WATCHED_ENTITIES and isinstance(new_state, dict):
-                            await self.apply_state_changed(entity_id, new_state)
                     raise ConnectionError("Home Assistant WebSocket closed")
             except asyncio.CancelledError:
                 raise
@@ -670,6 +672,90 @@ class HomeAssistantAdapter:
                 await self._mark_websocket_disconnected()
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30)
+
+    async def _subscribe_socket(self, socket: Any) -> None:
+        """Subscribe one authenticated HA socket to its fixed event set."""
+
+        for subscription_id, event_type in (
+            (_STATE_CHANGED_SUBSCRIPTION_ID, "state_changed"),
+            (_YANDEX_INTENT_SUBSCRIPTION_ID, "yandex_intent"),
+        ):
+            await socket.send(
+                json.dumps(
+                    {
+                        "id": subscription_id,
+                        "type": "subscribe_events",
+                        "event_type": event_type,
+                    }
+                )
+            )
+
+        pending_subscription_ids = {
+            _STATE_CHANGED_SUBSCRIPTION_ID,
+            _YANDEX_INTENT_SUBSCRIPTION_ID,
+        }
+        pre_ack_events: list[dict[str, Any]] = []
+        while pending_subscription_ids:
+            try:
+                message = json.loads(await socket.recv())
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(message, dict):
+                continue
+            if message.get("type") == "result":
+                subscription_id = message.get("id")
+                if subscription_id not in pending_subscription_ids:
+                    raise ValueError("Unexpected Home Assistant WebSocket result")
+                if message.get("success") is not True:
+                    raise ValueError("Home Assistant WebSocket subscription failed")
+                pending_subscription_ids.remove(subscription_id)
+                continue
+            if message.get("type") == "event":
+                if len(pre_ack_events) >= _MAX_PRE_ACK_EVENTS:
+                    raise ValueError("Home Assistant WebSocket setup event limit exceeded")
+                pre_ack_events.append(message)
+        await self._mark_websocket_connected()
+        try:
+            await self.fetch_initial_snapshot()
+        except (httpx.HTTPError, ValueError):
+            await self._mark_cached_or_unavailable()
+        for message in pre_ack_events:
+            await self._handle_websocket_event(message)
+        async for raw in socket:
+            try:
+                message = json.loads(raw)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            await self._handle_websocket_event(message)
+
+    async def _handle_websocket_event(self, message: Any) -> None:
+        if not isinstance(message, dict):
+            return
+        event = message.get("event")
+        if not isinstance(event, dict):
+            return
+        event_type = event.get("event_type")
+        data = event.get("data")
+        if not isinstance(data, dict):
+            return
+        if event_type == "state_changed":
+            entity_id = data.get("entity_id")
+            new_state = data.get("new_state")
+            if entity_id in WATCHED_ENTITIES and isinstance(new_state, dict):
+                await self.apply_state_changed(entity_id, new_state)
+            return
+        if event_type == "yandex_intent":
+            await self._dispatch_yandex_intent(data)
+
+    async def _dispatch_yandex_intent(self, data: dict[str, Any]) -> None:
+        handler = self._yandex_intent_handler
+        if handler is None:
+            return
+        try:
+            await handler(dict(data))
+        except Exception:
+            # Never include owner speech or the raw HA event in logs.
+            LOGGER.warning("Yandex intent handler failed")
 
     async def _watch_staleness(self) -> None:
         was_stale = self._is_stale()

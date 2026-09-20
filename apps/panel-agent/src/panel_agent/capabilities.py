@@ -95,6 +95,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("avalar_stage_deploy", "Развёртывание AVALAR Stage", "Инфраструктурное разрешение развёртывания Stage.", "Инфраструктура", "PANEL_AVALAR_STAGE_DEPLOY_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_main_deploy", "Развёртывание AVALAR Main", "Инфраструктурное разрешение развёртывания Main.", "Инфраструктура", "PANEL_AVALAR_MAIN_DEPLOY_ENABLED", "immediate", "none"),
     CapabilityDefinition("rog_g703", "Инфраструктура ROG G703", "Управление зарегистрированной инфраструктурой ROG.", "Инфраструктура", "PANEL_ROG_G703_ENABLED", "immediate", "none"),
+    CapabilityDefinition("rog_g703_alice", "Голосовое управление ASUS", "Приём закрытых команд ASUS из приватного навыка Алисы.", "Инфраструктура", "PANEL_ROG_G703_ALICE_ENABLED", "immediate", "none"),
     CapabilityDefinition("kiosk_controls", "Управление киоском", "Разрешение владельцу скрывать или останавливать киоск панели.", "Системные действия", "PANEL_KIOSK_CONTROLS_ENABLED", "immediate", "none"),
     CapabilityDefinition("panel_update_controls", "Обновление панели", "Разрешение проверять и устанавливать обновление самой панели через фиксированный системный механизм.", "Системные действия", "PANEL_UPDATE_CONTROLS_ENABLED", "immediate", "none"),
 )

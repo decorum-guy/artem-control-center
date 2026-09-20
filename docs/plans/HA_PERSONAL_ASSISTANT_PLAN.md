@@ -16,6 +16,27 @@ The first implementation belongs in `AliceTG_Bot`, with Home Assistant as the Al
 
 Home Assistant receives `yandex_intent`, forwards a narrow structured command to Planning, and returns `yandex_intent_response`. `AliceTG_Bot` owns persistence, parsing, scheduling, delivery, Telegram interaction, audit, and the internal API. This is a module boundary inside the existing bot first, not a new deployable service.
 
+### ASUS ROG voice-routing addendum (issue #255)
+
+The ASUS power-control slice is deliberately outside Planning and does not add
+an AliceTG Bot dependency. Its fixed route is `yandex_intent` → Panel Agent
+closed ASUS parser → the already-created `RogG703ActionExecutor` → the existing
+WOL/Sleep/Hibernate implementation. The bridge is default-off behind
+`PANEL_ROG_G703_ALICE_ENABLED` and returns through the fixed HA
+`yandex_intent_response` event.
+
+The owner invokes the private skill with, for example:
+
+- `Алиса, попроси домашнего помощника включить ASUS`
+- `Алиса, попроси домашнего помощника перевести ASUS в сон`
+- `Алиса, попроси домашнего помощника отправить ASUS в гибернацию`
+
+Here `домашний помощник` is the Yandex private-skill name. YandexDialogs
+strips that invocation prefix before Panel Agent matches the cleaned command,
+so the parser accepts only its bounded ASUS phrases and never the invocation
+words themselves. This is not a generic HA event/service proxy and does not
+permit a spoken host, entity, action ID, shell command, or arbitrary operation.
+
 ```mermaid
 flowchart LR
   Alice["Alice / Домашний помощник"] --> YD["HA yandex_dialogs adapter"]

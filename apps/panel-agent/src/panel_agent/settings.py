@@ -46,6 +46,7 @@ class IntegrationSettings:
     avalar_stage_deploy_enabled: bool = False
     avalar_main_deploy_enabled: bool = False
     rog_g703_enabled: bool = False
+    rog_g703_alice_enabled: bool = False
     rog_g703_target_id: str = "rog_g703gi"
     rog_g703_mac: str = ""
     rog_g703_broadcast_address: str = "255.255.255.255"
@@ -210,6 +211,10 @@ class IntegrationSettings:
                 False,
             ),
             rog_g703_enabled=_bool_env("PANEL_ROG_G703_ENABLED", False),
+            rog_g703_alice_enabled=_bool_env(
+                "PANEL_ROG_G703_ALICE_ENABLED",
+                False,
+            ),
             rog_g703_target_id=os.getenv(
                 "PANEL_ROG_G703_TARGET_ID",
                 "rog_g703gi",

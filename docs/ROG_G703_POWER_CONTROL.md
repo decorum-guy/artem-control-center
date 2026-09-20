@@ -61,6 +61,60 @@ The MAC, companion address, and secret above are placeholders only. Do not commi
 
 The existing global `PANEL_WRITES_ENABLED` gate and Panel Agent access profile still apply. Sleep and Hibernate use the same `standard` risk/access class. Keep that gate off during setup and enable it only when the broader write policy is intentionally enabled; the ROG feature does not bypass it.
 
+## Private Yandex Alice voice bridge
+
+The optional voice bridge is disabled by default:
+
+```dotenv
+PANEL_ROG_G703_ALICE_ENABLED=false
+```
+
+When deliberately enabled together with the existing ROG and write gates, it
+uses the already authenticated Samsung → Home Assistant connection. Its path
+is fixed:
+
+```text
+Alice -> private skill «домашний помощник» -> HA yandex_dialogs
+      -> yandex_intent -> Panel Agent closed ASUS parser
+      -> existing RogG703ActionExecutor -> existing WOL / selected power backend
+```
+
+For example, the owner may say:
+
+- `Алиса, попроси домашнего помощника включить ASUS`
+- `Алиса, попроси домашнего помощника перевести ASUS в сон`
+- `Алиса, попроси домашнего помощника отправить ASUS в гибернацию`
+
+`домашний помощник` is the private skill invocation name. YandexDialogs
+removes `попроси домашнего помощника` / `скажи домашнему помощнику` before the
+Panel Agent sees the event, so those invocation words are intentionally not
+part of the parser grammar.
+
+The parser accepts only these normalized commands (trimmed, case-folded, and
+with repeated whitespace collapsed). Before normalization it rejects any
+`command` or fallback `text` longer than 256 Unicode code points; it never
+truncates an oversized command or falls back from one to `text`:
+
+| Action | Accepted command text |
+| --- | --- |
+| Wake | `включить асус`, `включи асус`, `разбудить асус`, `разбуди асус` |
+| Sleep | `перевести асус в сон`, `переведи асус в сон`, `отправить асус в сон`, `отправь асус в сон` |
+| Hibernate | `перевести асус в гибернацию`, `переведи асус в гибернацию`, `отправить асус в гибернацию`, `отправь асус в гибернацию` |
+
+It maps those phrases only to the existing typed action IDs
+`system.rog_g703.wake`, `system.rog_g703.sleep`, and
+`system.rog_g703.hibernate`. It does not accept a host, MAC, entity, service,
+shell command, action ID, or arbitrary device name. Unknown `yandex_intent`
+traffic is left for its existing owners and receives no competing response.
+
+After the shared executor accepts an action, Panel Agent posts the fixed
+`yandex_intent_response` event with `end_session: true`; it answers only that
+the transition started. Wake, Sleep, and Hibernate verification remains the
+executor's existing asynchronous lifecycle, so no Alice response claims a
+physical state before it is verified. This adds no AliceTG Bot route, public
+endpoint, reverse tunnel, generic HA event/service proxy, or second ROG device
+or executor.
+
 The Panel Agent sends one fixed \`Authorization: Bearer ...\` header to the fixed origin and fixed routes. It does not follow redirects, accepts only bounded responses, and never logs the secret. The default transport is HTTP on the trusted home LAN; HTTP is not encrypted and must not be exposed to the public internet. The bootstrap firewall rule is LAN-scoped and can be narrowed to an explicit IPv4/CIDR.
 
 The HTTP companion URL and secret are required only when \`PANEL_ROG_G703_TRANSPORT=http\` (the default). SSH settings are ignored in HTTP mode.
