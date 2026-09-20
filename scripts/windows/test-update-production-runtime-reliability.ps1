@@ -110,10 +110,10 @@ try {
     $targetHead = "b" * 40
     $requestId = "0" * 24
 
-    # A. Present values, including an empty string, survive successful staging
-    # and are the exact values a continuation would inherit.
+    # A. Non-empty owner values are representable by the production Windows
+    # PowerShell process environment and survive successful staging exactly.
     $present = @{
-        PANEL_RUNTIME_VENV = ""
+        PANEL_RUNTIME_VENV = "owner-runtime-venv"
         PANEL_AGENT_MODE = "production"
         PANEL_WRITES_ENABLED = "true"
         PANEL_COFFEE_TIMING_WRITES_ENABLED = "owner-timing"
