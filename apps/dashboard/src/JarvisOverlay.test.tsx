@@ -78,4 +78,18 @@ describe("JarvisOverlay voice foundation", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(750); });
     expect(onNavigate).toHaveBeenCalledWith("/settings");
   });
+
+  it("renders speaking without emitting a duplicate message before READY", async () => {
+    vi.useFakeTimers();
+    let voice: object = disabled;
+    await mount(() => voice);
+    voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "speaking", sequence: 1,
+      recognizedText: "Открой настройки", responseText: "Открываю раздел." };
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    expect(host?.textContent).toContain("Говорю");
+    expect(host?.textContent).not.toContain("Открываю раздел.");
+    voice = { ...voice, state: "ready", sequence: 2 };
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    expect(host?.textContent).toContain("Открываю раздел.");
+  });
 });

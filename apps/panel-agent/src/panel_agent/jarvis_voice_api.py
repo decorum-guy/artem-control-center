@@ -26,7 +26,7 @@ class VoiceStateResponse(BaseModel):
     enabled: bool
     configured: bool
     health: Literal["disabled", "unconfigured", "starting", "healthy", "degraded", "unavailable"]
-    state: Literal["disabled", "starting", "idle", "wake_detected", "listening", "transcribing", "submitting", "ready", "error", "cooldown"]
+    state: Literal["disabled", "starting", "idle", "wake_detected", "listening", "transcribing", "submitting", "speaking", "ready", "error", "cooldown"]
     sequence: int = Field(ge=0)
     recognized_text: str | None = Field(default=None, max_length=512, alias="recognizedText")
     response_text: str | None = Field(default=None, max_length=500, alias="responseText")
@@ -34,7 +34,7 @@ class VoiceStateResponse(BaseModel):
         "microphone_unavailable", "wake_dependency_missing", "wake_model_missing",
         "stt_dependency_missing", "stt_model_missing", "audio_stream_failed",
         "stt_failed", "stt_timeout", "turn_failed", "empty_transcript",
-        "interaction_locked", "wrong_session", "cancelled",
+        "interaction_locked", "wrong_session", "cancelled", "tts_failed",
     ] | None = Field(default=None, alias="safeErrorCode")
     wake_latency_ms: int | None = Field(default=None, ge=0, alias="wakeLatencyMs")
     stt_latency_ms: int | None = Field(default=None, ge=0, alias="sttLatencyMs")

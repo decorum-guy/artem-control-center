@@ -80,3 +80,21 @@ def test_voice_state_allows_only_canonical_navigation():
     assert browser.get("/api/v1/jarvis/voice/state").json()["navigation"] == "/settings"
     for invalid in ("https://example.com", "javascript:alert(1)", "/not-a-real-jarvis-route"):
         assert browser.post("/api/v1/jarvis/voice/state", json={**payload, "navigation": invalid}, headers=headers).status_code == 422
+
+
+def test_speaking_and_tts_failed_are_narrow_legal_worker_updates():
+    browser = client()
+    headers = {"X-Jarvis-Voice-Token": "local-only-token"}
+    starting = {"schemaVersion": "jarvis.voice.v1", "enabled": True, "configured": True, "health": "starting", "state": "starting", "sequence": 1,
+                "recognizedText": None, "responseText": None, "safeErrorCode": None, "wakeLatencyMs": None, "sttLatencyMs": None}
+    states = [("idle", "healthy"), ("wake_detected", "healthy"), ("listening", "healthy"),
+              ("transcribing", "healthy"), ("submitting", "healthy"), ("speaking", "healthy")]
+    assert browser.post("/api/v1/jarvis/voice/state", json=starting, headers=headers).status_code == 204
+    for sequence, (state, health) in enumerate(states, start=2):
+        assert browser.post("/api/v1/jarvis/voice/state", json={**starting, "state": state, "health": health, "sequence": sequence}, headers=headers).status_code == 204
+    ready = {**starting, "state": "ready", "health": "degraded", "sequence": 8,
+             "responseText": "Готово.", "navigation": "/settings", "safeErrorCode": "tts_failed"}
+    assert browser.post("/api/v1/jarvis/voice/state", json=ready, headers=headers).status_code == 204
+    response = browser.get("/api/v1/jarvis/voice/state").json()
+    assert response["state"] == "ready" and response["safeErrorCode"] == "tts_failed"
+    assert response["responseText"] == "Готово." and response["navigation"] == "/settings"

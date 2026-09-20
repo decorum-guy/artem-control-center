@@ -12,6 +12,7 @@ function New-TestVoiceWorker {
 }
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ("artem-jarvis-voice-{0}" -f [guid]::NewGuid())
+$originalFishApiKey = [Environment]::GetEnvironmentVariable("FISH_API_KEY", "Process")
 try {
     $runtime = Join-Path $root "runtime"
     $models = Join-Path $root "models"
@@ -32,6 +33,11 @@ PANEL_JARVIS_STT_MODEL=__STT_MODEL_VALUE__
 PANEL_JARVIS_STT_PROFILE=base
 PANEL_JARVIS_WAKE_THRESHOLD=0.5
 PANEL_JARVIS_MIC_DEVICE=
+PANEL_JARVIS_TTS_ENABLED=false
+PANEL_JARVIS_TTS_MODEL=s2.1-pro-free
+PANEL_JARVIS_TTS_REFERENCE_ID=owner-configured-reference
+PANEL_JARVIS_TTS_LATENCY=balanced
+FISH_API_KEY=runtime-env-secret-must-not-propagate
 PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
 '@
     $runtimeEnvContents.Replace("__VOICE_MODEL_ROOT_VALUE__", $models).Replace("__WAKE_MODEL_VALUE__", $wake).Replace("__STT_MODEL_VALUE__", $stt) |
@@ -39,9 +45,10 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     $paths = [pscustomobject]@{ RuntimeEnv = $runtimeEnv }
 
     $allowed = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $paths
-    Assert-JarvisVoice ($allowed.Count -eq 9) "Only the nine explicit Jarvis voice keys may propagate"
+    Assert-JarvisVoice ($allowed.Count -eq 13) "Only the thirteen explicit non-secret Jarvis voice keys may propagate"
     Assert-JarvisVoice ($allowed["PANEL_JARVIS_VOICE_BRIDGE_TOKEN"] -ceq "bridge=token`$literal") "Token must remain a literal value after the first equals sign"
     Assert-JarvisVoice (-not $allowed.Contains("PANEL_UNRELATED_SHOULD_NOT_PROPAGATE")) "Unrelated PANEL variables must not propagate"
+    Assert-JarvisVoice (-not $allowed.Contains("FISH_API_KEY")) "FISH_API_KEY in runtime.env must never be imported"
     $configuration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $allowed
     Assert-JarvisVoice ($configuration.Enabled -and $configuration.Configured -and $configuration.ModelsReady) "Complete valid local configuration must be ready"
 
@@ -49,6 +56,7 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     foreach ($key in $allowed.Keys) { $disabled[$key] = $allowed[$key] }
     $disabled["PANEL_JARVIS_VOICE_ENABLED"] = "false"
     Assert-JarvisVoice (-not (Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $disabled).Enabled) "Disabled configuration must not start audio"
+    Assert-JarvisVoice (-not (Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $disabled).TtsEnabled) "Disabled voice configuration must keep TTS disabled"
     $missingModels = [ordered]@{}
     foreach ($key in $allowed.Keys) { $missingModels[$key] = $allowed[$key] }
     $missingModels["PANEL_JARVIS_STT_MODEL"] = (Join-Path $root "missing-model")
@@ -57,6 +65,17 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     $emptyConfigPaths = [pscustomobject]@{ RuntimeEnv = (Join-Path $root "empty.runtime.env") }
     New-Item -ItemType Directory -Force -Path (Join-Path $root "empty-config-directory") | Out-Null
     Assert-JarvisVoice (-not (Get-ArtemJarvisVoiceConfiguration -Paths $emptyConfigPaths).Configured) "An empty config directory is not configuration"
+
+    $env:FISH_API_KEY = "external-fish-key-fixture"
+    $ttsEnabled = [ordered]@{}
+    foreach ($key in $allowed.Keys) { $ttsEnabled[$key] = $allowed[$key] }
+    $ttsEnabled["PANEL_JARVIS_TTS_ENABLED"] = "true"
+    $ttsConfiguration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $ttsEnabled
+    Assert-JarvisVoice ($ttsConfiguration.TtsEnabled -and $ttsConfiguration.TtsConfigured -and $ttsConfiguration.Configured) "Valid external Fish secret and closed TTS values must configure output"
+    Remove-Item -LiteralPath "Env:FISH_API_KEY" -ErrorAction SilentlyContinue
+    $missingFishConfiguration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $ttsEnabled
+    Assert-JarvisVoice (-not $missingFishConfiguration.TtsConfigured -and -not $missingFishConfiguration.Configured -and $missingFishConfiguration.ModelsReady) "Missing Fish secret must fail TTS closed without changing local model readiness"
+    $env:FISH_API_KEY = "external-fish-key-fixture"
 
     Set-Content -LiteralPath $emptyConfigPaths.RuntimeEnv -Value "PANEL_JARVIS_VOICE_ENABLED" -Encoding ASCII
     $malformedRejected = $false
@@ -118,7 +137,7 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     }
     $env:JARVIS_VOICE_EXPECTED_JSON = $expectedNonEmpty | ConvertTo-Json -Compress
     $null = Set-ArtemJarvisVoiceWorkerEnvironment -Paths $paths
-    & $python -c "import json,os; expected=json.loads(os.environ.pop('JARVIS_VOICE_EXPECTED_JSON')); import jarvis_voice_worker; import panel_agent.jarvis_voice; assert all(key in os.environ and os.environ[key] == value for key,value in expected.items()); assert 'PANEL_JARVIS_MIC_DEVICE' not in os.environ; assert 'PANEL_UNRELATED_SHOULD_NOT_PROPAGATE' not in os.environ"
+    & $python -c "import json,os; expected=json.loads(os.environ.pop('JARVIS_VOICE_EXPECTED_JSON')); import jarvis_voice_worker; import panel_agent.jarvis_voice; assert all(key in os.environ and os.environ[key] == value for key,value in expected.items()); assert 'PANEL_JARVIS_MIC_DEVICE' not in os.environ; assert 'PANEL_UNRELATED_SHOULD_NOT_PROPAGATE' not in os.environ; assert os.environ.get('FISH_API_KEY') == 'external-fish-key-fixture'"
     if ($LASTEXITCODE -ne 0) { throw "Dedicated voice child did not receive the exact safe source/runtime contract" }
 
     $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot "run-jarvis-voice.ps1") -Raw
@@ -132,8 +151,11 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     Assert-JarvisVoice ($starter -match "Invoke-ArtemJarvisVoiceStartLifecycle" -and $starter -notmatch "Stop-Process") "Starter must use bounded task-owned lifecycle logic only"
     Assert-JarvisVoice ($status -match "Get-ArtemJarvisVoiceSessionAlignment" -and $status -notmatch "Get-Process -Name explorer") "Status must use canonical console authority"
     Assert-JarvisVoice ($launcher -notmatch "Write-(Host|Output).*BRIDGE_TOKEN" -and $status -notmatch "BRIDGE_TOKEN") "Bridge token must never be printed"
+    Assert-JarvisVoice ($status -notmatch "FISH_API_KEY") "Fish API key must never be rendered by status"
 }
 finally {
+    if ($null -eq $originalFishApiKey) { Remove-Item -LiteralPath "Env:FISH_API_KEY" -ErrorAction SilentlyContinue }
+    else { $env:FISH_API_KEY = $originalFishApiKey }
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 

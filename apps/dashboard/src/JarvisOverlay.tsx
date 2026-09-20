@@ -8,7 +8,7 @@ const MAX_MESSAGES = 24;
 const MAX_TEXT = 512;
 
 type Message = { role: "owner" | "jarvis"; text: string };
-type OverlayState = "idle" | "processing" | "listening" | "transcribing" | "submitting" | "ready" | "error";
+type OverlayState = "idle" | "processing" | "listening" | "transcribing" | "submitting" | "speaking" | "ready" | "error";
 
 export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNavigation) => void }) {
   const { locked } = useInteractionLock();
@@ -49,6 +49,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
       if (voice.state === "wake_detected" || voice.state === "listening") { setOpen(true); setState("listening"); return; }
       if (voice.state === "transcribing") { setOpen(true); setState("transcribing"); return; }
       if (voice.state === "submitting") { setOpen(true); setState("submitting"); return; }
+      if (voice.state === "speaking") { setOpen(true); setState("speaking"); return; }
       if (voice.state === "ready") {
         setOpen(true);
         if (voice.recognizedText) append({ role: "owner", text: voice.recognizedText });
@@ -109,7 +110,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
             <div><p>JARVIS · TEXT</p><h2>Jarvis</h2></div>
             <div className="jarvis-panel__header-actions">
               <span className={`jarvis-state jarvis-state--${state}`} data-testid="jarvis-state">{
-                state === "processing" || state === "submitting" ? "Обрабатываю" : state === "listening" ? "Слушаю" : state === "transcribing" ? "Распознаю" : state === "error" ? "Ошибка" : state === "ready" ? "Готово" : "Ожидаю"
+                state === "processing" || state === "submitting" ? "Обрабатываю" : state === "listening" ? "Слушаю" : state === "transcribing" ? "Распознаю" : state === "speaking" ? "Говорю" : state === "error" ? "Ошибка" : state === "ready" ? "Готово" : "Ожидаю"
               }</span>
               <button type="button" className="jarvis-icon-button" aria-label="Закрыть Jarvis" onClick={() => setOpen(false)}><Icon name="close" /></button>
             </div>
