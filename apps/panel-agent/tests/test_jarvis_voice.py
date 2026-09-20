@@ -92,6 +92,17 @@ class Publisher:
         self.snapshots.append(snapshot)
 
 
+class Speech:
+    def __init__(self, failure: Exception | None = None) -> None:
+        self.failure = failure
+        self.values: list[str] = []
+
+    async def speak(self, text: str) -> None:
+        self.values.append(text)
+        if self.failure:
+            raise self.failure
+
+
 class Lock:
     def __init__(self, locked: bool = False) -> None:
         self.locked = locked
@@ -110,12 +121,13 @@ class Clock:
 
 
 def pipeline(*, wake_at: int | None = 1, vad_speech: set[int] | None = None,
-             stt: Stt | None = None, lock: Lock | None = None, navigation: str | None = None):
+             stt: Stt | None = None, lock: Lock | None = None, navigation: str | None = None,
+             speech: Speech | None = None):
     publisher, turns = Publisher(), Turns(navigation)
     subject = VoicePipeline(
         config=VoiceRuntimeConfig(enabled=True, configured=True, trailing_silence_ms=160, cooldown_ms=1),
         wake=Wake(wake_at), vad=Vad(vad_speech or {1}), recognizer=stt or Stt(), turns=turns,
-        publisher=publisher, lock=lock or Lock(), clock=Clock(),
+        publisher=publisher, lock=lock or Lock(), clock=Clock(), speech_output=speech,
     )
     return subject, publisher, turns
 
@@ -147,6 +159,31 @@ def test_wake_vad_endpoint_stt_and_one_canonical_turn():
     ]
     ready = next(item for item in publisher.snapshots if item.state is VoiceState.READY)
     assert ready.recognized_text == "Который час?" and ready.response_text == "Сейчас 12:34."
+
+
+def test_optional_speech_receives_exact_canonical_response_and_adds_speaking_state():
+    speech = Speech()
+    subject, publisher, turns = pipeline(speech=speech)
+    asyncio.run(subject.run(Audio([FRAME, FRAME, FRAME, FRAME])))
+    assert turns.values == ["Который час?"]
+    assert speech.values == ["Сейчас 12:34."]
+    assert [item.state for item in publisher.snapshots] == [
+        VoiceState.STARTING, VoiceState.IDLE, VoiceState.WAKE_DETECTED, VoiceState.LISTENING,
+        VoiceState.TRANSCRIBING, VoiceState.SUBMITTING, VoiceState.SPEAKING,
+        VoiceState.READY, VoiceState.COOLDOWN, VoiceState.IDLE,
+    ]
+
+
+def test_speech_failure_preserves_canonical_response_and_navigation_at_ready():
+    speech = Speech(RuntimeError("provider exception must not leave the worker"))
+    subject, publisher, _ = pipeline(navigation="/settings", speech=speech)
+    asyncio.run(subject.run(Audio([FRAME, FRAME, FRAME, FRAME])))
+    ready = next(item for item in publisher.snapshots if item.state is VoiceState.READY)
+    assert speech.values == ["Сейчас 12:34."]
+    assert ready.response_text == "Сейчас 12:34." and ready.navigation == "/settings"
+    assert ready.health is VoiceHealth.DEGRADED and ready.safe_error_code == "tts_failed"
+    assert VoiceState.ERROR not in [item.state for item in publisher.snapshots]
+    assert all("provider exception" not in str(item) for item in publisher.snapshots)
 
 
 def test_canonical_navigation_survives_voice_pipeline_and_arbitrary_paths_do_not():

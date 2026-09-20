@@ -30,6 +30,7 @@ class VoiceState(str, Enum):
     LISTENING = "listening"
     TRANSCRIBING = "transcribing"
     SUBMITTING = "submitting"
+    SPEAKING = "speaking"
     READY = "ready"
     ERROR = "error"
     COOLDOWN = "cooldown"
@@ -48,7 +49,7 @@ SAFE_ERROR_CODES = frozenset({
     "microphone_unavailable", "wake_dependency_missing", "wake_model_missing",
     "stt_dependency_missing", "stt_model_missing", "audio_stream_failed",
     "stt_failed", "stt_timeout", "turn_failed", "empty_transcript",
-    "interaction_locked", "wrong_session", "cancelled",
+    "interaction_locked", "wrong_session", "cancelled", "tts_failed",
 })
 
 
@@ -64,6 +65,7 @@ class VoiceRuntimeConfig:
     trailing_silence_ms: int = 800
     cooldown_ms: int = 1_200
     stt_timeout_ms: int = 30_000
+    speech_timeout_ms: int = 45_000
 
     def __post_init__(self) -> None:
         for value in (self.pre_roll_ms, self.speech_onset_timeout_ms,
@@ -72,6 +74,8 @@ class VoiceRuntimeConfig:
                 raise ValueError("Voice timing values must be positive")
         if self.pre_roll_ms > 2_000 or self.max_utterance_ms > 30_000:
             raise ValueError("Voice timing values exceed bounded safety limits")
+        if not 1_000 <= self.speech_timeout_ms <= 90_000:
+            raise ValueError("Speech timeout must remain bounded")
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,12 @@ class VoiceActivityDetector(Protocol):
 
 class SpeechRecognizer(Protocol):
     async def recognize(self, pcm_16khz_mono: bytes) -> str: ...
+
+
+class SpeechOutput(Protocol):
+    """Optional output receives only an already-canonical Jarvis response."""
+
+    async def speak(self, text: str) -> None: ...
 
 
 class JarvisTurnClient(Protocol):
@@ -174,7 +184,8 @@ _LEGAL_TRANSITIONS: dict[VoiceState, frozenset[VoiceState]] = {
     VoiceState.WAKE_DETECTED: frozenset({VoiceState.LISTENING, VoiceState.COOLDOWN, VoiceState.ERROR}),
     VoiceState.LISTENING: frozenset({VoiceState.TRANSCRIBING, VoiceState.COOLDOWN, VoiceState.ERROR}),
     VoiceState.TRANSCRIBING: frozenset({VoiceState.SUBMITTING, VoiceState.COOLDOWN, VoiceState.ERROR}),
-    VoiceState.SUBMITTING: frozenset({VoiceState.READY, VoiceState.COOLDOWN, VoiceState.ERROR}),
+    VoiceState.SUBMITTING: frozenset({VoiceState.SPEAKING, VoiceState.READY, VoiceState.COOLDOWN, VoiceState.ERROR}),
+    VoiceState.SPEAKING: frozenset({VoiceState.READY, VoiceState.COOLDOWN, VoiceState.ERROR}),
     VoiceState.READY: frozenset({VoiceState.COOLDOWN, VoiceState.IDLE}),
     VoiceState.ERROR: frozenset({VoiceState.COOLDOWN, VoiceState.IDLE, VoiceState.DISABLED}),
     VoiceState.COOLDOWN: frozenset({VoiceState.IDLE, VoiceState.DISABLED}),
@@ -222,7 +233,8 @@ class VoicePipeline:
     def __init__(self, *, config: VoiceRuntimeConfig, wake: WakeDetector,
                  vad: VoiceActivityDetector, recognizer: SpeechRecognizer,
                  turns: JarvisTurnClient, publisher: VoiceStatePublisher,
-                 lock: InteractionLockSource, clock: Clock) -> None:
+                 lock: InteractionLockSource, clock: Clock,
+                 speech_output: SpeechOutput | None = None) -> None:
         self._config = config
         self._wake = wake
         self._vad = vad
@@ -231,6 +243,7 @@ class VoicePipeline:
         self._publisher = publisher
         self._lock = lock
         self._clock = clock
+        self._speech_output = speech_output
         self._machine = VoiceStateMachine(enabled=config.enabled, configured=config.configured)
         self._pre_roll = BoundedPcmBuffer(config.pre_roll_ms)
 
@@ -323,9 +336,34 @@ class VoicePipeline:
         # Adapters are an external boundary even on loopback: only preserve a
         # route that belongs to Jarvis A1's canonical allow-list.
         navigation = result.navigation if is_jarvis_navigation(result.navigation) else None
-        await self._transition(VoiceState.READY, recognized_text=text, response_text=result.response_text,
-                               wake_latency_ms=None if wake_at is None else max(0, started - wake_at),
-                               stt_latency_ms=stt_latency, navigation=navigation)
+        ready_fields = {
+            "recognized_text": text,
+            "response_text": result.response_text,
+            "wake_latency_ms": None if wake_at is None else max(0, started - wake_at),
+            "stt_latency_ms": stt_latency,
+            "navigation": navigation,
+        }
+        if self._speech_output is not None:
+            await self._transition(VoiceState.SPEAKING, **ready_fields)
+            try:
+                # The response comes directly from JarvisTurnService.  Do not
+                # normalize, rewrite, or otherwise turn a TTS adapter into a
+                # semantic authority.
+                await asyncio.wait_for(
+                    self._speech_output.speak(result.response_text),
+                    self._config.speech_timeout_ms / 1_000,
+                )
+            except Exception:
+                # A completed semantic turn remains canonical even if the
+                # optional output provider fails.  There is intentionally no
+                # automatic retry: it could duplicate speech and provider cost.
+                await self._transition(
+                    VoiceState.READY, health=VoiceHealth.DEGRADED,
+                    safe_error_code="tts_failed", **ready_fields,
+                )
+                await self._cooldown()
+                return
+        await self._transition(VoiceState.READY, **ready_fields)
         await self._cooldown()
 
     async def _cooldown(self) -> None:
@@ -335,7 +373,7 @@ class VoicePipeline:
         await self._transition(VoiceState.IDLE, health=VoiceHealth.HEALTHY)
 
     async def cancel(self) -> None:
-        if self._machine.state in {VoiceState.LISTENING, VoiceState.TRANSCRIBING, VoiceState.SUBMITTING}:
+        if self._machine.state in {VoiceState.LISTENING, VoiceState.TRANSCRIBING, VoiceState.SUBMITTING, VoiceState.SPEAKING}:
             await self._failure("cancelled")
 
     async def _failure(self, code: str) -> None:

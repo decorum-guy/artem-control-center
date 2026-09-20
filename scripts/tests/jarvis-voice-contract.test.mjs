@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const core = read("../../apps/panel-agent/src/panel_agent/jarvis_voice.py");
 const bridge = read("../../apps/panel-agent/src/panel_agent/jarvis_voice_api.py");
+const ttsAdapter = read("../../apps/jarvis-voice/src/jarvis_voice_worker/adapters.py");
+const voiceRequirements = read("../../apps/jarvis-voice/requirements-runtime.txt");
 const install = read("../windows/install-jarvis-voice.ps1");
 const launcher = read("../windows/run-jarvis-voice.ps1");
 const start = read("../windows/start-jarvis-voice.ps1");
@@ -19,12 +21,24 @@ test("voice core is bounded, adapter-only, and has no persistence primitive", ()
   assert.match(core, /class WakeDetector\(Protocol\)/);
   assert.match(core, /class VoiceActivityDetector\(Protocol\)/);
   assert.match(core, /class SpeechRecognizer\(Protocol\)/);
+  assert.match(core, /class SpeechOutput\(Protocol\)/);
   assert.match(core, /class JarvisTurnClient\(Protocol\)/);
   assert.match(core, /class VoiceStatePublisher\(Protocol\)/);
   assert.match(core, /pre_roll_ms: int = 500/);
   assert.match(core, /max_utterance_ms: int = 12_000/);
   assert.match(core, /trailing_silence_ms: int = 800/);
   assert.doesNotMatch(core, /open\(|wave\.|\.wav|\.pcm|\.raw|subprocess|os\.system/);
+});
+
+test("Fish speech output stays worker-local, streaming, bounded, and file-free", () => {
+  assert.match(voiceRequirements, /^fish-audio-sdk==1\.3\.0$/m);
+  assert.match(ttsAdapter, /AsyncFishAudio/);
+  assert.match(ttsAdapter, /stream_websocket/);
+  assert.match(ttsAdapter, /RawOutputStream/);
+  assert.match(ttsAdapter, /FISH_INITIAL_PREBUFFER_BYTES/);
+  assert.match(ttsAdapter, /FISH_MAX_PENDING_PCM_BYTES/);
+  assert.doesNotMatch(ttsAdapter, /subprocess|ffplay|Start-Process|\.wav|Path\(/);
+  assert.doesNotMatch(ttsAdapter, /fishaudio\.utils|\bplay\(|\bsave\(/);
 });
 
 test("voice bridge has one authenticated, non-mutating JarvisTurnService path", () => {

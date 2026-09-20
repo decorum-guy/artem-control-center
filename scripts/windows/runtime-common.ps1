@@ -70,7 +70,9 @@ function Get-ArtemJarvisVoiceRuntimeKeys {
         "PANEL_JARVIS_VOICE_PANEL_URL", "PANEL_JARVIS_VOICE_MODEL_ROOT",
         "PANEL_JARVIS_WAKE_MODEL", "PANEL_JARVIS_STT_MODEL",
         "PANEL_JARVIS_STT_PROFILE", "PANEL_JARVIS_WAKE_THRESHOLD",
-        "PANEL_JARVIS_MIC_DEVICE"
+        "PANEL_JARVIS_MIC_DEVICE", "PANEL_JARVIS_TTS_ENABLED",
+        "PANEL_JARVIS_TTS_MODEL", "PANEL_JARVIS_TTS_REFERENCE_ID",
+        "PANEL_JARVIS_TTS_LATENCY"
     )
 }
 
@@ -152,6 +154,11 @@ function Get-ArtemJarvisVoiceConfiguration {
     $sttModel = & $value "PANEL_JARVIS_STT_MODEL"
     $profile = & $value "PANEL_JARVIS_STT_PROFILE"
     $threshold = & $value "PANEL_JARVIS_WAKE_THRESHOLD"
+    $ttsRequested = (& $value "PANEL_JARVIS_TTS_ENABLED") -eq "true"
+    $ttsEnabled = $enabled -and $ttsRequested
+    $ttsModel = & $value "PANEL_JARVIS_TTS_MODEL"
+    $ttsReferenceId = & $value "PANEL_JARVIS_TTS_REFERENCE_ID"
+    $ttsLatency = & $value "PANEL_JARVIS_TTS_LATENCY"
     $localPanel = $false
     try {
         $uri = [Uri]$panelUrl
@@ -160,12 +167,25 @@ function Get-ArtemJarvisVoiceConfiguration {
     catch { $localPanel = $false }
     $thresholdValue = 0.0
     $validThreshold = [double]::TryParse($threshold, [ref]$thresholdValue) -and $thresholdValue -ge 0.1 -and $thresholdValue -le 0.95
-    $configured = (
+    $ingressConfigured = (
         $enabled -and $token.Length -gt 0 -and $localPanel -and
         $modelRoot.Length -gt 0 -and $wakeModel.Length -gt 0 -and $sttModel.Length -gt 0 -and
         $profile -in @("base", "small") -and $validThreshold
     )
-    $modelsReady = $configured -and
+    # FISH_API_KEY remains an inherited User-environment secret. It is never
+    # imported from runtime.env or returned in this configuration/status shape.
+    $fishApiKey = if ($ttsEnabled) { [Environment]::GetEnvironmentVariable("FISH_API_KEY", "Process") } else { "" }
+    $ttsConfigured = (
+        $ttsEnabled -and
+        ($ttsModel -in @("s2.1-pro-free", "s2.1-pro")) -and
+        ($ttsReferenceId.Length -gt 0) -and
+        ($ttsLatency -in @("balanced", "normal")) -and
+        -not [string]::IsNullOrEmpty($fishApiKey)
+    )
+    $configured = $ingressConfigured -and (-not $ttsEnabled -or $ttsConfigured)
+    # Local STT readiness remains truthful even if optional cloud speech is
+    # disabled or unavailable.
+    $modelsReady = $ingressConfigured -and
         (Test-Path -LiteralPath $modelRoot -PathType Container) -and
         (Test-Path -LiteralPath $wakeModel) -and
         (Test-Path -LiteralPath $sttModel)
@@ -173,6 +193,8 @@ function Get-ArtemJarvisVoiceConfiguration {
         Enabled = $enabled
         Configured = $configured
         ModelsReady = $modelsReady
+        TtsEnabled = $ttsEnabled
+        TtsConfigured = $ttsConfigured
         Environment = $Environment
     }
 }

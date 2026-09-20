@@ -9,6 +9,7 @@ const valid = {
 describe("Jarvis voice state contract", () => {
   it("accepts only the bounded voice protocol", () => {
     expect(parseJarvisVoiceSnapshot(valid)?.state).toBe("listening");
+    expect(parseJarvisVoiceSnapshot({ ...valid, state: "speaking" })?.state).toBe("speaking");
     expect(parseJarvisVoiceSnapshot({ ...valid, sequence: -1 })).toBeNull();
     expect(parseJarvisVoiceSnapshot({ ...valid, state: "shell" })).toBeNull();
     expect(parseJarvisVoiceSnapshot({ ...valid, recognizedText: 42 })).toBeNull();

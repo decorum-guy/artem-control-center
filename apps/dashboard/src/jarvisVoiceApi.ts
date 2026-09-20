@@ -1,6 +1,6 @@
 import { JARVIS_NAVIGATION_PATHS, type JarvisNavigation } from "./jarvisApi";
 
-export type JarvisVoiceState = "disabled" | "starting" | "idle" | "wake_detected" | "listening" | "transcribing" | "submitting" | "ready" | "error" | "cooldown";
+export type JarvisVoiceState = "disabled" | "starting" | "idle" | "wake_detected" | "listening" | "transcribing" | "submitting" | "speaking" | "ready" | "error" | "cooldown";
 export type JarvisVoiceHealth = "disabled" | "unconfigured" | "starting" | "healthy" | "degraded" | "unavailable";
 
 export interface JarvisVoiceSnapshot {
@@ -18,7 +18,7 @@ export interface JarvisVoiceSnapshot {
   navigation: JarvisNavigation | null;
 }
 
-const states = new Set<JarvisVoiceState>(["disabled", "starting", "idle", "wake_detected", "listening", "transcribing", "submitting", "ready", "error", "cooldown"]);
+const states = new Set<JarvisVoiceState>(["disabled", "starting", "idle", "wake_detected", "listening", "transcribing", "submitting", "speaking", "ready", "error", "cooldown"]);
 const health = new Set<JarvisVoiceHealth>(["disabled", "unconfigured", "starting", "healthy", "degraded", "unavailable"]);
 
 export function parseJarvisVoiceSnapshot(value: unknown): JarvisVoiceSnapshot | null {
