@@ -367,6 +367,58 @@ function Get-ArtemRuntimeState {
     return Get-ArtemJsonPayload -Path $Paths.State
 }
 
+function Assert-ArtemDurableRuntimeMode {
+    param([Parameter(Mandatory)]$Paths)
+
+    # The updater must not treat its own inherited environment as installed
+    # configuration. Parse only this single non-secret runtime.env contract.
+    if (-not (Test-Path -LiteralPath $Paths.RuntimeEnv)) {
+        throw "runtime_config_incomplete"
+    }
+
+    $mode = $null
+    foreach ($rawLine in (Get-Content -LiteralPath $Paths.RuntimeEnv -ErrorAction Stop)) {
+        $line = ([string]$rawLine).Trim()
+        if (-not $line -or $line.StartsWith("#")) { continue }
+        if ($line.StartsWith("export ")) { $line = $line.Substring(7).Trim() }
+        $separator = $line.IndexOf("=")
+        if ($separator -lt 1) { continue }
+        $key = $line.Substring(0, $separator).Trim()
+        if ($key -ne "PANEL_AGENT_MODE") { continue }
+        $value = $line.Substring($separator + 1).Trim()
+        if (
+            $value.Length -ge 2 -and
+            (($value[0] -eq '"' -and $value[$value.Length - 1] -eq '"') -or
+             ($value[0] -eq "'" -and $value[$value.Length - 1] -eq "'"))
+        ) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        $mode = $value
+    }
+
+    if ($mode -notin @("fixtures", "read_only", "integration_test", "production")) {
+        # Keep the fixed result code deliberately content-free: runtime.env
+        # contains deployment credentials and must never be echoed by updater.
+        throw "runtime_config_incomplete"
+    }
+    return $mode
+}
+
+function Get-ArtemProductionRuntimeSupervisors {
+    try {
+        return @(
+            Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction Stop |
+                Where-Object {
+                    $null -ne $_.CommandLine -and
+                    $_.CommandLine -like "*production-runtime.mjs*"
+                }
+        )
+    }
+    catch {
+        throw "Unable to inspect production runtime supervisors"
+    }
+}
+
 function Test-ArtemRuntimeProcess {
     param([Parameter(Mandatory)]$Paths)
     $state = Get-ArtemRuntimeState -Paths $Paths
@@ -382,6 +434,34 @@ function Test-ArtemRuntimeProcess {
     catch {
         return $false
     }
+}
+
+function Test-ArtemPanelPortReleased {
+    try {
+        return @(Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction Stop).Count -eq 0
+    }
+    catch {
+        return $false
+    }
+}
+
+function Wait-ArtemRuntimeHandoffStopped {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [int]$TimeoutSeconds = 20
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            if (@(Get-ArtemProductionRuntimeSupervisors).Count -eq 0 -and (Test-ArtemPanelPortReleased)) {
+                return $true
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 300
+    }
+    return $false
 }
 
 function Test-ArtemPanelReady {
@@ -906,17 +986,85 @@ function Get-ArtemKioskSessionAlignment {
 function Start-ArtemInteractiveRuntimeTask {
     param([Parameter(Mandatory)]$Paths)
 
-    # This is the one installed Interactive task. Restarting a currently-running
-    # invocation is required for Task Scheduler to create a fresh interactive
-    # session handoff; the healthy runtime itself is not stopped here.
+    # Never stop/restart a Running task. Its child can outlive Task Scheduler's
+    # stop request, which would make a second supervisor race the panel port.
     $task = Get-ScheduledTask -TaskName "Artem Control Center Runtime" -ErrorAction SilentlyContinue
     if ($null -eq $task) { return $false }
-    if ($task.State -eq "Running") {
-        Stop-ScheduledTask -TaskName "Artem Control Center Runtime" -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 500
+    if ($task.State -eq "Running") { return $false }
+    try {
+        Start-ScheduledTask -TaskName "Artem Control Center Runtime"
     }
-    Start-ScheduledTask -TaskName "Artem Control Center Runtime"
+    catch {
+        return $false
+    }
     return $true
+}
+
+function Wait-ArtemInteractiveRuntimeTaskAvailable {
+    param([int]$TimeoutSeconds = 20)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $task = Get-ScheduledTask -TaskName "Artem Control Center Runtime" -ErrorAction SilentlyContinue
+        if ($null -eq $task) { return $false }
+        if ($task.State -ne "Running") { return $true }
+        Start-Sleep -Milliseconds 300
+    }
+    return $false
+}
+
+function Invoke-ArtemPostUpdateInteractiveRecovery {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [int]$TimeoutSeconds = 60
+    )
+
+    # Software acceptance is already durable before this is called. Recovery
+    # therefore uses an explicit one-supervisor handoff and returns a bounded
+    # warning signal rather than retrying or rolling back accepted artifacts.
+    $task = Get-ScheduledTask -TaskName "Artem Control Center Runtime" -ErrorAction SilentlyContinue
+    if ($null -eq $task) { return $false }
+
+    try {
+        if (@(Get-ArtemProductionRuntimeSupervisors).Count -ne 1 -or -not (Test-ArtemPanelReady -Paths $Paths)) {
+            return $false
+        }
+    }
+    catch {
+        return $false
+    }
+
+    Stop-ArtemRuntime -Paths $Paths -Manual $false
+    if (-not (Wait-ArtemRuntimeHandoffStopped -Paths $Paths -TimeoutSeconds 20)) {
+        return $false
+    }
+    if (-not (Wait-ArtemInteractiveRuntimeTaskAvailable -TimeoutSeconds 20)) {
+        return $false
+    }
+
+    # One start attempt only. A task-start failure or a missing kiosk is
+    # advisory after update acceptance and must not create a retry storm.
+    try {
+        Start-ScheduledTask -TaskName "Artem Control Center Runtime"
+    }
+    catch {
+        return $false
+    }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            if (
+                @(Get-ArtemProductionRuntimeSupervisors).Count -eq 1 -and
+                (Test-ArtemPanelReady -Paths $Paths) -and
+                (Test-ArtemKioskVisible -Paths $Paths)
+            ) {
+                return $true
+            }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 300
+    }
+    return $false
 }
 
 function Stop-ArtemKiosk {

@@ -916,6 +916,9 @@ export async function runProductionRuntime() {
   const fileEnv = existsSync(configPath)
     ? parseEnvText(readFileSync(configPath, "utf8"))
     : {};
+  // Keep this fallback for intentionally configuration-free fixture/dev paths.
+  // The Windows production updater separately requires an explicit persisted
+  // runtime.env mode before it may stop an installed runtime for an update.
   const mode = fileEnv.PANEL_AGENT_MODE || process.env.PANEL_AGENT_MODE || "fixtures";
   if (!new Set(["fixtures", "read_only", "integration_test", "production"]).has(mode)) {
     throw new Error(`Unsupported PANEL_AGENT_MODE in runtime.env: ${mode}`);

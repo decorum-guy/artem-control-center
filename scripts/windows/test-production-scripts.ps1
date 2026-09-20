@@ -222,13 +222,21 @@ try {
     if ($startText -notmatch 'Start-ArtemInteractiveRuntimeTask') {
         throw "Normal explicit start and Session-aware recovery must share the installed Interactive task helper"
     }
-    if ($updaterText -notmatch 'postUpdateInteractiveKioskRecovery' -or $updaterText -notmatch 'Start-ArtemInteractiveRuntimeTask') {
-        throw "A successful update with deferred kiosk confirmation must request post-lock Interactive recovery"
+    if ($updaterText -notmatch 'postUpdateInteractiveKioskRecovery' -or $updaterText -notmatch 'Invoke-ArtemPostUpdateInteractiveRecovery') {
+        throw "A successful update with deferred kiosk confirmation must request the bounded post-lock handoff"
     }
     $updateLockReleaseIndex = $updaterText.LastIndexOf('Remove-ArtemUpdateLock')
-    $postUpdateTaskIndex = $updaterText.LastIndexOf('Start-ArtemInteractiveRuntimeTask')
+    $postUpdateTaskIndex = $updaterText.LastIndexOf('Invoke-ArtemPostUpdateInteractiveRecovery')
     if ($updateLockReleaseIndex -lt 0 -or $postUpdateTaskIndex -le $updateLockReleaseIndex) {
-        throw "Post-update Interactive kiosk recovery must occur only after the updater lease is released"
+        throw "Post-update interactive handoff must occur only after the updater lease is released"
+    }
+    if ($runtimeCommonText -match 'Stop-ScheduledTask') {
+        throw "Interactive runtime recovery must never stop a Running Scheduled Task before another start"
+    }
+    if ($runtimeCommonText -notmatch 'function\s+Invoke-ArtemPostUpdateInteractiveRecovery' -or
+        $runtimeCommonText -notmatch 'Wait-ArtemRuntimeHandoffStopped' -or
+        $runtimeCommonText -notmatch 'Wait-ArtemInteractiveRuntimeTaskAvailable') {
+        throw "Post-update recovery must prove clean runtime/task handoff before a fresh Interactive task start"
     }
 
     foreach ($helperText in @($installerText, $syncHelpersText)) {
@@ -262,6 +270,11 @@ try {
         $updaterText.IndexOf('Assert-ArtemExpectedUpdatePreflight', $preflightIndex)
     }
     else { -1 }
+    $durableModeIndex = $updaterText.IndexOf('Assert-ArtemDurableRuntimeMode')
+    $firstShutdownAfterPreflight = $updaterText.IndexOf('Stop-ArtemRuntime', $preflightIndex)
+    if ($durableModeIndex -le $preflightAssertionIndex -or $firstShutdownAfterPreflight -le $durableModeIndex) {
+        throw "Updater must reject incomplete durable runtime mode before any destructive runtime stop"
+    }
     $manualBindingIndex = if ($preflightAssertionIndex -ge 0) {
         $updaterText.IndexOf('Bind-ArtemUpdateLockRevisions', $preflightAssertionIndex)
     }

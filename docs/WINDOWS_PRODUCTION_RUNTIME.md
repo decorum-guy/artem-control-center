@@ -176,6 +176,14 @@ Update transcripts are stored under:
 
 The updater never modifies `runtime.env`.
 
+Before a software update is allowed to stop an installed runtime, the updater
+requires `runtime.env` to contain an explicit supported `PANEL_AGENT_MODE`
+(`fixtures`, `read_only`, `integration_test`, or `production`). It never uses
+an inherited process environment value as proof of durable configuration. This
+does not change first install: the installer writes `PANEL_AGENT_MODE=fixtures`
+for a valid fixture runtime. `production-runtime.mjs` retains its fallback only
+for intentional configuration-free development and fixture paths.
+
 ## Logs and state
 
 Supervisor logs:
