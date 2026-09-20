@@ -437,8 +437,18 @@ function Test-ArtemRuntimeProcess {
 }
 
 function Test-ArtemPanelPortReleased {
+    param(
+        # The production handoff always uses 8787. The optional parameter is
+        # only for the executable Windows socket regression below.
+        [ValidateRange(1024, 65535)][int]$Port = 8787
+    )
+
     try {
-        return @(Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction Stop).Count -eq 0
+        # Filtering LocalPort in the cmdlet query makes no match an exception
+        # on Windows. Query listeners first, then filter in PowerShell so a
+        # successful query with no panel listener is the positive result.
+        $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction Stop)
+        return @($listeners | Where-Object { [int]$_.LocalPort -eq $Port }).Count -eq 0
     }
     catch {
         return $false

@@ -170,6 +170,34 @@ try {
     try { Assert-ArtemDurableRuntimeMode -Paths $modePaths | Out-Null } catch { $invalidRejected = $_.Exception.Message -eq "runtime_config_incomplete" }
     Assert-Reliability $invalidRejected "Invalid durable mode must use the fixed safe result"
 
+    # The port helper queries all listening connections before filtering. This
+    # uses a real Windows TcpListener so an absent listener is not confused
+    # with CmdletizationQuery_NotFound_LocalPort from a filtered cmdlet query.
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $testPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+    try {
+        Assert-Reliability (-not (Test-ArtemPanelPortReleased -Port $testPort)) "An active listener must keep the tested port unavailable"
+    }
+    finally {
+        $listener.Stop()
+    }
+    $portReleased = $false
+    $releaseDeadline = (Get-Date).AddSeconds(5)
+    while ((Get-Date) -lt $releaseDeadline) {
+        if (Test-ArtemPanelPortReleased -Port $testPort) {
+            $portReleased = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-Reliability $portReleased "A closed listener must make the tested port available"
+
+    # A genuine query failure is distinct from an empty successful query and
+    # must remain fail-closed.
+    function Get-NetTCPConnection { throw "fixture query failure" }
+    Assert-Reliability (-not (Test-ArtemPanelPortReleased -Port $testPort)) "A connection query failure must fail closed"
+
     # C1-C5. Exercise the post-update handoff with fake process/task seams;
     # no Edge, kiosk, or real supervisor is spawned by this contract test.
     $script:events = New-Object System.Collections.Generic.List[string]
