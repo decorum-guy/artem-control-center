@@ -50,7 +50,7 @@ test("staging has truthful pre-cutover progress and staging failure preserves pr
   assert.ok(failure >= 0);
 });
 
-test("staged setup keeps the target runtime Python configured through validation", () => {
+test("staged setup keeps the target runtime Python configured through validation and scopes its environment", () => {
   const sources = [
     ["LF", updater.replace(/\r\n/g, "\n")],
     ["CRLF", updater.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n")],
@@ -63,29 +63,36 @@ test("staged setup keeps the target runtime Python configured through validation
     assert.ok(stagingEnd > staging, `${lineEnding}: staging function boundary is present`);
     const stagingSource = source.slice(staging, stagingEnd);
     const targetVenv = stagingSource.indexOf("$targetRuntimeVenv = Get-ArtemRuntimeVenvPath");
-    const previousVenv = stagingSource.indexOf("$previousRuntimeVenv = $env:PANEL_RUNTIME_VENV");
+    const environmentSnapshot = stagingSource.indexOf("Save-ArtemProcessEnvironment -Names $ArtemStagingEnvironmentNames");
     const configuredVenv = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $targetRuntimeVenv");
     const setup = stagingSource.indexOf('Description "staged project setup"');
     const validation = stagingSource.indexOf('Arguments @("run", "production-update-preflight")');
-    const firstRestore = stagingSource.indexOf("Remove-Item Env:PANEL_RUNTIME_VENV");
-    const firstRestorePrevious = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $previousRuntimeVenv");
-    const restore = stagingSource.indexOf("Remove-Item Env:PANEL_RUNTIME_VENV", validation);
-    const restorePrevious = stagingSource.indexOf("$env:PANEL_RUNTIME_VENV = $previousRuntimeVenv", validation);
+    const restore = stagingSource.indexOf("Restore-ArtemProcessEnvironment -Snapshot $environmentSnapshot");
 
     assert.ok(targetVenv >= 0, `${lineEnding}: target venv is resolved`);
-    assert.ok(previousVenv >= 0 && previousVenv < targetVenv, `${lineEnding}: caller venv is saved first`);
+    assert.ok(environmentSnapshot >= 0 && environmentSnapshot < targetVenv, `${lineEnding}: caller environment is saved first`);
     assert.ok(configuredVenv > targetVenv, `${lineEnding}: target venv is configured`);
     assert.ok(setup > configuredVenv, `${lineEnding}: setup follows configuration`);
     assert.ok(validation > setup, `${lineEnding}: validation follows setup`);
-    assert.equal(firstRestore, restore, `${lineEnding}: removal restore follows validation`);
-    assert.equal(firstRestorePrevious, restorePrevious, `${lineEnding}: value restore follows validation`);
-    assert.ok(restore > validation, `${lineEnding}: removal restore follows validation`);
-    assert.ok(restorePrevious > validation, `${lineEnding}: value restore follows validation`);
+    assert.ok(restore > validation, `${lineEnding}: environment restore follows validation`);
+    for (const variable of [
+      "PANEL_RUNTIME_VENV",
+      "PANEL_AGENT_MODE",
+      "PANEL_WRITES_ENABLED",
+      "PANEL_COFFEE_TIMING_WRITES_ENABLED",
+      "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED",
+      "PANEL_COFFEE_ACTIONS_ENABLED",
+      "PANEL_KIOSK_CONTROLS_ENABLED",
+      "PANEL_PRODUCTION_BUILD_OUT_DIR"
+    ]) {
+      assert.match(source, new RegExp(`"${variable}"`), `${lineEnding}: fixed staging scope includes ${variable}`);
+    }
     assert.equal((stagingSource.match(/Get-ArtemRuntimeVenvPath/g) ?? []).length, 1, `${lineEnding}: one target resolution`);
   }
 
   const ci = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8");
   assert.match(ci, /test-python-runtime-venv\.ps1/);
+  assert.match(ci, /test-update-production-runtime-reliability\.ps1/);
 });
 
 test("new production staging runs a narrow host preflight then exactly one accepted-v2 build", () => {
@@ -120,6 +127,17 @@ test("new production staging runs a narrow host preflight then exactly one accep
   ]) {
     assert.equal(source.includes(forbidden), false, `production staging must not invoke ${forbidden}`);
   }
+});
+
+test("Windows update requires an explicit durable runtime mode before a destructive stop", () => {
+  const common = readFileSync(resolve(root, "scripts/windows/runtime-common.ps1"), "utf8");
+  const guard = updater.indexOf("Assert-ArtemDurableRuntimeMode -Paths $paths");
+  const stop = updater.indexOf("Stop-ArtemRuntime", guard);
+  assert.ok(guard >= 0 && stop > guard);
+  assert.match(common, /function Assert-ArtemDurableRuntimeMode/);
+  assert.match(common, /runtime_config_incomplete/);
+  assert.match(common, /"fixtures", "read_only", "integration_test", "production"/);
+  assert.doesNotMatch(common.slice(common.indexOf("function Assert-ArtemDurableRuntimeMode"), common.indexOf("function Get-ArtemProductionRuntimeSupervisors")), /process\.env|GetEnvironmentVariable\(.*PANEL_AGENT_MODE/);
 });
 
 test("first rollout from an older updater rediscovers only its exact target revision environment", () => {

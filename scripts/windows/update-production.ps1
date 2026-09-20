@@ -5,7 +5,10 @@ param(
     [string]$ExpectedTargetHead,
     [ValidatePattern('^[0-9a-f]{24}$')]
     [string]$RequestId,
-    [switch]$Continuation
+    [switch]$Continuation,
+    # Test-only seam: dot-sourcing with this switch loads the real staging
+    # helpers without acquiring a lease or touching an installed runtime.
+    [switch]$ContractTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,6 +61,47 @@ function Invoke-CheckedCommand {
     }
 }
 
+# Staging must never affect the detached continuation process. Keep this fixed
+# and deliberately local rather than adding a generic environment framework:
+# these are the only process variables staging owns.
+$ArtemStagingEnvironmentNames = @(
+    "PANEL_RUNTIME_VENV",
+    "PANEL_AGENT_MODE",
+    "PANEL_WRITES_ENABLED",
+    "PANEL_COFFEE_TIMING_WRITES_ENABLED",
+    "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED",
+    "PANEL_COFFEE_ACTIONS_ENABLED",
+    "PANEL_KIOSK_CONTROLS_ENABLED",
+    "PANEL_PRODUCTION_BUILD_OUT_DIR"
+)
+
+function Save-ArtemProcessEnvironment {
+    param([Parameter(Mandatory)][string[]]$Names)
+
+    $snapshot = [ordered]@{}
+    foreach ($name in $Names) {
+        $value = [Environment]::GetEnvironmentVariable($name, "Process")
+        $snapshot[$name] = [pscustomobject]@{
+            Present = $null -ne $value
+            Value = $value
+        }
+    }
+    return $snapshot
+}
+
+function Restore-ArtemProcessEnvironment {
+    param([Parameter(Mandatory)]$Snapshot)
+
+    foreach ($name in $Snapshot.Keys) {
+        $entry = $Snapshot[$name]
+        [Environment]::SetEnvironmentVariable(
+            $name,
+            $(if ($entry.Present) { [string]$entry.Value } else { $null }),
+            "Process"
+        )
+    }
+}
+
 function Invoke-StagedProductionBuild {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -68,7 +112,7 @@ function Invoke-StagedProductionBuild {
     $productionDist = Join-Path $BuildRoot "production-dist"
     New-Item -ItemType Directory -Force -Path $productionDist | Out-Null
 
-    $previousProductionBuildOutDir = $env:PANEL_PRODUCTION_BUILD_OUT_DIR
+    $environmentSnapshot = Save-ArtemProcessEnvironment -Names @("PANEL_PRODUCTION_BUILD_OUT_DIR")
     try {
         Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
         $env:PANEL_PRODUCTION_BUILD_OUT_DIR = $productionDist
@@ -82,12 +126,7 @@ function Invoke-StagedProductionBuild {
         }
     }
     finally {
-        if ($null -eq $previousProductionBuildOutDir) {
-            Remove-Item Env:PANEL_PRODUCTION_BUILD_OUT_DIR -ErrorAction SilentlyContinue
-        }
-        else {
-            $env:PANEL_PRODUCTION_BUILD_OUT_DIR = $previousProductionBuildOutDir
-        }
+        Restore-ArtemProcessEnvironment -Snapshot $environmentSnapshot
     }
 }
 
@@ -130,21 +169,20 @@ function Invoke-ArtemTargetStaging {
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$TargetHead,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId
     )
+    $environmentSnapshot = Save-ArtemProcessEnvironment -Names $ArtemStagingEnvironmentNames
     $stage = Get-ArtemUpdateStagingPaths -Paths $Paths -LockRequestId $LockRequestId
-    if (Test-Path -LiteralPath $stage.Root) {
-        Remove-Item -LiteralPath $stage.Root -Recurse -Force
-    }
-    New-Item -ItemType Directory -Force -Path $stage.Root, $stage.Build | Out-Null
-    Write-ArtemUpdateTransaction -Paths $Paths -Phase "preparing" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
-    Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
-    Invoke-CheckedCommand -FilePath "git.exe" -Arguments @("worktree", "add", "--detach", $stage.Source, $TargetHead) -Description "target staging worktree"
-    $previousRuntimeVenv = $env:PANEL_RUNTIME_VENV
     try {
+        if (Test-Path -LiteralPath $stage.Root) {
+            Remove-Item -LiteralPath $stage.Root -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $stage.Root, $stage.Build | Out-Null
+        Write-ArtemUpdateTransaction -Paths $Paths -Phase "preparing" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
+        Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
+        Invoke-CheckedCommand -FilePath "git.exe" -Arguments @("worktree", "add", "--detach", $stage.Source, $TargetHead) -Description "target staging worktree"
         $targetRuntimeVenv = Get-ArtemRuntimeVenvPath -Paths $Paths -Revision $TargetHead
         $env:PANEL_RUNTIME_VENV = $targetRuntimeVenv
+        Push-Location -LiteralPath $stage.Source
         try {
-            Push-Location -LiteralPath $stage.Source
-            try {
                 Write-ArtemUpdateTransaction -Paths $Paths -Phase "installing" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
                 Invoke-CheckedCommand -FilePath "npm.cmd" -Arguments @("ci") -Description "staged npm ci"
                 Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
@@ -168,19 +206,19 @@ function Invoke-ArtemTargetStaging {
                 Assert-ArtemStagedProductionBuild -DashboardRoot $buildPaths.ProductionDist -ExpectedRevision $TargetHead
                 Write-ArtemUpdateTransaction -Paths $Paths -Phase "artifact-ready" -PreviousHead $PreviousHead -TargetHead $TargetHead -LockRequestId $LockRequestId -StagingRoot $stage.Root
                 return [pscustomobject]@{ Stage = $stage; BuildPaths = $buildPaths }
-            }
-            finally {
-                Pop-Location
-            }
         }
         finally {
-            if ($null -eq $previousRuntimeVenv) { Remove-Item Env:PANEL_RUNTIME_VENV -ErrorAction SilentlyContinue }
-            else { $env:PANEL_RUNTIME_VENV = $previousRuntimeVenv }
+            Pop-Location
         }
     }
     finally {
-        if (Test-Path -LiteralPath $stage.Source) {
-            & git.exe -C $Paths.RepoRoot worktree remove --force $stage.Source
+        try {
+            if (Test-Path -LiteralPath $stage.Source) {
+                & git.exe -C $Paths.RepoRoot worktree remove --force $stage.Source
+            }
+        }
+        finally {
+            Restore-ArtemProcessEnvironment -Snapshot $environmentSnapshot
         }
     }
 }
@@ -768,6 +806,8 @@ function Get-ArtemRollbackCandidate {
     return $CurrentHead
 }
 
+if ($ContractTest) { return }
+
 try {
     $paths = Get-ArtemRuntimePaths
     Initialize-ArtemRuntimeDirectories -Paths $paths
@@ -884,6 +924,9 @@ try {
         -Target $targetHead `
         -ExpectedCurrent $ExpectedCurrentHead `
         -ExpectedTarget $ExpectedTargetHead
+    # Read only the persisted runtime.env contract; inherited process state is
+    # not proof that an installed runtime can survive a restart.
+    Assert-ArtemDurableRuntimeMode -Paths $paths
     if (-not $Continuation -and -not $hasExpected) {
         # Manual invocations acquire a lease before preflight.  Persist the
         # discovered exact revisions before any handoff can be published.
@@ -1180,6 +1223,10 @@ catch {
         Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "rollback_failed"
     }
     elseif ($transactionStarted -and -not $childAlreadyHandled) {
+        if ($failure.Exception.Message -eq "runtime_config_incomplete") {
+            Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "runtime_config_incomplete"
+        }
+        else {
         $failureStage = if ($failure.Exception.Message -like "*artifact identity*") {
             "artifact-assertion"
         }
@@ -1196,9 +1243,11 @@ catch {
             -Stage $failureStage `
             -RuntimeStopped $runtimeStoppedForTransaction
         Write-ArtemUpdateState -Paths $paths -Status $failureState.Status -Result $failureState.Result
+        }
     }
     else {
-        Write-ArtemUpdateState -Paths $paths -Status "failed" -Result "pre_update_failed"
+        $failureResult = if ($failure.Exception.Message -eq "runtime_config_incomplete") { "runtime_config_incomplete" } else { "pre_update_failed" }
+        Write-ArtemUpdateState -Paths $paths -Status "failed" -Result $failureResult
     }
 
     throw $failure
@@ -1226,7 +1275,7 @@ finally {
         # may it perform owner-visible console-session recovery. A delayed or
         # failed handoff is advisory and must never roll back a healthy build.
         try {
-            if (-not (Start-ArtemInteractiveRuntimeTask -Paths $paths)) {
+            if (-not (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths)) {
                 Write-Warning "Production dashboard is verified, but the Interactive kiosk recovery task is unavailable"
             }
         }
