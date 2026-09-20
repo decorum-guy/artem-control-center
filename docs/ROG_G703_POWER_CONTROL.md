@@ -91,7 +91,9 @@ Panel Agent sees the event, so those invocation words are intentionally not
 part of the parser grammar.
 
 The parser accepts only these normalized commands (trimmed, case-folded, and
-with repeated whitespace collapsed):
+with repeated whitespace collapsed). Before normalization it rejects any
+`command` or fallback `text` longer than 256 Unicode code points; it never
+truncates an oversized command or falls back from one to `text`:
 
 | Action | Accepted command text |
 | --- | --- |

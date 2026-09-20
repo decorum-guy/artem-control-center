@@ -20,6 +20,7 @@ RogVoiceAction = Literal[
     "system.rog_g703.sleep",
     "system.rog_g703.hibernate",
 ]
+MAX_YANDEX_ROG_COMMAND_CODEPOINTS = 256
 
 _PHRASES: dict[str, RogVoiceAction] = {
     "включить асус": ROG_G703_WAKE_ACTION,
@@ -50,10 +51,20 @@ class YandexIntentResponder(Protocol):
 def parse_yandex_rog_voice_command(event_data: dict[str, Any]) -> RogVoiceAction | None:
     """Parse only the cleaned `command` field and a bounded `text` fallback."""
 
-    candidate = event_data.get("command")
-    if not isinstance(candidate, str) or not candidate.strip():
+    command = event_data.get("command")
+    if isinstance(command, str):
+        if len(command) > MAX_YANDEX_ROG_COMMAND_CODEPOINTS:
+            return None
+        candidate = command
+    elif command is None:
         candidate = event_data.get("text")
+    else:
+        return None
     if not isinstance(candidate, str):
+        return None
+    if not candidate.strip():
+        candidate = event_data.get("text")
+    if not isinstance(candidate, str) or len(candidate) > MAX_YANDEX_ROG_COMMAND_CODEPOINTS:
         return None
     normalized = " ".join(candidate.casefold().replace("ё", "е").split())
     return _PHRASES.get(normalized)

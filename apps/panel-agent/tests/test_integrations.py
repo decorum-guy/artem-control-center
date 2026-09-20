@@ -684,6 +684,94 @@ def test_ha_websocket_subscribes_to_state_and_yandex_intent(tmp_path) -> None:
     assert adapter._websocket_connected is True
 
 
+def test_ha_websocket_accepts_interleaved_state_event_during_subscription_setup(tmp_path) -> None:
+    adapter = _websocket_adapter(tmp_path)
+    applied = 0
+    original_apply = adapter.apply_state_changed
+
+    async def count_apply(entity_id: str, new_state: dict) -> bool:
+        nonlocal applied
+        applied += 1
+        return await original_apply(entity_id, new_state)
+
+    adapter.apply_state_changed = count_apply  # type: ignore[method-assign]
+    changed_coffee = next(item for item in _ha_states() if item["entity_id"] == COFFEE_ENTITY)
+    changed_coffee = dict(changed_coffee, state="off")
+    socket = FakeHomeAssistantSocket(
+        [
+            {"type": "result", "id": 1, "success": True},
+            {
+                "type": "event",
+                "event": {
+                    "event_type": "state_changed",
+                    "data": {"entity_id": COFFEE_ENTITY, "new_state": changed_coffee},
+                },
+            },
+            {"type": "result", "id": 2, "success": True},
+        ]
+    )
+    asyncio.run(adapter._subscribe_socket(socket))
+
+    assert adapter._websocket_connected is True
+    assert adapter.mutation_entity_state(COFFEE_ENTITY) == "off"
+    assert applied == 1
+    assert socket.sent == [
+        {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
+        {"id": 2, "type": "subscribe_events", "event_type": "yandex_intent"},
+    ]
+
+
+def test_ha_websocket_accepts_subscription_acknowledgements_in_either_order(tmp_path) -> None:
+    adapter = _websocket_adapter(tmp_path)
+    socket = FakeHomeAssistantSocket(
+        [
+            {"type": "result", "id": 2, "success": True},
+            {"type": "result", "id": 1, "success": True},
+        ]
+    )
+    asyncio.run(adapter._subscribe_socket(socket))
+
+    assert adapter._websocket_connected is True
+    assert socket.sent == [
+        {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
+        {"id": 2, "type": "subscribe_events", "event_type": "yandex_intent"},
+    ]
+
+
+def test_ha_websocket_delivers_interleaved_yandex_intent_once_after_setup(tmp_path) -> None:
+    adapter = _websocket_adapter(tmp_path)
+    received: list[dict] = []
+
+    async def yandex_handler(event_data: dict) -> None:
+        received.append(event_data)
+
+    adapter.set_yandex_intent_handler(yandex_handler)
+    event_data = {"command": "включи асус"}
+    socket = FakeHomeAssistantSocket(
+        [
+            {"type": "result", "id": 1, "success": True},
+            {"type": "event", "event": {"event_type": "yandex_intent", "data": event_data}},
+            {"type": "result", "id": 2, "success": True},
+        ]
+    )
+    asyncio.run(adapter._subscribe_socket(socket))
+
+    assert received == [event_data]
+
+
+def test_ha_websocket_fails_closed_on_a_failed_required_subscription(tmp_path) -> None:
+    adapter = _websocket_adapter(tmp_path)
+    socket = FakeHomeAssistantSocket(
+        [
+            {"type": "result", "id": 1, "success": True},
+            {"type": "result", "id": 2, "success": False},
+        ]
+    )
+
+    with pytest.raises(ValueError, match="subscription failed"):
+        asyncio.run(adapter._subscribe_socket(socket))
+
+
 def test_ha_websocket_routes_state_and_yandex_without_affecting_state_cache(tmp_path) -> None:
     adapter = _websocket_adapter(tmp_path)
     received: list[dict] = []

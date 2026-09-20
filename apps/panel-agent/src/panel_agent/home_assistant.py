@@ -50,6 +50,7 @@ WATCHED_ENTITIES = (
 LOGGER = logging.getLogger(__name__)
 _STATE_CHANGED_SUBSCRIPTION_ID = 1
 _YANDEX_INTENT_SUBSCRIPTION_ID = 2
+_MAX_PRE_ACK_EVENTS = 16
 YandexIntentHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
@@ -688,18 +689,38 @@ class HomeAssistantAdapter:
                     }
                 )
             )
-            subscription = json.loads(await socket.recv())
-            if (
-                subscription.get("type") != "result"
-                or subscription.get("id") != subscription_id
-                or not subscription.get("success")
-            ):
-                raise ValueError("Home Assistant WebSocket subscription failed")
+
+        pending_subscription_ids = {
+            _STATE_CHANGED_SUBSCRIPTION_ID,
+            _YANDEX_INTENT_SUBSCRIPTION_ID,
+        }
+        pre_ack_events: list[dict[str, Any]] = []
+        while pending_subscription_ids:
+            try:
+                message = json.loads(await socket.recv())
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(message, dict):
+                continue
+            if message.get("type") == "result":
+                subscription_id = message.get("id")
+                if subscription_id not in pending_subscription_ids:
+                    raise ValueError("Unexpected Home Assistant WebSocket result")
+                if message.get("success") is not True:
+                    raise ValueError("Home Assistant WebSocket subscription failed")
+                pending_subscription_ids.remove(subscription_id)
+                continue
+            if message.get("type") == "event":
+                if len(pre_ack_events) >= _MAX_PRE_ACK_EVENTS:
+                    raise ValueError("Home Assistant WebSocket setup event limit exceeded")
+                pre_ack_events.append(message)
         await self._mark_websocket_connected()
         try:
             await self.fetch_initial_snapshot()
         except (httpx.HTTPError, ValueError):
             await self._mark_cached_or_unavailable()
+        for message in pre_ack_events:
+            await self._handle_websocket_event(message)
         async for raw in socket:
             try:
                 message = json.loads(raw)

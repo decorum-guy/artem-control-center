@@ -12,6 +12,7 @@ from panel_agent.rog_g703_power import (
 )
 from panel_agent.settings import IntegrationSettings
 from panel_agent.yandex_rog_voice import (
+    MAX_YANDEX_ROG_COMMAND_CODEPOINTS,
     YandexRogVoiceBridge,
     parse_yandex_rog_voice_command,
 )
@@ -111,6 +112,28 @@ def test_parser_uses_text_only_when_command_is_missing() -> None:
     assert parse_yandex_rog_voice_command(
         {"command": "выключить асус", "text": "включи асус"}
     ) is None
+
+
+def test_parser_rejects_oversized_command_without_text_fallback() -> None:
+    within_limit = " " * (MAX_YANDEX_ROG_COMMAND_CODEPOINTS - len("включи асус")) + "включи асус"
+    over_limit = within_limit + " "
+
+    assert len(within_limit) == MAX_YANDEX_ROG_COMMAND_CODEPOINTS
+    assert parse_yandex_rog_voice_command({"command": within_limit}) == ROG_G703_WAKE_ACTION
+    assert parse_yandex_rog_voice_command(
+        {"command": over_limit, "text": "включи асус"}
+    ) is None
+
+
+def test_oversized_fallback_text_does_not_execute_or_respond() -> None:
+    subject, executor, responder = bridge()
+    oversized_text = "включи асус" + " " * MAX_YANDEX_ROG_COMMAND_CODEPOINTS
+
+    assert parse_yandex_rog_voice_command({"text": oversized_text}) is None
+    asyncio.run(subject.handle({"text": oversized_text}))
+
+    assert executor.requests == []
+    assert responder.responses == []
 
 
 @pytest.mark.parametrize(
