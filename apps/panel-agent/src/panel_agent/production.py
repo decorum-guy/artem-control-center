@@ -15,6 +15,7 @@ from .home_assistant_actions import (
 )
 from .main import SETTINGS, access_policy, app, backup_service, effective_immediate_capability_enabled, runtime
 from .rog_g703_power import RogG703ActionExecutor, build_rog_g703_action_router
+from .yandex_rog_voice import YandexRogVoiceBridge
 from .static_dashboard import install_dashboard_routes
 from .system_update import build_system_update_router
 
@@ -43,6 +44,9 @@ rog_g703_actions = RogG703ActionExecutor(
     SETTINGS,
     access_policy,
     device=runtime.rog_g703,
+)
+runtime.home_assistant.set_yandex_intent_handler(
+    YandexRogVoiceBridge(SETTINGS, rog_g703_actions, runtime.home_assistant).handle
 )
 
 app.add_middleware(AccessPolicyMiddleware, store=access_policy)

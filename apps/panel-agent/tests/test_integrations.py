@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 
-from panel_agent.home_assistant import CLIMATE_ENTITY, HomeAssistantAdapter
+from panel_agent.home_assistant import (
+    CLIMATE_ENTITY,
+    COFFEE_ENTITY,
+    HomeAssistantAdapter,
+)
 from panel_agent.http_integrations import HttpIntegrationAdapter
 from panel_agent.settings import IntegrationSettings
 from panel_agent.snapshot import SnapshotPublisher
@@ -95,6 +100,27 @@ def _climate_state(state: str = "heat"):
             "supported_features": 1,
         },
     }
+
+
+class FakeHomeAssistantSocket:
+    def __init__(self, received: list[dict], events: list[dict] | None = None) -> None:
+        self._received = [json.dumps(message) for message in received]
+        self._events = [json.dumps(message) for message in events or []]
+        self.sent: list[dict] = []
+
+    async def recv(self) -> str:
+        return self._received.pop(0)
+
+    async def send(self, message: str) -> None:
+        self.sent.append(json.loads(message))
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> str:
+        if not self._events:
+            raise StopAsyncIteration
+        return self._events.pop(0)
 
 
 def test_ha_initial_snapshot_normalizes_canonical_helpers(tmp_path):
@@ -626,3 +652,111 @@ def test_ssh_command_rejects_invalid_json_host_failure_and_oversized_output(
 ):
     with pytest.raises(SshDetailsError):
         _parse_command_output(stdout, stderr, returncode, limit)
+
+
+def _websocket_adapter(tmp_path) -> HomeAssistantAdapter:
+    return HomeAssistantAdapter(
+        IntegrationSettings(
+            ha_url="http://ha.test",
+            ha_token="test-token",
+            state_cache_path=str(tmp_path / "ha-cache.json"),
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=_ha_states())),
+    )
+
+
+def _subscription_acks() -> list[dict]:
+    return [
+        {"type": "result", "id": 1, "success": True},
+        {"type": "result", "id": 2, "success": True},
+    ]
+
+
+def test_ha_websocket_subscribes_to_state_and_yandex_intent(tmp_path) -> None:
+    adapter = _websocket_adapter(tmp_path)
+    socket = FakeHomeAssistantSocket(_subscription_acks())
+    asyncio.run(adapter._subscribe_socket(socket))
+
+    assert socket.sent == [
+        {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
+        {"id": 2, "type": "subscribe_events", "event_type": "yandex_intent"},
+    ]
+    assert adapter._websocket_connected is True
+
+
+def test_ha_websocket_routes_state_and_yandex_without_affecting_state_cache(tmp_path) -> None:
+    adapter = _websocket_adapter(tmp_path)
+    received: list[dict] = []
+
+    async def yandex_handler(event_data: dict) -> None:
+        received.append(event_data)
+
+    adapter.set_yandex_intent_handler(yandex_handler)
+    changed_coffee = next(item for item in _ha_states() if item["entity_id"] == COFFEE_ENTITY)
+    changed_coffee = dict(changed_coffee, state="off")
+    socket = FakeHomeAssistantSocket(
+        _subscription_acks(),
+        [
+            {"type": "event", "event": {"event_type": "yandex_intent", "data": {"command": "включи асус"}}},
+            {"type": "event", "event": {"event_type": "state_changed", "data": {"entity_id": COFFEE_ENTITY, "new_state": changed_coffee}}},
+            {"type": "event", "event": {"event_type": "yandex_intent", "data": {"command": "напомни мне через час"}}},
+        ],
+    )
+    asyncio.run(adapter._subscribe_socket(socket))
+
+    assert received == [
+        {"command": "включи асус"},
+        {"command": "напомни мне через час"},
+    ]
+    assert adapter.mutation_entity_state(COFFEE_ENTITY) == "off"
+    assert "command" not in adapter._states[COFFEE_ENTITY]
+
+
+def test_ha_websocket_recovers_both_subscriptions_and_handler_failure_keeps_state_stream(tmp_path) -> None:
+    adapter = _websocket_adapter(tmp_path)
+
+    async def broken_handler(_: dict) -> None:
+        raise RuntimeError("private utterance must not escape")
+
+    adapter.set_yandex_intent_handler(broken_handler)
+    changed_coffee = next(item for item in _ha_states() if item["entity_id"] == COFFEE_ENTITY)
+    changed_coffee = dict(changed_coffee, state="off")
+    first = FakeHomeAssistantSocket(
+        _subscription_acks(),
+        [
+            {"type": "event", "event": {"event_type": "yandex_intent", "data": {"command": "включи асус"}}},
+            {"type": "event", "event": {"event_type": "state_changed", "data": {"entity_id": COFFEE_ENTITY, "new_state": changed_coffee}}},
+            {"type": "event", "event": {"event_type": "yandex_intent", "data": "malformed"}},
+        ],
+    )
+    second = FakeHomeAssistantSocket(_subscription_acks())
+
+    async def exercise() -> None:
+        await adapter._subscribe_socket(first)
+        assert adapter.mutation_entity_state(COFFEE_ENTITY) == "off"
+        await adapter._mark_websocket_disconnected()
+        await adapter._subscribe_socket(second)
+
+    asyncio.run(exercise())
+    assert first.sent == second.sent == [
+        {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
+        {"id": 2, "type": "subscribe_events", "event_type": "yandex_intent"},
+    ]
+
+
+def test_fixed_yandex_response_event_has_no_caller_selected_event_or_payload(tmp_path) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={})
+
+    adapter = HomeAssistantAdapter(
+        IntegrationSettings(ha_url="http://ha.test", ha_token="test-token"),
+        transport=httpx.MockTransport(handler),
+    )
+    asyncio.run(adapter.respond_to_yandex_intent("Включаю ASUS."))
+
+    assert calls == [
+        ("/api/events/yandex_intent_response", {"text": "Включаю ASUS.", "end_session": True})
+    ]

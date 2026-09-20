@@ -103,6 +103,14 @@ and healthy AliceTG monitoring. Only after those checks pass does it enable
 coffee mutation transport gates. Access profiles, capabilities, confirmations,
 touch lock and PIN authorization still apply at the Panel Agent boundary.
 
+The same authenticated HA connection may subscribe to the fixed
+`yandex_intent` event for the optional ASUS voice bridge. The bridge remains
+off until `PANEL_ROG_G703_ALICE_ENABLED=true` is placed intentionally in the
+protected runtime file, alongside the existing ROG and write gates. It sends
+only the fixed `yandex_intent_response` event back through that same private HA
+origin; it does not require another forward, a public Samsung listener, or an
+AliceTG Bot change.
+
 The Planning runtime mapping is deterministic and private:
 
 ```text
@@ -131,6 +139,9 @@ AVALAR and unrelated settings are preserved.
   a fresh Home Assistant read after the bot reports success;
 - cached or stale Home Assistant state cannot enable a new coffee action;
 - no generic HA proxy, shell command or user-supplied entity/service is exposed.
+- the ASUS voice route accepts only a closed phrase grammar and invokes the
+  existing typed ROG executor; voice input cannot choose an event type, action,
+  host, MAC, entity, service, or command.
 
 ## Status and logs
 
