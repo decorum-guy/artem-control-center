@@ -450,9 +450,9 @@ test.describe("Overview V2 Edit mode and persistence", () => {
 
   test("communicates true, server-disabled, and unconfirmed layout writer gates", async ({ page }) => {
     for (const [mode, gate, enabled, copy] of [
-      ["writer-true", "available", true, "Редактор панели готов."],
-      ["writer-false", "server-disabled", false, "Запись раскладки отключена сервером или deployment gate."],
-      ["metadata-missing", "metadata-unavailable", false, "Серверная доступность раскладки не подтверждена; запись отключена."]
+      ["writer-true", "available", true, "Можно менять расположение и виджеты."],
+      ["writer-false", "server-disabled", false, "Изменение панели сейчас отключено."],
+      ["metadata-missing", "metadata-unavailable", false, "Не удалось проверить возможность изменения панели. Попробуйте позже."]
     ] as const) {
       await page.unroute("**/api/v1/overview/layout*").catch(() => undefined);
       const state = await installLayoutGateRoute(page, mode);
@@ -829,7 +829,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
 
     await page.getByTestId("overview-save").click();
     await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
-    await expect(page.getByTestId("overview-edit-toolbar").getByText("Сервер отклонил конфигурацию панели.")).toBeVisible();
+    await expect(page.getByTestId("overview-edit-toolbar").getByText("Не удалось сохранить изменения панели.")).toBeVisible();
     await expect(page.getByText("Сохраняем…")).toHaveCount(0);
     await expect(page.getByTestId("overview-save")).toBeEnabled();
     await expect(page.getByTestId("overview-add-widget")).toBeEnabled();
@@ -853,7 +853,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
 
     await page.getByTestId("overview-save").click();
     await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
-    await expect(page.getByTestId("overview-edit-toolbar").getByText("Сервер отклонил конфигурацию панели.")).toBeVisible();
+    await expect(page.getByTestId("overview-edit-toolbar").getByText("Не удалось сохранить изменения панели.")).toBeVisible();
     await expect(page.getByText("Сохраняем…")).toHaveCount(0);
     await expect(page.getByTestId("overview-save")).toBeEnabled();
     await expect(page.getByTestId("overview-reset")).toBeEnabled();
@@ -889,9 +889,9 @@ test.describe("Overview V2 Edit mode and persistence", () => {
 
     await page.getByTestId("overview-save").click();
     await expect(page.getByTestId("overview-load-current")).toBeVisible();
-    await expect(page.getByTestId("overview-edit-toolbar")).toContainText("Конфликт версии");
-    await expect(page.getByTestId("overview-edit-toolbar")).toContainText("Загрузить актуальную");
-    await expect(page.getByTestId("overview-edit-toolbar")).not.toContainText("Панель изменилась в другом окне");
+    await expect(page.getByTestId("overview-edit-toolbar")).toContainText("Панель изменилась в другом окне");
+    await expect(page.getByTestId("overview-edit-toolbar")).toContainText("Загрузить текущую");
+    await expect(page.getByTestId("overview-edit-toolbar")).not.toContainText("Конфликт версии");
     await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
     expect(routeState.patchCount).toBe(1);
     await captureArtifact(page, testInfo, "overview-edit-conflict.png");

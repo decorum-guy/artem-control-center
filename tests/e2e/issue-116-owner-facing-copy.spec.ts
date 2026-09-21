@@ -15,7 +15,12 @@ const technicalCopy = [
   /контракт/i,
   /снимок/i,
   /канонич/i,
-  /эндпоинт/i
+  /эндпоинт/i,
+  /deployment gate/i,
+  /instance identity/i,
+  /bounded appearance/i,
+  /серверная доступность/i,
+  /запись раскладки/i
 ];
 
 const calendarEventsRoute = new RegExp("/api/v1/planning/events(?:/[^/?]+)?(?:\\?.*)?$");

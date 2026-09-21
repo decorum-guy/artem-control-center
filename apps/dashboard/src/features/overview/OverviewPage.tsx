@@ -96,11 +96,11 @@ export function OverviewV2Page({
           ? "server-disabled"
           : "available";
   const configureGateCopy = {
-    "build-disabled": "Редактор выключен в этой сборке.",
-    checking: "Проверяем доступность редактора…",
-    "metadata-unavailable": "Серверная доступность раскладки не подтверждена; запись отключена.",
-    "server-disabled": "Запись раскладки отключена сервером или deployment gate.",
-    available: "Редактор панели готов."
+    "build-disabled": "Настройка панели недоступна в этой версии.",
+    checking: "Проверяем, можно ли изменить панель…",
+    "metadata-unavailable": "Не удалось проверить возможность изменения панели. Попробуйте позже.",
+    "server-disabled": "Изменение панели сейчас отключено.",
+    available: "Можно менять расположение и виджеты."
   } as const;
   const visibleItems = editMode ? editor.draft : editor.canonical.items;
   const appearanceItem = appearanceInstanceId
@@ -122,26 +122,26 @@ export function OverviewV2Page({
     try {
       const read = await readBackOverviewLayout();
       if (!read.available) {
-        dispatch({ type: "save-uncertain", message: "Проверка пока недоступна. Черновик сохранён на экране; повторная запись не выполнялась." });
+        dispatch({ type: "save-uncertain", message: "Не удалось проверить сохранение. Изменения остаются на экране; повторно сохранять их не нужно." });
         return;
       }
       etagRef.current = read.etag;
       if (overviewItemsEqual(read.document.items, candidate)) {
         dispatch({ type: "save-succeeded", document: read.document });
         setAppearanceInstanceId(null);
-        showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Сервер подтвердил сохранённую конфигурацию.", timeoutMs: 6_000 });
+        showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Изменения применены.", timeoutMs: 6_000 });
         return;
       }
-      dispatch({ type: "save-conflict", message: "Панель изменилась в другом окне. Черновик не перезаписан." });
+      dispatch({ type: "save-conflict", message: "Панель изменилась в другом окне. Ваши изменения пока не сохранены." });
       showNotice({
         id: "overview.layout.conflict",
         severity: "warning",
-        title: "Конфликт конфигурации",
-        detail: "Загрузите актуальную версию панели перед продолжением.",
+        title: "Панель изменилась",
+        detail: "Загрузите текущую версию панели перед продолжением.",
         timeoutMs: 10_000
       });
     } catch {
-      dispatch({ type: "save-uncertain", message: "Не удалось подтвердить результат. Не повторяйте сохранение вслепую." });
+      dispatch({ type: "save-uncertain", message: "Не удалось проверить результат. Изменения остаются на экране; повторно сохранять их не нужно." });
     }
   }
 
@@ -154,7 +154,7 @@ export function OverviewV2Page({
     }
     const validation = validateOverviewLayout(editor.draft);
     if (!validation.valid) {
-      const message = "Черновик содержит недопустимое размещение или настройку. Исправьте его перед сохранением.";
+      const message = "Некоторые виджеты размещены или настроены некорректно. Исправьте их перед сохранением.";
       dispatch({ type: "message", message });
       setAnnouncement(message);
       return;
@@ -172,21 +172,21 @@ export function OverviewV2Page({
       etagRef.current = result.etag;
       dispatch({ type: "save-succeeded", document: result.document });
       setAppearanceInstanceId(null);
-        showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Новая конфигурация загружена.", timeoutMs: 6_000 });
+        showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Изменения применены.", timeoutMs: 6_000 });
     } catch (error) {
       if (error instanceof OverviewLayoutApiError && error.conflict) {
-        dispatch({ type: "save-conflict", message: "Панель изменилась в другом окне. Локальный черновик сохранён." });
+        dispatch({ type: "save-conflict", message: "Панель изменилась в другом окне. Ваши изменения остаются на экране." });
         showNotice({
           id: "overview.layout.conflict",
           severity: "warning",
           title: "Панель изменилась в другом окне",
-          detail: "Загрузите актуальную версию, чтобы продолжить безопасно.",
+          detail: "Загрузите текущую версию, чтобы продолжить.",
           timeoutMs: 10_000
         });
         return;
       }
       if (error instanceof OverviewLayoutApiError && error.uncertain) {
-        dispatch({ type: "save-uncertain", message: "Результат сохранения неизвестен. Проверяем сервер без повторной записи…" });
+        dispatch({ type: "save-uncertain", message: "Не удалось сразу подтвердить сохранение. Проверяем ещё раз…" });
         void reconcileUncertain(candidate);
         return;
       }
@@ -200,14 +200,14 @@ export function OverviewV2Page({
     try {
       const result = await getOverviewLayout();
       if (!result.available) {
-        dispatch({ type: "message", message: "Актуальная версия панели пока недоступна." });
+        dispatch({ type: "message", message: "Текущая версия панели пока недоступна." });
         return;
       }
       etagRef.current = result.etag;
       dispatch({ type: "load-server", document: result.document });
       setAppearanceInstanceId(null);
     } catch {
-      dispatch({ type: "message", message: "Не удалось загрузить актуальную версию панели." });
+      dispatch({ type: "message", message: "Не удалось загрузить текущую версию панели." });
     }
   }
 
@@ -265,7 +265,7 @@ export function OverviewV2Page({
       {toolbar}
       {announcement && <p className="overview-edit-announcement" aria-live="polite">{announcement}</p>}
       {editor.canonical.warnings && editor.canonical.warnings.length > 0 && !editMode && (
-        <p className="overview-v2-layout-warning" data-testid="overview-layout-warning">Показывается безопасное восстановление сохранённой панели.</p>
+        <p className="overview-v2-layout-warning" data-testid="overview-layout-warning">Показана восстановленная версия панели.</p>
       )}
       {editMode && editor.canonical.unplaced && editor.canonical.unplaced.length > 0 && (
         <section className="overview-unplaced" data-testid="overview-unplaced">

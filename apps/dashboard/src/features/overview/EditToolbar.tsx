@@ -40,7 +40,7 @@ export function EditToolbar({
             disabled={disabled || !canWrite}
             onClick={onAdd}
             data-testid="overview-add-widget"
-            title={!canWrite ? "Сохранение панели отключено сервером" : undefined}
+            title={!canWrite ? "Сохранить изменения сейчас нельзя" : undefined}
           >
             Добавить
           </button>
@@ -56,7 +56,7 @@ export function EditToolbar({
         </div>
         <div className="overview-v2-toolbar__dirty" role="status" aria-live="polite">
           {conflict
-            ? "Конфликт версии"
+            ? "Панель изменилась в другом окне"
             : saving
               ? "Сохраняем…"
               : uncertain
@@ -74,7 +74,7 @@ export function EditToolbar({
           )}
           {conflict && !saving && (
             <button type="button" className="overview-v2-toolbar__secondary" onClick={onLoadCurrent} data-testid="overview-load-current">
-              Загрузить актуальную
+              Загрузить текущую
             </button>
           )}
           <button type="button" className="overview-v2-toolbar__secondary" disabled={saving || uncertain} onClick={onCancel} data-testid="overview-cancel">
@@ -93,13 +93,13 @@ export function EditToolbar({
       </header>
       {!canWrite && (
         <p className="overview-v2-editor-capability" data-testid="overview-editor-capability">
-          Сохранение панели отключено. Изменения доступны только для просмотра.
+          Сохранить изменения сейчас нельзя.
         </p>
       )}
       {resetOpen && (
         <DialogFrame
           title="Сбросить панель?"
-          description="Текущая раскладка будет заменена стандартной. Сохранение произойдёт только после нажатия «Готово»."
+          description="Текущая панель будет заменена стандартной. Изменение применится только после нажатия «Готово»."
           testId="overview-reset-dialog"
           onClose={() => setResetOpen(false)}
           footer={(
@@ -118,7 +118,7 @@ export function EditToolbar({
             </>
           )}
         >
-          <p>Позиции, размеры, видимость и bounded appearance-настройки вернутся к текущей версии по умолчанию.</p>
+          <p>Позиции, размеры, видимость и внешний вид виджетов вернутся к стандартным.</p>
         </DialogFrame>
       )}
     </>

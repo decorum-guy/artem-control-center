@@ -37,7 +37,7 @@ export function WidgetAppearanceSheet({
   return (
     <Sheet
       title={definition ? `Настройки: ${definition.title}` : "Настройки виджета"}
-      description="Изменения применяются только к текущему черновику до нажатия «Готово»."
+      description="Изменения вступят в силу после нажатия «Готово»."
       testId="overview-widget-appearance"
       onClose={onClose}
       footer={<button type="button" className="overview-appearance__reset" onClick={onReset}>Сбросить настройки</button>}

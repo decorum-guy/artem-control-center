@@ -82,7 +82,7 @@ export function WidgetPicker({
         })}
       </div>
       {items.some((item) => item.visibility === "hidden") && (
-        <p className="overview-picker__hint">Скрытые виджеты сохраняют свою instance identity и появятся здесь как доступные для восстановления.</p>
+        <p className="overview-picker__hint">Скрытые виджеты остаются доступными здесь, чтобы их можно было вернуть на панель.</p>
       )}
     </Sheet>
   );
