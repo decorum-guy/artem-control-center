@@ -110,6 +110,16 @@ try {
     if ([string]$evidence.stage -ne "target-bootstrap-accepted" -or [string]$evidence.result -ne "success") {
         throw "Target continuation did not record bounded bootstrap evidence"
     }
+    $acceptedRecovery = Stop-ArtemTargetContinuationForRecovery `
+        -Paths $paths `
+        -TargetProcess $process `
+        -LockRequestId $request `
+        -Current $current `
+        -Target $target `
+        -TimeoutSeconds 1
+    if ($acceptedRecovery) {
+        throw "Recovery attempted to reclaim a target child after bootstrap acceptance"
+    }
 
     # A fresh ownerless lease rejects every mismatched identity before a child
     # can claim it, including a stale competing parent owner.
