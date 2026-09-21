@@ -66,6 +66,25 @@ function Write-ArtemTargetHandoffEvidence {
     }
 }
 
+function Get-ArtemTargetHandoffEvidence {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId
+    )
+    $evidencePath = Join-Path $Paths.Logs ("update-handoff-{0}.json" -f $LockRequestId)
+    $payload = Get-ArtemJsonPayload -Path $evidencePath
+    if (
+        $null -eq $payload -or
+        $payload.schemaVersion -ne 1 -or
+        [string]$payload.requestId -ne $LockRequestId -or
+        [string]$payload.stage -notin @("launched", "arguments-accepted", "lease-accepted", "transcript-started", "target-bootstrap-accepted") -or
+        [string]$payload.result -notin @("success", "child-start-failed", "parameter-binding-failed", "lease-rejected", "bootstrap-failed")
+    ) {
+        return $null
+    }
+    return $payload
+}
+
 function Complete-ArtemTargetHandoffFailure {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -76,7 +95,8 @@ function Complete-ArtemTargetHandoffFailure {
     if (
         $null -ne $existing -and
         [string]$existing.requestId -eq $LockRequestId -and
-        [string]$existing.stage -in @("launched", "arguments-accepted")
+        [string]$existing.stage -in @("launched", "arguments-accepted", "lease-accepted", "transcript-started") -and
+        [string]$existing.result -eq "success"
     ) {
         Write-ArtemTargetHandoffEvidence `
             -Paths $Paths `
@@ -109,6 +129,27 @@ function Test-ArtemTargetHandoffTimestamp {
     catch { return $false }
     $age = [DateTimeOffset]::UtcNow - $updated
     return $age.TotalSeconds -ge 0 -and $age.TotalMinutes -le 2
+}
+
+function Test-ArtemTargetHandoffAcceptance {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)]$TargetProcess,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target
+    )
+    $evidence = Get-ArtemTargetHandoffEvidence -Paths $Paths -LockRequestId $LockRequestId
+    $lock = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+    return (
+        $null -ne $evidence -and
+        [string]$evidence.stage -eq "target-bootstrap-accepted" -and
+        [string]$evidence.result -eq "success" -and
+        (Test-ArtemTargetHandoffTimestamp -Value $evidence.updatedAt) -and
+        (Test-ArtemTargetHandoffLease -Existing $lock -LockRequestId $LockRequestId -Current $Current -Target $Target) -and
+        [int]$lock.ownerPid -eq [int]$TargetProcess.Id -and
+        $null -eq $lock.handoff
+    )
 }
 
 function Test-ArtemTargetHandoffTransaction {
@@ -239,6 +280,26 @@ function Claim-ArtemTargetHandoffLease {
     return $claim
 }
 
+function Publish-ArtemTargetBootstrapAcceptance {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target
+    )
+    Invoke-ArtemTargetHandoffLockMutation -Paths $Paths -Mutation {
+        $existing = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+        if (
+            -not (Test-ArtemTargetHandoffLease -Existing $existing -LockRequestId $LockRequestId -Current $Current -Target $Target) -or
+            [int]$existing.ownerPid -ne $PID -or
+            $null -ne $existing.handoff
+        ) {
+            throw "Target updater lost exact handoff ownership before bootstrap acceptance"
+        }
+        Write-ArtemTargetHandoffEvidence -Paths $Paths -LockRequestId $LockRequestId -Stage "target-bootstrap-accepted" -Result "success"
+    }
+}
+
 function Restore-ArtemLegacyTargetHandoffLease {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -328,6 +389,55 @@ function Start-ArtemTargetContinuation {
     }
 }
 
+function Stop-ArtemTargetContinuationForRecovery {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)]$TargetProcess,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target,
+        [int]$TimeoutSeconds = 5
+    )
+    $shouldRecover = Invoke-ArtemTargetHandoffLockMutation -Paths $Paths -Mutation {
+        if (Test-ArtemTargetHandoffAcceptance -Paths $Paths -TargetProcess $TargetProcess -LockRequestId $LockRequestId -Current $Current -Target $Target) {
+            return $false
+        }
+
+        $TargetProcess.Refresh()
+        if ($TargetProcess.HasExited) { return $true }
+
+        $lock = Get-ArtemJsonPayload -Path $Paths.UpdateLock
+        if ($null -ne $lock) {
+            $exact = Test-ArtemTargetHandoffLease -Existing $lock -LockRequestId $LockRequestId -Current $Current -Target $Target
+            $ownerless = $exact -and [string]$lock.handoff -eq "target-continuation" -and $null -eq $lock.ownerPid
+            $ownedByChild = $exact -and [int]$lock.ownerPid -eq [int]$TargetProcess.Id
+            if (-not $ownerless -and -not $ownedByChild) {
+                throw "Target updater continuation recovery found a competing lease owner"
+            }
+        }
+
+        # Recovery targets the exact Process object returned by Start-Process,
+        # never a separately looked-up PID that could have been recycled.
+        try {
+            $TargetProcess.Kill()
+        }
+        catch {
+            $TargetProcess.Refresh()
+            if (-not $TargetProcess.HasExited) {
+                throw "Target updater continuation could not be stopped for recovery"
+            }
+        }
+        return $true
+    }
+
+    if (-not $shouldRecover) { return $false }
+    $TargetProcess.Refresh()
+    if (-not $TargetProcess.HasExited -and -not $TargetProcess.WaitForExit([Math]::Max(1, $TimeoutSeconds) * 1000)) {
+        throw "Target updater continuation did not stop within the recovery timeout"
+    }
+    return $true
+}
+
 function Wait-ArtemTargetContinuationAcceptance {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -335,19 +445,32 @@ function Wait-ArtemTargetContinuationAcceptance {
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target,
-        [int]$TimeoutSeconds = 20
+        [int]$TimeoutSeconds = 60
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
+        if (Test-ArtemTargetHandoffAcceptance -Paths $Paths -TargetProcess $TargetProcess -LockRequestId $LockRequestId -Current $Current -Target $Target) {
+            return $true
+        }
+
         $TargetProcess.Refresh()
-        if ($TargetProcess.HasExited) { return $false }
+        if ($TargetProcess.HasExited) {
+            return Test-ArtemTargetHandoffAcceptance -Paths $Paths -TargetProcess $TargetProcess -LockRequestId $LockRequestId -Current $Current -Target $Target
+        }
+
         $lock = Get-ArtemJsonPayload -Path $Paths.UpdateLock
         if (
+            $null -ne $lock -and
             (Test-ArtemTargetHandoffLease -Existing $lock -LockRequestId $LockRequestId -Current $Current -Target $Target) -and
-            [int]$lock.ownerPid -eq [int]$TargetProcess.Id -and
-            $null -eq $lock.handoff
-        ) { return $true }
+            $null -ne $lock.ownerPid -and
+            [int]$lock.ownerPid -ne [int]$TargetProcess.Id
+        ) {
+            return $false
+        }
         Start-Sleep -Milliseconds 100
     }
-    return $false
+
+    # Final edge check closes the normal timeout race. The recovery stop takes
+    # the same mutex as bootstrap publication for the remaining atomic boundary.
+    return Test-ArtemTargetHandoffAcceptance -Paths $Paths -TargetProcess $TargetProcess -LockRequestId $LockRequestId -Current $Current -Target $Target
 }
