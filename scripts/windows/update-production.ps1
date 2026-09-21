@@ -1296,8 +1296,8 @@ finally {
         # may it perform owner-visible console-session recovery. A delayed or
         # failed handoff is advisory and must never roll back a healthy build.
         try {
-            if (-not (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths)) {
-                Write-Warning "Production dashboard is verified, but the Interactive kiosk recovery task is unavailable"
+            if (-not (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths -LockRequestId $RequestId)) {
+                Write-Warning "Production dashboard is verified and the backend was preserved, but the Interactive kiosk recovery task is unavailable"
             }
         }
         catch {
