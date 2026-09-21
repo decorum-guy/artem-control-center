@@ -53,5 +53,9 @@ if ($env:ARTEM_TARGET_HANDOFF_TEST_FAIL -eq "1") {
 if ($env:ARTEM_TARGET_HANDOFF_TEST_HOLD_BEFORE_ACCEPT -eq "1") {
     Start-Sleep -Seconds 30
 }
-Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "target-bootstrap-accepted" -Result "success"
+Publish-ArtemTargetBootstrapAcceptance `
+    -Paths $paths `
+    -LockRequestId $RequestId `
+    -Current $ExpectedCurrentHead `
+    -Target $ExpectedTargetHead
 exit 0
