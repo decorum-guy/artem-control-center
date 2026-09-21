@@ -1023,15 +1023,338 @@ function Wait-ArtemInteractiveRuntimeTaskAvailable {
     return $false
 }
 
+function Restore-ArtemPostUpdateRuntime {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}
+function Stop-ArtemKiosk {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$Processes,
+        [scriptblock]$ProcessStopper
+    )
+    try {
+        $owned = if ($PSBoundParameters.ContainsKey('Processes')) {
+            @(Get-ArtemKioskProcesses -Paths $Paths -Processes $Processes)
+        }
+        else {
+            @(Get-ArtemKioskProcesses -Paths $Paths)
+        }
+        if ($null -eq $ProcessStopper) {
+            $ProcessStopper = {
+                param($ProcessId)
+                Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        # Stop deepest descendants first so killing the profile root cannot orphan
+        # a still-running kiosk child before it has been included in cleanup.
+        $ordered = @(
+            $owned | Sort-Object -Property `
+                @{ Expression = { [int]$_.OwnershipDepth }; Descending = $true }, `
+                @{ Expression = { [int]$_.ProcessId }; Descending = $true }
+        )
+        foreach ($process in $ordered) {
+            & $ProcessStopper ([int]$process.ProcessId)
+        }
+        # The owner token is advisory status evidence. Remove it with the
+        # explicit cleanup so a stopped kiosk cannot look degraded merely
+        # because its last watcher claim remains on disk.
+        Remove-Item -LiteralPath (Join-Path $Paths.RuntimeRoot "kiosk-watcher-owner.json") -Force -ErrorAction SilentlyContinue
+    }
+    catch {
+        Write-Warning "Unable to close the panel-owned Edge kiosk: $($_.Exception.Message)"
+    }
+}
+
+function Start-ArtemKioskWatcher {
+    param([Parameter(Mandatory)]$Paths)
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList @(
+            "-NoProfile",
+            "-WindowStyle", "Hidden",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $Paths.KioskWatchScript
+        ) `
+        -WindowStyle Hidden | Out-Null
+}
+
+function Write-ArtemRuntimeCommand {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [ValidateSet("hide", "shutdown")]
+        [string]$Action,
+        [bool]$Manual = $true
+    )
+    Initialize-ArtemRuntimeDirectories -Paths $Paths
+    $payload = [ordered]@{
+        schemaVersion = 1
+        action = $Action
+        manual = $Manual
+        requestedAt = [DateTime]::UtcNow.ToString("o")
+        requestedBy = "windows-helper"
+    }
+    $temporary = "$($Paths.Command).tmp"
+    $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporary -Encoding ASCII
+    Move-Item -LiteralPath $temporary -Destination $Paths.Command -Force
+}
+
+function Write-ArtemManualStopMarker {
+    param([Parameter(Mandatory)]$Paths)
+    Initialize-ArtemRuntimeDirectories -Paths $Paths
+    $payload = [ordered]@{
+        schemaVersion = 1
+        reason = "manual_shutdown"
+        createdAt = [DateTime]::UtcNow.ToString("o")
+    }
+    $payload | ConvertTo-Json | Set-Content -LiteralPath $Paths.ManualStop -Encoding ASCII
+}
+
+function Stop-ArtemRuntime {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [bool]$Manual = $true,
+        [int]$TimeoutSeconds = 20
+    )
+    $state = Get-ArtemRuntimeState -Paths $Paths
+    $running = Test-ArtemRuntimeProcess -Paths $Paths
+
+    if ($Manual) { Write-ArtemManualStopMarker -Paths $Paths }
+    Stop-ArtemKiosk -Paths $Paths
+
+    if (-not $running) {
+        Remove-Item -LiteralPath $Paths.Command -Force -ErrorAction SilentlyContinue
+        return
+    }
+
+    Write-ArtemRuntimeCommand -Paths $Paths -Action "shutdown" -Manual $Manual
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-ArtemRuntimeProcess -Paths $Paths)) { return }
+        Start-Sleep -Milliseconds 300
+    }
+
+    if ($null -ne $state.supervisorPid) {
+        & taskkill.exe /PID $state.supervisorPid /T /F | Out-Null
+    }
+    if (Test-ArtemRuntimeProcess -Paths $Paths) {
+        throw "Production runtime did not stop"
+    }
+}
+
+function Assert-ArtemProductionPrerequisites {
+    param([Parameter(Mandatory)]$Paths)
+    Update-ArtemProcessPath
+    $revision = Get-ArtemCheckoutRevision -Paths $Paths
+    $python = Get-ArtemRuntimePythonPath -Paths $Paths -Revision $revision
+    if (-not (Test-Path -LiteralPath $Paths.RuntimeScript)) {
+        throw "Production runtime script is missing: $($Paths.RuntimeScript)"
+    }
+    if (-not (Test-Path -LiteralPath $python)) {
+        throw "Python environment is missing. Run npm run setup."
+    }
+    if (-not (Test-Path -LiteralPath $Paths.DashboardIndex)) {
+        throw "Production dashboard build is missing. Run npm run build:production."
+    }
+    if ($null -eq (Get-ArtemProductionBuildIdentity -DashboardRoot $Paths.DashboardDist)) {
+        throw "Production dashboard build identity is missing or invalid. Run npm run build:production."
+    }
+    $null = Get-Command node.exe -ErrorAction Stop
+}
+
+$updaterRecoveryScript = Join-Path $PSScriptRoot "updater-recovery.ps1"
+if (Test-Path -LiteralPath $updaterRecoveryScript) {
+    . $updaterRecoveryScript
+}
+
+$kioskPresenceScript = Join-Path $PSScriptRoot "kiosk-presence.ps1"
+if (Test-Path -LiteralPath $kioskPresenceScript) {
+    . $kioskPresenceScript
+}
+)][string]$LockRequestId,
+        [int]$TimeoutSeconds = 60
+    )
+
+    try {
+        # UpdateRequestId deliberately bypasses the interactive Scheduled Task
+        # preference in start-production.ps1. At this point the updater lease
+        # has already been released, so this is a direct canonical backend
+        # recovery with no competing update authority and no kiosk attempt.
+        & $Paths.StartScript -NoKiosk -UpdateRequestId $LockRequestId
+    }
+    catch {
+        return $false
+    }
+
+    try {
+        return (
+            @(Get-ArtemProductionRuntimeSupervisors).Count -eq 1 -and
+            (Wait-ArtemPanelReady -Paths $Paths -TimeoutSeconds $TimeoutSeconds)
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
 function Invoke-ArtemPostUpdateInteractiveRecovery {
     param(
         [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}
+function Stop-ArtemKiosk {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [object[]]$Processes,
+        [scriptblock]$ProcessStopper
+    )
+    try {
+        $owned = if ($PSBoundParameters.ContainsKey('Processes')) {
+            @(Get-ArtemKioskProcesses -Paths $Paths -Processes $Processes)
+        }
+        else {
+            @(Get-ArtemKioskProcesses -Paths $Paths)
+        }
+        if ($null -eq $ProcessStopper) {
+            $ProcessStopper = {
+                param($ProcessId)
+                Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        # Stop deepest descendants first so killing the profile root cannot orphan
+        # a still-running kiosk child before it has been included in cleanup.
+        $ordered = @(
+            $owned | Sort-Object -Property `
+                @{ Expression = { [int]$_.OwnershipDepth }; Descending = $true }, `
+                @{ Expression = { [int]$_.ProcessId }; Descending = $true }
+        )
+        foreach ($process in $ordered) {
+            & $ProcessStopper ([int]$process.ProcessId)
+        }
+        # The owner token is advisory status evidence. Remove it with the
+        # explicit cleanup so a stopped kiosk cannot look degraded merely
+        # because its last watcher claim remains on disk.
+        Remove-Item -LiteralPath (Join-Path $Paths.RuntimeRoot "kiosk-watcher-owner.json") -Force -ErrorAction SilentlyContinue
+    }
+    catch {
+        Write-Warning "Unable to close the panel-owned Edge kiosk: $($_.Exception.Message)"
+    }
+}
+
+function Start-ArtemKioskWatcher {
+    param([Parameter(Mandatory)]$Paths)
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList @(
+            "-NoProfile",
+            "-WindowStyle", "Hidden",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $Paths.KioskWatchScript
+        ) `
+        -WindowStyle Hidden | Out-Null
+}
+
+function Write-ArtemRuntimeCommand {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [ValidateSet("hide", "shutdown")]
+        [string]$Action,
+        [bool]$Manual = $true
+    )
+    Initialize-ArtemRuntimeDirectories -Paths $Paths
+    $payload = [ordered]@{
+        schemaVersion = 1
+        action = $Action
+        manual = $Manual
+        requestedAt = [DateTime]::UtcNow.ToString("o")
+        requestedBy = "windows-helper"
+    }
+    $temporary = "$($Paths.Command).tmp"
+    $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporary -Encoding ASCII
+    Move-Item -LiteralPath $temporary -Destination $Paths.Command -Force
+}
+
+function Write-ArtemManualStopMarker {
+    param([Parameter(Mandatory)]$Paths)
+    Initialize-ArtemRuntimeDirectories -Paths $Paths
+    $payload = [ordered]@{
+        schemaVersion = 1
+        reason = "manual_shutdown"
+        createdAt = [DateTime]::UtcNow.ToString("o")
+    }
+    $payload | ConvertTo-Json | Set-Content -LiteralPath $Paths.ManualStop -Encoding ASCII
+}
+
+function Stop-ArtemRuntime {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [bool]$Manual = $true,
+        [int]$TimeoutSeconds = 20
+    )
+    $state = Get-ArtemRuntimeState -Paths $Paths
+    $running = Test-ArtemRuntimeProcess -Paths $Paths
+
+    if ($Manual) { Write-ArtemManualStopMarker -Paths $Paths }
+    Stop-ArtemKiosk -Paths $Paths
+
+    if (-not $running) {
+        Remove-Item -LiteralPath $Paths.Command -Force -ErrorAction SilentlyContinue
+        return
+    }
+
+    Write-ArtemRuntimeCommand -Paths $Paths -Action "shutdown" -Manual $Manual
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-ArtemRuntimeProcess -Paths $Paths)) { return }
+        Start-Sleep -Milliseconds 300
+    }
+
+    if ($null -ne $state.supervisorPid) {
+        & taskkill.exe /PID $state.supervisorPid /T /F | Out-Null
+    }
+    if (Test-ArtemRuntimeProcess -Paths $Paths) {
+        throw "Production runtime did not stop"
+    }
+}
+
+function Assert-ArtemProductionPrerequisites {
+    param([Parameter(Mandatory)]$Paths)
+    Update-ArtemProcessPath
+    $revision = Get-ArtemCheckoutRevision -Paths $Paths
+    $python = Get-ArtemRuntimePythonPath -Paths $Paths -Revision $revision
+    if (-not (Test-Path -LiteralPath $Paths.RuntimeScript)) {
+        throw "Production runtime script is missing: $($Paths.RuntimeScript)"
+    }
+    if (-not (Test-Path -LiteralPath $python)) {
+        throw "Python environment is missing. Run npm run setup."
+    }
+    if (-not (Test-Path -LiteralPath $Paths.DashboardIndex)) {
+        throw "Production dashboard build is missing. Run npm run build:production."
+    }
+    if ($null -eq (Get-ArtemProductionBuildIdentity -DashboardRoot $Paths.DashboardDist)) {
+        throw "Production dashboard build identity is missing or invalid. Run npm run build:production."
+    }
+    $null = Get-Command node.exe -ErrorAction Stop
+}
+
+$updaterRecoveryScript = Join-Path $PSScriptRoot "updater-recovery.ps1"
+if (Test-Path -LiteralPath $updaterRecoveryScript) {
+    . $updaterRecoveryScript
+}
+
+$kioskPresenceScript = Join-Path $PSScriptRoot "kiosk-presence.ps1"
+if (Test-Path -LiteralPath $kioskPresenceScript) {
+    . $kioskPresenceScript
+}
+)][string]$LockRequestId,
         [int]$TimeoutSeconds = 60
     )
 
     # Software acceptance is already durable before this is called. Recovery
-    # therefore uses an explicit one-supervisor handoff and returns a bounded
-    # warning signal rather than retrying or rolling back accepted artifacts.
+    # first attempts one explicit interactive Scheduled Task handoff. Once the
+    # healthy updater-owned runtime has been stopped, every unsuccessful exit
+    # must restore one ready backend before returning an advisory false result.
     $task = Get-ScheduledTask -TaskName "Artem Control Center Runtime" -ErrorAction SilentlyContinue
     if ($null -eq $task) { return $false }
 
@@ -1046,20 +1369,33 @@ function Invoke-ArtemPostUpdateInteractiveRecovery {
 
     Stop-ArtemRuntime -Paths $Paths -Manual $false
     if (-not (Wait-ArtemRuntimeHandoffStopped -Paths $Paths -TimeoutSeconds 20)) {
-        return $false
-    }
-    if (-not (Wait-ArtemInteractiveRuntimeTaskAvailable -TimeoutSeconds 20)) {
+        # Stop did not prove absence; do not create a competing supervisor.
         return $false
     }
 
-    # One start attempt only. A task-start failure or a missing kiosk is
-    # advisory after update acceptance and must not create a retry storm.
+    $restoreBackend = {
+        return Restore-ArtemPostUpdateRuntime `
+            -Paths $Paths `
+            -LockRequestId $LockRequestId `
+            -TimeoutSeconds $TimeoutSeconds
+    }
+
+    if (-not (Wait-ArtemInteractiveRuntimeTaskAvailable -TimeoutSeconds 20)) {
+        [void](& $restoreBackend)
+        return $false
+    }
+
+    # One interactive start attempt only. A task-start failure or a missing
+    # kiosk remains advisory, but it may no longer leave the accepted backend
+    # stopped.
     try {
         Start-ScheduledTask -TaskName "Artem Control Center Runtime"
     }
     catch {
+        [void](& $restoreBackend)
         return $false
     }
+
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         try {
@@ -1074,6 +1410,8 @@ function Invoke-ArtemPostUpdateInteractiveRecovery {
         catch { }
         Start-Sleep -Milliseconds 300
     }
+
+    [void](& $restoreBackend)
     return $false
 }
 
