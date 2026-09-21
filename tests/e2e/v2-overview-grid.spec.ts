@@ -51,7 +51,7 @@ test.describe("Overview V2 safe grid foundation", () => {
     await page.goto("/overview");
     await expect(page.getByTestId("overview-configure")).toBeDisabled();
     await expect(page.getByTestId("overview-toolbar")).toHaveAttribute("data-configure-gate", "build-disabled");
-    await expect(page.locator("#overview-configure-note")).toHaveText("Редактор выключен в этой сборке.");
+    await expect(page.locator("#overview-configure-note")).toHaveText("Настройка панели недоступна в этой версии.");
     await expect(page.locator("#overview-configure-note")).toBeVisible();
   });
 

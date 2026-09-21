@@ -75,7 +75,7 @@ export async function getOverviewLayout(signal?: AbortSignal): Promise<OverviewL
     });
     const payload = parseJson(await response.text());
     if (!response.ok || !payload) {
-      throw new OverviewLayoutApiError("Панель не вернула сохранённую конфигурацию.", response.status);
+      throw new OverviewLayoutApiError("Не удалось загрузить сохранённую панель.", response.status);
     }
     const writeMetadata = typeof payload.writesEnabled === "boolean" || response.headers.has("X-Overview-Layout-Writes-Enabled");
     const writesEnabled = payload.writesEnabled === true || response.headers.get("X-Overview-Layout-Writes-Enabled") === "true";
@@ -124,7 +124,7 @@ export async function saveOverviewLayout(
     throw new OverviewLayoutApiError("Панель изменилась в другом окне.", response.status, { conflict: true });
   }
   if (!response.ok || !payload) {
-    throw new OverviewLayoutApiError("Сервер отклонил конфигурацию панели.", response.status);
+    throw new OverviewLayoutApiError("Не удалось сохранить изменения панели.", response.status);
   }
   const document = documentFromPayload(payload, payload.writesEnabled === true);
   return { document, etag: response.headers.get("ETag") ?? `"${document.revision}"`, available: true };
@@ -135,8 +135,8 @@ export async function readBackOverviewLayout(signal?: AbortSignal): Promise<Over
     return await getOverviewLayout(signal);
   } catch (error) {
     if (error instanceof OverviewLayoutApiError) {
-      throw new OverviewLayoutApiError("Не удалось подтвердить состояние сохранённой панели.", error.status, { uncertain: true });
+      throw new OverviewLayoutApiError("Не удалось проверить сохранённую панель.", error.status, { uncertain: true });
     }
-    throw new OverviewLayoutApiError("Не удалось подтвердить состояние сохранённой панели.", 0, { uncertain: true });
+    throw new OverviewLayoutApiError("Не удалось проверить сохранённую панель.", 0, { uncertain: true });
   }
 }

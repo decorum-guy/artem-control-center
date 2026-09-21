@@ -151,13 +151,13 @@ describe("Overview edit reducer", () => {
       value: 115
     });
     const saving = overviewEditorReducer(changed, { type: "save-started" });
-    const failed = overviewEditorReducer(saving, { type: "save-failed", message: "Сервер отклонил конфигурацию панели." });
+    const failed = overviewEditorReducer(saving, { type: "save-failed", message: "Не удалось сохранить изменения панели." });
 
     expect(failed.mode).toBe("editing");
     expect(failed.draft).toEqual(saving.draft);
     expect(failed.entrySnapshot).toEqual(saving.entrySnapshot);
     expect(failed.selectedInstanceId).toBe(saving.selectedInstanceId);
-    expect(failed.message).toBe("Сервер отклонил конфигурацию панели.");
+    expect(failed.message).toBe("Не удалось сохранить изменения панели.");
     expect(failed.conflict).toBe(false);
     expect(overviewEditorDirty(failed)).toBe(true);
   });
