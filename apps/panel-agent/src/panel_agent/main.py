@@ -54,6 +54,7 @@ from .project_registry_migration import (
     ensure_canonical_avalar_project,
 )
 from .runtime_control import router as runtime_control_router
+from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
 from .snapshot import SnapshotPublisher
 from .weather import WeatherService, build_weather_router
@@ -222,6 +223,7 @@ startup_lifecycle = PanelStartupLifecycle()
 access_policy = AccessPolicyStore.from_environment(
     temporary_minutes=SETTINGS.access_temporary_minutes,
 )
+system_controls = WindowsSystemControls()
 backup_source = PanelConfigSource.from_store_paths(
     overview_layout=overview_layout_store.path,
     calendar_display_colors=calendar_display_preferences_store.path,
@@ -327,6 +329,13 @@ app.include_router(
     )
 )
 app.include_router(runtime_control_router)
+app.include_router(
+    build_system_controls_router(
+        system_controls,
+        access_policy,
+        writes_enabled=lambda: SETTINGS.writes_enabled,
+    )
+)
 app.include_router(build_weather_router(weather_service))
 app.include_router(build_jarvis_router(jarvis_turn_service))
 app.include_router(build_jarvis_voice_router(service=jarvis_turn_service, bridge=jarvis_voice_bridge))
