@@ -8,6 +8,17 @@ import test from "node:test";
 const BEFORE = `sha256:${"b".repeat(64)}`;
 const AFTER = `sha256:${"a".repeat(64)}`;
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function toBashPath(value) {
+  if (process.platform !== "win32") return value;
+  return execFileSync("bash", ["-lc", 'cygpath -u "$1"', "bash", value], { encoding: "utf8" }).trim();
+}
+
+const BASH_PATH = execFileSync("bash", ["-lc", 'printf "%s" "$PATH"'], { encoding: "utf8" });
+
 function failed(fn) {
   try { fn(); } catch (error) { return String(error.stdout ?? ""); }
   assert.fail("expected helper to fail");
@@ -19,14 +30,19 @@ function fixture({ imageAfter = AFTER, health = "healthy", readinessUrl = "", co
   const lock = join(root, "lock");
   const bin = join(root, "bin");
   const log = join(root, "command.log");
+  const bashRoot = toBashPath(root);
+  const bashConfigPath = toBashPath(configPath);
+  const bashLock = toBashPath(lock);
+  const bashBin = toBashPath(bin);
+  const bashLog = toBashPath(log);
   mkdirSync(bin);
   writeFileSync(configPath, config || [
-    `COMPOSE_PROJECT_DIR=${root}`, `COMPOSE_FILE=${root}/compose.yml`,
-    "HA_SERVICE=ha", "CADDY_SERVICE=caddy", "BOT_SERVICE=bot", `HA_READY_URL=${readinessUrl}`,
+    `COMPOSE_PROJECT_DIR=${shellQuote(bashRoot)}`, `COMPOSE_FILE=${shellQuote(`${bashRoot}/compose.yml`)}`,
+    "HA_SERVICE=ha", "CADDY_SERVICE=caddy", "BOT_SERVICE=bot", `HA_READY_URL=${shellQuote(readinessUrl)}`,
   ].join("\n"));
   const helper = readFileSync("scripts/linux/home-maintenance", "utf8")
-    .replace("CONFIG=/etc/artem-control-center/home-server.conf", `CONFIG=${configPath}`)
-    .replace("LOCK=/run/lock/artem-control-center-home-maintenance.lock", `LOCK=${lock}`)
+    .replace("CONFIG=/etc/artem-control-center/home-server.conf", `CONFIG=${shellQuote(bashConfigPath)}`)
+    .replace("LOCK=/run/lock/artem-control-center-home-maintenance.lock", `LOCK=${shellQuote(bashLock)}`)
     .replace("MAX_WAIT_SECONDS=180", "MAX_WAIT_SECONDS=1");
   const path = join(root, "helper");
   writeFileSync(path, helper); chmodSync(path, 0o755);
@@ -57,7 +73,16 @@ exit 1
   chmodSync(join(bin, "flock"), 0o755);
   writeFileSync(join(bin, "curl"), "#!/usr/bin/env bash\necho \"curl $*\" >> \"$LOG\"\nexit 0\n");
   chmodSync(join(bin, "curl"), 0o755);
-  return { path, log, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LOG: log, MISSING_SERVICE: missingService ? "1" : "" } };
+  return {
+    path: toBashPath(path),
+    log,
+    env: {
+      ...process.env,
+      PATH: `${bashBin}:${BASH_PATH}`,
+      LOG: bashLog,
+      MISSING_SERVICE: missingService ? "1" : "",
+    },
+  };
 }
 
 function run(fixtureData, operation, extra = {}) {
