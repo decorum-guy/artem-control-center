@@ -9,6 +9,8 @@ $request = "1" * 24
 $root = Join-Path ([IO.Path]::GetTempPath()) ("artem-target-handoff {0}" -f [guid]::NewGuid())
 $previousRoot = $env:ARTEM_TARGET_HANDOFF_TEST_ROOT
 $previousFail = $env:ARTEM_TARGET_HANDOFF_TEST_FAIL
+$previousHold = $env:ARTEM_TARGET_HANDOFF_TEST_HOLD_BEFORE_ACCEPT
+$stalled = $null
 
 function New-TestPaths {
     param([Parameter(Mandatory)][string]$RuntimeRoot)
@@ -91,6 +93,9 @@ try {
         throw "Parent did not publish a bounded ownerless target handoff lease"
     }
     $process = Start-ArtemTargetContinuation -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript
+    if (-not (Wait-ArtemTargetContinuationAcceptance -Paths $paths -TargetProcess $process -LockRequestId $request -Current $current -Target $target -TimeoutSeconds 5)) {
+        throw "Parent did not observe durable target bootstrap acceptance"
+    }
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) { throw "Target continuation child failed" }
     $receipt = Get-ArtemJsonPayload -Path (Join-Path $root "child-receipt.json")
@@ -127,12 +132,57 @@ try {
     Publish-ArtemTargetHandoffLease -Paths $paths -LockRequestId $request -Current $current -Target $target
     $env:ARTEM_TARGET_HANDOFF_TEST_FAIL = "1"
     $failed = Start-ArtemTargetContinuation -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript
+    if (Wait-ArtemTargetContinuationAcceptance -Paths $paths -TargetProcess $failed -LockRequestId $request -Current $current -Target $target -TimeoutSeconds 5) {
+        throw "Parent accepted a child that exited before target bootstrap"
+    }
     $failed.WaitForExit()
     if ($failed.ExitCode -eq 0) { throw "Target handoff failure fixture unexpectedly succeeded" }
     Reclaim-ArtemTargetHandoffLease -Paths $paths -LockRequestId $request -Current $current -Target $target -ExitedChildPid $failed.Id
+    Complete-ArtemTargetHandoffFailure -Paths $paths -LockRequestId $request
     $reclaimed = Get-ArtemJsonPayload -Path $paths.UpdateLock
     if ([int]$reclaimed.ownerPid -ne $PID -or [string]$reclaimed.requestId -ne $request) {
         throw "Parent could not reclaim rollback authority after child failure"
+    }
+    $failedEvidence = Get-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $request
+    if ([string]$failedEvidence.stage -ne "lease-accepted" -or [string]$failedEvidence.result -ne "bootstrap-failed") {
+        throw "Pre-bootstrap child exit did not leave truthful failure evidence"
+    }
+
+    # Physical #240 boundary: the child can claim the lease and stay alive
+    # without ever reaching target-bootstrap-accepted. The parent must time out,
+    # stop only that exact process object, reclaim rollback authority, and
+    # publish a bounded bootstrap failure instead of disappearing.
+    $env:ARTEM_TARGET_HANDOFF_TEST_FAIL = ""
+    $env:ARTEM_TARGET_HANDOFF_TEST_HOLD_BEFORE_ACCEPT = "1"
+    Set-TestParentLease -Paths $paths
+    Set-TestHandoffTransaction -Paths $paths
+    Publish-ArtemTargetHandoffLease -Paths $paths -LockRequestId $request -Current $current -Target $target
+    $stalled = Start-ArtemTargetContinuation -Paths $paths -Current $current -Target $target -LockRequestId $request -TargetScript $childScript
+    if (Wait-ArtemTargetContinuationAcceptance -Paths $paths -TargetProcess $stalled -LockRequestId $request -Current $current -Target $target -TimeoutSeconds 1) {
+        throw "Stalled pre-bootstrap child was accepted"
+    }
+    Stop-ArtemTargetContinuationForRecovery -TargetProcess $stalled -TimeoutSeconds 5
+    $stalled.Refresh()
+    if (-not $stalled.HasExited) { throw "Stalled target child survived bounded recovery stop" }
+    Reclaim-ArtemTargetHandoffLease -Paths $paths -LockRequestId $request -Current $current -Target $target -ExitedChildPid $stalled.Id
+    Complete-ArtemTargetHandoffFailure -Paths $paths -LockRequestId $request
+    $stalledLease = Get-ArtemJsonPayload -Path $paths.UpdateLock
+    if ([int]$stalledLease.ownerPid -ne $PID -or [string]$stalledLease.requestId -ne $request) {
+        throw "Parent did not reclaim stalled child rollback authority"
+    }
+    $stalledEvidence = Get-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $request
+    if ([string]$stalledEvidence.stage -ne "lease-accepted" -or [string]$stalledEvidence.result -ne "bootstrap-failed") {
+        throw "Stalled child did not leave truthful bootstrap failure evidence"
+    }
+    $env:ARTEM_TARGET_HANDOFF_TEST_HOLD_BEFORE_ACCEPT = ""
+
+    # A continuation that reached transcript-started but vanished before the
+    # final bootstrap marker must also be classified as bootstrap-failed.
+    Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $request -Stage "transcript-started" -Result "success"
+    Complete-ArtemTargetHandoffFailure -Paths $paths -LockRequestId $request
+    $transcriptEvidence = Get-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $request
+    if ([string]$transcriptEvidence.stage -ne "transcript-started" -or [string]$transcriptEvidence.result -ne "bootstrap-failed") {
+        throw "Transcript-started child disappearance was not classified as bootstrap failure"
     }
 
     # This is the deployed a2b0 parent shape: its manual parent acquired an
@@ -261,9 +311,20 @@ try {
     if (-not $reclaimRejected) { throw "Reclaim overwrote a competing owner" }
 }
 finally {
+    if ($null -ne $stalled) {
+        try {
+            $stalled.Refresh()
+            if (-not $stalled.HasExited) {
+                $stalled.Kill()
+                [void]$stalled.WaitForExit(5000)
+            }
+        }
+        catch { }
+    }
     $env:ARTEM_TARGET_HANDOFF_TEST_ROOT = $previousRoot
     $env:ARTEM_TARGET_HANDOFF_TEST_FAIL = $previousFail
+    $env:ARTEM_TARGET_HANDOFF_TEST_HOLD_BEFORE_ACCEPT = $previousHold
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated Windows parent-to-child target handoff, exact arguments, lease claim/rejection, and parent recovery authority."
+Write-Host "Validated Windows parent-to-child target handoff, durable bootstrap acceptance, pre-bootstrap exit/stall recovery, exact arguments, lease claim/rejection, and parent recovery authority."
