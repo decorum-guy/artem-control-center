@@ -237,6 +237,23 @@ it is not a generic entity/domain/service proxy. The two new production gates
 guarded by `PANEL_WRITES_ENABLED`. Energy, Camelion, Alice, Jarvis, ROG-host,
 updater, and hardware-discovery scope is unchanged.
 
+## 8.2 Fixed Home Assistant maintenance
+
+`PANEL_HA_MAINTENANCE_ACTIONS_ENABLED=false` is the safe default. With both it
+and `PANEL_WRITES_ENABLED` enabled, a protected `runtime.env` may provide a
+long-lived **Home Assistant administrator** token for exactly two actions:
+
+- `system.home_assistant.restart` → `homeassistant.restart`;
+- `system.home_assistant.update_core` → `update.install` for only
+  `update.home_assistant_core_update`.
+
+The browser never selects an HA domain, service, entity, URL, token, version,
+backup mode, command or JSON payload. The agent projects only the current
+user's `is_admin` flag from `auth/current_user`; it does not return user data.
+An administrator token is also needed for the non-allowlisted `yandex_intent`
+subscription used by the private Alice bridge. Real tokens remain only in the
+protected runtime file. There is no generic HA service proxy and no SSH path.
+
 ## 9. Required discovery output
 
 Before implementing the real HA adapter, Codex creates inside the writable Control Center repository:

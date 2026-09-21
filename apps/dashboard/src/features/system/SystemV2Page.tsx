@@ -4,6 +4,7 @@ import { ConnectivityRecoverySurface } from "../../ConnectivityActions";
 import { ErrorBoundary } from "../../ErrorBoundary";
 import { Icon } from "../../icons";
 import { RuntimeControls } from "../../RuntimeControls";
+import { HomeAssistantMaintenance } from "../../HomeAssistantMaintenance";
 import { Sheet } from "../../Sheet";
 import { OperationalStatusSummary, RouteHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { RogG703DetailControl } from "../../RogG703Controls";
@@ -275,6 +276,12 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
             <span>Интеграция не передала подтверждённое состояние.</span>
           </WorkZone>
         )}
+
+        <ErrorBoundary title="Home Assistant">
+          <WorkZone className="system-primary-zone system-primary-zone--home-assistant">
+            <HomeAssistantMaintenance />
+          </WorkZone>
+        </ErrorBoundary>
 
         <ErrorBoundary title="Системные действия">
           <WorkZone className="system-primary-zone system-primary-zone--runtime">

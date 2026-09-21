@@ -67,6 +67,7 @@ configuration and access policy.
 The following are intentionally not converted into build-time product flags:
 
 - `PANEL_AGENT_MODE`, `PANEL_WRITES_ENABLED`,
+  `PANEL_HA_MAINTENANCE_ACTIONS_ENABLED`,
   `PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED`, and the three Coffee write gates;
 - `PANEL_PLANNING_ENABLED` and the three server-side Planning mutation gates,
   plus Planning credentials, cache, freshness, timeout, polling and timezone

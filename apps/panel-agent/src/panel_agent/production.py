@@ -13,6 +13,10 @@ from .home_assistant_actions import (
     HomeAssistantActionExecutor,
     build_home_assistant_action_router,
 )
+from .home_assistant_maintenance import (
+    HomeAssistantMaintenanceExecutor,
+    build_home_assistant_maintenance_router,
+)
 from .main import SETTINGS, access_policy, app, backup_service, effective_immediate_capability_enabled, runtime
 from .rog_g703_power import RogG703ActionExecutor, build_rog_g703_action_router
 from .yandex_rog_voice import YandexRogVoiceBridge
@@ -40,6 +44,10 @@ home_assistant_actions = HomeAssistantActionExecutor(
     runtime.home_assistant,
     gate_provider=effective_immediate_capability_enabled,
 )
+home_assistant_maintenance = HomeAssistantMaintenanceExecutor(
+    SETTINGS,
+    access_policy,
+)
 rog_g703_actions = RogG703ActionExecutor(
     SETTINGS,
     access_policy,
@@ -54,6 +62,7 @@ app.include_router(build_access_router(access_policy))
 app.include_router(build_avalar_action_router(avalar_actions))
 app.include_router(build_connectivity_action_router(connectivity_actions))
 app.include_router(build_home_assistant_action_router(home_assistant_actions))
+app.include_router(build_home_assistant_maintenance_router(home_assistant_maintenance))
 app.include_router(build_rog_g703_action_router(rog_g703_actions))
 app.include_router(build_system_update_router(access_policy))
 install_dashboard_routes(app)
