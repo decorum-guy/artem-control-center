@@ -777,7 +777,18 @@ function Invoke-ArtemTargetUpdater {
             -Current $PreviousHead `
             -Target $TargetHead)) {
         if ($null -ne $targetProcess) {
-            Stop-ArtemTargetContinuationForRecovery -TargetProcess $targetProcess
+            $recoveryRequired = Stop-ArtemTargetContinuationForRecovery `
+                -Paths $Paths `
+                -TargetProcess $targetProcess `
+                -LockRequestId $LockRequestId `
+                -Current $PreviousHead `
+                -Target $TargetHead
+            if (-not $recoveryRequired) {
+                # Bootstrap acceptance won the timeout race while recovery was
+                # entering the shared handoff mutex. Responsibility already
+                # transferred; the parent must not reclaim or roll back.
+                return $targetProcess
+            }
         }
         Reclaim-ArtemTargetHandoffLease `
             -Paths $Paths `
@@ -1003,7 +1014,11 @@ try {
         # Responsibility transfers only after the target continuation has
         # durably entered its authoritative phase. The waiting parent keeps
         # rollback authority until this marker exists.
-        Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "target-bootstrap-accepted" -Result "success"
+        Publish-ArtemTargetBootstrapAcceptance `
+            -Paths $paths `
+            -LockRequestId $RequestId `
+            -Current $ExpectedCurrentHead `
+            -Target $ExpectedTargetHead
         $targetPhase = $true
     }
     else {
