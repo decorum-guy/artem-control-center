@@ -239,20 +239,39 @@ updater, and hardware-discovery scope is unchanged.
 
 ## 8.2 Fixed Home Assistant maintenance
 
-`PANEL_HA_MAINTENANCE_ACTIONS_ENABLED=false` is the safe default. With both it
-and `PANEL_WRITES_ENABLED` enabled, a protected `runtime.env` may provide a
-long-lived **Home Assistant administrator** token for exactly two actions:
+`PANEL_HOME_SERVER_MAINTENANCE_ENABLED=false` is the safe default. The deployed
+Home Assistant is a Docker/Compose container alongside Caddy and AliceTG; its
+lifecycle belongs to the host. With it and `PANEL_WRITES_ENABLED` enabled, the
+Panel Agent uses the dedicated pinned `artem-home-control` SSH identity for:
 
-- `system.home_assistant.restart` → `homeassistant.restart`;
-- `system.home_assistant.update_core` → `update.install` for only
-  `update.home_assistant_core_update`.
+- `system.home_assistant.restart` → fixed `restart-ha`;
+- `system.home_assistant.update_core` → fixed `update-ha` pull/recreate;
+- `system.home_server.caddy.restart` and `system.home_server.bot.restart`.
 
-The browser never selects an HA domain, service, entity, URL, token, version,
-backup mode, command or JSON payload. The agent projects only the current
-user's `is_admin` flag from `auth/current_user`; it does not return user data.
-An administrator token is also needed for the non-allowlisted `yandex_intent`
-subscription used by the private Alice bridge. Real tokens remain only in the
-protected runtime file. There is no generic HA service proxy and no SSH path.
+The browser never selects a command, path, Compose service, image, tag, host,
+identity or JSON payload. The forced-command helper has a root-owned local
+configuration with the physical Compose values; it never prints Compose env,
+secrets or inspect output. `update.install` and its claimed backup are not used:
+the helper reports `up_to_date` or verified recovery truthfully. A native HA
+backup is not created in this slice.
+
+There are three distinct SSH authorities: connectivity is tunnel-only and
+unchanged; `artem-home-control` is the Panel Agent's forced-command product
+identity; `artem-home-admin` is a separate owner/operator shell key and is
+never in Panel Agent config or browser data. Docker/root-equivalent operator
+access is privileged. An HA administrator token remains separately necessary
+for the non-allowlisted `yandex_intent` subscription; this does not weaken it.
+
+Physical setup installs repository helper `scripts/linux/home-maintenance` as
+`/usr/local/lib/artem-control-center/home-maintenance` plus a root-owned
+`/etc/artem-control-center/home-server.conf`. The control public key is bound
+to that helper as an OpenSSH forced command; the helper validates
+`SSH_ORIGINAL_COMMAND` as exactly one fixed operation token. The root-owned
+configuration supplies `COMPOSE_PROJECT_DIR`, `COMPOSE_FILE`, three service
+names and optional server-local readiness URLs. It is deliberately not checked
+into this repository. `scripts/windows/setup-home-server-ssh.ps1` creates
+separate control/admin identities and requires an owner-verified known-host
+pin; it never installs keys or contacts a physical server.
 
 ## 9. Required discovery output
 

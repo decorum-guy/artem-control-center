@@ -50,6 +50,8 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "system.rog_g703.psu.bp2.off": "standard",
     "system.home_assistant.restart": "full",
     "system.home_assistant.update_core": "full",
+    "system.home_server.caddy.restart": "full",
+    "system.home_server.bot.restart": "full",
     "home.coffee.settings.timing": "standard",
     "home.coffee.settings.notifications": "standard",
     "settings.calendar.colors": "standard",

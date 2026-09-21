@@ -73,7 +73,14 @@ class IntegrationSettings:
     rog_g703_health_poll_seconds: float = 15.0
     rog_g703_response_limit_bytes: int = 16 * 1024
     writes_enabled: bool = False
-    ha_maintenance_actions_enabled: bool = False
+    home_server_maintenance_enabled: bool = False
+    home_server_ssh_host: str = ""
+    home_server_ssh_identity_file: str = ""
+    home_server_ssh_known_hosts_file: str = ""
+    home_server_ssh_port: int = 22
+    home_server_ssh_connect_timeout_seconds: int = 5
+    home_server_ssh_command_timeout_seconds: float = 150.0
+    home_server_ssh_output_limit_bytes: int = 16 * 1024
     home_climate_actions_enabled: bool = False
     rog_g703_psu_actions_enabled: bool = False
     coffee_timing_writes_enabled: bool = False
@@ -318,10 +325,17 @@ class IntegrationSettings:
                 max(1024, int(os.getenv("PANEL_ROG_G703_RESPONSE_LIMIT_BYTES", str(16 * 1024)))),
             ),
             writes_enabled=_bool_env("PANEL_WRITES_ENABLED", False),
-            ha_maintenance_actions_enabled=_bool_env(
-                "PANEL_HA_MAINTENANCE_ACTIONS_ENABLED",
+            home_server_maintenance_enabled=_bool_env(
+                "PANEL_HOME_SERVER_MAINTENANCE_ENABLED",
                 False,
             ),
+            home_server_ssh_host=os.getenv("PANEL_HOME_SERVER_SSH_HOST", "").strip(),
+            home_server_ssh_identity_file=os.getenv("PANEL_HOME_SERVER_SSH_IDENTITY_FILE", "").strip(),
+            home_server_ssh_known_hosts_file=os.getenv("PANEL_HOME_SERVER_SSH_KNOWN_HOSTS_FILE", "").strip(),
+            home_server_ssh_port=min(65535, max(1, _int_env("PANEL_HOME_SERVER_SSH_PORT", 22))),
+            home_server_ssh_connect_timeout_seconds=min(30, max(1, _int_env("PANEL_HOME_SERVER_SSH_CONNECT_TIMEOUT_SECONDS", 5))),
+            home_server_ssh_command_timeout_seconds=min(300.0, max(5.0, float(os.getenv("PANEL_HOME_SERVER_SSH_COMMAND_TIMEOUT_SECONDS", "150")))),
+            home_server_ssh_output_limit_bytes=min(64 * 1024, max(1024, _int_env("PANEL_HOME_SERVER_SSH_OUTPUT_LIMIT_BYTES", 16 * 1024))),
             home_climate_actions_enabled=_bool_env(
                 "PANEL_HOME_CLIMATE_ACTIONS_ENABLED",
                 False,

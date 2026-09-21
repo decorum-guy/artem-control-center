@@ -1,364 +1,269 @@
-"""Fixed Home Assistant maintenance actions.
+"""Pinned SSH control of the fixed home-server maintenance helper.
 
-This module intentionally does not share the generic device-action executor.
-The browser can request only a restart or installation of the one standard Core
-update entity; all service paths, entity IDs, versions and backup choices stay
-server owned.
+The Home Assistant deployment is a Docker/Compose container. Its lifecycle
+belongs to the home server, not Home Assistant's `update.install` service.
+Nothing from a browser request selects an SSH target, command, compose path,
+container, service, image or tag.
 """
-
 from __future__ import annotations
 
 import asyncio
 import json
-import time
+import os
+import re
+import shutil
+from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Literal
-from urllib.parse import urlsplit, urlunsplit
+from pathlib import Path
+from typing import Any, Literal
 from uuid import UUID
 
-import httpx
-import websockets
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict
 
 from .access_policy import AccessPolicyStore
 from .settings import IntegrationSettings
 
-
 RESTART_ACTION = "system.home_assistant.restart"
 UPDATE_CORE_ACTION = "system.home_assistant.update_core"
+RESTART_CADDY_ACTION = "system.home_server.caddy.restart"
+RESTART_BOT_ACTION = "system.home_server.bot.restart"
 MaintenanceActionId = Literal[
-    "system.home_assistant.restart",
-    "system.home_assistant.update_core",
+    "system.home_assistant.restart", "system.home_assistant.update_core",
+    "system.home_server.caddy.restart", "system.home_server.bot.restart",
 ]
-MAINTENANCE_ACTION_IDS: tuple[MaintenanceActionId, ...] = (RESTART_ACTION, UPDATE_CORE_ACTION)
-CORE_UPDATE_ENTITY = "update.home_assistant_core_update"
-_MAX_OPERATIONS = 32
-_TERMINAL = frozenset({"success", "failed"})
+MAINTENANCE_ACTION_IDS: tuple[MaintenanceActionId, ...] = (
+    RESTART_ACTION, UPDATE_CORE_ACTION, RESTART_CADDY_ACTION, RESTART_BOT_ACTION,
+)
+_OPERATION_BY_ACTION: dict[MaintenanceActionId, str] = {
+    RESTART_ACTION: "restart-ha", UPDATE_CORE_ACTION: "update-ha",
+    RESTART_CADDY_ACTION: "restart-caddy", RESTART_BOT_ACTION: "restart-bot",
+}
+_SSH_OPERATIONS = frozenset({"status", *tuple(_OPERATION_BY_ACTION.values())})
 _SAFE_FAILURES = frozenset({
-    "maintenance_disabled", "maintenance_busy", "ha_not_configured",
-    "ha_unreachable", "admin_required", "core_update_unavailable",
-    "update_not_available", "update_in_progress", "install_unsupported",
-    "maintenance_dispatch_failed", "restart_recovery_timeout",
-    "update_recovery_timeout", "update_not_applied",
+    "home_server_not_configured", "ssh_client_unavailable",
+    "ssh_identity_file_missing", "ssh_known_hosts_file_missing", "ssh_timeout",
+    "ssh_output_too_large", "ssh_transport_failed", "ssh_invalid_response",
+    "helper_failed", "restart_recovery_timeout", "update_recovery_timeout",
 })
+_HOST_PATTERN = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$")
 
 
-class HomeAssistantMaintenanceRequest(BaseModel):
-    """The deliberately fieldless maintenance mutation contract."""
-
+class HomeServerMaintenanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-
     actionId: MaintenanceActionId
     requestId: UUID
 
 
+class HomeServerMaintenanceError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        self.code = code if code in _SAFE_FAILURES else "helper_failed"
+
+
+def _valid_host(value: str) -> bool:
+    return bool(value and "@" not in value and not any(char.isspace() or ord(char) < 32 for char in value) and _HOST_PATTERN.fullmatch(value))
+
+
+async def _read_limited(stream: asyncio.StreamReader | None, limit: int) -> bytes:
+    if stream is None:
+        return b""
+    data = bytearray()
+    while True:
+        chunk = await stream.read(min(4096, limit + 1 - len(data)))
+        if not chunk:
+            return bytes(data)
+        data.extend(chunk)
+        if len(data) > limit:
+            raise HomeServerMaintenanceError("ssh_output_too_large")
+
+
 @dataclass
-class _Operation:
+class _Execution:
     request_id: str
     action_id: MaintenanceActionId
     status: str = "requested"
+    result: str | None = None
     failure_code: str | None = None
-    installed_before: str | None = None
-    latest_expected: str | None = None
-    backup_created: bool = False
 
     def public(self) -> dict[str, Any]:
-        return {
-            "schemaVersion": 1,
-            "requestId": self.request_id,
-            "actionId": self.action_id,
-            "status": self.status,
-            "failureCode": self.failure_code,
-            "backupCreated": self.backup_created,
-        }
+        return {"schemaVersion": 1, "requestId": self.request_id, "actionId": self.action_id, "status": self.status, "result": self.result, "failureCode": self.failure_code}
 
 
-AdminChecker = Callable[[], Awaitable[bool]]
+class HomeServerSshTransport:
+    """One product-control identity and one operation-token remote command."""
+
+    def __init__(self, settings: IntegrationSettings, *, executable_finder=shutil.which) -> None:
+        self.host = settings.home_server_ssh_host
+        self.port = settings.home_server_ssh_port
+        self.identity_file = settings.home_server_ssh_identity_file
+        self.known_hosts_file = settings.home_server_ssh_known_hosts_file
+        self.connect_timeout = settings.home_server_ssh_connect_timeout_seconds
+        self.command_timeout = settings.home_server_ssh_command_timeout_seconds
+        self.output_limit = settings.home_server_ssh_output_limit_bytes
+        self._executable_finder = executable_finder
+
+    def configured(self) -> bool:
+        return bool(_valid_host(self.host) and self.identity_file and self.known_hosts_file and Path(self.identity_file).is_file() and Path(self.known_hosts_file).is_file())
+
+    def argv(self, executable: str, operation: str) -> tuple[str, ...]:
+        if operation not in _SSH_OPERATIONS:
+            raise HomeServerMaintenanceError("helper_failed")
+        # The dedicated `artem-home-control` host key has a forced command;
+        # this final one-token argument is all it receives from Panel Agent.
+        return (executable, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={self.known_hosts_file}", "-o", f"GlobalKnownHostsFile={os.devnull}", "-o", f"ConnectTimeout={self.connect_timeout}", "-o", "ConnectionAttempts=1", "-o", "NumberOfPasswordPrompts=0", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-i", self.identity_file, "-p", str(self.port), self.host, operation)
+
+    async def run(self, operation: str) -> dict[str, Any]:
+        if operation not in _SSH_OPERATIONS:
+            raise HomeServerMaintenanceError("helper_failed")
+        if not self.configured():
+            if not Path(self.identity_file).is_file():
+                raise HomeServerMaintenanceError("ssh_identity_file_missing")
+            if not Path(self.known_hosts_file).is_file():
+                raise HomeServerMaintenanceError("ssh_known_hosts_file_missing")
+            raise HomeServerMaintenanceError("home_server_not_configured")
+        executable = self._executable_finder("ssh")
+        if not executable:
+            raise HomeServerMaintenanceError("ssh_client_unavailable")
+        try:
+            process = await asyncio.create_subprocess_exec(*self.argv(executable, operation), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        except FileNotFoundError:
+            raise HomeServerMaintenanceError("ssh_client_unavailable") from None
+        except (OSError, ValueError):
+            raise HomeServerMaintenanceError("ssh_transport_failed") from None
+        reads = (asyncio.create_task(_read_limited(process.stdout, self.output_limit)), asyncio.create_task(_read_limited(process.stderr, self.output_limit)), asyncio.create_task(process.wait()))
+        try:
+            stdout, _stderr, returncode = await asyncio.wait_for(asyncio.gather(*reads), timeout=self.command_timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            await asyncio.gather(process.wait(), *reads, return_exceptions=True)
+            raise HomeServerMaintenanceError("ssh_timeout") from None
+        except HomeServerMaintenanceError:
+            process.kill()
+            await asyncio.gather(process.wait(), *reads, return_exceptions=True)
+            raise
+        if returncode != 0:
+            raise HomeServerMaintenanceError("helper_failed")
+        try:
+            payload = json.loads(stdout.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise HomeServerMaintenanceError("ssh_invalid_response") from None
+        if not isinstance(payload, dict):
+            raise HomeServerMaintenanceError("ssh_invalid_response")
+        return payload
 
 
-class HomeAssistantMaintenanceExecutor:
-    def __init__(
-        self,
-        settings: IntegrationSettings,
-        access: AccessPolicyStore,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        admin_checker: AdminChecker | None = None,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-        clock: Callable[[], float] = time.monotonic,
-        recovery_timeout: float = 120.0,
-        poll_interval: float = 2.0,
-    ) -> None:
-        self.settings = settings
-        self.access = access
-        self._transport = transport
-        self._admin_checker = admin_checker or self._check_admin_websocket
-        self._sleep = sleep
-        self._clock = clock
-        self._recovery_timeout = recovery_timeout
-        self._poll_interval = poll_interval
-        self._operations: dict[str, _Operation] = {}
-        self._active_request_id: str | None = None
+class HomeServerMaintenanceExecutor:
+    def __init__(self, settings: IntegrationSettings, access: AccessPolicyStore, *, transport: HomeServerSshTransport | Any | None = None) -> None:
+        self.settings, self.access = settings, access
+        self.transport = transport or HomeServerSshTransport(settings)
+        self.executions: OrderedDict[str, _Execution] = OrderedDict()
+        self.active_request_id: str | None = None
         self._lock: asyncio.Lock | None = None
 
-    @property
-    def configured(self) -> bool:
-        return bool(self.settings.ha_url and self.settings.ha_token)
-
-    def _operation_lock(self) -> asyncio.Lock:
+    def _lock_for_loop(self) -> asyncio.Lock:
         if self._lock is None:
             self._lock = asyncio.Lock()
         return self._lock
 
-    async def _check_admin_websocket(self) -> bool:
-        """Project only the current user's admin flag, never its identity."""
-        if not self.configured:
-            return False
-        parsed = urlsplit(self.settings.ha_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            return False
-        ws_url = urlunsplit(("wss" if parsed.scheme == "https" else "ws", parsed.netloc, "/api/websocket", "", ""))
-        try:
-            async with websockets.connect(ws_url, open_timeout=5, close_timeout=2) as socket:
-                required = await asyncio.wait_for(socket.recv(), timeout=5)
-                if not isinstance(required, str) or '"auth_required"' not in required:
-                    return False
-                await socket.send('{"type":"auth","access_token":' + json.dumps(self.settings.ha_token) + "}")
-                authenticated = await asyncio.wait_for(socket.recv(), timeout=5)
-                if not isinstance(authenticated, str) or '"auth_ok"' not in authenticated:
-                    return False
-                await socket.send('{"id":1,"type":"auth/current_user"}')
-                raw = await asyncio.wait_for(socket.recv(), timeout=5)
-                payload = json.loads(raw)
-                result = payload.get("result") if isinstance(payload, dict) else None
-                return bool(isinstance(result, dict) and result.get("is_admin") is True)
-        except Exception:
-            return False
-
-    async def _get(self, path: str) -> dict[str, Any] | None:
-        if not self.configured:
-            return None
-        try:
-            async with httpx.AsyncClient(
-                base_url=self.settings.ha_url,
-                headers={"Authorization": f"Bearer {self.settings.ha_token}"},
-                timeout=10,
-                follow_redirects=False,
-                transport=self._transport,
-            ) as client:
-                response = await client.get(path)
-                response.raise_for_status()
-                payload = response.json()
-            return payload if isinstance(payload, dict) else None
-        except (httpx.HTTPError, ValueError, TypeError):
-            return None
-
-    async def _post(self, path: str, body: dict[str, Any]) -> bool:
-        try:
-            async with httpx.AsyncClient(
-                base_url=self.settings.ha_url,
-                headers={"Authorization": f"Bearer {self.settings.ha_token}"},
-                timeout=10,
-                follow_redirects=False,
-                transport=self._transport,
-            ) as client:
-                response = await client.post(path, json=body)
-                response.raise_for_status()
-            return True
-        except (httpx.HTTPError, ValueError, TypeError):
-            # Restart/update can terminate the requesting transport after HA
-            # accepted it. Lifecycle verification, not this response, decides
-            # success.
-            return False
-
-    @staticmethod
-    def _core_update(state: dict[str, Any] | None) -> dict[str, Any]:
-        if not isinstance(state, dict):
-            return {"present": False, "available": False, "inProgress": False, "installSupported": False, "backupSupported": False, "installedVersion": None, "latestVersion": None}
-        attributes = state.get("attributes")
-        attributes = attributes if isinstance(attributes, dict) else {}
-        supported = attributes.get("supported_features")
-        supported = supported if isinstance(supported, int) and not isinstance(supported, bool) else 0
-        installed = attributes.get("installed_version")
-        latest = attributes.get("latest_version")
-        return {
-            "present": True,
-            "available": state.get("state") == "on",
-            "inProgress": attributes.get("in_progress") is True,
-            "installSupported": bool(supported & 1),
-            "backupSupported": bool(supported & 2),
-            "installedVersion": installed if isinstance(installed, str) else None,
-            "latestVersion": latest if isinstance(latest, str) else None,
-        }
-
-    async def _probe(self) -> tuple[bool, bool, dict[str, Any]]:
-        if not self.configured:
-            return False, False, self._core_update(None)
-        api, admin, state = await asyncio.gather(
-            self._get("/api/"), self._admin_checker(), self._get(f"/api/states/{CORE_UPDATE_ENTITY}"),
-        )
-        return api is not None, bool(admin), self._core_update(state)
-
-    def _decision(self, action_id: MaintenanceActionId, *, reachable: bool, admin: bool, core: dict[str, Any]) -> dict[str, Any]:
-        gate = bool(self.settings.writes_enabled and self.settings.ha_maintenance_actions_enabled)
-        precondition = True
-        if action_id == UPDATE_CORE_ACTION:
-            precondition = bool(core["present"] and core["available"] and core["installSupported"] and not core["inProgress"])
-        decision = self.access.authorize(
-            action_id,
-            gate_enabled=gate,
-            integration_available=bool(self.configured and reachable and admin),
-            busy=self._active_request_id is not None,
-            precondition_ok=precondition,
-        )
-        return {**decision.as_dict(), "gateEnabled": gate, "integrationAvailable": bool(self.configured and reachable and admin), "busy": self._active_request_id is not None, "preconditionOk": precondition}
+    def _gate(self) -> bool:
+        return bool(self.settings.writes_enabled and self.settings.home_server_maintenance_enabled)
 
     async def availability(self) -> dict[str, Any]:
-        reachable, admin, core = await self._probe()
-        actions = {action: self._decision(action, reachable=reachable, admin=admin, core=core) for action in MAINTENANCE_ACTION_IDS}
-        return {
-            "schemaVersion": 1,
-            "configured": self.configured,
-            "reachable": reachable,
-            "adminAuthorized": admin,
-            "maintenanceGateEnabled": bool(self.settings.ha_maintenance_actions_enabled),
-            "busy": self._active_request_id is not None,
-            "installedVersion": core["installedVersion"], "latestVersion": core["latestVersion"],
-            "entityPresent": core["present"],
-            "updateAvailable": core["available"], "updateInProgress": core["inProgress"],
-            "installSupported": core["installSupported"], "backupSupported": core["backupSupported"],
-            "actions": actions,
-        }
+        configured = bool(self.transport.configured())
+        services: dict[str, Any] = {}
+        reachable = False
+        if configured:
+            try:
+                payload = await self.transport.run("status")
+                if payload.get("schemaVersion") == 1 and payload.get("ok") is True and payload.get("operation") == "status" and isinstance(payload.get("services"), dict):
+                    services, reachable = _safe_services(payload["services"]), True
+            except HomeServerMaintenanceError:
+                pass
+        actions = {}
+        for action in MAINTENANCE_ACTION_IDS:
+            decision = self.access.authorize(action, gate_enabled=self._gate(), integration_available=configured and reachable, busy=self.active_request_id is not None)
+            actions[action] = {**decision.as_dict(), "gateEnabled": self._gate(), "integrationAvailable": configured and reachable, "busy": self.active_request_id is not None, "preconditionOk": True}
+        return {"schemaVersion": 1, "configured": configured, "reachable": reachable, "maintenanceGateEnabled": self.settings.home_server_maintenance_enabled, "busy": self.active_request_id is not None, "services": services, "actions": actions}
+
+    async def submit(self, request: HomeServerMaintenanceRequest) -> tuple[dict[str, Any], bool]:
+        request_id = str(request.requestId)
+        async with self._lock_for_loop():
+            previous = self.executions.get(request_id)
+            if previous:
+                return previous.public(), False
+            availability = await self.availability()
+            decision = availability["actions"][request.actionId]
+            if not decision["allowed"]:
+                code = decision["availability"]
+                self.access.audit_capability(request.actionId, result=code, correlation_id=request_id)
+                raise HTTPException(status_code=403 if code in {"profile_blocked", "elevation_required"} else 409 if code in {"gate_disabled", "busy"} else 503, detail=code)
+            execution = _Execution(request_id, request.actionId)
+            self.executions[request_id] = execution
+            self.active_request_id = request_id
+            while len(self.executions) > 32:
+                self.executions.popitem(last=False)
+            self.access.audit_capability(request.actionId, result="accepted", correlation_id=request_id)
+            asyncio.create_task(self._run(execution))
+            return execution.public(), True
+
+    async def _run(self, execution: _Execution) -> None:
+        try:
+            execution.status = "dispatching"
+            operation = _OPERATION_BY_ACTION[execution.action_id]
+            payload = await self.transport.run(operation)
+            if payload.get("schemaVersion") != 1 or payload.get("ok") is not True or payload.get("operation") != operation or payload.get("status") not in {"success", "up_to_date"}:
+                raise HomeServerMaintenanceError("helper_failed")
+            execution.status, execution.result = "success", payload["status"]
+            self.access.audit_capability(execution.action_id, result=payload["status"], correlation_id=execution.request_id)
+        except HomeServerMaintenanceError as error:
+            execution.status, execution.failure_code = "failed", error.code
+            self.access.audit_capability(execution.action_id, result=error.code, correlation_id=execution.request_id)
+        finally:
+            if self.active_request_id == execution.request_id:
+                self.active_request_id = None
 
     def operation(self, request_id: str) -> dict[str, Any] | None:
-        operation = self._operations.get(request_id)
-        return operation.public() if operation else None
-
-    async def submit(self, request: HomeAssistantMaintenanceRequest) -> tuple[dict[str, Any], bool]:
-        request_id = str(request.requestId)
-        async with self._operation_lock():
-            existing = self._operations.get(request_id)
-            if existing is not None:
-                return existing.public(), False
-            available = await self.availability()
-            decision = available["actions"][request.actionId]
-            if not decision["allowed"]:
-                detail = decision["availability"]
-                if not available["adminAuthorized"] and available["configured"] and available["reachable"]:
-                    detail = "admin_required"
-                elif request.actionId == UPDATE_CORE_ACTION:
-                    core = available
-                    detail = "core_update_unavailable" if not core["installSupported"] and not core["updateAvailable"] else "install_unsupported" if not core["installSupported"] else "update_in_progress" if core["updateInProgress"] else "update_not_available" if not core["updateAvailable"] else detail
-                if detail not in _SAFE_FAILURES and detail not in {"profile_blocked", "elevation_required", "gate_disabled"}:
-                    detail = "maintenance_dispatch_failed"
-                self.access.audit_capability(request.actionId, result=detail, correlation_id=request_id)
-                code = 403 if detail in {"profile_blocked", "elevation_required", "admin_required"} else 409 if detail in {"gate_disabled", "maintenance_busy", "busy", "precondition_failed"} else 503
-                raise HTTPException(status_code=code, detail=detail)
-            core = {key: available[key] for key in ("installedVersion", "latestVersion", "backupSupported")}
-            operation = _Operation(request_id, request.actionId, installed_before=core["installedVersion"], latest_expected=core["latestVersion"], backup_created=bool(core["backupSupported"]))
-            self._operations[request_id] = operation
-            self._active_request_id = request_id
-            while len(self._operations) > _MAX_OPERATIONS:
-                self._operations.pop(next(iter(self._operations)))
-            self.access.audit_capability(request.actionId, result="accepted", correlation_id=request_id)
-            asyncio.create_task(self._run(operation))
-            return operation.public(), True
-
-    async def _run(self, operation: _Operation) -> None:
-        try:
-            operation.status = "dispatching"
-            if operation.action_id == RESTART_ACTION:
-                dispatched = await self._post("/api/services/homeassistant/restart", {})
-                await self._recover_restart(operation, dispatched)
-            else:
-                body: dict[str, Any] = {"entity_id": CORE_UPDATE_ENTITY}
-                if operation.backup_created:
-                    body["backup"] = True
-                await self._post("/api/services/update/install", body)
-                await self._recover_update(operation)
-            operation.status = "success"
-            self.access.audit_capability(operation.action_id, result="success", correlation_id=operation.request_id)
-        except _MaintenanceFailure as exc:
-            operation.status = "failed"
-            operation.failure_code = exc.code
-            self.access.audit_capability(operation.action_id, result=exc.code, correlation_id=operation.request_id)
-        except Exception:
-            operation.status = "failed"
-            operation.failure_code = "maintenance_dispatch_failed"
-            self.access.audit_capability(operation.action_id, result="maintenance_dispatch_failed", correlation_id=operation.request_id)
-        finally:
-            if self._active_request_id == operation.request_id:
-                self._active_request_id = None
-
-    async def _wait_healthy(self, operation: _Operation, timeout_code: str, *, dispatch_confirmed: bool = True) -> dict[str, Any]:
-        deadline = self._clock() + self._recovery_timeout
-        saw_outage = False
-        while self._clock() <= deadline:
-            reachable, admin, core = await self._probe()
-            if not reachable or not admin:
-                saw_outage = True
-                operation.status = "waiting_for_disconnect"
-            elif saw_outage:
-                operation.status = "waiting_for_recovery"
-                return core
-            else:
-                # HA can handle a command without a visible transport outage.
-                if not dispatch_confirmed:
-                    raise _MaintenanceFailure("maintenance_dispatch_failed")
-                return core
-            await self._sleep(self._poll_interval)
-        raise _MaintenanceFailure(timeout_code)
-
-    async def _recover_restart(self, operation: _Operation, dispatch_confirmed: bool) -> None:
-        operation.status = "waiting_for_recovery"
-        await self._wait_healthy(operation, "restart_recovery_timeout", dispatch_confirmed=dispatch_confirmed)
-        operation.status = "verifying"
-
-    async def _recover_update(self, operation: _Operation) -> None:
-        operation.status = "waiting_for_recovery"
-        core = await self._wait_healthy(operation, "update_recovery_timeout")
-        operation.status = "verifying"
-        if core["inProgress"]:
-            deadline = self._clock() + self._recovery_timeout
-            while self._clock() <= deadline:
-                await self._sleep(self._poll_interval)
-                reachable, admin, core = await self._probe()
-                if reachable and admin and not core["inProgress"]:
-                    break
-            else:
-                raise _MaintenanceFailure("update_recovery_timeout")
-        if not operation.latest_expected or core["installedVersion"] != operation.latest_expected:
-            raise _MaintenanceFailure("update_not_applied")
+        item = self.executions.get(request_id)
+        return item.public() if item else None
 
 
-class _MaintenanceFailure(Exception):
-    def __init__(self, code: str) -> None:
-        self.code = code if code in _SAFE_FAILURES else "maintenance_dispatch_failed"
+def _safe_services(raw: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key in ("homeAssistant", "caddy", "bot"):
+        value = raw.get(key)
+        if not isinstance(value, dict):
+            continue
+        item: dict[str, Any] = {"running": value.get("running") is True, "healthy": value.get("healthy") if value.get("healthy") in {True, False, None} else None}
+        if key == "homeAssistant":
+            for name in ("installedVersion", "configuredImage"):
+                if isinstance(value.get(name), str) and len(value[name]) <= 160:
+                    item[name] = value[name]
+        safe[key] = item
+    return safe
 
 
-def build_home_assistant_maintenance_router(executor: HomeAssistantMaintenanceExecutor) -> APIRouter:
-    router = APIRouter(prefix="/api/v1/actions/home-assistant", tags=["home-assistant-maintenance"])
+def build_home_assistant_maintenance_router(executor: HomeServerMaintenanceExecutor) -> APIRouter:
+    router = APIRouter(prefix="/api/v1/actions/home-assistant", tags=["home-server-maintenance"])
 
     @router.get("/maintenance")
-    async def maintenance_availability(response: Response) -> dict[str, Any]:
+    async def availability(response: Response) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
         return await executor.availability()
 
     @router.get("/maintenance/{request_id}")
-    def maintenance_operation(request_id: UUID, response: Response) -> dict[str, Any]:
+    def operation(request_id: UUID, response: Response) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
-        operation = executor.operation(str(request_id))
-        if operation is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="maintenance_operation_not_found")
-        return operation
+        item = executor.operation(str(request_id))
+        if item is None:
+            raise HTTPException(status_code=404, detail="maintenance_operation_not_found")
+        return item
 
     @router.post("/maintenance", status_code=status.HTTP_202_ACCEPTED)
-    async def maintenance_execute(payload: HomeAssistantMaintenanceRequest, response: Response) -> dict[str, Any]:
+    async def execute(payload: HomeServerMaintenanceRequest, response: Response) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
-        operation, accepted = await executor.submit(payload)
+        item, accepted = await executor.submit(payload)
         if not accepted:
             response.status_code = status.HTTP_200_OK
-        return operation
+        return item
 
     return router

@@ -14,7 +14,7 @@ from .home_assistant_actions import (
     build_home_assistant_action_router,
 )
 from .home_assistant_maintenance import (
-    HomeAssistantMaintenanceExecutor,
+    HomeServerMaintenanceExecutor,
     build_home_assistant_maintenance_router,
 )
 from .main import SETTINGS, access_policy, app, backup_service, effective_immediate_capability_enabled, runtime
@@ -44,7 +44,7 @@ home_assistant_actions = HomeAssistantActionExecutor(
     runtime.home_assistant,
     gate_provider=effective_immediate_capability_enabled,
 )
-home_assistant_maintenance = HomeAssistantMaintenanceExecutor(
+home_assistant_maintenance = HomeServerMaintenanceExecutor(
     SETTINGS,
     access_policy,
 )

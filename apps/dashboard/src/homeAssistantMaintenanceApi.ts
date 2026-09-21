@@ -1,6 +1,8 @@
 export const HA_RESTART = "system.home_assistant.restart" as const;
 export const HA_UPDATE_CORE = "system.home_assistant.update_core" as const;
-export type HomeAssistantMaintenanceActionId = typeof HA_RESTART | typeof HA_UPDATE_CORE;
+export const HOME_SERVER_CADDY_RESTART = "system.home_server.caddy.restart" as const;
+export const HOME_SERVER_BOT_RESTART = "system.home_server.bot.restart" as const;
+export type HomeAssistantMaintenanceActionId = typeof HA_RESTART | typeof HA_UPDATE_CORE | typeof HOME_SERVER_CADDY_RESTART | typeof HOME_SERVER_BOT_RESTART;
 
 export interface MaintenanceDecision {
   allowed: boolean;
@@ -10,15 +12,9 @@ export interface MaintenanceDecision {
 export interface HomeAssistantMaintenanceStatus {
   configured: boolean;
   reachable: boolean;
-  adminAuthorized: boolean;
   maintenanceGateEnabled: boolean;
   busy: boolean;
-  installedVersion: string | null;
-  latestVersion: string | null;
-  updateAvailable: boolean;
-  updateInProgress: boolean;
-  installSupported: boolean;
-  backupSupported: boolean;
+  services: Partial<Record<"homeAssistant" | "caddy" | "bot", { running: boolean; healthy: boolean | null; installedVersion?: string; configuredImage?: string }>>;
   actions: Record<HomeAssistantMaintenanceActionId, MaintenanceDecision>;
 }
 

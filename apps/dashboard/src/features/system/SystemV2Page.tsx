@@ -27,6 +27,10 @@ import {
   visibleSystemServices
 } from "../operations/routeDensity";
 
+export function homeServerMaintenanceVisible(mode: string): boolean {
+  return mode === "production";
+}
+
 function SystemFactRow({
   kind,
   label,
@@ -277,11 +281,13 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
           </WorkZone>
         )}
 
-        <ErrorBoundary title="Home Assistant">
-          <WorkZone className="system-primary-zone system-primary-zone--home-assistant">
-            <HomeAssistantMaintenance />
-          </WorkZone>
-        </ErrorBoundary>
+        {homeServerMaintenanceVisible(snapshot.mode) && (
+          <ErrorBoundary title="Домашний сервер">
+            <WorkZone className="system-primary-zone system-primary-zone--home-assistant">
+              <HomeAssistantMaintenance />
+            </WorkZone>
+          </ErrorBoundary>
+        )}
 
         <ErrorBoundary title="Системные действия">
           <WorkZone className="system-primary-zone system-primary-zone--runtime">

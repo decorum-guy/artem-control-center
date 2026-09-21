@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Root-owned forced-command helper for artem-home-control.  This file contains
+# no physical compose names or secrets; those live only in the root-owned host
+# configuration installed during owner setup.
+set -euo pipefail
+IFS=$'\n\t'
+
+CONFIG=/etc/artem-control-center/home-server.conf
+LOCK=/run/lock/artem-control-center-home-maintenance.lock
+MAX_WAIT_SECONDS=180
+
+fail() { printf '{"schemaVersion":1,"ok":false,"error":"%s"}\n' "$1"; exit 1; }
+# sshd forced-command runs this helper without argv and supplies the original
+# one-token request in SSH_ORIGINAL_COMMAND. Direct invocations intentionally
+# fail so an administrator cannot accidentally treat this as a shell helper.
+[[ $# -eq 0 ]] || fail invalid_operation
+operation=${SSH_ORIGINAL_COMMAND:-}
+case "$operation" in status|restart-ha|update-ha|restart-caddy|restart-bot) ;; *) fail invalid_operation ;; esac
+[[ -r "$CONFIG" ]] || fail configuration_missing
+# shellcheck disable=SC1090
+source "$CONFIG"
+: "${COMPOSE_PROJECT_DIR:?}" "${COMPOSE_FILE:?}" "${HA_SERVICE:?}" "${CADDY_SERVICE:?}" "${BOT_SERVICE:?}"
+compose=(docker compose --project-directory "$COMPOSE_PROJECT_DIR" --file "$COMPOSE_FILE")
+
+container_id() { "${compose[@]}" ps -q "$1" 2>/dev/null | head -n 1; }
+service_state() {
+  local id running health
+  id=$(container_id "$1")
+  [[ -n "$id" ]] || { printf 'false|null'; return; }
+  running=$(docker inspect --format '{{.State.Running}}' "$id" 2>/dev/null || printf false)
+  health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id" 2>/dev/null || printf none)
+  [[ "$health" == healthy ]] && health=true || [[ "$health" == unhealthy ]] && health=false || health=null
+  printf '%s|%s' "$running" "$health"
+}
+ready() {
+  local service=$1 url=${2:-} deadline=$((SECONDS + MAX_WAIT_SECONDS)) state running health
+  while (( SECONDS < deadline )); do
+    state=$(service_state "$service"); running=${state%%|*}; health=${state##*|}
+    if [[ "$running" == true ]] && { [[ "$health" == true ]] || { [[ "$health" == null ]] && { [[ -z "$url" ]] || curl --fail --silent --max-time 5 "$url" >/dev/null; }; }; }; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+json_status() {
+  local ha caddy bot image version
+  ha=$(service_state "$HA_SERVICE"); caddy=$(service_state "$CADDY_SERVICE"); bot=$(service_state "$BOT_SERVICE")
+  image=$(docker inspect --format '{{.Config.Image}}' "$(container_id "$HA_SERVICE")" 2>/dev/null || printf '')
+  version=$(docker exec "$(container_id "$HA_SERVICE")" python -c 'import homeassistant.const; print(homeassistant.const.__version__)' 2>/dev/null || printf '')
+  [[ "$image" =~ ^[A-Za-z0-9._:/@+-]{0,160}$ ]] || image=''
+  [[ "$version" =~ ^[A-Za-z0-9._+-]{0,160}$ ]] || version=''
+  printf '{"schemaVersion":1,"ok":true,"operation":"status","services":{"homeAssistant":{"running":%s,"healthy":%s,"installedVersion":"%s","configuredImage":"%s"},"caddy":{"running":%s,"healthy":%s},"bot":{"running":%s,"healthy":%s}}}\n' "${ha%%|*}" "${ha##*|}" "$version" "$image" "${caddy%%|*}" "${caddy##*|}" "${bot%%|*}" "${bot##*|}"
+}
+
+if [[ "$operation" == status ]]; then json_status; exit 0; fi
+exec 9>"$LOCK"
+flock -n 9 || fail maintenance_busy
+case "$operation" in
+  restart-ha)
+    "${compose[@]}" restart "$HA_SERVICE" >/dev/null
+    ready "$HA_SERVICE" "${HA_READY_URL:-}" || fail restart_recovery_timeout
+    ;;
+  restart-caddy)
+    "${compose[@]}" restart "$CADDY_SERVICE" >/dev/null
+    ready "$CADDY_SERVICE" "${CADDY_READY_URL:-}" || fail restart_recovery_timeout
+    ;;
+  restart-bot)
+    "${compose[@]}" restart "$BOT_SERVICE" >/dev/null
+    ready "$BOT_SERVICE" "${BOT_READY_URL:-}" || fail restart_recovery_timeout
+    ;;
+  update-ha)
+    before=$(docker image inspect --format '{{.Id}}' "$(container_id "$HA_SERVICE")" 2>/dev/null || printf '')
+    "${compose[@]}" pull "$HA_SERVICE" >/dev/null
+    after=$("${compose[@]}" images -q "$HA_SERVICE" 2>/dev/null | head -n 1)
+    if [[ -n "$before" && "$before" == "$after" ]]; then
+      printf '{"schemaVersion":1,"ok":true,"operation":"update-ha","status":"up_to_date"}\n'; exit 0
+    fi
+    "${compose[@]}" up -d --no-deps --force-recreate "$HA_SERVICE" >/dev/null
+    ready "$HA_SERVICE" "${HA_READY_URL:-}" || fail update_recovery_timeout
+    ;;
+esac
+printf '{"schemaVersion":1,"ok":true,"operation":"%s","status":"success"}\n' "$operation"

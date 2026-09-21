@@ -5,7 +5,7 @@ import { useInteractionLock } from "./InteractionLock";
 import { useNoticeCenter } from "./NoticeCenter";
 import { StatusText } from "./ShellPrimitives";
 import { newHomeAssistantRequestId } from "./homeAssistantControlApi";
-import { HA_RESTART, HA_UPDATE_CORE, fetchHomeAssistantMaintenance, fetchHomeAssistantMaintenanceOperation, startHomeAssistantMaintenance, type HomeAssistantMaintenanceActionId, type HomeAssistantMaintenanceStatus, type MaintenanceOperation } from "./homeAssistantMaintenanceApi";
+import { HA_RESTART, HA_UPDATE_CORE, HOME_SERVER_BOT_RESTART, HOME_SERVER_CADDY_RESTART, fetchHomeAssistantMaintenance, fetchHomeAssistantMaintenanceOperation, startHomeAssistantMaintenance, type HomeAssistantMaintenanceActionId, type HomeAssistantMaintenanceStatus, type MaintenanceOperation } from "./homeAssistantMaintenanceApi";
 import "./HomeAssistantMaintenance.css";
 
 const phaseCopy: Record<MaintenanceOperation["status"], string> = {
@@ -19,7 +19,6 @@ const phaseCopy: Record<MaintenanceOperation["status"], string> = {
 };
 
 function errorCopy(code: string | null): string {
-  if (code === "admin_required") return "Для системных действий нужен токен администратора Home Assistant.";
   if (code === "restart_recovery_timeout" || code === "update_recovery_timeout") return "Home Assistant не вернулся за отведённое время.";
   if (code === "update_not_applied") return "Home Assistant вернулся, но новая версия не подтверждена.";
   return "Системное действие сейчас недоступно.";
@@ -59,11 +58,10 @@ export function HomeAssistantMaintenance() {
       if (await ensureCapability(actionId, "Обслуживание Home Assistant")) { next = await refresh(); decision = next?.actions[actionId]; }
     }
     if (!decision?.allowed) {
-      showNotice({ id: "home-assistant-maintenance", severity: "warning", title: "Home Assistant", detail: decision?.availability === "integration_unavailable" && next?.configured && next?.reachable && !next?.adminAuthorized ? errorCopy("admin_required") : errorCopy(decision?.availability ?? null), timeoutMs: 8_000 });
+      showNotice({ id: "home-assistant-maintenance", severity: "warning", title: "Домашний сервер", detail: errorCopy(decision?.availability ?? null), timeoutMs: 8_000 });
       return;
     }
-    const versions = `${next?.installedVersion ?? "текущая версия"} → ${next?.latestVersion ?? "новая версия"}`;
-    const confirmation = await confirmAction(actionId, actionId === HA_UPDATE_CORE ? { description: `${versions}\n\nHome Assistant станет временно недоступен во время обновления и перезапуска.` } : undefined);
+    const confirmation = await confirmAction(actionId);
     if (!confirmation.confirmed || !guardMutation()) return;
     try {
       const started = await startHomeAssistantMaintenance(actionId, newHomeAssistantRequestId());
@@ -77,12 +75,15 @@ export function HomeAssistantMaintenance() {
   const updateDecision = status?.actions[HA_UPDATE_CORE];
   const restartDecision = status?.actions[HA_RESTART];
   const active = Boolean(operation && operation.status !== "success" && operation.status !== "failed");
-  const stateLabel = !status ? "Недоступно" : !status.configured || !status.reachable ? "Недоступно" : !status.adminAuthorized ? "Требуется administrator token" : status.updateInProgress ? "Обновляется" : status.updateAvailable ? "Доступно обновление" : "Последняя версия";
+  const ha = status?.services.homeAssistant;
+  const caddy = status?.services.caddy;
+  const bot = status?.services.bot;
+  const stateLabel = !status || !status.configured || !status.reachable ? "Недоступно" : ha?.healthy === false ? "Требует внимания" : "На связи";
   return <section className="ha-maintenance" data-testid="home-assistant-maintenance" aria-labelledby="ha-maintenance-title">
-    <header><div><p className="section-kicker">Система · Home Assistant</p><h2 id="ha-maintenance-title">Home Assistant</h2><p>{operation ? phaseCopy[operation.status] : "Обслуживание доступно только через фиксированные системные действия."}</p></div><StatusText label={stateLabel} tone={status?.reachable && status.adminAuthorized ? "success" : "unavailable"} /></header>
-    <dl className="ha-maintenance__versions"><div><dt>Текущая версия</dt><dd>{status?.installedVersion ?? "—"}</dd></div><div><dt>Последняя версия</dt><dd>{status?.latestVersion ?? "—"}</dd></div></dl>
-    {status?.configured && status.reachable && !status.adminAuthorized && <p className="ha-maintenance__notice" role="status">Для системных действий нужен токен администратора Home Assistant.</p>}
+    <header><div><p className="section-kicker">Система · домашний сервер</p><h2 id="ha-maintenance-title">Home Assistant</h2><p>{operation ? phaseCopy[operation.status] : "Обслуживание доступно только через фиксированные системные действия."}</p></div><StatusText label={stateLabel} tone={status?.reachable ? "success" : "unavailable"} /></header>
+    <dl className="ha-maintenance__versions"><div><dt>Версия Home Assistant</dt><dd>{ha?.installedVersion ?? "—"}</dd></div><div><dt>Образ контейнера</dt><dd>{ha?.configuredImage ?? "—"}</dd></div></dl>
     {operation?.status === "failed" && <p className="ha-maintenance__notice" role="status">{errorCopy(operation.failureCode)}</p>}
-    <div className="ha-maintenance__actions"><button type="button" onClick={() => void run(HA_RESTART)} disabled={active || !restartDecision || (!restartDecision.allowed && restartDecision.availability !== "elevation_required")}>Перезапустить</button><button type="button" onClick={() => void run(HA_UPDATE_CORE)} disabled={active || !status?.updateAvailable || !updateDecision || (!updateDecision.allowed && updateDecision.availability !== "elevation_required")}>Обновить</button></div>
+    <div className="ha-maintenance__actions"><button type="button" onClick={() => void run(HA_RESTART)} disabled={active || !restartDecision || (!restartDecision.allowed && restartDecision.availability !== "elevation_required")}>Перезапустить</button><button type="button" onClick={() => void run(HA_UPDATE_CORE)} disabled={active || !updateDecision || (!updateDecision.allowed && updateDecision.availability !== "elevation_required")}>Проверить и обновить</button></div>
+    <div className="ha-maintenance__service-actions"><span>Caddy · {caddy?.healthy ? "на связи" : "нет подтверждения"}</span><button type="button" onClick={() => void run(HOME_SERVER_CADDY_RESTART)} disabled={active || !status?.actions[HOME_SERVER_CADDY_RESTART]?.allowed}>Перезапустить Caddy</button><span>Telegram Bot · {bot?.healthy ? "на связи" : "нет подтверждения"}</span><button type="button" onClick={() => void run(HOME_SERVER_BOT_RESTART)} disabled={active || !status?.actions[HOME_SERVER_BOT_RESTART]?.allowed}>Перезапустить бота</button></div>
   </section>;
 }
