@@ -12,12 +12,18 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
+const BASH_EXECUTABLE = process.platform === "win32"
+  ? execFileSync("where.exe", ["bash.exe"], { encoding: "utf8" }).split(/\r?\n/).find(Boolean)?.trim()
+  : "bash";
+
+if (!BASH_EXECUTABLE) throw new Error("bash executable is required for home-maintenance contract tests");
+
 function toBashPath(value) {
   if (process.platform !== "win32") return value;
-  return execFileSync("bash", ["-lc", 'cygpath -u "$1"', "bash", value], { encoding: "utf8" }).trim();
+  return execFileSync(BASH_EXECUTABLE, ["-lc", 'cygpath -u "$1"', "bash", value], { encoding: "utf8" }).trim();
 }
 
-const BASH_PATH = execFileSync("bash", ["-lc", 'printf "%s" "$PATH"'], { encoding: "utf8" });
+const BASH_PATH = execFileSync(BASH_EXECUTABLE, ["-lc", 'printf "%s" "$PATH"'], { encoding: "utf8" });
 
 function failed(fn) {
   try { fn(); } catch (error) { return String(error.stdout ?? ""); }
@@ -86,7 +92,7 @@ exit 1
 }
 
 function run(fixtureData, operation, extra = {}) {
-  return execFileSync("bash", [fixtureData.path], {
+  return execFileSync(BASH_EXECUTABLE, [fixtureData.path], {
     env: { ...fixtureData.env, SSH_ORIGINAL_COMMAND: operation, ...extra }, encoding: "utf8",
   });
 }
