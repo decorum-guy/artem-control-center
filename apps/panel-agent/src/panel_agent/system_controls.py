@@ -213,7 +213,7 @@ def build_system_controls_router(
             integration_available=bool(state_value["available"]),
         )
         try:
-            controls.set_value(control, payload.value)
+            states[control] = controls.set_value(control, payload.value)
             access.audit_capability(capability, result="success")
         except SystemControlsError as exc:
             access.audit_capability(capability, result=str(exc))
@@ -222,7 +222,7 @@ def build_system_controls_router(
             access.audit_capability(capability, result=str(exc))
             raise HTTPException(status_code=422, detail=str(exc))
         response.headers["Cache-Control"] = "no-store"
-        return project(controls.read())
+        return project(states)
 
     @router.patch("/volume")
     def set_volume(payload: SystemControlPatch, response: Response) -> dict[str, Any]:
