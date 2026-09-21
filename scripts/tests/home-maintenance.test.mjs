@@ -49,7 +49,8 @@ function fixture({ imageAfter = AFTER, health = "healthy", readinessUrl = "", co
   const helper = readFileSync("scripts/linux/home-maintenance", "utf8")
     .replace("CONFIG=/etc/artem-control-center/home-server.conf", `CONFIG=${shellQuote(bashConfigPath)}`)
     .replace("LOCK=/run/lock/artem-control-center-home-maintenance.lock", `LOCK=${shellQuote(bashLock)}`)
-    .replace("MAX_WAIT_SECONDS=180", "MAX_WAIT_SECONDS=1");
+    .replace("MAX_WAIT_SECONDS=180", "MAX_WAIT_SECONDS=1")
+    .replace("curl --fail --silent --max-time 5 \"$url\"", `${shellQuote(`${bashBin}/curl`)} --fail --silent --max-time 5 \"$url\"`);
   const path = join(root, "helper");
   writeFileSync(path, helper); chmodSync(path, 0o755);
   const docker = `#!/usr/bin/env bash
