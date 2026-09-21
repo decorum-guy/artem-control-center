@@ -62,6 +62,8 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "settings.device_visibility": "standard",
     "settings.capabilities.manage": "full",
     "settings.projects.manage": "full",
+    "settings.system.volume": "standard",
+    "settings.system.brightness": "standard",
     "planning.reminders.create": "standard",
     "planning.reminders.edit": "standard",
     "planning.reminders.complete": "standard",
