@@ -16,8 +16,9 @@ vi.mock("../../InteractionLock", () => ({
 }));
 
 import { SystemControlsSettings } from "./SystemControlsSettings";
+import type { SystemControlsStatus } from "./systemControlsApi";
 
-function payload(volume = 37, brightness = 62) {
+function payload(volume = 37, brightness = 62): SystemControlsStatus {
   return {
     schemaVersion: 1,
     platform: "windows",
