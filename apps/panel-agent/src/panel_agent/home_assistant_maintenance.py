@@ -44,9 +44,11 @@ _SAFE_FAILURES = frozenset({
     "home_server_not_configured", "ssh_client_unavailable",
     "ssh_identity_file_missing", "ssh_known_hosts_file_missing", "ssh_timeout",
     "ssh_output_too_large", "ssh_transport_failed", "ssh_invalid_response",
-    "helper_failed", "restart_recovery_timeout", "update_recovery_timeout",
+    "helper_failed", "configuration_missing", "maintenance_busy", "compose_failed",
+    "restart_recovery_timeout", "update_recovery_timeout", "update_failed",
 })
 _HOST_PATTERN = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$")
+_USER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class HomeServerMaintenanceRequest(BaseModel):
@@ -58,6 +60,18 @@ class HomeServerMaintenanceRequest(BaseModel):
 class HomeServerMaintenanceError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code if code in _SAFE_FAILURES else "helper_failed"
+
+
+def _safe_helper_failure(stdout: bytes) -> str:
+    """Accept only the helper's closed, non-secret failure envelope."""
+    try:
+        payload = json.loads(stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "helper_failed"
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != 1 or payload.get("ok") is not False:
+        return "helper_failed"
+    error = payload.get("error")
+    return error if isinstance(error, str) and error in _SAFE_FAILURES else "helper_failed"
 
 
 def _valid_host(value: str) -> bool:
@@ -94,6 +108,7 @@ class HomeServerSshTransport:
 
     def __init__(self, settings: IntegrationSettings, *, executable_finder=shutil.which) -> None:
         self.host = settings.home_server_ssh_host
+        self.user = settings.home_server_ssh_user
         self.port = settings.home_server_ssh_port
         self.identity_file = settings.home_server_ssh_identity_file
         self.known_hosts_file = settings.home_server_ssh_known_hosts_file
@@ -103,14 +118,15 @@ class HomeServerSshTransport:
         self._executable_finder = executable_finder
 
     def configured(self) -> bool:
-        return bool(_valid_host(self.host) and self.identity_file and self.known_hosts_file and Path(self.identity_file).is_file() and Path(self.known_hosts_file).is_file())
+        return bool(_valid_host(self.host) and _USER_PATTERN.fullmatch(self.user) and self.identity_file and self.known_hosts_file and Path(self.identity_file).is_file() and Path(self.known_hosts_file).is_file())
 
     def argv(self, executable: str, operation: str) -> tuple[str, ...]:
         if operation not in _SSH_OPERATIONS:
             raise HomeServerMaintenanceError("helper_failed")
         # The dedicated `artem-home-control` host key has a forced command;
         # this final one-token argument is all it receives from Panel Agent.
-        return (executable, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={self.known_hosts_file}", "-o", f"GlobalKnownHostsFile={os.devnull}", "-o", f"ConnectTimeout={self.connect_timeout}", "-o", "ConnectionAttempts=1", "-o", "NumberOfPasswordPrompts=0", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-i", self.identity_file, "-p", str(self.port), self.host, operation)
+        null_config = "NUL" if os.name == "nt" else os.devnull
+        return (executable, "-F", null_config, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={self.known_hosts_file}", "-o", f"GlobalKnownHostsFile={os.devnull}", "-o", f"ConnectTimeout={self.connect_timeout}", "-o", "ConnectionAttempts=1", "-o", "NumberOfPasswordPrompts=0", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-l", self.user, "-i", self.identity_file, "-p", str(self.port), self.host, operation)
 
     async def run(self, operation: str) -> dict[str, Any]:
         if operation not in _SSH_OPERATIONS:
@@ -142,7 +158,7 @@ class HomeServerSshTransport:
             await asyncio.gather(process.wait(), *reads, return_exceptions=True)
             raise
         if returncode != 0:
-            raise HomeServerMaintenanceError("helper_failed")
+            raise HomeServerMaintenanceError(_safe_helper_failure(stdout))
         try:
             payload = json.loads(stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):

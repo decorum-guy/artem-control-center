@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$ControlHost,
+  [Parameter(Mandatory = $true)][string]$ControlUser,
   [Parameter(Mandatory = $true)][string]$AdminHost,
+  [Parameter(Mandatory = $true)][string]$AdminUser,
   [Parameter(Mandatory = $true)][string]$KnownHostsPath,
   [string]$KeyRoot = "$env:LOCALAPPDATA\ArtemControlCenter\ssh"
 )
@@ -21,22 +23,29 @@ if (-not (Test-Path -LiteralPath $KnownHostsPath)) {
 $config = @"
 Host artem-home-control
   HostName $ControlHost
+  User $ControlUser
   IdentityFile $KeyRoot\artem-home-control
   UserKnownHostsFile $KnownHostsPath
   GlobalKnownHostsFile NUL
   IdentitiesOnly yes
   StrictHostKeyChecking yes
   BatchMode yes
+  PasswordAuthentication no
+  KbdInteractiveAuthentication no
 
 Host artem-home-admin
   HostName $AdminHost
+  User $AdminUser
   IdentityFile $KeyRoot\artem-home-admin
   UserKnownHostsFile $KnownHostsPath
   GlobalKnownHostsFile NUL
   IdentitiesOnly yes
   StrictHostKeyChecking yes
+  BatchMode yes
+  PasswordAuthentication no
+  KbdInteractiveAuthentication no
 "@
 $configPath = Join-Path $KeyRoot 'config'
 Set-Content -LiteralPath $configPath -Value $config -NoNewline
 & icacls.exe $configPath /inheritance:r /grant:r "$env:USERNAME:(R,W)" 'SYSTEM:(F)' | Out-Null
-Write-Output "Created aliases and public keys under $KeyRoot. Install only the .pub control key with the server forced command; keep the admin key separate."
+Write-Output "Created separate product-control and operator keys under $KeyRoot. Install only artem-home-control.pub for the restricted forced command (restrict,command=\"/usr/local/lib/artem-control-center/home-maintenance\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding); artem-home-admin.pub is owner/operator-only. Never put the admin key in Panel Agent runtime.env."

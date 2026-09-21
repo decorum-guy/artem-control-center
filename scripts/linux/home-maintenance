@@ -19,7 +19,9 @@ case "$operation" in status|restart-ha|update-ha|restart-caddy|restart-bot) ;; *
 [[ -r "$CONFIG" ]] || fail configuration_missing
 # shellcheck disable=SC1090
 source "$CONFIG"
-: "${COMPOSE_PROJECT_DIR:?}" "${COMPOSE_FILE:?}" "${HA_SERVICE:?}" "${CADDY_SERVICE:?}" "${BOT_SERVICE:?}"
+for required in COMPOSE_PROJECT_DIR COMPOSE_FILE HA_SERVICE CADDY_SERVICE BOT_SERVICE; do
+  [[ -n "${!required:-}" ]] || fail configuration_missing
+done
 compose=(docker compose --project-directory "$COMPOSE_PROJECT_DIR" --file "$COMPOSE_FILE")
 
 container_id() { "${compose[@]}" ps -q "$1" 2>/dev/null | head -n 1; }
@@ -29,7 +31,13 @@ service_state() {
   [[ -n "$id" ]] || { printf 'false|null'; return; }
   running=$(docker inspect --format '{{.State.Running}}' "$id" 2>/dev/null || printf false)
   health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id" 2>/dev/null || printf none)
-  [[ "$health" == healthy ]] && health=true || [[ "$health" == unhealthy ]] && health=false || health=null
+  if [[ "$health" == healthy ]]; then
+    health=true
+  elif [[ "$health" == unhealthy ]]; then
+    health=false
+  else
+    health=null
+  fi
   printf '%s|%s' "$running" "$health"
 }
 ready() {
@@ -56,25 +64,29 @@ exec 9>"$LOCK"
 flock -n 9 || fail maintenance_busy
 case "$operation" in
   restart-ha)
-    "${compose[@]}" restart "$HA_SERVICE" >/dev/null
+    "${compose[@]}" restart "$HA_SERVICE" >/dev/null || fail compose_failed
     ready "$HA_SERVICE" "${HA_READY_URL:-}" || fail restart_recovery_timeout
     ;;
   restart-caddy)
-    "${compose[@]}" restart "$CADDY_SERVICE" >/dev/null
+    "${compose[@]}" restart "$CADDY_SERVICE" >/dev/null || fail compose_failed
     ready "$CADDY_SERVICE" "${CADDY_READY_URL:-}" || fail restart_recovery_timeout
     ;;
   restart-bot)
-    "${compose[@]}" restart "$BOT_SERVICE" >/dev/null
+    "${compose[@]}" restart "$BOT_SERVICE" >/dev/null || fail compose_failed
     ready "$BOT_SERVICE" "${BOT_READY_URL:-}" || fail restart_recovery_timeout
     ;;
   update-ha)
-    before=$(docker image inspect --format '{{.Id}}' "$(container_id "$HA_SERVICE")" 2>/dev/null || printf '')
-    "${compose[@]}" pull "$HA_SERVICE" >/dev/null
-    after=$("${compose[@]}" images -q "$HA_SERVICE" 2>/dev/null | head -n 1)
+    running_id=$(container_id "$HA_SERVICE")
+    [[ -n "$running_id" ]] || fail update_failed
+    before=$(docker inspect --format '{{.Image}}' "$running_id" 2>/dev/null || printf '')
+    [[ "$before" =~ ^sha256:[A-Fa-f0-9]{64}$ ]] || fail update_failed
+    "${compose[@]}" pull "$HA_SERVICE" >/dev/null || fail compose_failed
+    after=$("${compose[@]}" images -q "$HA_SERVICE" 2>/dev/null | head -n 1 || printf '')
     if [[ -n "$before" && "$before" == "$after" ]]; then
       printf '{"schemaVersion":1,"ok":true,"operation":"update-ha","status":"up_to_date"}\n'; exit 0
     fi
-    "${compose[@]}" up -d --no-deps --force-recreate "$HA_SERVICE" >/dev/null
+    [[ "$after" =~ ^sha256:[A-Fa-f0-9]{64}$ ]] || fail update_failed
+    "${compose[@]}" up -d --no-deps --force-recreate "$HA_SERVICE" >/dev/null || fail compose_failed
     ready "$HA_SERVICE" "${HA_READY_URL:-}" || fail update_recovery_timeout
     ;;
 esac

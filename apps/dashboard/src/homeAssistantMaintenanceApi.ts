@@ -25,7 +25,7 @@ export interface MaintenanceOperation {
   failureCode: string | null;
 }
 
-const safeCodes = new Set(["admin_required", "maintenance_busy", "maintenance_disabled", "core_update_unavailable", "update_not_available", "update_in_progress", "install_unsupported", "restart_recovery_timeout", "update_recovery_timeout", "update_not_applied", "profile_blocked", "elevation_required", "gate_disabled"]);
+const safeCodes = new Set(["admin_required", "maintenance_busy", "maintenance_disabled", "configuration_missing", "compose_failed", "update_failed", "helper_failed", "ssh_timeout", "ssh_transport_failed", "core_update_unavailable", "update_not_available", "update_in_progress", "install_unsupported", "restart_recovery_timeout", "update_recovery_timeout", "update_not_applied", "profile_blocked", "elevation_required", "gate_disabled"]);
 
 async function parse<T>(response: Response): Promise<T> {
   if (!response.ok) {

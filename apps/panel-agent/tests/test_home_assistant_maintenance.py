@@ -1,10 +1,11 @@
 import asyncio
+import os
 from pathlib import Path
 from uuid import uuid4
 
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.home_assistant_maintenance import (
-    HomeServerMaintenanceError, HomeServerMaintenanceExecutor, HomeServerSshTransport,
+    HomeServerMaintenanceError, HomeServerMaintenanceExecutor, HomeServerSshTransport, _safe_helper_failure,
     RESTART_ACTION, RESTART_BOT_ACTION, RESTART_CADDY_ACTION, UPDATE_CORE_ACTION,
 )
 from panel_agent.settings import IntegrationSettings
@@ -36,10 +37,18 @@ def test_default_gate_is_off(): assert IntegrationSettings().home_server_mainten
 
 def test_fixed_ssh_argv_has_pinned_known_hosts_and_one_operation(tmp_path):
     identity, known = tmp_path / "control", tmp_path / "known_hosts"; identity.touch(); known.touch()
-    transport = HomeServerSshTransport(IntegrationSettings(home_server_ssh_host="artem-home-control", home_server_ssh_identity_file=str(identity), home_server_ssh_known_hosts_file=str(known)))
+    transport = HomeServerSshTransport(IntegrationSettings(home_server_ssh_host="home-server.internal", home_server_ssh_user="panel-control", home_server_ssh_identity_file=str(identity), home_server_ssh_known_hosts_file=str(known)))
     argv = transport.argv("ssh", "restart-ha")
-    assert argv[-2:] == ("artem-home-control", "restart-ha")
+    assert argv[-2:] == ("home-server.internal", "restart-ha")
+    assert ("-F", os.devnull) == (argv[1], argv[2])
+    assert ("-l", "panel-control") == (argv[argv.index("-l")], argv[argv.index("-l") + 1])
     assert "StrictHostKeyChecking=yes" in argv and f"UserKnownHostsFile={known}" in argv and "IdentitiesOnly=yes" in argv
+
+
+def test_nonzero_helper_preserves_only_closed_safe_envelope():
+    assert _safe_helper_failure(b'{"schemaVersion":1,"ok":false,"error":"maintenance_busy"}\n') == "maintenance_busy"
+    assert _safe_helper_failure(b'{"schemaVersion":1,"ok":false,"error":"docker: secret"}\n') == "helper_failed"
+    assert _safe_helper_failure(b'not json') == "helper_failed"
 
 
 def test_unknown_operation_is_rejected(tmp_path):

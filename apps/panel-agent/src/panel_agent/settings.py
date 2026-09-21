@@ -75,6 +75,7 @@ class IntegrationSettings:
     writes_enabled: bool = False
     home_server_maintenance_enabled: bool = False
     home_server_ssh_host: str = ""
+    home_server_ssh_user: str = ""
     home_server_ssh_identity_file: str = ""
     home_server_ssh_known_hosts_file: str = ""
     home_server_ssh_port: int = 22
@@ -330,6 +331,7 @@ class IntegrationSettings:
                 False,
             ),
             home_server_ssh_host=os.getenv("PANEL_HOME_SERVER_SSH_HOST", "").strip(),
+            home_server_ssh_user=os.getenv("PANEL_HOME_SERVER_SSH_USER", "").strip(),
             home_server_ssh_identity_file=os.getenv("PANEL_HOME_SERVER_SSH_IDENTITY_FILE", "").strip(),
             home_server_ssh_known_hosts_file=os.getenv("PANEL_HOME_SERVER_SSH_KNOWN_HOSTS_FILE", "").strip(),
             home_server_ssh_port=min(65535, max(1, _int_env("PANEL_HOME_SERVER_SSH_PORT", 22))),

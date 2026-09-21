@@ -265,13 +265,22 @@ for the non-allowlisted `yandex_intent` subscription; this does not weaken it.
 Physical setup installs repository helper `scripts/linux/home-maintenance` as
 `/usr/local/lib/artem-control-center/home-maintenance` plus a root-owned
 `/etc/artem-control-center/home-server.conf`. The control public key is bound
-to that helper as an OpenSSH forced command; the helper validates
-`SSH_ORIGINAL_COMMAND` as exactly one fixed operation token. The root-owned
+to that helper as an OpenSSH forced command. Its `authorized_keys` entry must
+use the equivalent of `restrict,command="/usr/local/lib/artem-control-center/home-maintenance"`
+plus explicit `no-pty,no-agent-forwarding,no-X11-forwarding,no-port-forwarding`;
+it grants no arbitrary shell. The helper validates `SSH_ORIGINAL_COMMAND` as
+exactly one fixed operation token. The root-owned
 configuration supplies `COMPOSE_PROJECT_DIR`, `COMPOSE_FILE`, three service
 names and optional server-local readiness URLs. It is deliberately not checked
 into this repository. `scripts/windows/setup-home-server-ssh.ps1` creates
 separate control/admin identities and requires an owner-verified known-host
-pin; it never installs keys or contacts a physical server.
+pin; it never installs keys or contacts a physical server. The Panel Agent uses
+explicit host, user, port, identity and known-host paths with an empty SSH
+configuration (`-F NUL` on Windows), so neither alias configuration nor a
+user's `%USERPROFILE%\\.ssh\\config` can supply a proxy, identity or user. The
+admin alias is only for an owner-authorized operator session. If the restricted
+account receives Docker-group access, that access is effectively privileged;
+the forced-command key remains the product security boundary.
 
 ## 9. Required discovery output
 
