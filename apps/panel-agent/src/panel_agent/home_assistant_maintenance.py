@@ -125,7 +125,7 @@ class HomeServerSshTransport:
             raise HomeServerMaintenanceError("helper_failed")
         # The dedicated `artem-home-control` host key has a forced command;
         # this final one-token argument is all it receives from Panel Agent.
-        null_config = "NUL" if os.name == "nt" else os.devnull
+        null_config = os.devnull
         return (executable, "-F", null_config, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={self.known_hosts_file}", "-o", f"GlobalKnownHostsFile={os.devnull}", "-o", f"ConnectTimeout={self.connect_timeout}", "-o", "ConnectionAttempts=1", "-o", "NumberOfPasswordPrompts=0", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-l", self.user, "-i", self.identity_file, "-p", str(self.port), self.host, operation)
 
     async def run(self, operation: str) -> dict[str, Any]:
