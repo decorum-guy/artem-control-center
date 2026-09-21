@@ -1023,15 +1023,46 @@ function Wait-ArtemInteractiveRuntimeTaskAvailable {
     return $false
 }
 
+function Restore-ArtemPostUpdateRuntime {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [int]$TimeoutSeconds = 60
+    )
+
+    try {
+        # UpdateRequestId deliberately bypasses the interactive Scheduled Task
+        # preference in start-production.ps1. At this point the updater lease
+        # has already been released, so this is a direct canonical backend
+        # recovery with no competing update authority and no kiosk attempt.
+        & $Paths.StartScript -NoKiosk -UpdateRequestId $LockRequestId
+    }
+    catch {
+        return $false
+    }
+
+    try {
+        return (
+            @(Get-ArtemProductionRuntimeSupervisors).Count -eq 1 -and
+            (Wait-ArtemPanelReady -Paths $Paths -TimeoutSeconds $TimeoutSeconds)
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
 function Invoke-ArtemPostUpdateInteractiveRecovery {
     param(
         [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
         [int]$TimeoutSeconds = 60
     )
 
     # Software acceptance is already durable before this is called. Recovery
-    # therefore uses an explicit one-supervisor handoff and returns a bounded
-    # warning signal rather than retrying or rolling back accepted artifacts.
+    # first attempts one explicit interactive Scheduled Task handoff. Once the
+    # healthy updater-owned runtime has been stopped, every unsuccessful exit
+    # must restore one ready backend before returning an advisory false result.
     $task = Get-ScheduledTask -TaskName "Artem Control Center Runtime" -ErrorAction SilentlyContinue
     if ($null -eq $task) { return $false }
 
@@ -1046,20 +1077,33 @@ function Invoke-ArtemPostUpdateInteractiveRecovery {
 
     Stop-ArtemRuntime -Paths $Paths -Manual $false
     if (-not (Wait-ArtemRuntimeHandoffStopped -Paths $Paths -TimeoutSeconds 20)) {
-        return $false
-    }
-    if (-not (Wait-ArtemInteractiveRuntimeTaskAvailable -TimeoutSeconds 20)) {
+        # Stop did not prove absence; do not create a competing supervisor.
         return $false
     }
 
-    # One start attempt only. A task-start failure or a missing kiosk is
-    # advisory after update acceptance and must not create a retry storm.
+    $restoreBackend = {
+        return Restore-ArtemPostUpdateRuntime `
+            -Paths $Paths `
+            -LockRequestId $LockRequestId `
+            -TimeoutSeconds $TimeoutSeconds
+    }
+
+    if (-not (Wait-ArtemInteractiveRuntimeTaskAvailable -TimeoutSeconds 20)) {
+        [void](& $restoreBackend)
+        return $false
+    }
+
+    # One interactive start attempt only. A task-start failure or a missing
+    # kiosk remains advisory, but it may no longer leave the accepted backend
+    # stopped.
     try {
         Start-ScheduledTask -TaskName "Artem Control Center Runtime"
     }
     catch {
+        [void](& $restoreBackend)
         return $false
     }
+
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         try {
@@ -1074,6 +1118,8 @@ function Invoke-ArtemPostUpdateInteractiveRecovery {
         catch { }
         Start-Sleep -Milliseconds 300
     }
+
+    [void](& $restoreBackend)
     return $false
 }
 

@@ -207,6 +207,7 @@ try {
     $script:panelReady = $true
     $script:kioskVisible = $true
     $script:startFails = $false
+    $handoffRequest = "a" * 24
     function Get-ScheduledTask {
         param([string]$TaskName)
         if (-not $script:taskAvailable) { return $null }
@@ -244,25 +245,43 @@ try {
         $script:panelReady = $true
     }
     function Test-ArtemKioskVisible { param($Paths) return $script:kioskVisible }
+    function Restore-ArtemPostUpdateRuntime {
+        param($Paths, $LockRequestId, $TimeoutSeconds)
+        [void]$script:events.Add("backend-fallback")
+        if ($LockRequestId -ne $handoffRequest) { throw "fallback lost the exact update request id" }
+        $script:supervisorCount = 1
+        $script:panelReady = $true
+        return $true
+    }
 
     # Case 1: a Running task plus healthy updater-owned runtime uses a clean
     # handoff; no second supervisor appears before the old one is absent.
-    Assert-Reliability (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths -TimeoutSeconds 1) "Healthy post-update handoff did not recover kiosk"
+    Assert-Reliability (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths -LockRequestId $handoffRequest -TimeoutSeconds 1) "Healthy post-update handoff did not recover kiosk"
     Assert-Reliability (($script:events -join ",") -eq "stop,absence-confirmed,task-available,task-start") "Handoff order must stop, prove absence, then start task"
     Assert-Reliability ($script:supervisorCount -eq 1) "Handoff created competing supervisors"
 
     # Case 3: unavailable task leaves healthy runtime untouched.
     $script:events.Clear(); $script:taskAvailable = $false; $script:taskState = "Ready"; $script:supervisorCount = 1; $script:panelReady = $true
-    Assert-Reliability (-not (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths -TimeoutSeconds 1)) "Unavailable task must return bounded warning"
+    Assert-Reliability (-not (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths -LockRequestId $handoffRequest -TimeoutSeconds 1)) "Unavailable task must return bounded warning"
     Assert-Reliability ($script:events.Count -eq 0 -and $script:supervisorCount -eq 1) "Unavailable task destroyed a healthy runtime"
 
-    # Case 4: one failed task start creates no retry storm or duplicate runtime.
-    $script:events.Clear(); $script:taskAvailable = $true; $script:taskState = "Ready"; $script:supervisorCount = 1; $script:panelReady = $true; $script:startFails = $true
-    Assert-Reliability (-not (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths -TimeoutSeconds 1)) "Task start failure must be advisory"
-    Assert-Reliability ((@($script:events | Where-Object { $_ -eq "task-start" }).Count -eq 1) -and $script:supervisorCount -eq 0) "Task start failure retried or created a duplicate runtime"
+    # Case 4: one failed task start creates no retry storm and restores one
+    # ready backend before returning its advisory false result.
+    $script:events.Clear(); $script:taskAvailable = $true; $script:taskState = "Ready"; $script:supervisorCount = 1; $script:panelReady = $true; $script:kioskVisible = $true; $script:startFails = $true
+    Assert-Reliability (-not (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths -LockRequestId $handoffRequest -TimeoutSeconds 1)) "Task start failure must remain advisory"
+    Assert-Reliability ((@($script:events | Where-Object { $_ -eq "task-start" }).Count -eq 1)) "Task start failure retried the interactive task"
+    Assert-Reliability (($script:events -join ",") -eq "stop,absence-confirmed,task-available,task-start,backend-fallback") "Failed task start did not use the bounded backend fallback"
+    Assert-Reliability ($script:supervisorCount -eq 1 -and $script:panelReady) "Task start failure left the accepted backend stopped"
+
+    # Case 5: a Scheduled Task can restore the backend but still fail to make
+    # the kiosk visible. The advisory timeout must preserve one ready backend.
+    $script:events.Clear(); $script:taskAvailable = $true; $script:taskState = "Ready"; $script:supervisorCount = 1; $script:panelReady = $true; $script:kioskVisible = $false; $script:startFails = $false
+    Assert-Reliability (-not (Invoke-ArtemPostUpdateInteractiveRecovery -Paths $paths -LockRequestId $handoffRequest -TimeoutSeconds 1)) "Missing kiosk must remain advisory"
+    Assert-Reliability ((@($script:events | Where-Object { $_ -eq "backend-fallback" }).Count -eq 1)) "Missing kiosk did not pass through backend preservation"
+    Assert-Reliability ($script:supervisorCount -eq 1 -and $script:panelReady) "Missing kiosk left the accepted backend stopped"
 
     # Running task helper itself never calls Stop-ScheduledTask or restarts it.
-    $script:events.Clear(); $script:startFails = $false; $script:taskState = "Running"
+    $script:events.Clear(); $script:startFails = $false; $script:taskState = "Running"; $script:kioskVisible = $true
     Assert-Reliability (-not (Start-ArtemInteractiveRuntimeTask -Paths $paths)) "Running task must not be restarted"
     Assert-Reliability ($script:events.Count -eq 0) "Running task recovery issued a competing task start"
 }
@@ -274,4 +293,4 @@ finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated staging environment restoration, durable runtime-mode guard, and bounded one-supervisor post-update handoff."
+Write-Host "Validated staging environment restoration, durable runtime-mode guard, and bounded one-supervisor post-update handoff with backend preservation."
