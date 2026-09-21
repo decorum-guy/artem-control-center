@@ -80,6 +80,9 @@ class HomeAssistantAdapter:
         self._panel_mode = panel_mode
         self._on_change = on_change
         self._yandex_intent_handler: YandexIntentHandler | None = None
+        self._yandex_intent_subscribed = False
+        self._yandex_intent_status = "disabled"
+        self._last_yandex_intent_failure_at: Optional[datetime] = None
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._load_cache()
 
@@ -457,6 +460,8 @@ class HomeAssistantAdapter:
                     "transport": {
                         "websocketConnected": self._websocket_connected,
                         "snapshotConfirmed": self._snapshot_confirmed_for_transport,
+                        "yandexIntentSubscribed": self._yandex_intent_subscribed,
+                        "yandexIntentStatus": self._yandex_intent_status,
                         "lastSuccessfulRestAt": _iso(self._last_successful_rest_at),
                         "lastTransportConnectedAt": _iso(
                             self._last_transport_connected_at
@@ -674,51 +679,37 @@ class HomeAssistantAdapter:
                 delay = min(delay * 2, 30)
 
     async def _subscribe_socket(self, socket: Any) -> None:
-        """Subscribe one authenticated HA socket to its fixed event set."""
+        """Keep core HA state transport independent from optional voice ingress."""
 
-        for subscription_id, event_type in (
-            (_STATE_CHANGED_SUBSCRIPTION_ID, "state_changed"),
-            (_YANDEX_INTENT_SUBSCRIPTION_ID, "yandex_intent"),
-        ):
-            await socket.send(
-                json.dumps(
-                    {
-                        "id": subscription_id,
-                        "type": "subscribe_events",
-                        "event_type": event_type,
-                    }
-                )
-            )
-
-        pending_subscription_ids = {
-            _STATE_CHANGED_SUBSCRIPTION_ID,
-            _YANDEX_INTENT_SUBSCRIPTION_ID,
-        }
+        await socket.send(json.dumps({
+            "id": _STATE_CHANGED_SUBSCRIPTION_ID,
+            "type": "subscribe_events",
+            "event_type": "state_changed",
+        }))
         pre_ack_events: list[dict[str, Any]] = []
-        while pending_subscription_ids:
-            try:
-                message = json.loads(await socket.recv())
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-            if not isinstance(message, dict):
-                continue
-            if message.get("type") == "result":
-                subscription_id = message.get("id")
-                if subscription_id not in pending_subscription_ids:
-                    raise ValueError("Unexpected Home Assistant WebSocket result")
-                if message.get("success") is not True:
-                    raise ValueError("Home Assistant WebSocket subscription failed")
-                pending_subscription_ids.remove(subscription_id)
-                continue
-            if message.get("type") == "event":
-                if len(pre_ack_events) >= _MAX_PRE_ACK_EVENTS:
-                    raise ValueError("Home Assistant WebSocket setup event limit exceeded")
-                pre_ack_events.append(message)
+        await self._await_subscription_ack(
+            socket, _STATE_CHANGED_SUBSCRIPTION_ID, pre_ack_events, required=True,
+        )
         await self._mark_websocket_connected()
         try:
             await self.fetch_initial_snapshot()
         except (httpx.HTTPError, ValueError):
             await self._mark_cached_or_unavailable()
+
+        if self._settings.rog_g703_alice_enabled and self._yandex_intent_handler:
+            await socket.send(json.dumps({
+                "id": _YANDEX_INTENT_SUBSCRIPTION_ID,
+                "type": "subscribe_events",
+                "event_type": "yandex_intent",
+            }))
+            subscribed = await self._await_subscription_ack(
+                socket, _YANDEX_INTENT_SUBSCRIPTION_ID, pre_ack_events, required=False,
+            )
+            self._yandex_intent_subscribed = subscribed
+            self._yandex_intent_status = "subscribed" if subscribed else self._yandex_failure_status
+        else:
+            self._yandex_intent_subscribed = False
+            self._yandex_intent_status = "disabled"
         for message in pre_ack_events:
             await self._handle_websocket_event(message)
         async for raw in socket:
@@ -727,6 +718,39 @@ class HomeAssistantAdapter:
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
             await self._handle_websocket_event(message)
+
+    _yandex_failure_status = "subscription_failed"
+
+    async def _await_subscription_ack(
+        self, socket: Any, subscription_id: int, pre_ack_events: list[dict[str, Any],], *, required: bool,
+    ) -> bool:
+        """Await exactly one bounded subscription result without dropping events."""
+        while True:
+            try:
+                message = json.loads(await socket.recv())
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(message, dict):
+                continue
+            if message.get("type") == "result":
+                if message.get("id") != subscription_id:
+                    raise ValueError("Unexpected Home Assistant WebSocket result")
+                if message.get("success") is not True:
+                    if required:
+                        raise ValueError("Home Assistant WebSocket subscription failed")
+                    self._last_yandex_intent_failure_at = self._clock()
+                    error = message.get("error")
+                    self._yandex_failure_status = (
+                        "unauthorized"
+                        if isinstance(error, dict) and error.get("code") == "unauthorized"
+                        else "subscription_failed"
+                    )
+                    return False
+                return True
+            if message.get("type") == "event":
+                if len(pre_ack_events) >= _MAX_PRE_ACK_EVENTS:
+                    raise ValueError("Home Assistant WebSocket setup event limit exceeded")
+                pre_ack_events.append(message)
 
     async def _handle_websocket_event(self, message: Any) -> None:
         if not isinstance(message, dict):
@@ -840,6 +864,8 @@ class HomeAssistantAdapter:
         was_connected = self._websocket_connected
         should_record_failure = was_connected or self._source == "live"
         self._websocket_connected = False
+        self._yandex_intent_subscribed = False
+        self._yandex_intent_status = "disabled"
         self._snapshot_confirmed_for_transport = False
         if should_record_failure:
             self._last_transport_failure_at = self._clock()

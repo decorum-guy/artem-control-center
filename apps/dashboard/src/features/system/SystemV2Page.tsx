@@ -4,6 +4,7 @@ import { ConnectivityRecoverySurface } from "../../ConnectivityActions";
 import { ErrorBoundary } from "../../ErrorBoundary";
 import { Icon } from "../../icons";
 import { RuntimeControls } from "../../RuntimeControls";
+import { HomeAssistantMaintenance } from "../../HomeAssistantMaintenance";
 import { Sheet } from "../../Sheet";
 import { OperationalStatusSummary, RouteHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { RogG703DetailControl } from "../../RogG703Controls";
@@ -25,6 +26,10 @@ import {
   selectSystemServiceSubjects,
   visibleSystemServices
 } from "../operations/routeDensity";
+
+export function homeServerMaintenanceVisible(mode: string): boolean {
+  return mode === "production";
+}
 
 function SystemFactRow({
   kind,
@@ -274,6 +279,14 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
             <StatusText label="Недоступен" tone="unavailable" />
             <span>Интеграция не передала подтверждённое состояние.</span>
           </WorkZone>
+        )}
+
+        {homeServerMaintenanceVisible(snapshot.mode) && (
+          <ErrorBoundary title="Домашний сервер">
+            <WorkZone className="system-primary-zone system-primary-zone--home-assistant">
+              <HomeAssistantMaintenance />
+            </WorkZone>
+          </ErrorBoundary>
         )}
 
         <ErrorBoundary title="Системные действия">

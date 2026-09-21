@@ -6,6 +6,10 @@ export type ActionConfirmationId =
   | "home.coffee.turn_on"
   | "home.kettle.boil"
   | "system.runtime.shutdown"
+  | "system.home_assistant.restart"
+  | "system.home_assistant.update_core"
+  | "system.home_server.caddy.restart"
+  | "system.home_server.bot.restart"
   | "system.rog_g703.sleep"
   | "system.rog_g703.hibernate"
   | "planning.reminders.complete"
@@ -108,6 +112,38 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     description: "Закроем панель и локальные процессы. Скрытие панели остаётся отдельной командой.",
     confirmLabel: "Полностью закрыть",
     alwaysConfirm: true
+  },
+  "system.home_assistant.restart": {
+    id: "system.home_assistant.restart",
+    level: "simple",
+    tone: "standard",
+    title: "Перезапустить Home Assistant?",
+    target: "Home Assistant",
+    environment: "система",
+    description: "Устройства и автоматизации будут временно недоступны, пока Home Assistant перезапускается.",
+    confirmLabel: "Перезапустить",
+    alwaysConfirm: true
+  },
+  "system.home_assistant.update_core": {
+    id: "system.home_assistant.update_core",
+    level: "simple",
+    tone: "standard",
+    title: "Обновить Home Assistant?",
+    target: "Home Assistant Core",
+    environment: "система",
+    description: "Home Assistant станет временно недоступен во время обновления и перезапуска.",
+    confirmLabel: "Обновить",
+    alwaysConfirm: true
+  },
+  "system.home_server.caddy.restart": {
+    id: "system.home_server.caddy.restart", level: "simple", tone: "standard",
+    title: "Перезапустить Caddy?", target: "Caddy", environment: "домашний сервер",
+    description: "Прокси домашнего сервера будет временно недоступен.", confirmLabel: "Перезапустить", alwaysConfirm: true
+  },
+  "system.home_server.bot.restart": {
+    id: "system.home_server.bot.restart", level: "simple", tone: "standard",
+    title: "Перезапустить Telegram-бота?", target: "AliceTG / Telegram Bot", environment: "домашний сервер",
+    description: "Telegram-бот будет временно недоступен во время перезапуска.", confirmLabel: "Перезапустить", alwaysConfirm: true
   },
   "system.rog_g703.hibernate": {
     id: "system.rog_g703.hibernate",

@@ -81,6 +81,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("planning_task_mutations", "Запись задач", "Разрешение Panel Agent изменять задачи.", "Планирование", "PANEL_PLANNING_TASK_MUTATIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("planning_calendar_mutations", "Запись календаря", "Разрешение Panel Agent изменять события календаря.", "Планирование", "PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("panel_writes", "Запись панели", "Главный защитный барьер для всех операций записи.", "Системные действия", "PANEL_WRITES_ENABLED", "immediate", "none"),
+    CapabilityDefinition("home_server_maintenance", "Обслуживание домашнего сервера", "Разрешение фиксированно обслуживать контейнеры Home Assistant, Caddy и Telegram-бота.", "Системные действия", "PANEL_HOME_SERVER_MAINTENANCE_ENABLED", "immediate", "none"),
     CapabilityDefinition("coffee_timing_writes", "Запись времени кофемашины", "Разрешение менять расписание кофемашины.", "Системные действия", "PANEL_COFFEE_TIMING_WRITES_ENABLED", "immediate", "none"),
     CapabilityDefinition("coffee_notification_writes", "Запись уведомлений кофемашины", "Разрешение менять уведомления кофемашины.", "Системные действия", "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED", "immediate", "none"),
     CapabilityDefinition("coffee_actions", "Действия кофемашины", "Разрешение выполнять действия кофемашины.", "Системные действия", "PANEL_COFFEE_ACTIONS_ENABLED", "immediate", "none"),

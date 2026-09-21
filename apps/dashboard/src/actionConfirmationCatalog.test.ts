@@ -88,6 +88,6 @@ describe("action confirmation catalog", () => {
       confirmLabel: "Удалить проект",
       alwaysConfirm: true
     });
-    expect(mandatory).toEqual(["system.runtime.shutdown", "settings.projects.delete", "coffee-diary.bean.delete", "coffee-diary.extraction.delete"]);
+    expect(mandatory).toEqual(["system.runtime.shutdown", "system.home_assistant.restart", "system.home_assistant.update_core", "system.home_server.caddy.restart", "system.home_server.bot.restart", "settings.projects.delete", "coffee-diary.bean.delete", "coffee-diary.extraction.delete"]);
   });
 });

@@ -290,15 +290,19 @@ runtime.createPanelUpdateLauncherLifecycle({
   publishFailure: (result) => { failures.push(result); return true; },
   log: (level, message) => logs.push({ level, message })
 });
-setTimeout(() => {
+const raceDeadline = Date.now() + 5000;
+const raceTimer = setInterval(() => {
+  const accepted = logs.some(({ message }) => message.includes("accepted durable evidence"));
+  if (failures.length === 0 && !accepted && Date.now() < raceDeadline) return;
+  clearInterval(raceTimer);
   writeFileSync(process.env.ARTEM_RACE_RESULT, JSON.stringify({
     failures,
     logs,
     receipt: readJson(process.env.ARTEM_RACE_RECEIPT),
     bootstrap: readJson(process.env.ARTEM_RACE_BOOTSTRAP)
   }));
-  process.exit(failures.length === 0 && logs.some(({ message }) => message.includes("accepted durable evidence")) ? 0 : 1);
-}, 900);
+  process.exit(failures.length === 0 && accepted ? 0 : 1);
+}, 25);
 '@
 
 try {
