@@ -776,6 +776,9 @@ function Invoke-ArtemTargetUpdater {
             -LockRequestId $LockRequestId `
             -Current $PreviousHead `
             -Target $TargetHead)) {
+        if ($null -ne $targetProcess) {
+            Stop-ArtemTargetContinuationForRecovery -TargetProcess $targetProcess
+        }
         Reclaim-ArtemTargetHandoffLease `
             -Paths $Paths `
             -LockRequestId $LockRequestId `
@@ -783,7 +786,7 @@ function Invoke-ArtemTargetUpdater {
             -Target $TargetHead `
             -ExitedChildPid $(if ($null -ne $targetProcess) { $targetProcess.Id } else { 0 })
         Complete-ArtemTargetHandoffFailure -Paths $Paths -LockRequestId $LockRequestId
-        throw "Target updater continuation did not accept ownership"
+        throw "Target updater continuation did not reach bootstrap acceptance"
     }
     return $targetProcess
 }
@@ -983,7 +986,6 @@ try {
             throw "Target updater continuation selected an invalid recovery action"
         }
         Assert-ArtemTargetUpdaterLogic -Paths $paths -ExpectedTargetHead $ExpectedTargetHead
-        Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "target-bootstrap-accepted" -Result "success"
         $currentHead = $decision.CurrentHead
         $targetHead = $decision.TargetHead
         $rollbackHead = $decision.RollbackHead
@@ -998,6 +1000,10 @@ try {
             -TargetHead $targetHead `
             -LockRequestId $RequestId `
             -StagingRoot $stagingRoot
+        # Responsibility transfers only after the target continuation has
+        # durably entered its authoritative phase. The waiting parent keeps
+        # rollback authority until this marker exists.
+        Write-ArtemTargetHandoffEvidence -Paths $paths -LockRequestId $RequestId -Stage "target-bootstrap-accepted" -Result "success"
         $targetPhase = $true
     }
     else {
