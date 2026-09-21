@@ -53,9 +53,10 @@ rog_g703_actions = RogG703ActionExecutor(
     access_policy,
     device=runtime.rog_g703,
 )
-runtime.home_assistant.set_yandex_intent_handler(
-    YandexRogVoiceBridge(SETTINGS, rog_g703_actions, runtime.home_assistant).handle
-)
+if SETTINGS.rog_g703_alice_enabled:
+    runtime.home_assistant.set_yandex_intent_handler(
+        YandexRogVoiceBridge(SETTINGS, rog_g703_actions, runtime.home_assistant).handle
+    )
 
 app.add_middleware(AccessPolicyMiddleware, store=access_policy)
 app.include_router(build_access_router(access_policy))

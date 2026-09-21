@@ -412,7 +412,7 @@ export function CoffeeWidget({
           </div>
         )}
         {activeAction && !activeAction.enabled && (
-          <span className="action-hint">Управление отключено политикой панели.</span>
+          <span className="action-hint">Управление сейчас недоступно.</span>
         )}
         {variant === "overview" && appearance.showAuthority && (
           <p className="coffee-authority">Источник: Home Assistant</p>
