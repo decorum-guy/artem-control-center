@@ -25,6 +25,7 @@ import { ReminderDeliverySettingsSheet, reminderDeliveryStateLabel, reminderDeli
 import { InterfaceCopySettingsSheet } from "./InterfaceCopySettings";
 import { DeviceVisibilitySettingsSheet, deviceVisibilityStateLabel, deviceVisibilitySummary } from "./DeviceVisibilitySettings";
 import { ProjectSettingsSheet } from "./ProjectSettings";
+import { SystemControlsSettings } from "./SystemControlsSettings";
 import { projectRegistryStateLabel, projectRegistrySummary } from "../../projectRegistryPresentation";
 import { useDeviceVisibility } from "../../DeviceVisibility";
 import { useInterfaceCopy } from "../../interfaceCopy";
@@ -123,6 +124,8 @@ export function SettingsV2Page({
           </div>
         </div>
       </section>
+
+      <SystemControlsSettings />
 
       <div className="settings-v2-summary-grid">
         <SettingsSummaryColumn>
