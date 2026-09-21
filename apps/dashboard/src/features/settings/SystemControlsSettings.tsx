@@ -11,7 +11,7 @@ import {
 const labels: Record<SystemControlName, { title: string; description: string }> = {
   volume: {
     title: "Громкость",
-    description: "Основной выход Windows"
+    description: "Текущий аудиовыход"
   },
   brightness: {
     title: "Яркость",
@@ -115,7 +115,7 @@ export function SystemControlsSettings() {
       <div className="settings-system-controls__heading">
         <div>
           <h2 id="settings-system-controls-title">Звук и экран</h2>
-          <p>Текущие значения Windows. Панель не хранит отдельную копию.</p>
+          <p>Громкость звука и яркость встроенного экрана.</p>
         </div>
         {!status && <span className="settings-system-controls__state">Нет данных</span>}
       </div>
