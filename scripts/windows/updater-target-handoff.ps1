@@ -445,7 +445,7 @@ function Wait-ArtemTargetContinuationAcceptance {
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Current,
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Target,
-        [int]$TimeoutSeconds = 20
+        [int]$TimeoutSeconds = 60
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
