@@ -161,7 +161,13 @@ try {
     if (Wait-ArtemTargetContinuationAcceptance -Paths $paths -TargetProcess $stalled -LockRequestId $request -Current $current -Target $target -TimeoutSeconds 1) {
         throw "Stalled pre-bootstrap child was accepted"
     }
-    Stop-ArtemTargetContinuationForRecovery -TargetProcess $stalled -TimeoutSeconds 5
+    Stop-ArtemTargetContinuationForRecovery `
+        -Paths $paths `
+        -TargetProcess $stalled `
+        -LockRequestId $request `
+        -Current $current `
+        -Target $target `
+        -TimeoutSeconds 5
     $stalled.Refresh()
     if (-not $stalled.HasExited) { throw "Stalled target child survived bounded recovery stop" }
     Reclaim-ArtemTargetHandoffLease -Paths $paths -LockRequestId $request -Current $current -Target $target -ExitedChildPid $stalled.Id
