@@ -8,7 +8,7 @@ import { JarvisOverlay } from "./JarvisOverlay";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const disabled = { schemaVersion: "jarvis.voice.v1", enabled: false, configured: false, health: "disabled", state: "disabled", sequence: 0,
-  recognizedText: null, responseText: null, safeErrorCode: null, wakeLatencyMs: null, sttLatencyMs: null, navigation: null };
+  recognizedText: null, responseText: null, safeErrorCode: null, wakeLatencyMs: null, sttLatencyMs: null, navigation: null, inputLevel: null };
 
 describe("JarvisOverlay voice foundation", () => {
   let root: Root | null = null;
@@ -52,20 +52,25 @@ describe("JarvisOverlay voice foundation", () => {
     expect(host?.textContent).toContain("Сейчас 12:34.");
   });
 
-  it("auto-opens for voice state and renders transcript as inert text", async () => {
+  it("shows compact mic-reactive voice HUD without auto-opening the full panel", async () => {
     vi.useFakeTimers();
     let voice: object = disabled;
     await mount(() => voice);
-    voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "wake_detected", sequence: 1 };
-    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
-    expect(host?.querySelector("[data-testid=jarvis-panel]")).not.toBeNull();
+    voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "wake_detected", sequence: 1, inputLevel: 0 };
+    await act(async () => { await vi.advanceTimersByTimeAsync(650); });
+    expect(host?.querySelector("[data-testid=jarvis-panel]")).toBeNull();
+    expect(host?.querySelector("[data-testid=jarvis-voice-hud]")).not.toBeNull();
     expect(host?.textContent).toContain("Слушаю");
-    voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "ready", sequence: 2,
-      recognizedText: "<img src=x onerror=alert(1)>", responseText: "Готово." };
-    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
-    expect(host?.textContent).toContain("<img src=x onerror=alert(1)>");
+
+    voice = { ...voice, state: "listening", sequence: 2, inputLevel: 0.72 };
+    await act(async () => { await vi.advanceTimersByTimeAsync(140); });
+    expect(host?.querySelector("[data-testid=jarvis-launcher]")?.getAttribute("data-input-level")).toBe("0.720");
+
+    voice = { ...voice, state: "submitting", sequence: 3, inputLevel: null,
+      recognizedText: "<img src=x onerror=alert(1)>" };
+    await act(async () => { await vi.advanceTimersByTimeAsync(140); });
+    expect(host?.querySelector("[data-testid=jarvis-voice-transcript]")?.textContent).toContain("<img src=x onerror=alert(1)>");
     expect(host?.querySelector("img")).toBeNull();
-    expect(host?.textContent).toContain("Готово.");
   });
 
   it("passes canonical voice navigation through the existing callback", async () => {
@@ -75,8 +80,9 @@ describe("JarvisOverlay voice foundation", () => {
     await mount(() => voice, onNavigate);
     voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "ready", sequence: 1,
       recognizedText: "Открой настройки", responseText: "Открываю раздел.", navigation: "/settings" };
-    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(650); });
     expect(onNavigate).toHaveBeenCalledWith("/settings");
+    expect(host?.querySelector("[data-testid=jarvis-panel]")).toBeNull();
   });
 
   it("renders speaking without emitting a duplicate message before READY", async () => {
@@ -85,11 +91,11 @@ describe("JarvisOverlay voice foundation", () => {
     await mount(() => voice);
     voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "speaking", sequence: 1,
       recognizedText: "Открой настройки", responseText: "Открываю раздел." };
-    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(650); });
     expect(host?.textContent).toContain("Говорю");
-    expect(host?.textContent).not.toContain("Открываю раздел.");
+    expect(host?.querySelector("[data-testid=jarvis-voice-hud]")?.textContent).toContain("Открываю раздел.");
     voice = { ...voice, state: "ready", sequence: 2 };
-    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(140); });
     expect(host?.textContent).toContain("Открываю раздел.");
   });
 });
