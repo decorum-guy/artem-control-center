@@ -20,6 +20,8 @@ from jarvis_voice_worker.__main__ import microphone_device_from_environment
 
 FRAME = b"\x00\x00" * 1_280  # 80 ms of canonical PCM
 LOUD_FRAME = (1000).to_bytes(2, "little", signed=True) * 1_280
+WAKE_FRAME = (2000).to_bytes(2, "little", signed=True) * 1_280
+COMMAND_FRAME = (1500).to_bytes(2, "little", signed=True) * 1_280
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +77,16 @@ class Stt:
         return self.value
 
 
+class RecordingStt(Stt):
+    def __init__(self, value: str = "Открой настройки") -> None:
+        super().__init__(value)
+        self.pcm = b""
+
+    async def recognize(self, pcm: bytes) -> str:
+        self.pcm = pcm
+        return await super().recognize(pcm)
+
+
 class Turns:
     def __init__(self, navigation: str | None = None) -> None:
         self.values: list[str] = []
@@ -126,8 +138,13 @@ def pipeline(*, wake_at: int | None = 1, vad_speech: set[int] | None = None,
              speech: Speech | None = None):
     publisher, turns = Publisher(), Turns(navigation)
     subject = VoicePipeline(
-        config=VoiceRuntimeConfig(enabled=True, configured=True, trailing_silence_ms=160, cooldown_ms=1),
-        wake=Wake(wake_at), vad=Vad(vad_speech or {1}), recognizer=stt or Stt(), turns=turns,
+        config=VoiceRuntimeConfig(
+            enabled=True, configured=True, wake_release_silence_ms=80,
+            trailing_silence_ms=80, cooldown_ms=1,
+        ),
+        wake=Wake(wake_at),
+        vad=Vad(vad_speech if vad_speech is not None else {2}),
+        recognizer=stt or Stt(), turns=turns,
         publisher=publisher, lock=lock or Lock(), clock=Clock(), speech_output=speech,
     )
     return subject, publisher, turns
@@ -163,6 +180,25 @@ def test_wake_vad_endpoint_stt_and_one_canonical_turn():
     ]
     ready = next(item for item in publisher.snapshots if item.state is VoiceState.READY)
     assert ready.recognized_text == "Который час?" and ready.response_text == "Сейчас 12:34."
+
+
+def test_command_capture_excludes_wake_audio_and_post_wake_release_silence():
+    stt = RecordingStt()
+    subject, publisher, turns = pipeline(stt=stt)
+    asyncio.run(subject.run(Audio([WAKE_FRAME, FRAME, COMMAND_FRAME, FRAME])))
+    assert turns.values == ["Открой настройки"]
+    assert stt.pcm == COMMAND_FRAME + FRAME
+    assert WAKE_FRAME not in stt.pcm
+    assert publisher.snapshots[-1].state is VoiceState.IDLE
+
+
+def test_local_stop_command_never_reaches_semantic_turn_or_error_state():
+    subject, publisher, turns = pipeline(stt=Stt("Стоп!"))
+    asyncio.run(subject.run(Audio([WAKE_FRAME, FRAME, COMMAND_FRAME, FRAME])))
+    assert turns.values == []
+    assert publisher.snapshots[-1].state is VoiceState.IDLE
+    assert VoiceState.ERROR not in [item.state for item in publisher.snapshots]
+    assert all(item.response_text is None for item in publisher.snapshots)
 
 
 def test_listening_activity_is_bounded_ephemeral_and_tracks_pcm_level():
@@ -250,12 +286,12 @@ def test_absent_microphone_environment_uses_default_device(monkeypatch: pytest.M
     assert microphone_device_from_environment() is None
 
 
-def test_cancel_transitions_to_cooldown_without_persistence():
+def test_cancel_returns_to_idle_without_error_or_persistence():
     subject, publisher, _ = pipeline()
     asyncio.run(subject._transition(VoiceState.STARTING, health=VoiceHealth.STARTING))
     asyncio.run(subject._transition(VoiceState.IDLE, health=VoiceHealth.HEALTHY))
     asyncio.run(subject._transition(VoiceState.WAKE_DETECTED))
     asyncio.run(subject._transition(VoiceState.LISTENING))
     asyncio.run(subject.cancel())
-    assert publisher.snapshots[-3].safe_error_code == "cancelled"
-    assert publisher.snapshots[-1].state is VoiceState.IDLE
+    assert [item.state for item in publisher.snapshots[-2:]] == [VoiceState.COOLDOWN, VoiceState.IDLE]
+    assert all(item.safe_error_code is None for item in publisher.snapshots[-2:])
