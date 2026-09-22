@@ -1,14 +1,33 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useInteractionLock } from "./InteractionLock";
 import { Icon } from "./icons";
 import { sendJarvisTurn, type JarvisNavigation } from "./jarvisApi";
-import { getJarvisVoiceState, syncJarvisVoiceInteractionLock, type JarvisVoiceSnapshot } from "./jarvisVoiceApi";
+import {
+  getJarvisVoiceState, syncJarvisVoiceInteractionLock,
+  type JarvisVoiceSnapshot, type JarvisVoiceState
+} from "./jarvisVoiceApi";
 
 const MAX_MESSAGES = 24;
 const MAX_TEXT = 512;
+const IDLE_POLL_MS = 650;
+const ACTIVE_POLL_MS = 140;
 
 type Message = { role: "owner" | "jarvis"; text: string };
 type OverlayState = "idle" | "processing" | "listening" | "transcribing" | "submitting" | "speaking" | "ready" | "error";
+
+const VOICE_HUD_STATES = new Set<JarvisVoiceState>([
+  "wake_detected", "listening", "transcribing", "submitting", "speaking", "ready", "error"
+]);
+
+function voiceHudLabel(state: JarvisVoiceState): string {
+  if (state === "wake_detected" || state === "listening") return "Слушаю";
+  if (state === "transcribing") return "Распознаю";
+  if (state === "submitting") return "Обрабатываю";
+  if (state === "speaking") return "Говорю";
+  if (state === "ready") return "Готово";
+  if (state === "error") return "Ошибка";
+  return "Ожидаю";
+}
 
 export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNavigation) => void }) {
   const { locked } = useInteractionLock();
@@ -16,6 +35,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
   const [text, setText] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [state, setState] = useState<OverlayState>("idle");
+  const [voiceSnapshot, setVoiceSnapshot] = useState<JarvisVoiceSnapshot | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const voiceSequence = useRef(-1);
   const onNavigateRef = useRef(onNavigate);
@@ -31,42 +51,62 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
     if (locked) {
       setOpen(false);
       setState("idle");
+      setVoiceSnapshot(null);
     }
   }, [locked]);
 
   useEffect(() => {
     // This best-effort boolean is mirrored to the Panel Agent, where the
-    // loopback voice turn is rejected while locked.  It carries no command.
+    // loopback voice turn is rejected while locked. It carries no command.
     void syncJarvisVoiceInteractionLock(locked).catch(() => undefined);
   }, [locked]);
 
   useEffect(() => {
     let disposed = false;
     let controller: AbortController | null = null;
+    let timer: number | null = null;
+
     const apply = (voice: JarvisVoiceSnapshot | null) => {
       if (!voice || disposed || voice.sequence <= voiceSequence.current || locked) return;
       voiceSequence.current = voice.sequence;
-      if (voice.state === "wake_detected" || voice.state === "listening") { setOpen(true); setState("listening"); return; }
-      if (voice.state === "transcribing") { setOpen(true); setState("transcribing"); return; }
-      if (voice.state === "submitting") { setOpen(true); setState("submitting"); return; }
-      if (voice.state === "speaking") { setOpen(true); setState("speaking"); return; }
+      setVoiceSnapshot(voice);
+
+      if (voice.state === "wake_detected" || voice.state === "listening") { setState("listening"); return; }
+      if (voice.state === "transcribing") { setState("transcribing"); return; }
+      if (voice.state === "submitting") { setState("submitting"); return; }
+      if (voice.state === "speaking") { setState("speaking"); return; }
       if (voice.state === "ready") {
-        setOpen(true);
         if (voice.recognizedText) append({ role: "owner", text: voice.recognizedText });
         if (voice.responseText) append({ role: "jarvis", text: voice.responseText });
         if (voice.navigation) onNavigateRef.current(voice.navigation);
         setState("ready");
         return;
       }
-      if (voice.state === "error") { setOpen(true); setState("error"); }
+      if (voice.state === "error") { setState("error"); return; }
+      if (voice.state === "idle" || voice.state === "cooldown" || voice.state === "disabled") setState("idle");
     };
+
+    const schedule = (delay: number) => {
+      if (!disposed) timer = window.setTimeout(poll, delay);
+    };
+
     const poll = () => {
-      controller?.abort(); controller = new AbortController();
-      void getJarvisVoiceState(controller.signal).then(apply).catch(() => undefined);
+      controller?.abort();
+      controller = new AbortController();
+      void getJarvisVoiceState(controller.signal)
+        .then((voice) => {
+          apply(voice);
+          schedule(voice && VOICE_HUD_STATES.has(voice.state) ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+        })
+        .catch(() => schedule(IDLE_POLL_MS));
     };
+
     poll();
-    const timer = window.setInterval(poll, 750);
-    return () => { disposed = true; controller?.abort(); window.clearInterval(timer); };
+    return () => {
+      disposed = true;
+      controller?.abort();
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [locked]);
 
   function append(message: Message): void {
@@ -91,12 +131,49 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
     }
   }
 
+  const voiceHudVisible = !locked && !!voiceSnapshot && VOICE_HUD_STATES.has(voiceSnapshot.state);
+  const listening = voiceSnapshot?.state === "wake_detected" || voiceSnapshot?.state === "listening";
+  const level = listening ? (voiceSnapshot?.inputLevel ?? 0) : 0;
+  const launcherStyle = {
+    "--jarvis-level": String(level),
+    "--jarvis-scale": String(1 + level * 0.045),
+    "--jarvis-glow-alpha": String(0.35 + level * 0.6),
+    "--jarvis-glow-blur": `${18 + level * 24}px`,
+  } as CSSProperties;
+
   return (
     <div className="jarvis-root" data-testid="jarvis-root">
+      {voiceHudVisible && !open && voiceSnapshot && (
+        <section className="jarvis-voice-hud" data-testid="jarvis-voice-hud" aria-live="polite" aria-label="Состояние голоса Jarvis">
+          <div className="jarvis-voice-hud__topline">
+            <span className={`jarvis-voice-hud__dot jarvis-voice-hud__dot--${voiceSnapshot.state}`} aria-hidden="true" />
+            <strong>{voiceHudLabel(voiceSnapshot.state)}</strong>
+          </div>
+          {voiceSnapshot.recognizedText ? (
+            <p className="jarvis-voice-hud__transcript" data-testid="jarvis-voice-transcript">{voiceSnapshot.recognizedText}</p>
+          ) : (
+            <p className="jarvis-voice-hud__hint">
+              {listening ? "Говорите — микрофон активен" : voiceSnapshot.state === "transcribing" ? "Преобразую речь в текст…" : "Секунду…"}
+            </p>
+          )}
+          {(voiceSnapshot.state === "speaking" || voiceSnapshot.state === "ready") && voiceSnapshot.responseText && (
+            <p className="jarvis-voice-hud__response">{voiceSnapshot.responseText}</p>
+          )}
+        </section>
+      )}
+
       <button
         type="button"
-        className="jarvis-launcher"
+        className={[
+          "jarvis-launcher",
+          voiceHudVisible ? "jarvis-launcher--voice-active" : "",
+          listening ? "jarvis-launcher--listening" : "",
+          voiceSnapshot?.state === "speaking" ? "jarvis-launcher--speaking" : "",
+        ].filter(Boolean).join(" ")}
+        style={launcherStyle}
         data-testid="jarvis-launcher"
+        data-voice-state={voiceSnapshot?.state ?? "none"}
+        data-input-level={level.toFixed(3)}
         aria-label="Открыть Jarvis"
         aria-expanded={open}
         disabled={locked}
@@ -104,6 +181,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
       >
         <span aria-hidden="true">J</span><span>Jarvis</span>
       </button>
+
       {open && (
         <section className="jarvis-panel" data-testid="jarvis-panel" aria-label="Диалог с Jarvis">
           <header className="jarvis-panel__header">

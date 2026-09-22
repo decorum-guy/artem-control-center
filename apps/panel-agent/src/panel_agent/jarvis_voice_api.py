@@ -39,6 +39,7 @@ class VoiceStateResponse(BaseModel):
     wake_latency_ms: int | None = Field(default=None, ge=0, alias="wakeLatencyMs")
     stt_latency_ms: int | None = Field(default=None, ge=0, alias="sttLatencyMs")
     navigation: NavigationPath | None = None
+    input_level: float | None = Field(default=None, ge=0.0, le=1.0, alias="inputLevel")
 
 
 class VoiceStateUpdate(VoiceStateResponse):
@@ -92,7 +93,13 @@ class VoiceBridgeState:
         restarting = next_state is VoiceState.STARTING and update.sequence == 1
         if not restarting and update.sequence <= self._worker_sequence:
             return False
-        if not restarting and not is_legal_voice_transition(self._snapshot.state, next_state):
+        listening_refresh = (
+            next_state is VoiceState.LISTENING and self._snapshot.state is VoiceState.LISTENING and
+            update.input_level is not None and update.recognized_text is None and
+            update.response_text is None and update.safe_error_code is None and
+            update.navigation is None and update.wake_latency_ms is None and update.stt_latency_ms is None
+        )
+        if not restarting and not listening_refresh and not is_legal_voice_transition(self._snapshot.state, next_state):
             return False
         self._worker_sequence = update.sequence
         self._snapshot = VoiceSnapshot(
@@ -101,6 +108,7 @@ class VoiceBridgeState:
             recognized_text=update.recognized_text, response_text=update.response_text,
             safe_error_code=update.safe_error_code, wake_latency_ms=update.wake_latency_ms,
             stt_latency_ms=update.stt_latency_ms, navigation=update.navigation,
+            input_level=update.input_level,
         )
         return True
 

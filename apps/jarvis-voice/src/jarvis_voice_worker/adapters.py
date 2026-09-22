@@ -227,6 +227,7 @@ class HttpVoiceStatePublisher(VoiceStatePublisher):
             "recognizedText": snapshot.recognized_text, "responseText": snapshot.response_text,
             "safeErrorCode": snapshot.safe_error_code, "wakeLatencyMs": snapshot.wake_latency_ms,
             "sttLatencyMs": snapshot.stt_latency_ms, "navigation": snapshot.navigation,
+            "inputLevel": snapshot.input_level,
         }
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.post(f"{self._bridge.base_url}/api/v1/jarvis/voice/state",
