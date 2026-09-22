@@ -201,9 +201,27 @@ function Get-ArtemJarvisVoiceConfiguration {
 
 function Get-ArtemJarvisVoiceWorkers {
     param([Parameter(Mandatory)]$Voice)
-    return @(Get-CimInstance Win32_Process | Where-Object {
-        $_.Name -ieq "python.exe" -and $_.CommandLine -like "*$($Voice.WorkerModule)*"
-    })
+
+    $candidates = @(
+        Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -ieq "python.exe" -and $_.CommandLine -like "*$($Voice.WorkerModule)*"
+        }
+    )
+    if ($candidates.Count -le 1) { return $candidates }
+
+    # A Windows venv launch can appear as two matching python.exe processes:
+    # the venv launcher plus its base-interpreter child. Treat that parent-child
+    # chain as one logical worker by keeping only matching roots. Two genuinely
+    # independent workers still produce two roots and remain a duplicate fault.
+    $candidateIds = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($candidate in $candidates) {
+        [void]$candidateIds.Add([int]$candidate.ProcessId)
+    }
+    return @(
+        $candidates | Where-Object {
+            -not $candidateIds.Contains([int]$_.ParentProcessId)
+        }
+    )
 }
 
 function Get-ArtemJarvisVoiceSessionAlignment {
