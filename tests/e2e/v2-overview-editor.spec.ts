@@ -210,11 +210,10 @@ async function installLayoutRoute(
 }
 
 async function openEditor(page: Page, url = "/overview?theme=night"): Promise<void> {
-  await page.goto(url);
+  const separator = url.includes("?") ? "&" : "?";
+  await page.goto(`${url}${separator}overviewEdit=1`);
   await unlockTouchLockIfNeeded(page);
   await expect(page.getByTestId("route-overview-v2")).toBeVisible();
-  await expect(page.getByTestId("overview-configure")).toBeEnabled();
-  await page.getByTestId("overview-configure").click();
   await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
   await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
 }
@@ -448,26 +447,40 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     test.skip(!overviewV2Enabled || !overviewEditorEnabled, "Run with V2 and the Overview editor flags enabled.");
   });
 
-  test("communicates true, server-disabled, and unconfirmed layout writer gates", async ({ page }) => {
-    for (const [mode, gate, enabled, copy] of [
-      ["writer-true", "available", true, "Можно менять расположение и виджеты."],
-      ["writer-false", "server-disabled", false, "Изменение панели сейчас отключено."],
-      ["metadata-missing", "metadata-unavailable", false, "Не удалось проверить возможность изменения панели. Попробуйте позже."]
+  test("keeps Overview clean and handles edit requests truthfully", async ({ page }) => {
+    for (const [mode, entersEdit, copy] of [
+      ["writer-true", true, null],
+      ["writer-false", false, "Изменение обзора сейчас отключено."],
+      ["metadata-missing", false, "Не удалось загрузить настройки обзора. Попробуйте позже."]
     ] as const) {
       await page.unroute("**/api/v1/overview/layout*").catch(() => undefined);
       const state = await installLayoutGateRoute(page, mode);
       await page.goto("/overview?theme=night");
-      const toolbar = page.getByTestId("overview-toolbar");
-      const configure = page.getByTestId("overview-configure");
-      const note = page.locator("#overview-configure-note");
-      await expect(toolbar).toHaveAttribute("data-configure-gate", gate);
-      await expect(configure).toHaveJSProperty("disabled", !enabled);
-      await expect(note).toHaveText(copy);
-      await expect(note).toBeVisible();
-      await expect(configure).toHaveAttribute("aria-describedby", "overview-configure-note");
-      if (!enabled) await expect(configure).toHaveCSS("cursor", "not-allowed");
+      await expect(page.getByTestId("overview-configure")).toHaveCount(0);
+      await expect(page.locator("#overview-configure-note")).toHaveCount(0);
+
+      await page.goto("/overview?theme=night&overviewEdit=1");
+      if (entersEdit) {
+        await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
+      } else {
+        await expect(page.getByTestId("overview-edit-toolbar")).toHaveCount(0);
+        await expect(page.getByText(copy!)).toBeVisible();
+      }
       expect(state.patchCount()).toBe(0);
     }
+  });
+
+  test("opens Overview editing from Settings instead of the Overview page", async ({ page }) => {
+    await installLayoutRoute(page);
+    await page.goto("/settings?theme=night");
+    await unlockTouchLockIfNeeded(page);
+    const overviewSetting = page.getByTestId("settings-summary-overview");
+    await expect(overviewSetting).toContainText("Обзор");
+    await expect(overviewSetting).toContainText("Расположение и виджеты");
+    await overviewSetting.click();
+    await expect(page.getByTestId("route-overview-v2")).toBeVisible();
+    await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
+    await expect(page.getByTestId("overview-configure")).toHaveCount(0);
   });
 
   test("keeps widget bodies inert and exposes touch-safe accessible handles", async ({ page }, testInfo) => {
@@ -650,7 +663,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await assertCoffeeActivityHidden(page);
     await captureArtifact(page, testInfo, "overview-coffee-warming.png");
 
-    await page.getByTestId("overview-configure").click();
+    await page.goto("/overview?scenario=coffee-warming&theme=night&overviewEdit=1");
     await expect(page.getByTestId("overview-edit-toolbar")).toBeVisible();
     await selectFrame(page, "fixture.coffee");
     await assertEditorChromeGeometry(page, "fixture.coffee", ["fixture.rog", "fixture.planning", "fixture.climate", "fixture.health"]);
