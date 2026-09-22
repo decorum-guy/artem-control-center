@@ -47,6 +47,30 @@ def test_worker_state_requires_token_ignores_stale_and_rejects_extra_fields():
     assert browser.post("/api/v1/jarvis/voice/state", json={**idle, "sequence": 3, "safeErrorCode": "raw exception text"}, headers=headers).status_code == 422
 
 
+def test_listening_activity_refresh_is_bounded_and_cannot_smuggle_turn_fields():
+    browser = client()
+    headers = {"X-Jarvis-Voice-Token": "local-only-token"}
+    base = {"schemaVersion": "jarvis.voice.v1", "enabled": True, "configured": True, "health": "starting",
+            "state": "starting", "sequence": 1, "recognizedText": None, "responseText": None,
+            "safeErrorCode": None, "wakeLatencyMs": None, "sttLatencyMs": None, "inputLevel": None}
+    states = [("idle", "healthy"), ("wake_detected", "healthy"), ("listening", "healthy")]
+    assert browser.post("/api/v1/jarvis/voice/state", json=base, headers=headers).status_code == 204
+    for sequence, (state, health) in enumerate(states, start=2):
+        assert browser.post("/api/v1/jarvis/voice/state", json={**base, "state": state, "health": health, "sequence": sequence}, headers=headers).status_code == 204
+
+    activity = {**base, "state": "listening", "health": "healthy", "sequence": 5, "inputLevel": 0.73}
+    assert browser.post("/api/v1/jarvis/voice/state", json=activity, headers=headers).status_code == 204
+    current = browser.get("/api/v1/jarvis/voice/state").json()
+    assert current["inputLevel"] == 0.73 and current["state"] == "listening"
+
+    rejected = {**activity, "sequence": 6, "recognizedText": "must not appear"}
+    assert browser.post("/api/v1/jarvis/voice/state", json=rejected, headers=headers).status_code == 204
+    current = browser.get("/api/v1/jarvis/voice/state").json()
+    assert current["sequence"] == 5 and current["recognizedText"] is None
+
+    assert browser.post("/api/v1/jarvis/voice/state", json={**activity, "sequence": 7, "inputLevel": 1.2}, headers=headers).status_code == 422
+
+
 def test_loopback_turn_is_one_existing_service_path_and_lock_blocks_it():
     browser = client()
     headers = {"X-Jarvis-Voice-Token": "local-only-token"}
