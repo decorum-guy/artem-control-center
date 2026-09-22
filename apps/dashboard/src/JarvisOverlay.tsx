@@ -156,7 +156,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
               {listening ? "Говорите — микрофон активен" : voiceSnapshot.state === "transcribing" ? "Преобразую речь в текст…" : "Секунду…"}
             </p>
           )}
-          {voiceSnapshot.state === "speaking" && voiceSnapshot.responseText && (
+          {(voiceSnapshot.state === "speaking" || voiceSnapshot.state === "ready") && voiceSnapshot.responseText && (
             <p className="jarvis-voice-hud__response">{voiceSnapshot.responseText}</p>
           )}
         </section>
