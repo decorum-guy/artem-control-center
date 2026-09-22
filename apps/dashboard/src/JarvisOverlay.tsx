@@ -39,8 +39,16 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
   const inputRef = useRef<HTMLInputElement>(null);
   const voiceSequence = useRef(-1);
   const voiceCancelPending = useRef(false);
+  const voiceCancelUnlockTimer = useRef<number | null>(null);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+
+  useEffect(() => {
+    return () => {
+      if (voiceCancelUnlockTimer.current !== null) window.clearTimeout(voiceCancelUnlockTimer.current);
+      if (voiceCancelPending.current) void syncJarvisVoiceInteractionLock(false).catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     if (!open || locked) return;
@@ -73,6 +81,10 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
       if (voiceCancelPending.current) {
         if (voice.state === "idle" || voice.state === "cooldown") {
           voiceCancelPending.current = false;
+          if (voiceCancelUnlockTimer.current !== null) {
+            window.clearTimeout(voiceCancelUnlockTimer.current);
+            voiceCancelUnlockTimer.current = null;
+          }
           setVoiceSnapshot(null);
           setState("idle");
           void syncJarvisVoiceInteractionLock(false).catch(() => undefined);
@@ -128,6 +140,13 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
       voiceCancelPending.current = false;
       void syncJarvisVoiceInteractionLock(false).catch(() => undefined);
     });
+    if (voiceCancelUnlockTimer.current !== null) window.clearTimeout(voiceCancelUnlockTimer.current);
+    voiceCancelUnlockTimer.current = window.setTimeout(() => {
+      if (!voiceCancelPending.current) return;
+      voiceCancelPending.current = false;
+      voiceCancelUnlockTimer.current = null;
+      void syncJarvisVoiceInteractionLock(false).catch(() => undefined);
+    }, 35_000);
   }
 
   function append(message: Message): void {
