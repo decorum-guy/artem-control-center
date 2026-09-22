@@ -488,6 +488,45 @@ function Test-ArtemPanelReady {
     }
 }
 
+function Invoke-ArtemProductionStartHelper {
+    param(
+        [Parameter(Mandatory)]$Paths,
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{24}$')][string]$LockRequestId,
+        [int]$TimeoutSeconds = 90
+    )
+
+    $targetScriptArgument = '"{0}"' -f $Paths.StartScript
+    $helper = Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList @(
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $targetScriptArgument,
+            "-NoKiosk",
+            "-UpdateRequestId", $LockRequestId
+        ) `
+        -WorkingDirectory $Paths.RepoRoot `
+        -WindowStyle Hidden `
+        -PassThru
+
+    if ($null -eq $helper -or $helper.Id -le 0) {
+        throw "Production runtime start helper process was not created"
+    }
+
+    if (-not $helper.WaitForExit([Math]::Max(1, $TimeoutSeconds) * 1000)) {
+        try {
+            & taskkill.exe /PID $helper.Id /T /F | Out-Null
+        }
+        catch { }
+        throw "Production runtime start helper timed out"
+    }
+
+    if ($helper.ExitCode -ne 0) {
+        throw "Production runtime start helper failed with exit code $($helper.ExitCode)"
+    }
+}
+
 function Get-ArtemProductionBuildIdentity {
     param(
         [Parameter(Mandatory)][string]$DashboardRoot
@@ -1032,10 +1071,13 @@ function Restore-ArtemPostUpdateRuntime {
 
     try {
         # UpdateRequestId deliberately bypasses the interactive Scheduled Task
-        # preference in start-production.ps1. At this point the updater lease
-        # has already been released, so this is a direct canonical backend
-        # recovery with no competing update authority and no kiosk attempt.
-        & $Paths.StartScript -NoKiosk -UpdateRequestId $LockRequestId
+        # preference in start-production.ps1. Run the script in an isolated
+        # PowerShell child so any helper-level exit can never terminate the
+        # authoritative updater/recovery host.
+        Invoke-ArtemProductionStartHelper `
+            -Paths $Paths `
+            -LockRequestId $LockRequestId `
+            -TimeoutSeconds ([Math]::Max(90, $TimeoutSeconds))
     }
     catch {
         return $false

@@ -722,7 +722,10 @@ function Ensure-ArtemHealthyVisiblePanel {
     )
     Remove-Item -LiteralPath $Paths.ManualStop -Force -ErrorAction SilentlyContinue
     if (-not (Test-ArtemRuntimeProcess -Paths $Paths) -or -not (Wait-ArtemPanelReady -Paths $Paths -TimeoutSeconds 20)) {
-        & $Paths.StartScript -NoKiosk -UpdateRequestId $LockRequestId
+        Invoke-ArtemProductionStartHelper `
+            -Paths $Paths `
+            -LockRequestId $LockRequestId `
+            -TimeoutSeconds 90
     }
     if (-not (Wait-ArtemPanelReady -Paths $Paths -TimeoutSeconds 60)) {
         throw "Control Center runtime did not become healthy"

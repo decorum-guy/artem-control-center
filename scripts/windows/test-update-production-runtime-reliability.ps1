@@ -55,6 +55,45 @@ try {
     # process/network seams. The staging function itself remains unmodified.
     . (Join-Path $PSScriptRoot "update-production.ps1") -ContractTest
 
+    # Physical #240 regression: start-production.ps1 is a script with its own
+    # exit paths. The updater must execute that helper in a separate PowerShell
+    # process so helper exit can never terminate the authoritative updater host.
+    $helperFixture = Join-Path $root "runtime-start-helper-fixture.ps1"
+    $helperMarker = Join-Path $root "runtime-start-helper-marker.txt"
+    @'
+param(
+    [switch]$NoKiosk,
+    [string]$UpdateRequestId
+)
+Set-Content -LiteralPath $env:ARTEM_START_HELPER_MARKER -Value $UpdateRequestId -Encoding ASCII
+if ($UpdateRequestId -eq ("b" * 24)) { exit 17 }
+exit 0
+'@ | Set-Content -LiteralPath $helperFixture -Encoding ASCII
+    $previousHelperMarker = $env:ARTEM_START_HELPER_MARKER
+    $env:ARTEM_START_HELPER_MARKER = $helperMarker
+    try {
+        $helperPaths = [pscustomobject]@{
+            StartScript = $helperFixture
+            RepoRoot = $root
+        }
+        $successRequest = "a" * 24
+        Invoke-ArtemProductionStartHelper -Paths $helperPaths -LockRequestId $successRequest -TimeoutSeconds 10
+        Assert-Reliability (Test-Path -LiteralPath $helperMarker) "Isolated runtime start helper did not execute"
+        Assert-Reliability (((Get-Content -LiteralPath $helperMarker -Raw).Trim()) -eq $successRequest) "Isolated runtime start helper lost the exact update request id"
+
+        $nonZeroCaught = $false
+        try {
+            Invoke-ArtemProductionStartHelper -Paths $helperPaths -LockRequestId ("b" * 24) -TimeoutSeconds 10
+        }
+        catch {
+            $nonZeroCaught = $_.Exception.Message -eq "Production runtime start helper failed with exit code 17"
+        }
+        Assert-Reliability $nonZeroCaught "Non-zero runtime start helper exit did not become a catchable updater failure"
+    }
+    finally {
+        $env:ARTEM_START_HELPER_MARKER = $previousHelperMarker
+    }
+
     $script:stageRoot = Join-Path $root "stage"
     $script:failureDescription = $null
     $script:stagingObserved = $null
@@ -293,4 +332,4 @@ finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Validated staging environment restoration, durable runtime-mode guard, and bounded one-supervisor post-update handoff with backend preservation."
+Write-Host "Validated isolated runtime start helper exits, staging environment restoration, durable runtime-mode guard, and bounded one-supervisor post-update handoff with backend preservation."
