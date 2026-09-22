@@ -9,6 +9,8 @@ Audio and recognized text live only in process memory.
 from __future__ import annotations
 
 import asyncio
+import sys
+from array import array
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -20,6 +22,8 @@ from .jarvis_navigation import NavigationPath, is_jarvis_navigation
 
 SAMPLE_RATE_HZ = 16_000
 PCM_BYTES_PER_SECOND = SAMPLE_RATE_HZ * 2  # signed 16-bit, mono
+VOICE_ACTIVITY_PUBLISH_MS = 160
+PCM_ACTIVITY_REFERENCE_RMS = 512.0
 
 
 class VoiceState(str, Enum):
@@ -92,6 +96,22 @@ class VoiceSnapshot:
     wake_latency_ms: int | None = None
     stt_latency_ms: int | None = None
     navigation: NavigationPath | None = None
+    input_level: float | None = None
+
+
+def pcm_input_level(pcm_16khz_mono: bytes) -> float:
+    """Return a bounded UI activity level without persisting or exposing PCM."""
+    usable = len(pcm_16khz_mono) - (len(pcm_16khz_mono) % 2)
+    if usable <= 0:
+        return 0.0
+    samples = array("h")
+    samples.frombytes(pcm_16khz_mono[:usable])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if not samples:
+        return 0.0
+    rms = (sum(int(sample) * int(sample) for sample in samples) / len(samples)) ** 0.5
+    return min(1.0, max(0.0, rms / PCM_ACTIVITY_REFERENCE_RMS))
 
 
 class AudioInput(Protocol):
@@ -209,7 +229,8 @@ class VoiceStateMachine:
     def transition(self, state: VoiceState, *, health: VoiceHealth | None = None,
                    recognized_text: str | None = None, response_text: str | None = None,
                    safe_error_code: str | None = None, wake_latency_ms: int | None = None,
-                   stt_latency_ms: int | None = None, navigation: NavigationPath | None = None) -> VoiceSnapshot | None:
+                   stt_latency_ms: int | None = None, navigation: NavigationPath | None = None,
+                   input_level: float | None = None) -> VoiceSnapshot | None:
         if not is_legal_voice_transition(self.state, state):
             return None
         if safe_error_code is not None and safe_error_code not in SAFE_ERROR_CODES:
@@ -223,7 +244,18 @@ class VoiceStateMachine:
             health=self.health, state=state, sequence=self.sequence,
             recognized_text=recognized_text, response_text=response_text,
             safe_error_code=safe_error_code, wake_latency_ms=wake_latency_ms,
-            stt_latency_ms=stt_latency_ms, navigation=navigation,
+            stt_latency_ms=stt_latency_ms, navigation=navigation, input_level=input_level,
+        )
+
+    def listening_activity(self, input_level: float) -> VoiceSnapshot | None:
+        if self.state is not VoiceState.LISTENING:
+            return None
+        if not 0.0 <= input_level <= 1.0:
+            raise ValueError("Voice input level must be bounded")
+        self.sequence += 1
+        return VoiceSnapshot(
+            schema_version="jarvis.voice.v1", enabled=self.enabled, configured=self.configured,
+            health=self.health, state=self.state, sequence=self.sequence, input_level=input_level,
         )
 
 
@@ -254,6 +286,11 @@ class VoicePipeline:
         await self._publisher.publish(snapshot)
         return True
 
+    async def _publish_listening_activity(self, frame: bytes) -> None:
+        snapshot = self._machine.listening_activity(pcm_input_level(frame))
+        if snapshot is not None:
+            await self._publisher.publish(snapshot)
+
     async def disabled(self) -> None:
         """Publish the safe default without opening a microphone."""
         # Initial state is already disabled, so build the default snapshot directly.
@@ -272,6 +309,7 @@ class VoicePipeline:
         wake_at: int | None = None
         speech_started = False
         silence_ms = 0
+        activity_elapsed_ms = 0
         async for frame in audio.frames():
             if not frame:
                 continue
@@ -284,13 +322,18 @@ class VoicePipeline:
                 capture = bytearray(self._pre_roll.snapshot())
                 speech_started = False
                 silence_ms = 0
+                activity_elapsed_ms = 0
                 await self._transition(VoiceState.WAKE_DETECTED)
-                await self._transition(VoiceState.LISTENING)
+                await self._transition(VoiceState.LISTENING, input_level=0.0)
                 continue
             if self._machine.state is not VoiceState.LISTENING:
                 continue
             capture.extend(frame)
             elapsed_ms = len(capture) * 1_000 // PCM_BYTES_PER_SECOND
+            activity_elapsed_ms += frame_ms
+            if activity_elapsed_ms >= VOICE_ACTIVITY_PUBLISH_MS:
+                await self._publish_listening_activity(frame)
+                activity_elapsed_ms = 0
             speech = await self._vad.is_speech(frame)
             if speech:
                 speech_started = True
@@ -305,6 +348,7 @@ class VoicePipeline:
                 wake_at = None
                 speech_started = False
                 silence_ms = 0
+                activity_elapsed_ms = 0
 
     async def _complete_capture(self, pcm: bytes, wake_at: int | None) -> None:
         await self._transition(VoiceState.TRANSCRIBING)
