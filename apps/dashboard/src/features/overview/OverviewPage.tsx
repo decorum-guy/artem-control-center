@@ -86,22 +86,6 @@ export function OverviewV2Page({
   const dirty = overviewEditorDirty(editor);
   const canWrite = overviewV2Enabled && overviewEditorEnabled && layoutAvailable && editor.canonical.writesEnabled === true;
   const canEnterEdit = canWrite && !layoutLoading;
-  const configureGateState = !overviewV2Enabled || !overviewEditorEnabled
-    ? "build-disabled"
-    : layoutLoading
-      ? "checking"
-      : !layoutAvailable
-        ? "metadata-unavailable"
-        : editor.canonical.writesEnabled !== true
-          ? "server-disabled"
-          : "available";
-  const configureGateCopy = {
-    "build-disabled": "Настройка панели недоступна в этой версии.",
-    checking: "Проверяем, можно ли изменить панель…",
-    "metadata-unavailable": "Не удалось проверить возможность изменения панели. Попробуйте позже.",
-    "server-disabled": "Изменение панели сейчас отключено.",
-    available: "Можно менять расположение и виджеты."
-  } as const;
   const visibleItems = editMode ? editor.draft : editor.canonical.items;
   const appearanceItem = appearanceInstanceId
     ? editor.draft.find((item) => item.instanceId === appearanceInstanceId) ?? null
@@ -117,6 +101,34 @@ export function OverviewV2Page({
     onCoffeeDelayedStart,
     editMode
   };
+
+  useEffect(() => {
+    if (layoutLoading || editMode) return;
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("overviewEdit") !== "1") return;
+
+    query.delete("overviewEdit");
+    const nextSearch = query.toString();
+    window.history.replaceState({}, "", `/overview${nextSearch ? `?${nextSearch}` : ""}`);
+
+    if (canEnterEdit) {
+      dispatch({ type: "enter" });
+      return;
+    }
+
+    const detail = !overviewV2Enabled || !overviewEditorEnabled
+      ? "Настройка обзора недоступна в этой версии."
+      : !layoutAvailable
+        ? "Не удалось загрузить настройки обзора. Попробуйте позже."
+        : "Изменение обзора сейчас отключено.";
+    showNotice({
+      id: "overview.layout.configure",
+      severity: "warning",
+      title: "Настройка обзора недоступна",
+      detail,
+      timeoutMs: 8_000
+    });
+  }, [canEnterEdit, editMode, layoutAvailable, layoutLoading, showNotice]);
 
   async function reconcileUncertain(candidate: OverviewLayoutDocument["items"]): Promise<void> {
     try {
@@ -237,26 +249,11 @@ export function OverviewV2Page({
       onLoadCurrent={() => void loadCurrentServer()}
     />
   ) : (
-    <header className="overview-v2-toolbar" data-testid="overview-toolbar" data-configure-gate={configureGateState}>
+    <header className="overview-v2-toolbar" data-testid="overview-toolbar">
       <div className="overview-v2-toolbar__copy">
         <h1>{copy("page.overview.title")}</h1>
         {copy("page.overview.subtitle") && <p>{copy("page.overview.subtitle")}</p>}
       </div>
-      <button
-        type="button"
-        className="overview-v2-toolbar__configure"
-        disabled={!canEnterEdit}
-        aria-disabled={!canEnterEdit}
-        aria-describedby="overview-configure-note"
-        data-testid="overview-configure"
-        title={canEnterEdit ? "Редактировать расположение и виджеты" : configureGateCopy[configureGateState]}
-        onClick={() => dispatch({ type: "enter" })}
-      >
-        Настроить
-      </button>
-      <span id="overview-configure-note" className="overview-v2-toolbar__note" role="status">
-        {configureGateCopy[configureGateState]}
-      </span>
     </header>
   );
 
