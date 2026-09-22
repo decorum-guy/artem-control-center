@@ -16,6 +16,7 @@ export interface JarvisVoiceSnapshot {
   wakeLatencyMs: number | null;
   sttLatencyMs: number | null;
   navigation: JarvisNavigation | null;
+  inputLevel: number | null;
 }
 
 const states = new Set<JarvisVoiceState>(["disabled", "starting", "idle", "wake_detected", "listening", "transcribing", "submitting", "speaking", "ready", "error", "cooldown"]);
@@ -30,9 +31,11 @@ export function parseJarvisVoiceSnapshot(value: unknown): JarvisVoiceSnapshot | 
       typeof item.health !== "string" || !health.has(item.health as JarvisVoiceHealth)) return null;
   const numeric = (field: string) => item[field] === null || (typeof item[field] === "number" && Number.isFinite(item[field]) && item[field] >= 0);
   if (!numeric("wakeLatencyMs") || !numeric("sttLatencyMs") || (item.safeErrorCode !== null && typeof item.safeErrorCode !== "string")) return null;
+  const inputLevel = item.inputLevel === undefined ? null : item.inputLevel;
+  if (inputLevel !== null && (typeof inputLevel !== "number" || !Number.isFinite(inputLevel) || inputLevel < 0 || inputLevel > 1)) return null;
   if ((item.recognizedText !== null && typeof item.recognizedText !== "string") || (item.responseText !== null && typeof item.responseText !== "string")) return null;
   if (item.navigation !== null && !JARVIS_NAVIGATION_PATHS.includes(item.navigation as JarvisNavigation)) return null;
-  return item as unknown as JarvisVoiceSnapshot;
+  return { ...item, inputLevel } as unknown as JarvisVoiceSnapshot;
 }
 
 export async function getJarvisVoiceState(signal?: AbortSignal): Promise<JarvisVoiceSnapshot | null> {
