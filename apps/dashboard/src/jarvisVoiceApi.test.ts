@@ -3,7 +3,7 @@ import { parseJarvisVoiceSnapshot } from "./jarvisVoiceApi";
 
 const valid = {
   schemaVersion: "jarvis.voice.v1", enabled: true, configured: true, health: "healthy", state: "listening", sequence: 4,
-  recognizedText: null, responseText: null, safeErrorCode: null, wakeLatencyMs: 8, sttLatencyMs: null, navigation: null
+  recognizedText: null, responseText: null, safeErrorCode: null, wakeLatencyMs: 8, sttLatencyMs: null, navigation: null, inputLevel: 0.42
 };
 
 describe("Jarvis voice state contract", () => {
@@ -13,6 +13,9 @@ describe("Jarvis voice state contract", () => {
     expect(parseJarvisVoiceSnapshot({ ...valid, sequence: -1 })).toBeNull();
     expect(parseJarvisVoiceSnapshot({ ...valid, state: "shell" })).toBeNull();
     expect(parseJarvisVoiceSnapshot({ ...valid, recognizedText: 42 })).toBeNull();
+    expect(parseJarvisVoiceSnapshot({ ...valid, inputLevel: 1.01 })).toBeNull();
+    expect(parseJarvisVoiceSnapshot({ ...valid, inputLevel: -0.01 })).toBeNull();
+    expect(parseJarvisVoiceSnapshot({ ...valid, inputLevel: undefined })?.inputLevel).toBeNull();
     expect(parseJarvisVoiceSnapshot({ ...valid, navigation: "/settings" })?.navigation).toBe("/settings");
     for (const route of ["https://example.com", "javascript:alert(1)", "/not-a-real-jarvis-route"]) {
       expect(parseJarvisVoiceSnapshot({ ...valid, navigation: route })).toBeNull();
