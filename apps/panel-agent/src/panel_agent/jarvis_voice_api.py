@@ -97,7 +97,7 @@ class VoiceBridgeState:
             next_state is VoiceState.LISTENING and self._snapshot.state is VoiceState.LISTENING and
             update.input_level is not None and update.recognized_text is None and
             update.response_text is None and update.safe_error_code is None and
-            update.navigation is None and update.stt_latency_ms is None
+            update.navigation is None and update.wake_latency_ms is None and update.stt_latency_ms is None
         )
         if not restarting and not listening_refresh and not is_legal_voice_transition(self._snapshot.state, next_state):
             return False
