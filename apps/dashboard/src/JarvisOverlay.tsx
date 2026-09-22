@@ -38,6 +38,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
   const [voiceSnapshot, setVoiceSnapshot] = useState<JarvisVoiceSnapshot | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const voiceSequence = useRef(-1);
+  const voiceCancelPending = useRef(false);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
 
@@ -69,6 +70,15 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
     const apply = (voice: JarvisVoiceSnapshot | null) => {
       if (!voice || disposed || voice.sequence <= voiceSequence.current || locked) return;
       voiceSequence.current = voice.sequence;
+      if (voiceCancelPending.current) {
+        if (voice.state === "idle" || voice.state === "cooldown") {
+          voiceCancelPending.current = false;
+          setVoiceSnapshot(null);
+          setState("idle");
+          void syncJarvisVoiceInteractionLock(false).catch(() => undefined);
+        }
+        return;
+      }
       setVoiceSnapshot(voice);
 
       if (voice.state === "wake_detected" || voice.state === "listening") { setState("listening"); return; }
@@ -109,6 +119,17 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
     };
   }, [locked]);
 
+  function cancelVoiceInteraction(): void {
+    if (!voiceSnapshot || !["wake_detected", "listening", "transcribing", "submitting"].includes(voiceSnapshot.state)) return;
+    voiceCancelPending.current = true;
+    setVoiceSnapshot(null);
+    setState("idle");
+    void syncJarvisVoiceInteractionLock(true).catch(() => {
+      voiceCancelPending.current = false;
+      void syncJarvisVoiceInteractionLock(false).catch(() => undefined);
+    });
+  }
+
   function append(message: Message): void {
     setMessages((current) => [...current, message].slice(-MAX_MESSAGES));
   }
@@ -146,8 +167,21 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
       {voiceHudVisible && !open && voiceSnapshot && (
         <section className="jarvis-voice-hud" data-testid="jarvis-voice-hud" aria-live="polite" aria-label="Состояние голоса Jarvis">
           <div className="jarvis-voice-hud__topline">
-            <span className={`jarvis-voice-hud__dot jarvis-voice-hud__dot--${voiceSnapshot.state}`} aria-hidden="true" />
-            <strong>{voiceHudLabel(voiceSnapshot.state)}</strong>
+            <div className="jarvis-voice-hud__status">
+              <span className={`jarvis-voice-hud__dot jarvis-voice-hud__dot--${voiceSnapshot.state}`} aria-hidden="true" />
+              <strong>{voiceHudLabel(voiceSnapshot.state)}</strong>
+            </div>
+            {["wake_detected", "listening", "transcribing", "submitting"].includes(voiceSnapshot.state) && (
+              <button
+                type="button"
+                className="jarvis-voice-hud__cancel"
+                data-testid="jarvis-voice-cancel"
+                aria-label="Отменить голосовой запрос"
+                onClick={cancelVoiceInteraction}
+              >
+                <Icon name="close" />
+              </button>
+            )}
           </div>
           {voiceSnapshot.recognizedText ? (
             <p className="jarvis-voice-hud__transcript" data-testid="jarvis-voice-transcript">{voiceSnapshot.recognizedText}</p>
