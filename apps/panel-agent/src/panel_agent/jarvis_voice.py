@@ -235,6 +235,8 @@ class VoiceStateMachine:
             return None
         if safe_error_code is not None and safe_error_code not in SAFE_ERROR_CODES:
             raise ValueError("Unsafe voice error code")
+        if input_level is not None and not 0.0 <= input_level <= 1.0:
+            raise ValueError("Voice input level must be bounded")
         self.state = state
         if health is not None:
             self.health = health
