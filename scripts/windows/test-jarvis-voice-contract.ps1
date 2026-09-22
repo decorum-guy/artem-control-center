@@ -100,6 +100,14 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     Assert-JarvisVoice (-not (Get-ArtemJarvisVoiceSessionAlignment -Workers @(New-TestVoiceWorker 2) -ConsoleSessionId $null).SessionAligned) "Missing active console must be unhealthy"
     Assert-JarvisVoice ((Get-ArtemJarvisVoiceSessionAlignment -Workers @(New-TestVoiceWorker 2) -ConsoleSessionId 2).SessionAligned) "Exactly one active-console worker must align"
 
+    $venvLauncher = [pscustomobject]@{ ProcessId = 101; ParentProcessId = 50; SessionId = 2 }
+    $baseInterpreter = [pscustomobject]@{ ProcessId = 102; ParentProcessId = 101; SessionId = 2 }
+    $secondWorker = [pscustomobject]@{ ProcessId = 201; ParentProcessId = 60; SessionId = 2 }
+    $collapsed = @(Get-ArtemJarvisLogicalWorkerRoots -Candidates @($venvLauncher, $baseInterpreter))
+    Assert-JarvisVoice ($collapsed.Count -eq 1 -and [int]$collapsed[0].ProcessId -eq 101) "Venv launcher plus base interpreter must count as one logical worker"
+    $duplicates = @(Get-ArtemJarvisLogicalWorkerRoots -Candidates @($venvLauncher, $baseInterpreter, $secondWorker))
+    Assert-JarvisVoice ($duplicates.Count -eq 2) "Two independent Jarvis process roots must remain a duplicate fault"
+
     $voice = [pscustomobject]@{ WorkerModule = "jarvis_voice_worker" }
     Assert-JarvisVoice ((Get-ArtemJarvisVoiceStartDecision -Workers @() -TaskState "Ready" -ConsoleSessionId 2).Action -eq "start") "No workers must permit Interactive task start"
     Assert-JarvisVoice ((Get-ArtemJarvisVoiceStartDecision -Workers @(New-TestVoiceWorker 2) -TaskState "Running" -ConsoleSessionId 2).Action -eq "no-op") "One aligned worker must be a no-op"
