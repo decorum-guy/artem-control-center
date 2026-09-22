@@ -46,13 +46,15 @@ test.describe("Overview V2 safe grid foundation", () => {
     await expect(page.getByTestId("v2-shell")).toHaveCount(0);
   });
 
-  test("build-disabled Overview editor gate is visible and truthful", async ({ page }) => {
+  test("build-disabled Overview keeps configuration out of the page and rejects edit requests truthfully", async ({ page }) => {
     test.skip(!overviewV2Enabled || overviewEditorEnabled, "Run with Overview V2 on and the editor build gate off.");
     await page.goto("/overview");
-    await expect(page.getByTestId("overview-configure")).toBeDisabled();
-    await expect(page.getByTestId("overview-toolbar")).toHaveAttribute("data-configure-gate", "build-disabled");
-    await expect(page.locator("#overview-configure-note")).toHaveText("Настройка панели недоступна в этой версии.");
-    await expect(page.locator("#overview-configure-note")).toBeVisible();
+    await expect(page.getByTestId("overview-configure")).toHaveCount(0);
+    await expect(page.locator("#overview-configure-note")).toHaveCount(0);
+
+    await page.goto("/overview?overviewEdit=1");
+    await expect(page.getByTestId("overview-edit-toolbar")).toHaveCount(0);
+    await expect(page.getByText("Настройка обзора недоступна в этой версии.")).toBeVisible();
   });
 
   test("renders the canonical 12-column fixture with exact grid units", async ({ page }) => {

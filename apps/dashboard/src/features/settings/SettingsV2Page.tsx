@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { PlanningCalendarSource } from "@artem/contracts";
 import type { AccessStatus } from "../../accessApi";
+import type { ShellNavigationTarget } from "../../Shell";
 import {
   AccessSettingsPanel,
   useAccess
@@ -55,7 +56,8 @@ export function SettingsV2Page({
   calendarSources,
   onThemeChange,
   onMotionChange,
-  onRefreshCalendarMetadata
+  onRefreshCalendarMetadata,
+  onNavigate
 }: {
   theme: Theme;
   motion: MotionMode;
@@ -63,6 +65,7 @@ export function SettingsV2Page({
   onThemeChange: (theme: Theme) => void;
   onMotionChange: (motion: MotionMode) => void;
   onRefreshCalendarMetadata: () => Promise<boolean>;
+  onNavigate: (target: ShellNavigationTarget) => void;
 }) {
   const coffee = useCoffeeSettings();
   const { status: accessStatus, available: accessAvailable } = useAccess();
@@ -202,6 +205,13 @@ export function SettingsV2Page({
           />
         </SettingsSummaryColumn>
         <SettingsSummaryColumn>
+          <SettingsSummaryRow
+            title="Обзор"
+            summary="Расположение и виджеты"
+            stateLabel="Настроить"
+            testId="settings-summary-overview"
+            onClick={() => onNavigate({ path: "/overview", search: "overviewEdit=1" })}
+          />
           <SettingsSummaryRow
             title="Доступ"
             summary={accessSummary(accessStatus, accessAvailable)}

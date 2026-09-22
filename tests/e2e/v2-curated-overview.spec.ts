@@ -4,7 +4,6 @@ import path from "node:path";
 
 const overviewV2Enabled = process.env.VITE_OVERVIEW_V2_ENABLED === "true";
 const visualShellEnabled = process.env.VITE_V2_VISUAL_SHELL === "true";
-const overviewLayoutWritesEnabled = process.env.PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED === "true";
 
 type RogStatus = "online" | "offline" | "waking" | "sleeping" | "hibernating" | "unavailable";
 type RogAction = "system.rog_g703.wake" | "system.rog_g703.sleep" | "system.rog_g703.hibernate";
@@ -364,13 +363,8 @@ test.describe("PR4 curated Overview", () => {
     await expect(rog.getByTestId("overview-rog-g703-wake")).toBeDisabled();
     await expect(rog.getByTestId("overview-rog-g703-hibernate")).toHaveText("H");
 
-    if (overviewLayoutWritesEnabled) {
-      await expect(page.getByTestId("overview-configure")).toBeEnabled();
-    } else {
-      await expect(page.getByTestId("overview-configure")).toBeDisabled();
-    }
+    await expect(page.getByTestId("overview-configure")).toHaveCount(0);
     for (const control of [
-      page.getByTestId("overview-configure"),
       rog.getByTestId("overview-rog-g703-wake"),
       rog.getByTestId("overview-rog-g703-sleep"),
       rog.getByTestId("overview-rog-g703-hibernate"),

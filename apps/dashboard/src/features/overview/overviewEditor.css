@@ -356,30 +356,3 @@
   .overview-edit-frame { transition: none; }
 }
 
-
-.overview-v2-toolbar__configure:disabled {
-  cursor: not-allowed;
-  opacity: .72;
-}
-
-.overview-v2-toolbar__note {
-  max-width: 360px;
-  color: var(--cc-text-muted);
-  font-size: var(--cc-type-metadata-size);
-  line-height: var(--cc-type-metadata-line);
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
-.overview-v2-toolbar[data-configure-gate="build-disabled"] .overview-v2-toolbar__note,
-.overview-v2-toolbar[data-configure-gate="metadata-unavailable"] .overview-v2-toolbar__note,
-.overview-v2-toolbar[data-configure-gate="server-disabled"] .overview-v2-toolbar__note {
-  color: var(--cc-warning);
-}
-
-@media (max-width: 720px) {
-  .overview-v2-toolbar__note {
-    max-width: none;
-    text-align: left;
-  }
-}
