@@ -166,7 +166,7 @@ function Get-ArtemJarvisVoiceConfiguration {
     }
     catch { $localPanel = $false }
     $thresholdValue = 0.0
-    $validThreshold = [double]::TryParse($threshold, [ref]$thresholdValue) -and $thresholdValue -ge 0.1 -and $thresholdValue -le 0.95
+    $validThreshold = [double]::TryParse($threshold, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$thresholdValue) -and $thresholdValue -ge 0.1 -and $thresholdValue -le 0.95
     $ingressConfigured = (
         $enabled -and $token.Length -gt 0 -and $localPanel -and
         $modelRoot.Length -gt 0 -and $wakeModel.Length -gt 0 -and $sttModel.Length -gt 0 -and
@@ -275,7 +275,7 @@ function Get-ArtemJarvisVoiceStartDecision {
 function Invoke-ArtemJarvisVoiceStartLifecycle {
     param(
         [Parameter(Mandatory)]$Voice,
-        [Parameter(Mandatory)][object[]]$Workers,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Workers,
         [Parameter(Mandatory)][string]$TaskState,
         [scriptblock]$StopTask,
         [Parameter(Mandatory)][scriptblock]$StartTask,

@@ -52,6 +52,16 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     $configuration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $allowed
     Assert-JarvisVoice ($configuration.Enabled -and $configuration.Configured -and $configuration.ModelsReady) "Complete valid local configuration must be ready"
 
+    $originalCulture = [Globalization.CultureInfo]::CurrentCulture
+    try {
+        [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo("ru-RU")
+        $ruConfiguration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $allowed
+        Assert-JarvisVoice ($ruConfiguration.Configured -and $ruConfiguration.ModelsReady) "Dot-decimal wake threshold must remain valid under ru-RU Windows culture"
+    }
+    finally {
+        [Globalization.CultureInfo]::CurrentCulture = $originalCulture
+    }
+
     $disabled = [ordered]@{}
     foreach ($key in $allowed.Keys) { $disabled[$key] = $allowed[$key] }
     $disabled["PANEL_JARVIS_VOICE_ENABLED"] = "false"
@@ -97,6 +107,12 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     Assert-JarvisVoice ((Get-ArtemJarvisVoiceStartDecision -Workers @(New-TestVoiceWorker 0) -TaskState "Running" -ConsoleSessionId 2).Action -eq "restart") "Session 0 task-owned worker must take bounded restart path"
     Assert-JarvisVoice ((Get-ArtemJarvisVoiceStartDecision -Workers @(New-TestVoiceWorker 3) -TaskState "Running" -ConsoleSessionId 2).Action -eq "restart") "Wrong interactive task-owned worker must take bounded restart path"
     Assert-JarvisVoice ((Get-ArtemJarvisVoiceStartDecision -Workers @(New-TestVoiceWorker 0) -TaskState "Ready" -ConsoleSessionId 2).Action -eq "reject") "Misaligned worker outside task lifecycle must reject start"
+
+    $script:startCalls = 0
+    $emptyStart = Invoke-ArtemJarvisVoiceStartLifecycle -Voice $voice -Workers @() -TaskState "Ready" -ConsoleSessionId 2 `
+        -StartTask { $script:startCalls++ } `
+        -WorkerProvider { @() }
+    Assert-JarvisVoice ($emptyStart.Action -eq "start" -and $script:startCalls -eq 1) "No workers must invoke scheduled task start exactly once"
 
     foreach ($misalignedSession in @(0, 3)) {
         $script:stopCalls = 0
