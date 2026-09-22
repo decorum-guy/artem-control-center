@@ -52,6 +52,16 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     $configuration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $allowed
     Assert-JarvisVoice ($configuration.Enabled -and $configuration.Configured -and $configuration.ModelsReady) "Complete valid local configuration must be ready"
 
+    $originalCulture = [Globalization.CultureInfo]::CurrentCulture
+    try {
+        [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo("ru-RU")
+        $ruConfiguration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $allowed
+        Assert-JarvisVoice ($ruConfiguration.Configured -and $ruConfiguration.ModelsReady) "Dot-decimal wake threshold must remain valid under ru-RU Windows culture"
+    }
+    finally {
+        [Globalization.CultureInfo]::CurrentCulture = $originalCulture
+    }
+
     $disabled = [ordered]@{}
     foreach ($key in $allowed.Keys) { $disabled[$key] = $allowed[$key] }
     $disabled["PANEL_JARVIS_VOICE_ENABLED"] = "false"
