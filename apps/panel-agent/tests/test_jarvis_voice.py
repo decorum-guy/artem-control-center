@@ -9,7 +9,7 @@ import pytest
 
 from panel_agent.jarvis_voice import (
     BoundedPcmBuffer, VoiceHealth, VoicePipeline, VoiceRuntimeConfig, VoiceSnapshot,
-    VoiceState, VoiceStateMachine, VoiceTurnResult,
+    VoiceState, VoiceStateMachine, VoiceTurnResult, pcm_input_level,
 )
 
 VOICE_WORKER_SOURCE = Path(__file__).resolve().parents[2] / "jarvis-voice" / "src"
@@ -19,6 +19,7 @@ from jarvis_voice_worker.__main__ import microphone_device_from_environment
 
 
 FRAME = b"\x00\x00" * 1_280  # 80 ms of canonical PCM
+LOUD_FRAME = (1000).to_bytes(2, "little", signed=True) * 1_280
 
 
 @pytest.fixture(autouse=True)
@@ -138,6 +139,8 @@ def test_ring_buffer_has_exact_bound_and_no_file_interface():
     assert subject.size_bytes == 16_000
     assert subject.snapshot() == b"a" * 16_000
     assert not hasattr(subject, "path")
+    assert pcm_input_level(FRAME) == 0.0
+    assert 0.9 < pcm_input_level(LOUD_FRAME) <= 1.0
 
 
 def test_state_machine_rejects_stale_invalid_transition_and_monotonically_sequences():
@@ -155,10 +158,19 @@ def test_wake_vad_endpoint_stt_and_one_canonical_turn():
     assert turns.values == ["Который час?"]
     assert [item.state for item in publisher.snapshots] == [
         VoiceState.STARTING, VoiceState.IDLE, VoiceState.WAKE_DETECTED, VoiceState.LISTENING,
-        VoiceState.TRANSCRIBING, VoiceState.SUBMITTING, VoiceState.READY, VoiceState.COOLDOWN, VoiceState.IDLE,
+        VoiceState.LISTENING, VoiceState.TRANSCRIBING, VoiceState.SUBMITTING, VoiceState.READY,
+        VoiceState.COOLDOWN, VoiceState.IDLE,
     ]
     ready = next(item for item in publisher.snapshots if item.state is VoiceState.READY)
     assert ready.recognized_text == "Который час?" and ready.response_text == "Сейчас 12:34."
+
+
+def test_listening_activity_is_bounded_ephemeral_and_tracks_pcm_level():
+    subject, publisher, _ = pipeline()
+    asyncio.run(subject.run(Audio([LOUD_FRAME, LOUD_FRAME, LOUD_FRAME, LOUD_FRAME])))
+    activity = [item for item in publisher.snapshots if item.state is VoiceState.LISTENING and item.sequence > 4]
+    assert activity and activity[0].input_level is not None and activity[0].input_level > 0.9
+    assert activity[0].recognized_text is None and activity[0].response_text is None
 
 
 def test_optional_speech_receives_exact_canonical_response_and_adds_speaking_state():
@@ -169,7 +181,7 @@ def test_optional_speech_receives_exact_canonical_response_and_adds_speaking_sta
     assert speech.values == ["Сейчас 12:34."]
     assert [item.state for item in publisher.snapshots] == [
         VoiceState.STARTING, VoiceState.IDLE, VoiceState.WAKE_DETECTED, VoiceState.LISTENING,
-        VoiceState.TRANSCRIBING, VoiceState.SUBMITTING, VoiceState.SPEAKING,
+        VoiceState.LISTENING, VoiceState.TRANSCRIBING, VoiceState.SUBMITTING, VoiceState.SPEAKING,
         VoiceState.READY, VoiceState.COOLDOWN, VoiceState.IDLE,
     ]
 
