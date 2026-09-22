@@ -275,7 +275,7 @@ function Get-ArtemJarvisVoiceStartDecision {
 function Invoke-ArtemJarvisVoiceStartLifecycle {
     param(
         [Parameter(Mandatory)]$Voice,
-        [Parameter(Mandatory)][object[]]$Workers,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Workers,
         [Parameter(Mandatory)][string]$TaskState,
         [scriptblock]$StopTask,
         [Parameter(Mandatory)][scriptblock]$StartTask,
