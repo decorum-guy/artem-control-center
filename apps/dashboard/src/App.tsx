@@ -544,6 +544,7 @@ export function App() {
                 onThemeChange={setTheme}
                 onMotionChange={setMotion}
                 onRefreshCalendarMetadata={reconcileSnapshotAfterAction}
+                onNavigate={navigate}
               />
             ) : (
               <SettingsPage
