@@ -74,6 +74,22 @@ describe("JarvisOverlay voice foundation", () => {
     expect(host?.querySelector("img")).toBeNull();
   });
 
+  it("recovers voice HUD after Panel Agent sequence resets", async () => {
+    vi.useFakeTimers();
+    let voice: object = { ...disabled, enabled: true, configured: true, health: "healthy", state: "idle", sequence: 42 };
+    await mount(() => voice);
+
+    voice = { ...voice, state: "idle", sequence: 0, inputLevel: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(650); });
+    expect(host?.querySelector("[data-testid=jarvis-voice-hud]")).toBeNull();
+
+    voice = { ...voice, state: "listening", sequence: 1, inputLevel: 0.61 };
+    await act(async () => { await vi.advanceTimersByTimeAsync(650); });
+    expect(host?.querySelector("[data-testid=jarvis-voice-hud]")).not.toBeNull();
+    expect(host?.textContent).toContain("Слушаю");
+    expect(host?.querySelector("[data-testid=jarvis-launcher]")?.getAttribute("data-input-level")).toBe("0.610");
+  });
+
   it("cancels an active voice HUD without opening the full panel", async () => {
     vi.useFakeTimers();
     let voice: object = disabled;
