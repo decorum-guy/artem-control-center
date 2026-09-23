@@ -200,7 +200,7 @@ The widget must continue to render HA state when `AliceTG_Bot` is down.
 
 ## 8. Kettle
 
-The kettle is included in the HA device registry from the beginning but is lower priority than the coffee-machine widget.
+The kettle is included in the HA device registry from the beginning but is lower priority than the coffee-machine widget. Its physical absence does not degrade aggregate Home Assistant health; the kettle service reports offline/unavailable independently until a compatible entity exists again.
 
 Initial support:
 
