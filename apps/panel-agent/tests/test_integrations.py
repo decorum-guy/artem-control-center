@@ -151,6 +151,33 @@ def test_ha_initial_snapshot_normalizes_canonical_helpers(tmp_path):
     assert "not_allowlisted" not in (tmp_path / "ha-cache.json").read_text()
 
 
+def test_absent_kettle_does_not_degrade_home_assistant_aggregate(tmp_path):
+    states = [
+        state for state in _ha_states()
+        if state["entity_id"] not in {
+            "water_heater.chainik",
+            "switch.chainik_podderzhanie_tepla",
+            "switch.chainik_podsvetka",
+            "switch.chainik_bez_zvuka",
+        }
+    ]
+    adapter = HomeAssistantAdapter(
+        IntegrationSettings(
+            ha_url="http://ha.test",
+            ha_token="test-token",
+            state_cache_path=str(tmp_path / "ha-cache.json"),
+        ),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=states)),
+    )
+
+    asyncio.run(adapter.fetch_initial_snapshot())
+    services = {service.id: service for service in adapter.services()}
+
+    assert services["home-assistant"].health == "healthy"
+    assert services["home-assistant"].data["missingEntities"] == []
+    assert services["kettle"].health == "offline"
+
+
 def test_uninitialized_timing_and_unknown_activation_do_not_create_fake_progress(
     tmp_path,
 ):
