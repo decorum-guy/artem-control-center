@@ -25,16 +25,28 @@ MAX_YANDEX_ROG_COMMAND_CODEPOINTS = 256
 _PHRASES: dict[str, RogVoiceAction] = {
     "включить асус": ROG_G703_WAKE_ACTION,
     "включи асус": ROG_G703_WAKE_ACTION,
+    "включить asus": ROG_G703_WAKE_ACTION,
+    "включи asus": ROG_G703_WAKE_ACTION,
     "разбудить асус": ROG_G703_WAKE_ACTION,
     "разбуди асус": ROG_G703_WAKE_ACTION,
+    "разбудить asus": ROG_G703_WAKE_ACTION,
+    "разбуди asus": ROG_G703_WAKE_ACTION,
     "перевести асус в сон": ROG_G703_SLEEP_ACTION,
     "переведи асус в сон": ROG_G703_SLEEP_ACTION,
     "отправить асус в сон": ROG_G703_SLEEP_ACTION,
     "отправь асус в сон": ROG_G703_SLEEP_ACTION,
+    "перевести asus в сон": ROG_G703_SLEEP_ACTION,
+    "переведи asus в сон": ROG_G703_SLEEP_ACTION,
+    "отправить asus в сон": ROG_G703_SLEEP_ACTION,
+    "отправь asus в сон": ROG_G703_SLEEP_ACTION,
     "перевести асус в гибернацию": ROG_G703_HIBERNATE_ACTION,
     "переведи асус в гибернацию": ROG_G703_HIBERNATE_ACTION,
     "отправить асус в гибернацию": ROG_G703_HIBERNATE_ACTION,
     "отправь асус в гибернацию": ROG_G703_HIBERNATE_ACTION,
+    "перевести asus в гибернацию": ROG_G703_HIBERNATE_ACTION,
+    "переведи asus в гибернацию": ROG_G703_HIBERNATE_ACTION,
+    "отправить asus в гибернацию": ROG_G703_HIBERNATE_ACTION,
+    "отправь asus в гибернацию": ROG_G703_HIBERNATE_ACTION,
 }
 
 _ACCEPTED_RESPONSES: dict[RogVoiceAction, str] = {
