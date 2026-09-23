@@ -230,6 +230,13 @@ try {
     if ($updateLockReleaseIndex -lt 0 -or $postUpdateTaskIndex -le $updateLockReleaseIndex) {
         throw "Post-update interactive handoff must occur only after the updater lease is released"
     }
+    if ($updaterText -notmatch 'function\s+Invoke-ArtemPostRuntimeJarvisVoiceRecovery' -or
+        ($updaterText | Select-String -Pattern 'Invoke-ArtemPostRuntimeJarvisVoiceRecovery\s+-Paths' -AllMatches).Matches.Count -lt 3) {
+        throw "Production update, same-SHA recovery, and rollback must all synchronize the optional Jarvis voice worker"
+    }
+    if ($runtimeCommonText -notmatch 'function\s+Invoke-ArtemJarvisVoiceRestartLifecycle') {
+        throw "Jarvis voice restart must use a bounded shared task-owned lifecycle helper"
+    }
     if ($runtimeCommonText -match 'Stop-ScheduledTask') {
         throw "Interactive runtime recovery must never stop a Running Scheduled Task before another start"
     }
