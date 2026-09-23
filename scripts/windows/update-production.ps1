@@ -666,6 +666,7 @@ function Invoke-ArtemRollback {
         -Paths $Paths `
         -LockRequestId $LockRequestId `
         -ExpectedBuildRevision $RollbackHead | Out-Null
+    $null = Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $Paths
     Refresh-ArtemUpdateLock -Paths $Paths -LockRequestId $LockRequestId
     $rollbackDecision = Get-ArtemProductionRollbackState `
         -RollbackHead $RollbackHead `
@@ -734,6 +735,38 @@ function Ensure-ArtemHealthyVisiblePanel {
     return [bool](Ensure-ArtemKioskVisible -Paths $Paths -TimeoutSeconds 20)
 }
 
+function Invoke-ArtemPostRuntimeJarvisVoiceRecovery {
+    param([Parameter(Mandatory)]$Paths)
+
+    $configuration = Get-ArtemJarvisVoiceConfiguration -Paths $Paths
+    if (-not $configuration.Enabled) {
+        return $true
+    }
+
+    $voice = Get-ArtemJarvisVoicePaths -Paths $Paths
+    $task = Get-ScheduledTask -TaskName $voice.TaskName -ErrorAction SilentlyContinue
+    if ($null -eq $task) {
+        Write-Warning "Production runtime is healthy, but the enabled Jarvis voice task is not installed"
+        return $false
+    }
+
+    try {
+        $workers = @(Get-ArtemJarvisVoiceWorkers -Voice $voice)
+        $null = Invoke-ArtemJarvisVoiceRestartLifecycle `
+            -Voice $voice `
+            -Workers $workers `
+            -TaskState ([string]$task.State) `
+            -StopTask { Stop-ScheduledTask -TaskName $voice.TaskName } `
+            -StartTask { Start-ScheduledTask -TaskName $voice.TaskName } `
+            -WorkerProvider { Get-ArtemJarvisVoiceWorkers -Voice $voice }
+        Write-Host "Jarvis voice worker synchronized with the active Panel Agent runtime."
+        return $true
+    }
+    catch {
+        Write-Warning "Production runtime is healthy, but Jarvis voice recovery failed: $($_.Exception.Message)"
+        return $false
+    }
+}
 function Invoke-ArtemTargetUpdater {
     param(
         [Parameter(Mandatory)]$Paths,
@@ -1051,6 +1084,7 @@ try {
                 -LockRequestId $RequestId `
                 -ExpectedBuildRevision $targetHead
             Refresh-ArtemUpdateLock -Paths $paths -LockRequestId $RequestId
+            $null = Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths
             Set-Content -LiteralPath $paths.LastKnownGood -Value $currentHead -Encoding ASCII
             Write-ArtemUpdateState -Paths $paths -Status "success" -Result "up_to_date" -ServedRevision $targetHead
             $postUpdateInteractiveKioskRecovery = -not $kioskConfirmed
@@ -1193,6 +1227,7 @@ try {
             -LockRequestId $RequestId
         Assert-ArtemProductionBuildIdentity -DashboardRoot $paths.DashboardDist -ExpectedRevision $targetHead | Out-Null
         Assert-ArtemServedProductionBuildIdentity -Paths $paths -ExpectedRevision $targetHead | Out-Null
+        $null = Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths
         Set-Content -LiteralPath $paths.LastKnownGood -Value $targetHead -Encoding ASCII
         # The accepted target is now durably verified and served. Publish that
         # terminal truth while the transaction still provides independent
