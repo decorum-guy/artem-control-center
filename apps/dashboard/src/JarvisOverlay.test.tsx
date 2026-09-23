@@ -21,7 +21,7 @@ describe("JarvisOverlay voice foundation", () => {
   });
 
   async function mount(voice: () => object, onNavigate = () => undefined) {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
       if (String(input).endsWith("/voice/state")) return Promise.resolve(new Response(JSON.stringify(voice()), { status: 200 }));
       if (String(input).endsWith("/interaction-lock")) return Promise.resolve(new Response(null, { status: 204 }));
       if (String(input).endsWith("/jarvis/turn")) return Promise.resolve(new Response(JSON.stringify({ schemaVersion: "jarvis.turn.v1", status: "ready", intentId: "system.time.current", responseText: "Сейчас 12:34.", navigation: null }), { status: 200 }));
