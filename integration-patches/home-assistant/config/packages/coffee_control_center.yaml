@@ -87,7 +87,7 @@ template:
           {% set started = states('input_datetime.coffee_last_turned_on') %}
           {% set duration = states('input_number.coffee_warmup_minutes') | float(0) %}
           {% if as_timestamp(started, 0) > 0 and duration > 0 %}
-            {{ (as_datetime(started) + timedelta(minutes=duration)).isoformat() }}
+            {{ (as_timestamp(started) + duration * 60) | timestamp_local }}
           {% else %}
             {{ none }}
           {% endif %}

@@ -78,6 +78,15 @@ test("safe scripts target the discovered HA entities", () => {
   assert.doesNotMatch(packageText, /\boverheat(?:ed|ing)?\b/i);
 });
 
+test("coffee ready timestamp is timezone-aware on current Home Assistant", () => {
+  const sensors = config.template.find((entry) => entry.sensor).sensor;
+  const readyAt = sensors.find((entity) => entity.unique_id === "coffee_ready_at");
+
+  assert.equal(readyAt.device_class, "timestamp");
+  assert.match(readyAt.state, /timestamp_local/);
+  assert.doesNotMatch(readyAt.state, /\.isoformat\(\)/);
+});
+
 test("long-running warning is unavailable before timing initialization", () => {
   const binarySensors = config.template.find((entry) => entry.binary_sensor)
     .binary_sensor;
