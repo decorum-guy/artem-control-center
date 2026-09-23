@@ -9,6 +9,7 @@ Audio and recognized text live only in process memory.
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from array import array
 from collections import deque
@@ -24,6 +25,7 @@ SAMPLE_RATE_HZ = 16_000
 PCM_BYTES_PER_SECOND = SAMPLE_RATE_HZ * 2  # signed 16-bit, mono
 VOICE_ACTIVITY_PUBLISH_MS = 160
 PCM_ACTIVITY_REFERENCE_RMS = 512.0
+LOCAL_CANCEL_UTTERANCES = frozenset({"стоп", "хватит", "отмена", "отбой"})
 
 
 class VoiceState(str, Enum):
@@ -64,6 +66,7 @@ class VoiceRuntimeConfig:
     enabled: bool = False
     configured: bool = False
     pre_roll_ms: int = 500
+    wake_release_silence_ms: int = 160
     speech_onset_timeout_ms: int = 3_000
     max_utterance_ms: int = 12_000
     trailing_silence_ms: int = 800
@@ -72,11 +75,11 @@ class VoiceRuntimeConfig:
     speech_timeout_ms: int = 45_000
 
     def __post_init__(self) -> None:
-        for value in (self.pre_roll_ms, self.speech_onset_timeout_ms,
+        for value in (self.pre_roll_ms, self.wake_release_silence_ms, self.speech_onset_timeout_ms,
                       self.max_utterance_ms, self.trailing_silence_ms, self.cooldown_ms, self.stt_timeout_ms):
             if value <= 0:
                 raise ValueError("Voice timing values must be positive")
-        if self.pre_roll_ms > 2_000 or self.max_utterance_ms > 30_000:
+        if self.pre_roll_ms > 2_000 or self.wake_release_silence_ms > 1_000 or self.max_utterance_ms > 30_000:
             raise ValueError("Voice timing values exceed bounded safety limits")
         if not 1_000 <= self.speech_timeout_ms <= 90_000:
             raise ValueError("Speech timeout must remain bounded")
@@ -112,6 +115,14 @@ def pcm_input_level(pcm_16khz_mono: bytes) -> float:
         return 0.0
     rms = (sum(int(sample) * int(sample) for sample in samples) / len(samples)) ** 0.5
     return min(1.0, max(0.0, rms / PCM_ACTIVITY_REFERENCE_RMS))
+
+
+def normalize_local_control_utterance(text: str) -> str:
+    return " ".join(re.findall(r"[0-9a-zа-яё]+", text.casefold()))
+
+
+def is_local_cancel_utterance(text: str) -> bool:
+    return normalize_local_control_utterance(text) in LOCAL_CANCEL_UTTERANCES
 
 
 class AudioInput(Protocol):
@@ -279,7 +290,6 @@ class VoicePipeline:
         self._clock = clock
         self._speech_output = speech_output
         self._machine = VoiceStateMachine(enabled=config.enabled, configured=config.configured)
-        self._pre_roll = BoundedPcmBuffer(config.pre_roll_ms)
 
     async def _transition(self, state: VoiceState, **kwargs: object) -> bool:
         snapshot = self._machine.transition(state, **kwargs)  # type: ignore[arg-type]
@@ -309,19 +319,24 @@ class VoicePipeline:
         await self._transition(VoiceState.IDLE, health=VoiceHealth.HEALTHY)
         capture = bytearray()
         wake_at: int | None = None
+        command_armed = False
+        wake_release_silence_ms = 0
+        command_wait_ms = 0
         speech_started = False
         silence_ms = 0
         activity_elapsed_ms = 0
         async for frame in audio.frames():
             if not frame:
                 continue
-            self._pre_roll.append(frame)
             frame_ms = max(1, len(frame) * 1_000 // PCM_BYTES_PER_SECOND)
             if self._machine.state is VoiceState.IDLE:
                 if self._lock.is_locked() or not await self._wake.detect(frame):
                     continue
                 wake_at = self._clock.monotonic_ms()
-                capture = bytearray(self._pre_roll.snapshot())
+                capture.clear()
+                command_armed = False
+                wake_release_silence_ms = 0
+                command_wait_ms = 0
                 speech_started = False
                 silence_ms = 0
                 activity_elapsed_ms = 0
@@ -330,24 +345,55 @@ class VoicePipeline:
                 continue
             if self._machine.state is not VoiceState.LISTENING:
                 continue
-            capture.extend(frame)
-            elapsed_ms = len(capture) * 1_000 // PCM_BYTES_PER_SECOND
+
             activity_elapsed_ms += frame_ms
             if activity_elapsed_ms >= VOICE_ACTIVITY_PUBLISH_MS:
                 await self._publish_listening_activity(frame)
                 activity_elapsed_ms = 0
+
             speech = await self._vad.is_speech(frame)
+            if not command_armed:
+                if speech:
+                    # The detector fires near the end of the wake phrase. Ignore
+                    # its remaining speech tail instead of feeding it to STT.
+                    wake_release_silence_ms = 0
+                else:
+                    wake_release_silence_ms += frame_ms
+                    if wake_release_silence_ms >= self._config.wake_release_silence_ms:
+                        command_armed = True
+                        command_wait_ms = 0
+                        capture.clear()
+                continue
+
+            command_wait_ms += frame_ms
+            capture.extend(frame)
+            elapsed_ms = len(capture) * 1_000 // PCM_BYTES_PER_SECOND
             if speech:
                 speech_started = True
                 silence_ms = 0
             elif speech_started:
                 silence_ms += frame_ms
-            if ((not speech_started and elapsed_ms >= self._config.pre_roll_ms + self._config.speech_onset_timeout_ms)
-                    or elapsed_ms >= self._config.max_utterance_ms
+
+            if not speech_started and command_wait_ms >= self._config.speech_onset_timeout_ms:
+                await self._cancel_without_error()
+                capture.clear()
+                wake_at = None
+                command_armed = False
+                wake_release_silence_ms = 0
+                command_wait_ms = 0
+                speech_started = False
+                silence_ms = 0
+                activity_elapsed_ms = 0
+                continue
+
+            if (elapsed_ms >= self._config.max_utterance_ms
                     or (speech_started and silence_ms >= self._config.trailing_silence_ms)):
                 await self._complete_capture(bytes(capture), wake_at)
                 capture.clear()  # discard the completed utterance from worker memory
                 wake_at = None
+                command_armed = False
+                wake_release_silence_ms = 0
+                command_wait_ms = 0
                 speech_started = False
                 silence_ms = 0
                 activity_elapsed_ms = 0
@@ -367,6 +413,9 @@ class VoicePipeline:
         text = text.strip()
         if not text:
             await self._failure("empty_transcript")
+            return
+        if is_local_cancel_utterance(text):
+            await self._cancel_without_error()
             return
         if self._lock.is_locked():
             await self._failure("interaction_locked")
@@ -412,6 +461,12 @@ class VoicePipeline:
         await self._transition(VoiceState.READY, **ready_fields)
         await self._cooldown()
 
+    async def _cancel_without_error(self) -> None:
+        """End the active voice turn immediately without a semantic request or error UI."""
+        if self._machine.state in {VoiceState.WAKE_DETECTED, VoiceState.LISTENING, VoiceState.TRANSCRIBING, VoiceState.SUBMITTING}:
+            await self._transition(VoiceState.COOLDOWN)
+            await self._transition(VoiceState.IDLE, health=VoiceHealth.HEALTHY)
+
     async def _cooldown(self) -> None:
         """Keep terminal state briefly visible, then clear text before the next wake."""
         await asyncio.sleep(self._config.cooldown_ms / 1_000)
@@ -419,8 +474,8 @@ class VoicePipeline:
         await self._transition(VoiceState.IDLE, health=VoiceHealth.HEALTHY)
 
     async def cancel(self) -> None:
-        if self._machine.state in {VoiceState.LISTENING, VoiceState.TRANSCRIBING, VoiceState.SUBMITTING, VoiceState.SPEAKING}:
-            await self._failure("cancelled")
+        if self._machine.state in {VoiceState.WAKE_DETECTED, VoiceState.LISTENING, VoiceState.TRANSCRIBING, VoiceState.SUBMITTING}:
+            await self._cancel_without_error()
 
     async def _failure(self, code: str) -> None:
         await self._transition(VoiceState.ERROR, health=VoiceHealth.DEGRADED, safe_error_code=code)

@@ -21,7 +21,8 @@ describe("JarvisOverlay voice foundation", () => {
   });
 
   async function mount(voice: () => object, onNavigate = () => undefined) {
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
       if (String(input).endsWith("/voice/state")) return Promise.resolve(new Response(JSON.stringify(voice()), { status: 200 }));
       if (String(input).endsWith("/interaction-lock")) return Promise.resolve(new Response(null, { status: 204 }));
       if (String(input).endsWith("/jarvis/turn")) return Promise.resolve(new Response(JSON.stringify({ schemaVersion: "jarvis.turn.v1", status: "ready", intentId: "system.time.current", responseText: "Сейчас 12:34.", navigation: null }), { status: 200 }));
@@ -71,6 +72,32 @@ describe("JarvisOverlay voice foundation", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(140); });
     expect(host?.querySelector("[data-testid=jarvis-voice-transcript]")?.textContent).toContain("<img src=x onerror=alert(1)>");
     expect(host?.querySelector("img")).toBeNull();
+  });
+
+  it("cancels an active voice HUD without opening the full panel", async () => {
+    vi.useFakeTimers();
+    let voice: object = disabled;
+    const fetchMock = await mount(() => voice);
+    voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "listening", sequence: 1, inputLevel: 0.4 };
+    await act(async () => { await vi.advanceTimersByTimeAsync(650); });
+
+    const cancel = host?.querySelector<HTMLButtonElement>("[data-testid=jarvis-voice-cancel]");
+    expect(cancel).not.toBeNull();
+    await act(async () => {
+      cancel?.click();
+      await Promise.resolve();
+    });
+    expect(host?.querySelector("[data-testid=jarvis-voice-hud]")).toBeNull();
+
+    const lockWrites = fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/interaction-lock"));
+    const lastRequest = lockWrites.at(-1)?.[1] as RequestInit | undefined;
+    expect(lastRequest?.body).toBe(JSON.stringify({ locked: true }));
+
+    voice = { ...disabled, enabled: true, configured: true, health: "healthy", state: "idle", sequence: 2, inputLevel: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(140); await Promise.resolve(); });
+    const afterIdle = fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/interaction-lock"));
+    const unlockRequest = afterIdle.at(-1)?.[1] as RequestInit | undefined;
+    expect(unlockRequest?.body).toBe(JSON.stringify({ locked: false }));
   });
 
   it("passes canonical voice navigation through the existing callback", async () => {
