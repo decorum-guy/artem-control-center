@@ -76,7 +76,15 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
     let timer: number | null = null;
 
     const apply = (voice: JarvisVoiceSnapshot | null) => {
-      if (!voice || disposed || voice.sequence <= voiceSequence.current || locked) return;
+      if (!voice || disposed || locked) return;
+      if (voice.sequence === voiceSequence.current) return;
+      if (voice.sequence < voiceSequence.current) {
+        // Panel Agent restarts reset the browser-facing bridge sequence. Polls
+        // are serialized, so a lower value here is a new server epoch rather
+        // than an out-of-order response. Accept it instead of muting voice UI
+        // until the page is manually refreshed.
+        voiceSequence.current = -1;
+      }
       voiceSequence.current = voice.sequence;
       if (voiceCancelPending.current) {
         if (voice.state === "idle" || voice.state === "cooldown") {
