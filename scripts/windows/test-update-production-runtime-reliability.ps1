@@ -323,6 +323,48 @@ exit 0
     $script:events.Clear(); $script:startFails = $false; $script:taskState = "Running"; $script:kioskVisible = $true
     Assert-Reliability (-not (Start-ArtemInteractiveRuntimeTask -Paths $paths)) "Running task must not be restarted"
     Assert-Reliability ($script:events.Count -eq 0) "Running task recovery issued a competing task start"
+
+    # Jarvis voice recovery is separate from the main Runtime task. It must
+    # refresh an enabled worker after Panel Agent replacement, but remain
+    # advisory so an optional voice failure cannot roll back a healthy panel.
+    $script:voiceEnabled = $false
+    $script:voiceConfigFails = $false
+    $script:voiceTaskAvailable = $true
+    $script:voiceRecoveryFails = $false
+    $script:voiceRecoveryCalls = 0
+    function Get-ArtemJarvisVoiceConfiguration { param($Paths) if ($script:voiceConfigFails) { throw "fixture voice config failure" }; return [pscustomobject]@{ Enabled = $script:voiceEnabled } }
+    function Get-ArtemJarvisVoicePaths { param($Paths) return [pscustomobject]@{ TaskName = "Jarvis Voice Fixture" } }
+    function Get-ScheduledTask {
+        param([string]$TaskName, $ErrorAction)
+        if (-not $script:voiceTaskAvailable) { return $null }
+        return [pscustomobject]@{ State = "Running" }
+    }
+    function Get-ArtemJarvisVoiceWorkers { param($Voice) return @([pscustomobject]@{ SessionId = 2 }) }
+    function Invoke-ArtemJarvisVoiceRestartLifecycle {
+        param($Voice, $Workers, $TaskState, $StopTask, $StartTask, $WorkerProvider)
+        $script:voiceRecoveryCalls++
+        if ($script:voiceRecoveryFails) { throw "fixture voice recovery failure" }
+        return [pscustomobject]@{ Action = "restart" }
+    }
+
+    Assert-Reliability (Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths) "Disabled voice must be a successful no-op"
+    Assert-Reliability ($script:voiceRecoveryCalls -eq 0) "Disabled voice unexpectedly touched the task lifecycle"
+
+    $script:voiceEnabled = $true; $script:voiceTaskAvailable = $false
+    Assert-Reliability (-not (Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths)) "Missing enabled voice task must remain advisory"
+    Assert-Reliability ($script:voiceRecoveryCalls -eq 0) "Missing voice task must not invoke restart lifecycle"
+
+    $script:voiceTaskAvailable = $true; $script:voiceRecoveryFails = $false
+    Assert-Reliability (Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths) "Enabled voice worker was not synchronized after runtime recovery"
+    Assert-Reliability ($script:voiceRecoveryCalls -eq 1) "Enabled voice recovery must run exactly once"
+
+    $script:voiceRecoveryFails = $true
+    Assert-Reliability (-not (Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths)) "Voice recovery failure must remain advisory"
+    Assert-Reliability ($script:voiceRecoveryCalls -eq 2) "Failed voice recovery must not retry or storm"
+
+    $script:voiceConfigFails = $true
+    Assert-Reliability (-not (Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths)) "Voice configuration failure must remain advisory"
+    Assert-Reliability ($script:voiceRecoveryCalls -eq 2) "Voice config failure must not reach the task lifecycle"
 }
 finally {
     foreach ($name in $stagingNames) {

@@ -341,6 +341,76 @@ function Invoke-ArtemJarvisVoiceStartLifecycle {
     return $decision
 }
 
+function Invoke-ArtemJarvisVoiceRestartLifecycle {
+    param(
+        [Parameter(Mandatory)]$Voice,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Workers,
+        [Parameter(Mandatory)][string]$TaskState,
+        [Parameter(Mandatory)][scriptblock]$StopTask,
+        [Parameter(Mandatory)][scriptblock]$StartTask,
+        [Parameter(Mandatory)][scriptblock]$WorkerProvider,
+        [object]$ConsoleSessionId,
+        [ValidateRange(1, 60000)][int]$StopTimeoutMilliseconds = 10000,
+        [ValidateRange(1, 60000)][int]$StartTimeoutMilliseconds = 15000,
+        [ValidateRange(1, 10000)][int]$PollMilliseconds = 250,
+        [scriptblock]$Sleep = { param([int]$Milliseconds) Start-Sleep -Milliseconds $Milliseconds }
+    )
+
+    $alignmentArgs = @{ Workers = $Workers }
+    if ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+        $alignmentArgs.ConsoleSessionId = $ConsoleSessionId
+    }
+    $alignment = Get-ArtemJarvisVoiceSessionAlignment @alignmentArgs
+    if ($alignment.WorkerCount -gt 1) {
+        throw "Refusing to restart duplicate Jarvis voice workers."
+    }
+    if ($alignment.WorkerCount -eq 1 -and $TaskState -ne "Running") {
+        throw "Refusing to restart an unowned Jarvis voice worker."
+    }
+
+    if ($TaskState -eq "Running") {
+        $null = & $StopTask
+        $waited = 0
+        while ($true) {
+            $remaining = @(& $WorkerProvider)
+            if ($remaining.Count -eq 0) { break }
+            if ($waited -ge $StopTimeoutMilliseconds) {
+                throw "Jarvis voice worker did not stop after bounded task shutdown."
+            }
+            $delay = [Math]::Min($PollMilliseconds, $StopTimeoutMilliseconds - $waited)
+            & $Sleep $delay
+            $waited += $delay
+        }
+    }
+
+    $null = & $StartTask
+    $waited = 0
+    while ($true) {
+        $current = @(& $WorkerProvider)
+        if ($current.Count -gt 1) {
+            throw "Jarvis voice restart created duplicate workers."
+        }
+        $currentAlignmentArgs = @{ Workers = $current }
+        if ($PSBoundParameters.ContainsKey('ConsoleSessionId')) {
+            $currentAlignmentArgs.ConsoleSessionId = $ConsoleSessionId
+        }
+        $currentAlignment = Get-ArtemJarvisVoiceSessionAlignment @currentAlignmentArgs
+        if ($currentAlignment.SessionAligned) {
+            return [pscustomobject]@{
+                Action = if ($TaskState -eq "Running") { "restart" } else { "start" }
+                WorkerCount = $currentAlignment.WorkerCount
+                ConsoleSessionId = $currentAlignment.ConsoleSessionId
+            }
+        }
+        if ($waited -ge $StartTimeoutMilliseconds) {
+            throw "Jarvis voice worker did not become aligned after bounded task start."
+        }
+        $delay = [Math]::Min($PollMilliseconds, $StartTimeoutMilliseconds - $waited)
+        & $Sleep $delay
+        $waited += $delay
+    }
+}
+
 function Get-ArtemRuntimeVenvPath {
     param(
         [Parameter(Mandatory)]$Paths,

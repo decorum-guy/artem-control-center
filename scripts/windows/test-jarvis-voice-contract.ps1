@@ -146,6 +146,37 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     catch { $timedOut = $_.Exception.Message -eq "Jarvis voice worker did not stop after bounded task shutdown." }
     Assert-JarvisVoice ($timedOut -and $script:stopCalls -eq 1 -and $script:startCalls -eq 0) "Timed-out task stop must reject without restart"
 
+    # A production update must force-restart even an already healthy aligned
+    # worker so the process imports the newly checked-out voice code and
+    # re-seeds the freshly restarted Panel Agent bridge from STARTING/1.
+    $script:restartStopCalls = 0
+    $script:restartStartCalls = 0
+    $script:restartWorkers = @(New-TestVoiceWorker 2)
+    $forcedRestart = Invoke-ArtemJarvisVoiceRestartLifecycle -Voice $voice -Workers @(New-TestVoiceWorker 2) -TaskState "Running" -ConsoleSessionId 2 `
+        -StopTask { $script:restartStopCalls++; $script:restartWorkers = @() } `
+        -StartTask { $script:restartStartCalls++; $script:restartWorkers = @(New-TestVoiceWorker 2) } `
+        -WorkerProvider { @($script:restartWorkers) } `
+        -StopTimeoutMilliseconds 3 -StartTimeoutMilliseconds 3 -PollMilliseconds 1 -Sleep { param($milliseconds) }
+    Assert-JarvisVoice ($forcedRestart.Action -eq "restart" -and $script:restartStopCalls -eq 1 -and $script:restartStartCalls -eq 1) "Aligned running worker must be force-restarted exactly once after runtime replacement"
+
+    $script:restartStopCalls = 0
+    $script:restartStartCalls = 0
+    $script:restartWorkers = @()
+    $coldStart = Invoke-ArtemJarvisVoiceRestartLifecycle -Voice $voice -Workers @() -TaskState "Ready" -ConsoleSessionId 2 `
+        -StopTask { $script:restartStopCalls++ } `
+        -StartTask { $script:restartStartCalls++; $script:restartWorkers = @(New-TestVoiceWorker 2) } `
+        -WorkerProvider { @($script:restartWorkers) } `
+        -StopTimeoutMilliseconds 3 -StartTimeoutMilliseconds 3 -PollMilliseconds 1 -Sleep { param($milliseconds) }
+    Assert-JarvisVoice ($coldStart.Action -eq "start" -and $script:restartStopCalls -eq 0 -and $script:restartStartCalls -eq 1) "Stopped voice task must start once without a redundant stop"
+
+    $unownedRestartRejected = $false
+    try {
+        Invoke-ArtemJarvisVoiceRestartLifecycle -Voice $voice -Workers @(New-TestVoiceWorker 2) -TaskState "Ready" -ConsoleSessionId 2 `
+            -StopTask { } -StartTask { } -WorkerProvider { @(New-TestVoiceWorker 2) } `
+            -StopTimeoutMilliseconds 3 -StartTimeoutMilliseconds 3 -PollMilliseconds 1 -Sleep { param($milliseconds) } | Out-Null
+    }
+    catch { $unownedRestartRejected = $_.Exception.Message -eq "Refusing to restart an unowned Jarvis voice worker." }
+    Assert-JarvisVoice $unownedRestartRejected "Updater must never kill or duplicate a worker that is not owned by the Running task"
     # This clean venv has no Panel Agent installation. The child sees precisely
     # the two roots which the launcher sets and proves both imports resolve.
     $venv = Join-Path $root "dedicated-voice-venv"
