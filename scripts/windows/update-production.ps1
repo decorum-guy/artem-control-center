@@ -738,19 +738,19 @@ function Ensure-ArtemHealthyVisiblePanel {
 function Invoke-ArtemPostRuntimeJarvisVoiceRecovery {
     param([Parameter(Mandatory)]$Paths)
 
-    $configuration = Get-ArtemJarvisVoiceConfiguration -Paths $Paths
-    if (-not $configuration.Enabled) {
-        return $true
-    }
-
-    $voice = Get-ArtemJarvisVoicePaths -Paths $Paths
-    $task = Get-ScheduledTask -TaskName $voice.TaskName -ErrorAction SilentlyContinue
-    if ($null -eq $task) {
-        Write-Warning "Production runtime is healthy, but the enabled Jarvis voice task is not installed"
-        return $false
-    }
-
     try {
+        $configuration = Get-ArtemJarvisVoiceConfiguration -Paths $Paths
+        if (-not $configuration.Enabled) {
+            return $true
+        }
+
+        $voice = Get-ArtemJarvisVoicePaths -Paths $Paths
+        $task = Get-ScheduledTask -TaskName $voice.TaskName -ErrorAction SilentlyContinue
+        if ($null -eq $task) {
+            Write-Warning "Production runtime is healthy, but the enabled Jarvis voice task is not installed"
+            return $false
+        }
+
         $workers = @(Get-ArtemJarvisVoiceWorkers -Voice $voice)
         $null = Invoke-ArtemJarvisVoiceRestartLifecycle `
             -Voice $voice `
