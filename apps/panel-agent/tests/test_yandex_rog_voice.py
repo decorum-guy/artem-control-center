@@ -78,6 +78,18 @@ def bridge(*, enabled: bool = True, executor: FakeExecutor | None = None):
         ("отправь асус в гибернацию", ROG_G703_HIBERNATE_ACTION),
         ("разбудить асус", ROG_G703_WAKE_ACTION),
         ("разбуди асус", ROG_G703_WAKE_ACTION),
+        ("включить ASUS", ROG_G703_WAKE_ACTION),
+        ("включи ASUS", ROG_G703_WAKE_ACTION),
+        ("разбудить ASUS", ROG_G703_WAKE_ACTION),
+        ("разбуди ASUS", ROG_G703_WAKE_ACTION),
+        ("перевести ASUS в сон", ROG_G703_SLEEP_ACTION),
+        ("переведи ASUS в сон", ROG_G703_SLEEP_ACTION),
+        ("отправить ASUS в сон", ROG_G703_SLEEP_ACTION),
+        ("отправь ASUS в сон", ROG_G703_SLEEP_ACTION),
+        ("перевести ASUS в гибернацию", ROG_G703_HIBERNATE_ACTION),
+        ("переведи ASUS в гибернацию", ROG_G703_HIBERNATE_ACTION),
+        ("отправить ASUS в гибернацию", ROG_G703_HIBERNATE_ACTION),
+        ("отправь ASUS в гибернацию", ROG_G703_HIBERNATE_ACTION),
     ],
 )
 def test_parser_accepts_only_the_closed_asus_grammar(phrase: str, action_id: str) -> None:
