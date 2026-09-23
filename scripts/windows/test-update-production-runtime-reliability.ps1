@@ -328,10 +328,11 @@ exit 0
     # refresh an enabled worker after Panel Agent replacement, but remain
     # advisory so an optional voice failure cannot roll back a healthy panel.
     $script:voiceEnabled = $false
+    $script:voiceConfigFails = $false
     $script:voiceTaskAvailable = $true
     $script:voiceRecoveryFails = $false
     $script:voiceRecoveryCalls = 0
-    function Get-ArtemJarvisVoiceConfiguration { param($Paths) return [pscustomobject]@{ Enabled = $script:voiceEnabled } }
+    function Get-ArtemJarvisVoiceConfiguration { param($Paths) if ($script:voiceConfigFails) { throw "fixture voice config failure" }; return [pscustomobject]@{ Enabled = $script:voiceEnabled } }
     function Get-ArtemJarvisVoicePaths { param($Paths) return [pscustomobject]@{ TaskName = "Jarvis Voice Fixture" } }
     function Get-ScheduledTask {
         param([string]$TaskName, $ErrorAction)
@@ -359,7 +360,12 @@ exit 0
 
     $script:voiceRecoveryFails = $true
     Assert-Reliability (-not (Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths)) "Voice recovery failure must remain advisory"
-    Assert-Reliability ($script:voiceRecoveryCalls -eq 2) "Failed voice recovery must not retry or storm"}
+    Assert-Reliability ($script:voiceRecoveryCalls -eq 2) "Failed voice recovery must not retry or storm"
+
+    $script:voiceConfigFails = $true
+    Assert-Reliability (-not (Invoke-ArtemPostRuntimeJarvisVoiceRecovery -Paths $paths)) "Voice configuration failure must remain advisory"
+    Assert-Reliability ($script:voiceRecoveryCalls -eq 2) "Voice config failure must not reach the task lifecycle"
+}
 finally {
     foreach ($name in $stagingNames) {
         [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], "Process")
