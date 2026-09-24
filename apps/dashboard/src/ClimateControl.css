@@ -12,9 +12,20 @@
 }
 
 .climate-control--home { gap: 10px; padding: 12px 12px 18px; }
-.climate-control--overview { gap: 6px; padding: 10px 12px 12px; }
+.climate-control--overview {
+  gap: 6px;
+  padding: 10px 12px 12px;
+  border: 0;
+  background: transparent;
+}
 .climate-control--overview .climate-control__controls { margin-top: 4px; }
-.climate-control--overview .climate-control__controls { row-gap: 6px; }
+.climate-control--overview .climate-control__controls {
+  grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1fr);
+  row-gap: 8px;
+}
+.climate-control--overview .climate-control__temperature-control { grid-column: 2 / 4; }
+.climate-control--overview .climate-control__mode-label { grid-column: 1 / 3; }
+.climate-control--overview .climate-control__fan-label { grid-column: 3 / 4; }
 .climate-control--overview .climate-control__select-label { gap: 2px; }
 .climate-control--unavailable { border-color: var(--cc-offline-border); }
 .climate-control__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }

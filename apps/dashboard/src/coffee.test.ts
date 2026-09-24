@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CoffeeData } from "@artem/contracts";
-import { coffeePresentation, coffeeProgressColor, coffeeProgressTone } from "./coffee";
+import { coffeeActiveGlowEligible, coffeePresentation, coffeeProgressColor, coffeeProgressTone } from "./coffee";
 
 const base: CoffeeData = {
   machine: {
@@ -25,6 +25,15 @@ const base: CoffeeData = {
 };
 
 describe("coffee presentation", () => {
+  it("allows an active contour only for a live, fresh canonical ON switch", () => {
+    expect(coffeeActiveGlowEligible(base.machine)).toBe(true);
+    for (const state of ["off", "turning_on", "turning_off", "unavailable", "stale"] as const) {
+      expect(coffeeActiveGlowEligible({ ...base.machine, state })).toBe(false);
+    }
+    expect(coffeeActiveGlowEligible({ ...base.machine, available: false })).toBe(false);
+    expect(coffeeActiveGlowEligible({ ...base.machine, stale: true })).toBe(false);
+  });
+
   it("does not invent progress when HA timing is absent", () => {
     const view = coffeePresentation(base, "2026-07-29T12:00:00Z");
     expect(view.progressText).toBeNull();

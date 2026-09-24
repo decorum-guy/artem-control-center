@@ -46,6 +46,7 @@ function PlanningRow({
   ariaLabel,
   empty = false,
   className = "",
+  emphasis = false,
   dataState = "current",
   indicatorColor,
   indicatorTestId
@@ -60,6 +61,7 @@ function PlanningRow({
   ariaLabel?: string;
   empty?: boolean;
   className?: string;
+  emphasis?: boolean;
   dataState?: PlanningDomainHealthStatus;
   indicatorColor?: string;
   indicatorTestId?: string;
@@ -76,7 +78,7 @@ function PlanningRow({
   const content = (
     <>
       <div className="planning-row__copy">
-        <span className="planning-row__label">{label}</span>
+        {label && <span className="planning-row__label">{label}</span>}
         <strong className={empty ? "planning-row__title planning-row__title--empty" : "planning-row__title"}>
           {title}
         </strong>
@@ -93,7 +95,7 @@ function PlanningRow({
   if (onClick) {
     return (
       <button
-        className={`planning-row planning-row--interactive ${className}`.trim()}
+        className={`planning-row planning-row--interactive ${emphasis ? "planning-row--next" : ""} ${className}`.trim()}
         data-testid={testId}
         data-planning-state={dataState}
         type="button"
@@ -107,7 +109,7 @@ function PlanningRow({
   }
 
   return (
-    <div className={`planning-row ${className}`.trim()} data-testid={testId} data-planning-state={dataState}>
+    <div className={`planning-row ${emphasis ? "planning-row--next" : ""} ${className}`.trim()} data-testid={testId} data-planning-state={dataState}>
       {indicator}
       {content}
     </div>
@@ -319,6 +321,7 @@ export function PlanningOverviewCard({
 
   const displayItems = displayPlanningOverviewItems(planning, summary.overviewItems, planningOverviewRowLimit(sizeVariant));
   const overdueCount = formatOverdueTaskCount(summary.overdueTaskCount);
+  const firstMeaningfulIndex = displayItems.findIndex((entry) => entry.presentation === "meaningful");
 
   return (
     <section
@@ -349,6 +352,7 @@ export function PlanningOverviewCard({
           const rowState = planningDomainStatus(planning, domain);
           const isUnavailableStatus = entry.presentation === "unavailable";
           const isMeaningful = entry.presentation === "meaningful";
+          const emphasis = isMeaningful && index === firstMeaningfulIndex;
           const className = rowState !== "current" && rowState !== "retrying" ? "planning-row--not-current" : "";
           const rowSourceStatus = rowState === "retrying" || rowState === "current"
             ? "current"
@@ -360,6 +364,7 @@ export function PlanningOverviewCard({
                 key={`${entry.kind}-${index}`}
                 testId={testId}
                 className={className}
+                emphasis={emphasis}
                 dataState={rowState}
                 label={isUnavailableStatus ? "Напоминания" : "Напоминание"}
                 title={isMeaningful && reminder ? reminder.title : unavailableRowTitle("Напоминаний нет", rowState)}
@@ -375,15 +380,16 @@ export function PlanningOverviewCard({
           if (entry.kind === "task") {
             const task = entry.item;
             const taskTitle = isMeaningful && task
-              ? entry.overdue ? `${overdueCount} · ${task.title}` : task.title
+              ? task.title
               : unavailableRowTitle("Нет просроченных задач", rowState);
             return (
               <PlanningRow
                 key={`${entry.kind}-${index}`}
                 testId={testId}
                 className={className}
+                emphasis={emphasis}
                 dataState={rowState}
-                label={isUnavailableStatus ? "Задачи" : entry.overdue ? "Просроченные задачи" : "Задача"}
+                label={isUnavailableStatus ? "Задачи" : entry.overdue && kindOccurrence === 1 ? `Просрочено: ${overdueCount}` : "Задача"}
                 title={taskTitle}
                 meta={isMeaningful && task ? formatTaskDueLabel(task) : entry.presentation === "placeholder" && (rowState === "current" || rowState === "degraded") ? overdueCount : undefined}
                 onClick={isMeaningful && task ? () => onNavigate("/tasks") : undefined}
@@ -400,6 +406,7 @@ export function PlanningOverviewCard({
               key={`${entry.kind}-${index}`}
               testId={testId}
               className={className}
+              emphasis={emphasis}
               dataState={rowState}
               indicatorColor={isMeaningful && event ? calendarEventColor(event, planning.providerStatuses, calendarDisplayPreferences?.overrides ?? []) : undefined}
               indicatorTestId={entry.kind === "calendar" && kindOccurrence === 1

@@ -8,7 +8,7 @@ import type {
 } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { titleForServiceAction, useAvalarActions } from "./AvalarActions";
-import { coffeePresentation } from "./coffee";
+import { coffeeActiveGlowEligible, coffeePresentation } from "./coffee";
 import { resolveWidgetAsset } from "./widgetAssets";
 import type { CoffeeAppearanceConfig } from "./features/overview/appearanceConfig";
 import { sourceOwnedCoffeeScale } from "./features/overview/appearanceConfig";
@@ -245,7 +245,7 @@ export function CoffeeWidget({
   );
   let stateDetail = service.summary;
   if (warming && remaining) stateDetail = `Осталось примерно ${remaining}`;
-  if (view.stage === "ready" && duration) stateDetail = `Работает ${duration} · можно готовить кофе`;
+  if (view.stage === "ready" && duration) stateDetail = `Работает ${duration}`;
   if (view.stage === "running" && duration) stateDetail = `Работает ${duration}`;
   if (view.stage === "running_too_long" && duration) stateDetail = `Включена уже ${duration}`;
   if (activeDelayedStart?.status === "executing") {
@@ -332,6 +332,7 @@ export function CoffeeWidget({
       data-testid="widget-coffee-machine"
       data-stage={view.stage}
       data-canonical-state={data.machine.state}
+      data-coffee-active={coffeeActiveGlowEligible(data.machine)}
       data-transition={coffeeTransition}
       data-progress-tone={view.progressTone ?? "unknown"}
       data-progress-visible={progressVisible}
@@ -349,7 +350,7 @@ export function CoffeeWidget({
       <div className="coffee-panel__copy">
         <div className="coffee-panel__heading">
           <div>
-            {variant !== "home-v2" && <p className="section-kicker">Дом</p>}
+            {variant !== "home-v2" && variant !== "overview" && <p className="section-kicker">Дом</p>}
             <h2>{service.title}</h2>
           </div>
         </div>

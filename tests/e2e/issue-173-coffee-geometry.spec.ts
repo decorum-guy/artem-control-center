@@ -116,7 +116,8 @@ async function assertCoffeeComposition(coffee: Locator, variant: "overview" | "h
   expectContained(imageBox, assetBox);
   const kicker = coffee.locator(".coffee-panel__heading .section-kicker");
   if (variant === "overview") {
-    await expect(kicker).toHaveText("Дом");
+    // #279 keeps the Coffee title prominent without repeating its Home category.
+    await expect(kicker).toHaveCount(0);
   } else {
     await expect(kicker).toHaveCount(0);
   }
@@ -179,8 +180,8 @@ async function assertOverviewCoffeeProportions(coffee: Locator, timerExpected: b
   expect(primaryBox.height).toBe(56);
 
   const title = coffee.locator(".coffee-panel__heading h2");
-  await expect(title).toHaveCSS("font-size", "26px");
-  await expect(coffee.locator(".coffee-panel__heading .section-kicker")).toHaveText("Дом");
+  await expect(title).toHaveCSS("font-size", "21px");
+  await expect(coffee.locator(".coffee-panel__heading .section-kicker")).toHaveCount(0);
   await expect(coffee.locator(".coffee-activity")).toHaveCount(0);
   await expect(coffee.locator(".coffee-asset")).toHaveCSS("border-left-width", "0px");
   await expect(coffee.locator(".coffee-asset")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
@@ -298,12 +299,9 @@ test.describe("#173 Coffee composition stabilization", () => {
         right: panelBox.right - onlineBox.right
       });
       await expect(online).toHaveText("Онлайн");
-      const accent = await coffee.evaluate((element) => {
-        const pseudo = getComputedStyle(element, "::before");
-        return { width: pseudo.width, opacity: Number.parseFloat(pseudo.opacity) };
-      });
-      expect(accent.width).toBe("2px");
-      expect(accent.opacity).toBeGreaterThan(0);
+      await expect(coffee).toHaveAttribute("data-coffee-active", String(stage !== "off"));
+      const contour = await coffee.evaluate((element) => getComputedStyle(element).boxShadow);
+      expect(contour === "none").toBe(stage === "off");
       await page.screenshot({ path: await reviewScreenshotPath(testInfo, screenshotName) });
       await expectNoOverflow(page);
     }

@@ -233,14 +233,15 @@ function OverviewHealthWidget(runtime: OverviewRuntimeContext): ReactNode {
         </div>
       </header>
       <div className="overview-health-widget__aggregate">
-        <StatusText
-          label={`${healthyCount} в норме · ${attention.length} требуют внимания`}
-          tone={attention.length ? "warning" : "success"}
-        />
+        {attention.length
+          ? `${healthyCount} в норме · ${attention.length} требуют внимания`
+          : `${healthyCount} в норме`}
       </div>
-      <p className="overview-health-widget__incident">
-        {incident ? `${incident.title}: ${healthIncidentLabel(incident)}` : "Критичных инцидентов нет."}
-      </p>
+      {incident && (
+        <p className="overview-health-widget__incident">
+          <strong>{incident.title}:</strong> {healthIncidentLabel(incident)}
+        </p>
+      )}
       <footer className="overview-health-widget__footer">
         <span>{backupCopy}</span>
         <span
