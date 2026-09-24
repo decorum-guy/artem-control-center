@@ -41,6 +41,13 @@ def _get(client):
     return response.json()
 
 
+def _patch_marker_style(client, revision, marker_style):
+    return client.patch("/api/v1/settings/calendar/event-marker-style", json={
+        "expectedRevision": revision,
+        "markerStyle": marker_style,
+    })
+
+
 def _patch(client, revision, calendar_id, color):
     return client.patch("/api/v1/settings/calendar/display-colors", json={
         "expectedRevision": revision,
@@ -57,7 +64,7 @@ def test_read_contract_is_safe_typed_and_write_is_narrowly_gated(tmp_path, monke
         assert payload == {
             "schemaVersion": "calendar.display-preferences.v1", "revision": 0,
             "updatedAt": payload["updatedAt"], "overrides": [], "available": True,
-            "warnings": [], "writesEnabled": False,
+            "eventMarkerStyle": "dots", "warnings": [], "writesEnabled": False,
         }
         assert _patch(client, 0, "work-a", "#AABBCC").status_code == 403
         serialized = json.dumps(payload)
@@ -80,7 +87,70 @@ def test_valid_colour_is_normalized_persisted_and_duplicate_labels_stay_independ
     with TestClient(module.app) as client:
         restored = _get(client)
         assert restored["revision"] == 2
+        assert restored["eventMarkerStyle"] == "dots"
         assert {entry["calendarId"]: entry["color"] for entry in restored["overrides"]} == {"work-a": "#A1B2C3", "work-b": "#D4E5F6"}
+
+
+def test_legacy_document_defaults_to_dots_without_losing_colours(tmp_path, monkeypatch):
+    path = tmp_path / "calendar-colors.json"
+    path.write_text(json.dumps({
+        "schemaVersion": "calendar.display-preferences.v1",
+        "revision": 4,
+        "updatedAt": "2026-08-26T00:00:00Z",
+        "overrides": [{"providerId": "icloud-safe", "calendarId": "work-a", "color": "#112233"}],
+    }), encoding="utf-8")
+    module = _load_app(monkeypatch, path)
+    with TestClient(module.app) as client:
+        payload = _get(client)
+        assert payload["available"] is True
+        assert payload["eventMarkerStyle"] == "dots"
+        assert payload["overrides"] == [{"providerId": "icloud-safe", "calendarId": "work-a", "color": "#112233"}]
+
+
+def test_marker_style_persists_and_each_mutation_preserves_the_other_setting(tmp_path, monkeypatch):
+    path = tmp_path / "calendar-colors.json"
+    module = _load_app(monkeypatch, path)
+    with TestClient(module.app) as client:
+        styled = _patch_marker_style(client, 0, "bars")
+        assert styled.status_code == 200
+        assert styled.json()["eventMarkerStyle"] == "bars"
+        colored = _patch(client, 1, "work-a", "#AABBCC")
+        assert colored.status_code == 200
+        assert colored.json()["eventMarkerStyle"] == "bars"
+        assert colored.json()["overrides"] == [{"providerId": "icloud-safe", "calendarId": "work-a", "color": "#AABBCC"}]
+        restored_style = _patch_marker_style(client, 2, "dots")
+        assert restored_style.status_code == 200
+        assert restored_style.json()["eventMarkerStyle"] == "dots"
+        assert restored_style.json()["overrides"] == colored.json()["overrides"]
+    module = _load_app(monkeypatch, path)
+    with TestClient(module.app) as client:
+        restored = _get(client)
+        assert restored["eventMarkerStyle"] == "dots"
+        assert restored["overrides"] == [{"providerId": "icloud-safe", "calendarId": "work-a", "color": "#AABBCC"}]
+
+
+def test_marker_style_rejects_malformed_payload_and_stale_revision(tmp_path, monkeypatch):
+    module = _load_app(monkeypatch, tmp_path / "calendar-colors.json")
+    with TestClient(module.app) as client:
+        assert _patch_marker_style(client, 0, "invalid").status_code == 422
+        assert _patch_marker_style(client, 1, "bars").status_code == 409
+        assert _patch_marker_style(client, 0, "bars").status_code == 200
+
+
+def test_marker_style_atomic_failure_preserves_previous_state(tmp_path, monkeypatch):
+    from panel_agent.calendar_display_preferences import CalendarDisplayPreferencesStore
+
+    path = tmp_path / "calendar-colors.json"
+    store = CalendarDisplayPreferencesStore(str(path), writes_enabled=True)
+    first = store.write_marker_style(marker_style="bars", expected_revision=0)
+    before = store.path.read_bytes()
+    monkeypatch.setattr("panel_agent.calendar_display_preferences.os.replace", lambda *_args: (_ for _ in ()).throw(OSError("disk full")))
+    try:
+        store.write_marker_style(marker_style="dots", expected_revision=first.revision)
+    except OSError:
+        pass
+    assert store.path.read_bytes() == before
+    assert store.read().eventMarkerStyle == "bars"
 
 
 def test_calendar_colour_capability_is_an_effective_runtime_gate(tmp_path, monkeypatch):

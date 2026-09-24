@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import { getCalendarDisplayPreferences, patchCalendarDisplayPreference, CalendarDisplayPreferencesApiError } from "./calendarDisplayPreferencesApi";
+import { getCalendarDisplayPreferences, patchCalendarDisplayPreference, patchCalendarEventMarkerStyle, CalendarDisplayPreferencesApiError } from "./calendarDisplayPreferencesApi";
 
 describe("calendarDisplayPreferencesApi", () => {
   let globalFetchMock: ReturnType<typeof vi.fn>;
@@ -19,6 +19,7 @@ describe("calendarDisplayPreferencesApi", () => {
     updatedAt: "2024-01-01T00:00:00Z",
     available: true,
     writesEnabled: true,
+    eventMarkerStyle: "dots",
     warnings: [],
     overrides: [
       { providerId: "provider-1", calendarId: "cal-1", color: "#FF0000" }
@@ -52,6 +53,15 @@ describe("calendarDisplayPreferencesApi", () => {
 
     const result = await getCalendarDisplayPreferences();
     expect(result.overrides[0].color).toBe("#AABBCC");
+  });
+
+  test("legacy response defaults marker style to dots", async () => {
+    globalFetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => {
+      const legacy: Record<string, unknown> = { ...validResponse };
+      delete legacy.eventMarkerStyle;
+      return legacy;
+    } });
+    await expect(getCalendarDisplayPreferences()).resolves.toMatchObject({ eventMarkerStyle: "dots" });
   });
 
   test("network error -> expected bounded API error", async () => {
@@ -141,6 +151,20 @@ describe("calendarDisplayPreferencesApi", () => {
       method: "PATCH",
       body: JSON.stringify({ expectedRevision: 1, providerId: "p", calendarId: "c", color: "#112233" })
     }));
+  });
+
+  test("marker style PATCH uses the bounded route and revision body", async () => {
+    globalFetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => validResponse });
+    await patchCalendarEventMarkerStyle({ expectedRevision: 1, markerStyle: "bars" });
+    expect(globalFetchMock).toHaveBeenCalledWith("/api/v1/settings/calendar/event-marker-style", expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ expectedRevision: 1, markerStyle: "bars" })
+    }));
+  });
+
+  test("malformed marker style response is rejected", async () => {
+    globalFetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...validResponse, eventMarkerStyle: "lines" }) });
+    await expect(getCalendarDisplayPreferences()).rejects.toThrow(CalendarDisplayPreferencesApiError);
   });
 
   test("successful PATCH response is parsed through the same strict contract", async () => {

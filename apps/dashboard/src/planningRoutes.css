@@ -375,11 +375,8 @@
 .calendar-timed-list .calendar-event-row { border-left: 1px solid var(--border-soft); }
 .calendar-event-row--past { opacity: .7; }
 .calendar-event-row { border: 1px solid var(--border-soft); }
-.calendar-event-row[data-color-dots="false"],
-.calendar-timed-list .calendar-event-row[data-color-dots="false"] { border-left: 3px solid var(--calendar-event-accent, var(--accent)); }
 .calendar-event-row--running { background: var(--success-soft); }
 .calendar-event-row--overlap { box-shadow: inset 0 -3px 0 var(--warning); }
-.calendar-event-row__badges { display: grid; justify-items: end; gap: 5px; min-width: 86px; }
 .calendar-badge { max-width: 145px; font-size: 11px; }
 .calendar-badge--running { color: var(--success); border-color: var(--success); }
 .calendar-badge--overlap { color: var(--warning); border-color: var(--warning); background: var(--warning-soft); }
@@ -479,15 +476,17 @@
 .planning-route-page[data-planning-domain="calendar"] .v2-route-header { margin-bottom: 4px; }
 .planning-route-page[data-planning-domain="calendar"] .planning-source-strip { margin: 5px 0 8px; }
 .planning-calendar-create { min-height: 56px; }
-.calendar-event-row,
-.calendar-timed-list .calendar-event-row { grid-template-columns: 86px 10px minmax(0, 1fr); gap: 6px 8px; min-height: 60px; }
-.calendar-event-row[data-color-dots="false"] { grid-template-columns: 86px minmax(0, 1fr); }
+.calendar-event-row { grid-template-columns: 86px 10px minmax(0, 1fr) minmax(max-content, auto); gap: 6px 8px; min-height: 56px; }
+.calendar-timed-list .calendar-event-row { grid-template-columns: 86px 10px minmax(0, 1fr) minmax(max-content, auto); }
+.calendar-event-row[data-marker-style="bars"],
+.calendar-timed-list .calendar-event-row[data-marker-style="bars"] { grid-template-columns: 86px minmax(0, 1fr) minmax(max-content, auto); border-left: 3px solid var(--calendar-event-accent, var(--accent)); }
 .calendar-event-row__time { color: var(--text-secondary); font-size: 12px; font-weight: 740; font-variant-numeric: tabular-nums; line-height: 1.3; overflow-wrap: anywhere; }
 .calendar-event-row__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--calendar-event-accent, var(--accent)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent); }
-.calendar-event-row__badges { grid-column: 3; display: flex; flex-wrap: wrap; justify-self: start; min-width: 0; }
-.calendar-event-row[data-color-dots="false"] .calendar-event-row__badges { grid-column: 2; }
+.calendar-event-row__badges { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 2px; min-width: max-content; max-width: 145px; }
+.calendar-event-row__badges:empty { display: block; }
 .calendar-event-row .planning-route-row__main { gap: 3px; }
 .calendar-event-row .planning-route-row__source { font-size: 11px; }
+.calendar-event-row .calendar-badge { min-height: 24px; padding: 2px 7px; white-space: nowrap; }
 
 .calendar-detail__lead { display: grid; gap: 10px; }
 .calendar-detail__date { margin: 0; color: var(--text-secondary); font-size: 14px; text-transform: capitalize; }
@@ -559,8 +558,8 @@
 .calendar-editor__footer .planning-primary-button { min-height: 56px; }
 
 @media (max-width: 1000px) {
-  .calendar-event-row, .calendar-timed-list .calendar-event-row { grid-template-columns: 76px 10px minmax(0, 1fr); }
-  .calendar-event-row[data-color-dots="false"] { grid-template-columns: 76px minmax(0, 1fr); }
+  .calendar-event-row, .calendar-timed-list .calendar-event-row { grid-template-columns: 76px 10px minmax(0, 1fr) minmax(max-content, auto); }
+  .calendar-event-row[data-marker-style="bars"], .calendar-timed-list .calendar-event-row[data-marker-style="bars"] { grid-template-columns: 76px minmax(0, 1fr) minmax(max-content, auto); }
 }
 
 @media (max-width: 760px) {
@@ -593,7 +592,9 @@
 
 @media (max-width: 520px) {
   .planning-route-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .planning-priority, .reminder-status-badge, .calendar-event-row__badges { justify-self: start; }
-  .calendar-event-row__badges { display: flex; flex-wrap: wrap; justify-items: start; min-width: 0; }
+  .calendar-event-row, .calendar-timed-list .calendar-event-row { grid-template-columns: 76px 10px minmax(0, 1fr) minmax(max-content, auto); gap: 5px; }
+  .calendar-event-row[data-marker-style="bars"], .calendar-timed-list .calendar-event-row[data-marker-style="bars"] { grid-template-columns: 76px minmax(0, 1fr) minmax(max-content, auto); }
+  .planning-priority, .reminder-status-badge { justify-self: start; }
+  .calendar-event-row__badges { justify-self: end; min-width: 0; max-width: 110px; }
   .planning-detail-field { grid-template-columns: 1fr; gap: 4px; }
 }

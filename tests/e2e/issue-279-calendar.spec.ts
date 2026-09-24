@@ -5,7 +5,6 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 const enabled = process.env.VITE_V2_VISUAL_SHELL === "true"
   && process.env.B3_PLANNING_CALENDAR_ROUTE_ENABLED === "true"
   && process.env.VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED === "true";
-const dotsEnabled = process.env.VITE_CALENDAR_EVENT_COLOR_DOTS_ENABLED !== "false";
 test.skip(!enabled, "Run with the Calendar writer and V2 shell enabled.");
 
 const localId = "00000000-0000-4000-8000-000000002790";
@@ -30,11 +29,14 @@ function event(id: string, title: string, calendarId: string, startAtUtc: string
   };
 }
 
-async function fixture(page: Page) {
+async function fixture(page: Page, initialMarkerStyle: "dots" | "bars" = "dots") {
   let sourceStale = false;
+  let markerStyle = initialMarkerStyle;
+  let preferencesRevision = 0;
   const events = [
     event(localId, "Локальная встреча", "local", "2026-08-12T10:00:00Z", "2026-08-12T11:00:00Z"),
     event("00000000-0000-4000-8000-000000002791", "Рабочая встреча", "work", "2026-08-12T10:30:00Z", "2026-08-12T11:30:00Z"),
+    event("00000000-0000-4000-8000-000000002796", "Обычная встреча", "home", "2026-08-12T12:00:00Z", "2026-08-12T13:00:00Z"),
     event("00000000-0000-4000-8000-000000002792", "Весь день с семьёй", "home", null, null, true),
     event("00000000-0000-4000-8000-000000002793", "Очень длинное русское название рабочей встречи, которое должно оставаться читаемым в узкой повестке", "work", "2026-08-14T08:30:00Z", "2026-08-14T09:30:00Z"),
     event("00000000-0000-4000-8000-000000002794", "Домашние дела", "home", "2026-08-14T09:00:00Z", "2026-08-14T10:00:00Z"),
@@ -56,8 +58,29 @@ async function fixture(page: Page) {
   await page.route("**/api/v1/snapshot**", async (route) => {
     const response = await route.fetch();
     const snapshot = await response.json() as { planning?: Record<string, unknown> | null };
-    if (snapshot.planning) snapshot.planning.calendarMutationsEnabled = true;
+    if (snapshot.planning) {
+      snapshot.planning.calendarMutationsEnabled = true;
+      snapshot.planning.providerStatuses = sources;
+    }
     await route.fulfill({ response, body: JSON.stringify(snapshot) });
+  });
+  await page.route("**/api/v1/settings/calendar/display-colors", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: "calendar.display-preferences.v1", revision: preferencesRevision, updatedAt: "2026-08-12T09:00:00Z", overrides: [], eventMarkerStyle: markerStyle, available: true, warnings: [], writesEnabled: true }) });
+      return;
+    }
+    await route.fulfill({ status: 405, contentType: "application/json", body: JSON.stringify({ detail: "not_supported_in_calendar_fixture" }) });
+  });
+  await page.route("**/api/v1/settings/calendar/event-marker-style", async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    const body = route.request().postDataJSON() as { expectedRevision: number; markerStyle: "dots" | "bars" };
+    if (body.expectedRevision !== preferencesRevision) {
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ detail: "revision_conflict" }) });
+      return;
+    }
+    markerStyle = body.markerStyle;
+    preferencesRevision += 1;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: "calendar.display-preferences.v1", revision: preferencesRevision, updatedAt: "2026-08-12T09:00:00Z", overrides: [], eventMarkerStyle: markerStyle, available: true, warnings: [], writesEnabled: true }) });
   });
   await page.route(/\/api\/v1\/planning\/events(?:\/[^/?]+)?(?:\?.*)?$/, async (route) => {
     const request = route.request();
@@ -109,7 +132,6 @@ test.beforeEach(async ({ page }) => { await page.clock.install({ time: "2026-08-
 
 test("Calendar day/night visual review keeps the complete six-week month and agenda in 720px", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
-  test.skip(!dotsEnabled, "enabled-dot review invocation");
   const data = await fixture(page);
   expect(page.viewportSize()).toEqual({ width: 1280, height: 720 });
   await page.goto("/calendar?date=2026-08-12&theme=day");
@@ -122,6 +144,19 @@ test("Calendar day/night visual review keeps the complete six-week month and age
   const routeScroll = await page.locator(".v2-route-content").evaluate((element) => ({ scroll: element.scrollHeight, visible: element.clientHeight }));
   expect(routeScroll.scroll).toBeLessThanOrEqual(routeScroll.visible + 1);
   await noHorizontalOverflow(page);
+  const overlapRow = page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" });
+  const ordinaryRow = page.getByTestId("planning-calendar-event-row").filter({ hasText: "Обычная встреча" });
+  await expect(overlapRow).toHaveAttribute("data-overlap", "true");
+  const overlapGeometry = await overlapRow.boundingBox();
+  const ordinaryGeometry = await ordinaryRow.boundingBox();
+  const overlapMainGeometry = await overlapRow.locator(".planning-route-row__main").boundingBox();
+  const overlapStatusGeometry = await overlapRow.locator(".calendar-event-row__badges").boundingBox();
+  expect(overlapGeometry?.height).toBeGreaterThanOrEqual(48);
+  expect(ordinaryGeometry?.height).toBeGreaterThanOrEqual(48);
+  expect(overlapStatusGeometry?.x).toBeGreaterThanOrEqual((overlapMainGeometry?.x ?? 0) + (overlapMainGeometry?.width ?? 0) - 1);
+  expect(overlapStatusGeometry?.y).toBeLessThan((overlapMainGeometry?.y ?? 0) + (overlapMainGeometry?.height ?? 0));
+  expect((overlapStatusGeometry?.y ?? 0) + (overlapStatusGeometry?.height ?? 0)).toBeLessThanOrEqual((overlapGeometry?.y ?? 0) + (overlapGeometry?.height ?? 0));
+  await capture(page, testInfo, "day-compact-overlap.png");
   await capture(page, testInfo, "day-normal.png");
 
   await page.locator('[data-testid="planning-calendar-month-cell"][data-date="2026-08-14"]').tap();
@@ -162,21 +197,34 @@ test("Calendar day/night visual review keeps the complete six-week month and age
   await capture(page, testInfo, "night-external-read-only.png");
 });
 
-test("dot flag removes markers without a layout gap", async ({ page }, testInfo) => {
-  test.skip(dotsEnabled, "disabled-dot review invocation");
-  await fixture(page);
+test("Calendar bars mode keeps the selected-day agenda compact and removes dots", async ({ page }, testInfo) => {
+  await fixture(page, "bars");
   await page.goto("/calendar?date=2026-08-12&theme=day");
   const rows = page.getByTestId("planning-calendar-event-row");
-  await expect(rows).toHaveCount(2);
+  await expect(rows).toHaveCount(3);
   await expect(page.getByTestId("planning-calendar-event-color-dot")).toHaveCount(0);
-  await expect(rows.first()).toHaveAttribute("data-color-dots", "false");
+  await expect(rows.first()).toHaveAttribute("data-marker-style", "bars");
+  await expect(rows.first()).toHaveCSS("border-left-width", "3px");
   await noHorizontalOverflow(page);
-  await capture(page, testInfo, "day-dots-disabled.png");
+  await capture(page, testInfo, "day-bars-mode.png");
+});
+
+test("Calendar marker selector persists bars and is visible in Settings", async ({ page }, testInfo) => {
+  await fixture(page);
+  await page.goto("/settings?theme=night");
+  await page.getByTestId("settings-summary-calendars").tap();
+  const selector = page.getByTestId("settings-calendar-marker-style");
+  await expect(selector).toContainText("Отображение событий");
+  await expect(selector.getByRole("button", { name: "Точки" })).toHaveAttribute("aria-pressed", "true");
+  await capture(page, testInfo, "settings-calendar-marker-selector.png");
+  await selector.getByRole("button", { name: "Полоски" }).tap();
+  await expect(selector.getByRole("button", { name: "Полоски" })).toHaveAttribute("aria-pressed", "true");
+  await page.goto("/calendar?date=2026-08-12&theme=night");
+  await expect(page.getByTestId("planning-calendar-event-row").first()).toHaveAttribute("data-marker-style", "bars");
 });
 
 test("touch editor writes LOCAL-ONLY create, edit and delete with canonical readback", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
-  test.skip(!dotsEnabled, "enabled-dot interaction invocation");
   const data = await fixture(page);
   await page.goto("/calendar?date=2026-08-12&theme=day");
   await page.getByRole("button", { name: "Создать событие" }).tap();
@@ -231,7 +279,6 @@ test("touch editor writes LOCAL-ONLY create, edit and delete with canonical read
 
 test("reduced motion, backdrop safety and compact visible viewport keep controls reachable", async ({ page }) => {
   test.setTimeout(60_000);
-  test.skip(!dotsEnabled, "enabled-dot interaction invocation");
   await fixture(page);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/calendar?date=2026-08-12&theme=night");

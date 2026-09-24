@@ -28,6 +28,7 @@ from .contracts import (
     CoffeeTimingPatch,
     CoffeeTimingSettings,
     CalendarDisplayColorPatch,
+    CalendarEventMarkerStylePatch,
     CalendarDisplayPreferencesResponse,
     DeviceVisibilityPatch,
     DeviceVisibilitySettingsResponse,
@@ -1280,6 +1281,29 @@ def patch_calendar_display_preferences(
         raise HTTPException(status_code=409, detail="revision_conflict")
     except CalendarDisplayPreferencesError as exc:
         raise HTTPException(status_code=404 if str(exc) == "calendar_identity_unknown" else 422, detail=str(exc))
+    response.headers["Cache-Control"] = "no-store"
+    return saved.model_copy(update={"writesEnabled": _calendar_display_write_allowed()})
+
+
+@app.patch(
+    "/api/v1/settings/calendar/event-marker-style",
+    response_model=CalendarDisplayPreferencesResponse,
+)
+def patch_calendar_event_marker_style(
+    patch: CalendarEventMarkerStylePatch,
+    response: Response,
+) -> CalendarDisplayPreferencesResponse:
+    if not _calendar_display_write_allowed():
+        raise HTTPException(status_code=403, detail="calendar_display_preferences_write_disabled")
+    try:
+        saved = calendar_display_preferences_store.write_marker_style(
+            marker_style=patch.markerStyle,
+            expected_revision=patch.expectedRevision,
+        )
+    except CalendarDisplayPreferencesConflict:
+        raise HTTPException(status_code=409, detail="revision_conflict")
+    except CalendarDisplayPreferencesError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     response.headers["Cache-Control"] = "no-store"
     return saved.model_copy(update={"writesEnabled": _calendar_display_write_allowed()})
 

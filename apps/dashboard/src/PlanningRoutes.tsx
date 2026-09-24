@@ -63,7 +63,6 @@ import {
   planningCalendarRouteEnabled,
   planningReminderMutationsEnabled,
   planningCalendarMutationsEnabled,
-  calendarEventColorDotsEnabled,
   planningRemindersRouteEnabled,
   planningTaskMutationsEnabled,
   planningTasksRouteEnabled
@@ -932,7 +931,7 @@ function calendarDetailTimeLabel(event: PlanningCalendarEvent): string {
   return `${start.time} — ${start.date === end.date ? "" : `${end.date} `}${end.time}`;
 }
 
-function CalendarEventRow({ event, overlap, now, onOpen, sourceStale, accentColor }: { event: PlanningCalendarEvent; overlap: boolean; now: Date; onOpen: () => void; sourceStale: boolean; accentColor: string }) {
+function CalendarEventRow({ event, overlap, now, onOpen, sourceStale, accentColor, markerStyle }: { event: PlanningCalendarEvent; overlap: boolean; now: Date; onOpen: () => void; sourceStale: boolean; accentColor: string; markerStyle: "dots" | "bars" }) {
   const state = eventTemporalState(event, now);
   const identity = calendarIdentityForEvent(event);
   return (
@@ -941,13 +940,13 @@ function CalendarEventRow({ event, overlap, now, onOpen, sourceStale, accentColo
       className={`planning-route-row calendar-event-row calendar-event-row--${state}${overlap ? " calendar-event-row--overlap" : ""}`}
       style={{ "--calendar-event-accent": accentColor } as CSSProperties}
       data-testid="planning-calendar-event-row"
-      data-color-dots={calendarEventColorDotsEnabled ? "true" : "false"}
+      data-marker-style={markerStyle}
       data-sync-state={event.syncState}
       data-overlap={overlap ? "true" : "false"}
       onClick={onOpen}
     >
       <span className="calendar-event-row__time">{calendarRowTimeLabel(event)}</span>
-      {calendarEventColorDotsEnabled && <span className="calendar-event-row__dot" data-testid="planning-calendar-event-color-dot" data-color={accentColor} aria-hidden="true" />}
+      {markerStyle === "dots" && <span className="calendar-event-row__dot" data-testid="planning-calendar-event-color-dot" data-color={accentColor} aria-hidden="true" />}
       <span className="planning-route-row__main">
         <strong>{event.title}</strong>
         <span className="planning-route-row__source planning-calendar-state-line">
@@ -1127,6 +1126,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const { status: accessStatus, available: accessAvailable, ensureCapability } = useAccess();
   const { guardMutation } = useInteractionLock();
   const { preferences: calendarDisplayPreferences } = useCalendarDisplayPreferences();
+  const calendarEventMarkerStyle = calendarDisplayPreferences?.eventMarkerStyle ?? "dots";
   const { confirmAction } = useActionConfirmation();
   const deletePendingRef = useRef(false);
   const calendarRefreshStartedRef = useRef(false);
@@ -1582,14 +1582,14 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
                       <p className="calendar-band__label">Весь день</p>
                       {selectedDayEvents.filter((event) => event.allDay).map((event) => {
                         const source = providerSourceForEvent(event, sources);
-                        return <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} accentColor={calendarEventColor(event, sources, calendarDisplayPreferences?.overrides ?? [])} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
+                        return <CalendarEventRow key={event.id} event={event} overlap={false} now={referenceTime} accentColor={calendarEventColor(event, sources, calendarDisplayPreferences?.overrides ?? [])} markerStyle={calendarEventMarkerStyle} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
                       })}
                     </div>
                   )}
                   <div className="calendar-timed-list">
                     {selectedDayEvents.filter((event) => !event.allDay).map((event) => {
                       const source = providerSourceForEvent(event, sources);
-                      return <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} accentColor={calendarEventColor(event, sources, calendarDisplayPreferences?.overrides ?? [])} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
+                      return <CalendarEventRow key={event.id} event={event} overlap={overlapIds.has(event.id)} now={referenceTime} accentColor={calendarEventColor(event, sources, calendarDisplayPreferences?.overrides ?? [])} markerStyle={calendarEventMarkerStyle} sourceStale={providerSourceNeedsStaleCue(source)} onOpen={() => setSelectedEvent(event)} />;
                     })}
                   </div>
                 </div>
