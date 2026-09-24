@@ -324,7 +324,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await unlockTouchLockIfNeeded(page);
     await page.getByRole("button", { name: "Создать событие" }).tap();
     const sheet = page.getByTestId("planning-calendar-mutation");
-    await sheet.locator("textarea").fill("весь день отключённое событие");
+    await sheet.getByTestId("calendar-editor-title").fill("Отключённое событие");
     await sheet.getByRole("button", { name: "Сохранить" }).tap();
     await expect(page.getByTestId("global-notice-stack").getByText("Изменения календаря отключены").first()).toBeVisible();
     await expect(page.getByTestId("global-notice-stack").getByText("Событие создано")).toHaveCount(0);
@@ -342,7 +342,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).tap();
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" }).tap();
     const sheet = page.getByTestId("planning-calendar-mutation");
-    await sheet.locator("textarea").fill("весь день исчезнувшее событие");
+    await sheet.getByTestId("calendar-editor-title").fill("Исчезнувшее событие");
     await sheet.getByRole("button", { name: "Сохранить" }).tap();
     await expect(page.getByTestId("global-notice-stack").getByText("Событие больше не найдено").first()).toBeVisible();
     await expect(page.getByTestId("planning-calendar-detail")).toHaveCount(0);
@@ -376,10 +376,15 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).tap();
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" }).tap();
     const sheet = page.getByTestId("planning-calendar-mutation");
-    await sheet.locator("textarea").fill("весь день устаревшее изменение");
+    await sheet.getByTestId("calendar-editor-title").fill("Устаревшее изменение");
     await sheet.getByRole("button", { name: "Сохранить" }).tap();
     await expect(page.getByTestId("global-notice-stack").getByText("Событие изменилось").first()).toBeVisible();
     await expect(page.getByTestId("global-notice-stack").getByText("Событие изменено")).toHaveCount(0);
+    await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    await expect(sheet.getByRole("button", { name: "Перечитать событие" })).toBeVisible();
+    expect(fixture.requests.filter((request) => request.method === "PATCH")).toHaveLength(1);
+    await sheet.getByRole("button", { name: "Перечитать событие" }).tap();
+    await expect(page.getByTestId("planning-calendar-mutation").getByTestId("calendar-editor-title")).toHaveValue("Локальная встреча");
     expect(fixture.requests.filter((request) => request.method === "PATCH")).toHaveLength(1);
   });
 
@@ -391,14 +396,15 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await unlockTouchLockIfNeeded(page);
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Внешняя встреча" }).tap();
     const externalDetail = page.getByTestId("planning-calendar-detail");
-    await expect(externalDetail).toContainText("Внешний календарь · только просмотр");
+    await expect(externalDetail).toContainText("Только просмотр");
     await expect(externalDetail.getByRole("button", { name: "Изменить" })).toHaveCount(0);
     await expect(externalDetail.getByRole("button", { name: "Удалить" })).toHaveCount(0);
     await externalDetail.getByRole("button", { name: "Закрыть" }).tap();
     expect(fixture.requests).toHaveLength(0);
     await page.getByRole("button", { name: "Создать событие" }).tap();
     const sheet = page.getByTestId("planning-calendar-mutation");
-    await sheet.locator("textarea").fill("весь день новая встреча");
+    await sheet.getByTestId("calendar-editor-title").fill("Новая встреча");
+    await sheet.getByRole("switch", { name: "Весь день" }).tap();
     await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeEnabled();
     await sheet.getByRole("button", { name: "Сохранить" }).tap();
     await expect.poll(() => fixture.requests.filter((request) => request.method === "POST").length).toBe(1);
@@ -416,7 +422,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.goto("/calendar");
     await expect(page.getByRole("button", { name: "Создать событие" })).toHaveCount(0);
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Внешняя встреча" }).tap();
-    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Внешний календарь · только просмотр");
+    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Только просмотр");
     await expect(page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" })).toHaveCount(0);
     await expect(page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Удалить" })).toHaveCount(0);
     await capture(page, testInfo, "b4-calendar-read-only.png");
@@ -432,7 +438,8 @@ test.describe("B4.3 local-only Calendar mutations", () => {
 
     await page.getByRole("button", { name: "Создать событие" }).tap();
     const sheet = page.getByTestId("planning-calendar-mutation");
-    await sheet.locator("textarea").fill("завтра вечером встреча");
+    await sheet.locator("details summary").tap();
+    await sheet.locator("#planning-calendar-free-text").fill("завтра вечером встреча");
     await expect(page.getByTestId("planning-calendar-ambiguities")).toBeVisible();
     await expect(sheet.getByRole("button", { name: "Сохранить" })).toBeDisabled();
     await capture(page, testInfo, "b4-calendar-ambiguous.png");
@@ -441,28 +448,34 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByRole("button", { name: "Создать событие" }).tap();
     const extraAmbiguitySheet = page.getByTestId("planning-calendar-mutation");
     const extraAmbiguitySave = extraAmbiguitySheet.getByRole("button", { name: "Сохранить" });
-    await extraAmbiguitySheet.locator("textarea").fill("завтра в 18:30 встреча с неоднозначной датой");
+    await extraAmbiguitySheet.locator("details summary").tap();
+    await extraAmbiguitySheet.locator("#planning-calendar-free-text").fill("завтра в 18:30 встреча с неоднозначной датой");
     await expect(page.getByTestId("planning-calendar-proposal")).toContainText("Предлагаемый конец");
     await expect(extraAmbiguitySave).toBeDisabled();
     await page.getByTestId("planning-calendar-proposal").getByRole("button", { name: "Принять 60 минут" }).tap();
     await expect(extraAmbiguitySave).toBeDisabled();
+    await expect(extraAmbiguitySheet.getByRole("button", { name: "Перенести в поля" })).toBeDisabled();
     expect(fixture.requests.filter((request) => request.method === "POST")).toHaveLength(0);
     await extraAmbiguitySheet.getByRole("button", { name: "Отмена" }).tap();
 
     await page.getByRole("button", { name: "Создать событие" }).tap();
-    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("завтра в 18:30 встреча");
+    await page.getByTestId("planning-calendar-mutation").locator("details summary").tap();
+    await page.getByTestId("planning-calendar-mutation").locator("#planning-calendar-free-text").fill("завтра в 18:30 встреча");
     await expect(page.getByTestId("planning-calendar-proposal")).toContainText("Предлагаемый конец: 19:30");
     await capture(page, testInfo, "b4-calendar-start-only-proposal.png");
     expect(fixture.requests.filter((request) => request.method === "POST")).toHaveLength(0);
     await page.getByTestId("planning-calendar-proposal").getByRole("button", { name: "Принять 60 минут" }).tap();
-    await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeEnabled();
-    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("завтра вечером встреча");
+    await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Перенести в поля" })).toBeEnabled();
+    await page.getByTestId("planning-calendar-mutation").locator("#planning-calendar-free-text").fill("завтра вечером встреча");
     await expect(page.getByTestId("planning-calendar-ambiguities")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeDisabled();
-    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("завтра в 18:30 встреча");
+    await page.getByTestId("planning-calendar-mutation").locator("#planning-calendar-free-text").fill("завтра в 18:30 встреча");
     await expect(page.getByTestId("planning-calendar-proposal")).toBeVisible();
     await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeDisabled();
     await page.getByTestId("planning-calendar-proposal").getByRole("button", { name: "Принять 60 минут" }).tap();
+    await page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Перенести в поля" }).tap();
+    await expect(page.getByTestId("calendar-editor-title")).toHaveValue("Новая встреча");
+    await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeEnabled();
     await page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" }).tap();
     const createRequests = () => fixture.requests.filter((request) => request.method === "POST");
     await expect.poll(() => createRequests().length).toBe(2);
@@ -477,7 +490,12 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
 
     await page.getByRole("button", { name: "Создать событие" }).tap();
-    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("весь день день без времени");
+    await page.getByTestId("calendar-editor-title").fill("День без времени");
+    await page.getByTestId("planning-calendar-mutation").getByRole("switch", { name: "Весь день" }).tap();
+    await page.getByTestId("calendar-editor-start-date").locator('input[type="date"]').fill("2026-08-14");
+    await page.getByTestId("calendar-editor-end-date").locator('input[type="date"]').fill("2026-08-14");
+    await page.getByRole("textbox", { name: "Заметки необязательно" }).fill("Сохранить контекст");
+    await page.getByRole("textbox", { name: "Место необязательно" }).fill("Переговорная");
     await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeEnabled();
     await page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" }).tap();
     await capture(page, testInfo, "b4-calendar-local-create-all-day.png");
@@ -485,7 +503,7 @@ test.describe("B4.3 local-only Calendar mutations", () => {
 
     await page.getByRole("button", { name: "Сегодня" }).tap();
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "Внешняя встреча" }).tap();
-    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Внешний календарь · только просмотр");
+    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Только просмотр");
     await capture(page, testInfo, "b4-calendar-external-read-only.png");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
 
@@ -493,7 +511,8 @@ test.describe("B4.3 local-only Calendar mutations", () => {
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "День без времени" }).tap();
     await expect(page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" })).toBeVisible();
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Изменить" }).tap();
-    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("завтра в 18:30–19:30 новая встреча");
+    await page.getByTestId("planning-calendar-mutation").getByTestId("calendar-editor-title").fill("Новая встреча");
+    await page.getByTestId("planning-calendar-mutation").getByRole("switch", { name: "Весь день" }).tap();
     await expect(page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" })).toBeEnabled();
     await page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" }).tap();
     await expect.poll(() => fixture.requests.filter((request) => request.method === "PATCH").length).toBe(1);

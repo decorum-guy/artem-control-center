@@ -7,7 +7,7 @@ import type {
   PlanningTask
 } from "@artem/contracts";
 import type { CalendarRange } from "./calendarRange";
-import { calendarDayRangeUtc, DEFAULT_PLANNING_TIME_ZONE, localDateForInstant } from "./calendarRange";
+import { addCalendarDays, calendarDayRangeUtc, DEFAULT_PLANNING_TIME_ZONE, localDateForInstant } from "./calendarRange";
 import type { PlanningCalendarSource } from "@artem/contracts";
 import { calendarEventDisplayColor } from "./calendarDisplayColors";
 
@@ -85,9 +85,11 @@ export function formatReminderExactDue(reminder: PlanningReminder): string {
 
 export function formatEventRange(event: PlanningCalendarEvent, includeTimezone = false): string {
   if (event.allDay) {
-    return event.startDate && event.endDateExclusive
-      ? `${formatDateOnly(event.startDate)} — ${formatDateOnly(event.endDateExclusive)}`
-      : "Весь день";
+    if (!event.startDate || !event.endDateExclusive) return "Весь день";
+    const lastDay = addCalendarDays(event.endDateExclusive, -1);
+    return lastDay === event.startDate
+      ? formatDateOnly(event.startDate)
+      : `${formatDateOnly(event.startDate)} — ${formatDateOnly(lastDay)}`;
   }
   if (!event.startAtUtc || !event.endAtUtc) return "Время не указано";
   const range = `${formatDateTime(event.startAtUtc, event.timezone)} — ${formatClock(event.endAtUtc, event.timezone)}`;

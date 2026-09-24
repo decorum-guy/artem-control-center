@@ -66,7 +66,7 @@ test.describe("PR9 Planning visual/module foundation", () => {
     await expect(page.getByTestId("planning-calendar-all-day-band")).not.toContainText("00:00");
     const overlap = page.getByTestId("planning-calendar-event-row").filter({ hasText: "Первая пересекающаяся встреча" });
     await expect(overlap).toHaveAttribute("data-overlap", "true");
-    await expect(overlap).toContainText("Пересекается по времени");
+    await expect(overlap).toContainText("Пересекается");
     await expect(overlap).not.toContainText("Синхронизация: Синхронизировано");
     await expect(overlap).not.toContainText("Europe/Moscow");
 

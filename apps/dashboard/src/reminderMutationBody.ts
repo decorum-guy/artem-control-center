@@ -37,9 +37,13 @@ function zonedParts(instant: Date, timezone: string): ReminderLocalDateTime | nu
 }
 
 export function reminderLocalDateTime(reminder: PlanningReminder): ReminderLocalDateTime {
-  return zonedParts(new Date(reminder.dueAtUtc), reminder.timezone) ?? {
-    date: reminder.dueAtUtc.slice(0, 10),
-    time: reminder.dueAtUtc.slice(11, 16)
+  return localDateTimeForUtc(reminder.dueAtUtc, reminder.timezone);
+}
+
+export function localDateTimeForUtc(utc: string, timezone: string): ReminderLocalDateTime {
+  return zonedParts(new Date(utc), timezone) ?? {
+    date: utc.slice(0, 10),
+    time: utc.slice(11, 16)
   };
 }
 

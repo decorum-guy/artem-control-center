@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode, type RefObject } from "react";
 import type { InterfaceCopyPageKey, PlanningCalendarSource, PlanningSourceStatus, PlanningSnapshot } from "@artem/contracts";
 import type { PlanningReadEnvelope, PlanningReadError } from "./planningReadClient";
 import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
@@ -91,7 +91,7 @@ export function PlanningRouteFrame({
       data-planning-module={module.id}
       data-planning-domain={module.domain}
     >
-      <RouteHeader eyebrow={eyebrow} title={copy(pageTitleField(pageKey))} description={copy(pageSubtitleField(pageKey))} />
+      <RouteHeader eyebrow={eyebrow} title={copy(pageTitleField(pageKey))} description={copy(pageSubtitleField(pageKey))} variant={module.domain === "calendar" ? "compact" : "default"} />
       <div className="planning-route-heading-row">
         <div className={`planning-route-controls planning-route-controls--primary${module.domain === "calendar" ? " planning-route-controls--calendar" : ""}`}>{controls}</div>
         {futureAction && <div className="planning-future-action-slot" data-testid="planning-future-action-slot">{futureAction}</div>}
@@ -317,6 +317,8 @@ export function PlanningSheet({
   description,
   onClose,
   children,
+  footer,
+  initialFocusRef,
   testId = "planning-sheet"
 }: {
   title: string;
@@ -324,6 +326,8 @@ export function PlanningSheet({
   description?: string;
   onClose: () => void;
   children: ReactNode;
+  footer?: ReactNode;
+  initialFocusRef?: RefObject<HTMLElement | null>;
   testId?: string;
 }) {
   return (
@@ -332,6 +336,8 @@ export function PlanningSheet({
       eyebrow={eyebrow}
       description={description}
       onClose={onClose}
+      footer={footer}
+      initialFocusRef={initialFocusRef}
       testId={testId}
     >
       {children}
