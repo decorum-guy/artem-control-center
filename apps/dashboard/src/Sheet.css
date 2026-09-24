@@ -137,6 +137,25 @@ body.cc-overlay-open {
   overscroll-behavior: none;
 }
 
+@keyframes cc-overlay-backdrop-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes cc-overlay-surface-enter {
+  from { opacity: .65; }
+  to { opacity: 1; }
+}
+
+/* Opacity preserves the overlay's hit area, focus target and visual-viewport geometry. */
+html[data-motion="full"] .cc-overlay-backdrop {
+  animation: cc-overlay-backdrop-enter var(--cc-motion-hover) ease-out both;
+}
+
+html[data-motion="full"] .cc-overlay {
+  animation: cc-overlay-surface-enter var(--cc-motion-sheet) var(--cc-motion-ease) both;
+}
+
 @media (max-height: 420px) {
   .cc-overlay__header {
     height: 60px;
@@ -184,6 +203,7 @@ body.cc-overlay-open {
 @media (prefers-reduced-motion: reduce) {
   .cc-overlay,
   .cc-overlay-backdrop {
+    animation: none !important;
     transition: none;
   }
 }

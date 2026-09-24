@@ -413,7 +413,7 @@ function V2ProductShell({
             <InteractionLockStatus />
           </div>
         </header>
-        <div className="route-content v2-route-content">{children}</div>
+        <div key={route} className="route-content v2-route-content" data-route-transition="enter">{children}</div>
       </main>
     </div>
   );

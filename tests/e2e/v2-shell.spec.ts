@@ -166,7 +166,7 @@ test.describe("Control Center V2 shell", () => {
       const style = getComputedStyle(element);
       return { size: style.fontSize, line: style.lineHeight, weight: style.fontWeight, numerals: style.fontVariantNumeric };
     });
-    expect(typography).toEqual({ size: "28px", line: "32px", weight: "700", numerals: "tabular-nums" });
+    expect(typography).toEqual({ size: "36px", line: "40px", weight: "720", numerals: "tabular-nums" });
     await expect(page.locator(overviewTitleSelector)).toHaveCSS("font-size", "26px");
     await expect(page.locator(".app")).toHaveCSS("font-family", /Segoe UI Variable Text/);
   });

@@ -164,6 +164,23 @@ jobs:
           path: artifacts/v2-shell-review
           if-no-files-found: error
 
+      - name: Run #279 Slice 1 foundation and visual review gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          ISSUE_279_ARTIFACT_DIR: artifacts/issue-279-foundation-review
+        run: npm run test:e2e -- tests/e2e/issue-279-foundation.spec.ts
+
+      - name: Upload #279 Slice 1 review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-279-foundation-review-${{ github.sha }}
+          path: artifacts/issue-279-foundation-review
+          if-no-files-found: error
+
       - name: Run focused V2 overlay gate
         if: runner.os == 'Linux'
         env:

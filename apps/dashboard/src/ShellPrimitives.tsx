@@ -143,10 +143,11 @@ export function OperationalStatusSummary({
 export function WorkZone({
   children,
   className,
+  surface = "working",
   ...props
-}: HTMLAttributes<HTMLElement> & { children: ReactNode }) {
+}: HTMLAttributes<HTMLElement> & { children: ReactNode; surface?: "working" | "list" }) {
   return (
-    <section {...props} className={["v2-work-zone", className].filter(Boolean).join(" ")}>
+    <section {...props} className={["v2-work-zone", className].filter(Boolean).join(" ")} data-surface={surface}>
       {children}
     </section>
   );
