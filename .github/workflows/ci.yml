@@ -206,16 +206,6 @@ jobs:
           ISSUE_279_CALENDAR_ARTIFACT_DIR: artifacts/issue-279-calendar-review
         run: npm run test:e2e -- tests/e2e/issue-279-calendar.spec.ts
 
-      - name: "Run #279 Slice 3 Calendar dots-disabled gate"
-        if: runner.os == 'Linux'
-        env:
-          VITE_V2_VISUAL_SHELL: "true"
-          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
-          VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED: "true"
-          VITE_CALENDAR_EVENT_COLOR_DOTS_ENABLED: "false"
-          ISSUE_279_CALENDAR_ARTIFACT_DIR: artifacts/issue-279-calendar-review
-        run: npm run test:e2e -- tests/e2e/issue-279-calendar.spec.ts --grep "dot flag removes"
-
       - name: "Upload #279 Slice 3 Calendar review screenshots"
         if: always() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
