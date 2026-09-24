@@ -258,6 +258,8 @@
 @keyframes overview-rog-spin { to { transform: rotate(360deg); } }
 
 .coffee-panel--overview {
+  --cc-coffee-active-edge: rgb(229 182 111 / 20%);
+  --cc-coffee-active-halo: rgb(229 166 83 / 21%);
   grid-template-columns: minmax(0, 1.25fr) minmax(112px, .75fr);
   gap: var(--cc-space-4);
   height: 100%;
@@ -265,7 +267,27 @@
   border: 1px solid var(--cc-border);
   border-radius: var(--cc-radius-zone);
   background: var(--cc-surface-1);
-  transition: border-color 220ms ease, background-color 260ms ease;
+  transition: border-color var(--cc-motion-reconcile) ease, background-color var(--cc-motion-reconcile) ease, box-shadow var(--cc-motion-reconcile) ease;
+}
+
+html[data-theme="day"] .coffee-panel--overview {
+  --cc-coffee-active-edge: rgb(139 91 36 / 13%);
+  --cc-coffee-active-halo: rgb(155 102 43 / 12%);
+}
+
+.coffee-panel--overview[data-coffee-active="true"] {
+  z-index: 1;
+  box-shadow: 0 0 0 1px var(--cc-coffee-active-edge), 0 0 20px 3px var(--cc-coffee-active-halo);
+}
+
+.coffee-panel--overview.coffee-panel--running_too_long[data-coffee-active="true"] {
+  --cc-coffee-active-edge: var(--cc-warning-border);
+  --cc-coffee-active-halo: rgb(225 170 99 / 12%);
+  border-left: 3px solid var(--cc-warning);
+}
+
+html[data-theme="day"] .coffee-panel--overview.coffee-panel--running_too_long[data-coffee-active="true"] {
+  --cc-coffee-active-halo: rgb(142 91 30 / 9%);
 }
 
 .coffee-panel--overview[data-overview-copy-density="spacious"] {
@@ -288,8 +310,8 @@
 .coffee-panel--overview .coffee-panel__heading h2 {
   margin-top: 1px;
   color: var(--cc-text);
-  font-size: var(--cc-type-page-title-size);
-  line-height: var(--cc-type-page-title-line);
+  font-size: var(--cc-type-section-title-size);
+  line-height: var(--cc-type-section-title-line);
 }
 
 .overview-v2-grid-item > .planning-card .planning-card__header .section-kicker {
@@ -503,23 +525,6 @@
   --cc-overview-coffee-state-scale: 1;
 }
 
-.overview-v2-grid-item > .coffee-panel--overview::before {
-  position: absolute;
-  z-index: 1;
-  inset: 14px auto 14px -1px;
-  width: 2px;
-  border-radius: 0 2px 2px 0;
-  background: var(--cc-accent);
-  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--cc-accent) 36%, transparent);
-  content: "";
-  opacity: .7;
-  pointer-events: none;
-}
-.overview-v2-grid-item > .coffee-panel--overview.coffee-panel--ready::before {
-  background: var(--success);
-  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--success) 36%, transparent);
-}
-
 .coffee-panel--overview[data-overview-size-variant="compact"] {
   grid-template-columns: minmax(0, 1fr) clamp(132px, 34%, 148px);
 }
@@ -621,6 +626,7 @@
   min-height: 100%;
   border: 0;
   border-radius: inherit;
+  background: transparent;
 }
 
 .overview-home-widget__cells {
@@ -703,26 +709,22 @@
 }
 
 .overview-health-widget {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 2px;
   padding: 8px 16px;
 }
 
 .overview-health-widget--attention {
-  border-color: var(--cc-warning-border);
-  background: var(--cc-warning-bg);
+  border-color: color-mix(in srgb, var(--cc-warning-border) 42%, var(--cc-border));
 }
 
 .overview-health-widget__aggregate {
   min-width: 0;
   overflow: hidden;
-}
-
-.overview-health-widget__aggregate .v2-status-text {
-  overflow: hidden;
-  font-size: var(--cc-type-body-size);
-  line-height: var(--cc-type-body-line);
+  color: var(--cc-text-muted);
+  font-size: var(--cc-type-metadata-size);
+  line-height: var(--cc-type-metadata-line);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -737,10 +739,17 @@
 }
 
 .overview-health-widget__incident {
+  padding-left: 8px;
   overflow: hidden;
+  border-left: 2px solid var(--cc-warning);
+  color: var(--cc-text);
+  font-size: var(--cc-type-body-size);
+  line-height: var(--cc-type-body-line);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.overview-health-widget__incident strong { font-weight: 700; }
 
 .overview-health-widget__footer {
   display: flex;
@@ -748,6 +757,7 @@
   justify-content: space-between;
   gap: 8px;
   min-height: 48px;
+  margin-top: auto;
 }
 
 .overview-health-widget__footer > span:first-child {
@@ -771,10 +781,10 @@
   width: 156px;
   min-height: 48px;
   padding: 6px 10px;
-  border-color: var(--cc-warning-border);
+  border-color: var(--cc-border-strong);
   border-radius: var(--cc-radius-control);
   color: var(--cc-text);
-  background: var(--cc-warning-bg);
+  background: var(--cc-interactive);
   font-size: var(--cc-type-control-size);
   font-weight: var(--cc-type-control-weight);
 }
@@ -791,6 +801,36 @@
 .overview-v2-grid-item > .planning-card .planning-row__meta time {
   font-size: var(--cc-type-metadata-size);
   line-height: var(--cc-type-metadata-line);
+}
+
+.overview-v2-grid-item > .planning-card .planning-card__header h2 {
+  margin-top: 0;
+  font-size: var(--cc-type-section-title-size);
+  line-height: var(--cc-type-section-title-line);
+}
+
+.overview-v2-grid-item > .planning-card .planning-row__label {
+  color: var(--cc-text-muted);
+  font-size: 12px;
+  letter-spacing: .035em;
+}
+
+.overview-v2-grid-item > .planning-card .planning-row__title {
+  font-size: var(--cc-type-body-size);
+  line-height: 18px;
+  font-weight: 620;
+}
+
+.overview-v2-grid-item > .planning-card .planning-row--next .planning-row__title {
+  font-size: 16px;
+  line-height: 18px;
+  font-weight: 720;
+}
+
+.overview-v2-grid-item > .planning-card .planning-row__source-marker {
+  left: 5px;
+  width: 4px;
+  border-radius: 3px;
 }
 
 .overview-v2-grid-item > .planning-card.planning-card--compact .planning-card__header {
@@ -868,6 +908,19 @@
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .coffee-panel--overview .coffee-panel__state strong {
   font-size: 20px;
   line-height: 24px;
+}
+
+.overview-v2-grid-shell[data-grid-profile="compact-4"] .climate-control--overview .climate-control__controls {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+
+.overview-v2-grid-shell[data-grid-profile="compact-4"] .climate-control--overview .climate-control__temperature-control {
+  grid-column: 2;
+}
+
+.overview-v2-grid-shell[data-grid-profile="compact-4"] .climate-control--overview .climate-control__mode-label,
+.overview-v2-grid-shell[data-grid-profile="compact-4"] .climate-control--overview .climate-control__fan-label {
+  grid-column: 1 / -1;
 }
 
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-home-widget {

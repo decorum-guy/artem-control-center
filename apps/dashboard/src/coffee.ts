@@ -1,5 +1,10 @@
 import type { CoffeeData, CoffeeStage } from "@artem/contracts";
 
+/** A lit Overview contour means the physical switch is confirmed live ON. */
+export function coffeeActiveGlowEligible(machine: CoffeeData["machine"]): boolean {
+  return machine.available === true && machine.stale !== true && machine.state === "on";
+}
+
 const labels: Record<CoffeeStage, string> = {
   off: "Выключена",
   turning_on: "Включаем",

@@ -33,6 +33,23 @@ function overviewMarkup(planning: PlanningSnapshot, sizeVariant: "compact" | "st
 }
 
 describe("Planning Overview domain composition", () => {
+  it("keeps dense overdue tasks distinct with one count label and a clear next row", () => {
+    const fixture = planningFixtures.exactlyTwentyOverdueTasks;
+    const snapshot: PlanningSnapshot = {
+      ...fixture,
+      reminders: { ...fixture.reminders, upcoming: [] },
+      calendar: { ...fixture.calendar, today: [], upcoming: [] }
+    };
+    const markup = overviewMarkup(snapshot);
+
+    expect(markup.match(/class="planning-row planning-row--interactive/g) ?? []).toHaveLength(3);
+    expect(markup.match(/Просрочено: 20\+/g) ?? []).toHaveLength(1);
+    expect(markup).toContain("Открытая просроченная задача 1");
+    expect(markup).toContain("Открытая просроченная задача 2");
+    expect(markup).toContain("Открытая просроченная задача 3");
+    expect(markup.match(/planning-row--next/g) ?? []).toHaveLength(1);
+  });
+
   it("collapses unavailable Calendar candidates once without crowding out healthy rows", () => {
     const event = planningFixtures.overviewDensity.calendar.upcoming[0];
     const snapshot = withDomainStatus({
