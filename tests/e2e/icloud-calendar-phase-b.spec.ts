@@ -251,10 +251,9 @@ test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
   test("combined current agenda keeps source identities, all-day semantics, overlap, and literal text", async ({ page }, testInfo) => {
     await installCalendarFixtures(page);
     await page.goto("/calendar?theme=day");
-    await expect(page.getByTestId("planning-source-strip")).toContainText("iCloud");
-    await expect(page.getByTestId("planning-source").filter({ hasText: "актуально" })).toHaveCount(2);
-    await expect(page.getByTestId("planning-calendar-identity").filter({ hasText: "iCloud · Работа · #a1b2c3" })).toBeVisible();
-    await expect(page.getByTestId("planning-calendar-identity").filter({ hasText: "iCloud · Работа · #d4e5f6" })).toBeVisible();
+    await expect(page.getByTestId("planning-source-strip")).toHaveCount(0);
+    await expect(page.getByTestId("planning-calendar-identity").filter({ hasText: "Работа · #a1b2c3" })).toHaveAttribute("title", "iCloud · Работа · #a1b2c3");
+    await expect(page.getByTestId("planning-calendar-identity").filter({ hasText: "Работа · #d4e5f6" })).toHaveAttribute("title", "iCloud · Работа · #d4e5f6");
     await expect(page.getByTestId("planning-calendar-all-day-band")).toContainText("Внешний день");
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "<img src=x onerror=alert(1)>" })).toBeVisible();
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "<img src=x onerror=alert(1)>" }).locator("img,script")).toHaveCount(0);
@@ -274,7 +273,7 @@ test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Локальная встреча" }).getByTestId("planning-calendar-stale-cue")).toHaveCount(0);
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "<img src=x onerror=alert(1)>" }).tap();
     await expect(page.getByTestId("planning-calendar-detail")).toContainText("Сохранённая копия");
-    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Последнее обновление");
+    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Обновлено");
     await capture(page, testInfo, "icloud-stale-cache.png");
   });
 
@@ -298,13 +297,13 @@ test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
     await expect(localDetail.getByRole("button", { name: "Изменить" })).toBeVisible();
     await expect(localDetail.getByRole("button", { name: "Удалить" })).toBeVisible();
     await localDetail.getByRole("button", { name: "Изменить" }).tap();
-    await page.getByTestId("planning-calendar-mutation").locator("textarea").fill("Обновлённая локальная встреча");
+    await page.getByTestId("planning-calendar-mutation").getByTestId("calendar-editor-title").fill("Обновлённая локальная встреча");
     await page.getByTestId("planning-calendar-mutation").getByRole("button", { name: "Сохранить" }).tap();
     await expect.poll(() => fixture.requests).toContain("PATCH");
     await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
     await page.getByTestId("planning-calendar-event-row").filter({ hasText: "<img src=x onerror=alert(1)>" }).tap();
     const externalDetail = page.getByTestId("planning-calendar-detail");
-    await expect(externalDetail).toContainText("только чтение");
+    await expect(externalDetail).toContainText("Только просмотр");
     await expect(externalDetail.getByRole("button", { name: "Изменить" })).toHaveCount(0);
     await expect(externalDetail.getByRole("button", { name: "Удалить" })).toHaveCount(0);
     await capture(page, testInfo, "icloud-local-mutable-while-provider-stale.png");
@@ -327,7 +326,7 @@ test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
     await installCalendarFixtures(page);
     await page.setViewportSize({ width: 960, height: 720 });
     await page.goto("/calendar?theme=day");
-    await expect(page.getByTestId("planning-source-strip")).toBeVisible();
+    await expect(page.getByTestId("planning-source-strip")).toHaveCount(0);
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(3);
     const dimensions = await page.evaluate(() => ({
       documentWidth: document.documentElement.scrollWidth,

@@ -11,7 +11,6 @@ export const planningReminderMutationsEnabled = import.meta.env.VITE_PLANNING_RE
 export const planningTaskMutationsEnabled = import.meta.env.VITE_PLANNING_TASK_MUTATIONS_ENABLED === "true";
 /** B4.3 writer seam retained for legacy/test bundles; accepted-v2 sets this true. */
 export const planningCalendarMutationsEnabled = import.meta.env.VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED === "true";
-
 export const planningRouteLimit = 20;
 
 const rolloutFlags: Record<PlanningRolloutGate, boolean> = {

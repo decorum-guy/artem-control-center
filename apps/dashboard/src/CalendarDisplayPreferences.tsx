@@ -1,12 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { CalendarDisplayPreferences } from "@artem/contracts";
-import { getCalendarDisplayPreferences, patchCalendarDisplayPreference } from "./calendarDisplayPreferencesApi";
+import type { CalendarDisplayPreferences, CalendarEventMarkerStyle } from "@artem/contracts";
+import { getCalendarDisplayPreferences, patchCalendarDisplayPreference, patchCalendarEventMarkerStyle } from "./calendarDisplayPreferencesApi";
 
 interface CalendarDisplayPreferencesContextValue {
   preferences: CalendarDisplayPreferences | null;
   loading: boolean;
   refresh: () => Promise<void>;
   save: (entry: { providerId: string; calendarId: string; color: string | null }) => Promise<CalendarDisplayPreferences>;
+  saveMarkerStyle: (markerStyle: CalendarEventMarkerStyle) => Promise<CalendarDisplayPreferences>;
 }
 
 const CalendarDisplayPreferencesContext = createContext<CalendarDisplayPreferencesContextValue | null>(null);
@@ -30,7 +31,13 @@ export function CalendarDisplayPreferencesProvider({ children }: { children: Rea
     setPreferences(saved);
     return saved;
   }, [preferences]);
-  const value = useMemo(() => ({ preferences, loading, refresh, save }), [preferences, loading, refresh, save]);
+  const saveMarkerStyle = useCallback(async (markerStyle: CalendarEventMarkerStyle) => {
+    if (!preferences) throw new Error("preferences_unavailable");
+    const saved = await patchCalendarEventMarkerStyle({ expectedRevision: preferences.revision, markerStyle });
+    setPreferences(saved);
+    return saved;
+  }, [preferences]);
+  const value = useMemo(() => ({ preferences, loading, refresh, save, saveMarkerStyle }), [preferences, loading, refresh, save, saveMarkerStyle]);
   return <CalendarDisplayPreferencesContext.Provider value={value}>{children}</CalendarDisplayPreferencesContext.Provider>;
 }
 

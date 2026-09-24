@@ -197,6 +197,23 @@ jobs:
           path: artifacts/issue-279-overview-review
           if-no-files-found: error
 
+      - name: "Run #279 Slice 3 Calendar visual and touch gate"
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
+          VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED: "true"
+          ISSUE_279_CALENDAR_ARTIFACT_DIR: artifacts/issue-279-calendar-review
+        run: npm run test:e2e -- tests/e2e/issue-279-calendar.spec.ts
+
+      - name: "Upload #279 Slice 3 Calendar review screenshots"
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-279-calendar-review-${{ github.sha }}
+          path: artifacts/issue-279-calendar-review
+          if-no-files-found: error
+
       - name: Run focused V2 overlay gate
         if: runner.os == 'Linux'
         env:

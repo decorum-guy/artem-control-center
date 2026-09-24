@@ -341,6 +341,15 @@
 .ai-provider-settings__actions button { min-height: 48px; }
 
 .settings-calendar-settings { display: grid; gap: 10px; }
+.settings-calendar-marker-style { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--cc-divider); border-radius: var(--cc-radius-control); background: var(--cc-surface-1); }
+.settings-calendar-marker-style__copy { display: grid; gap: 2px; }
+.settings-calendar-marker-style__copy strong { color: var(--cc-text); font-size: var(--cc-type-control-size); }
+.settings-calendar-marker-style__copy span { color: var(--cc-text-muted); font-size: var(--cc-type-short-label-size); }
+.settings-calendar-marker-style__control { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-height: 48px; overflow: hidden; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-control); }
+.settings-calendar-marker-style__control button { min-height: 48px; padding: 0 14px; border: 0; color: var(--cc-text-secondary); background: var(--cc-surface-2); font: inherit; font-weight: 700; touch-action: manipulation; }
+.settings-calendar-marker-style__control button + button { border-left: 1px solid var(--cc-border); }
+.settings-calendar-marker-style__control button[aria-pressed="true"] { color: var(--cc-text); background: var(--cc-selected-bg); }
+.settings-calendar-marker-style__control button:disabled { cursor: not-allowed; opacity: .52; }
 .settings-calendar-source-refresh { display: grid; gap: 4px; min-height: 76px; }
 .settings-calendar-source-refresh__button { min-height: 48px; }
 .settings-calendar-source-refresh__hint { margin: 0; color: var(--cc-text-muted); font-size: var(--cc-type-short-label-size); line-height: var(--cc-type-short-label-line); }

@@ -681,11 +681,14 @@ export interface CalendarDisplayColorOverride {
   color: string;
 }
 
+export type CalendarEventMarkerStyle = "dots" | "bars";
+
 export interface CalendarDisplayPreferences {
   schemaVersion: "calendar.display-preferences.v1";
   revision: number;
   updatedAt: string;
   overrides: CalendarDisplayColorOverride[];
+  eventMarkerStyle: CalendarEventMarkerStyle;
   available: boolean;
   warnings: "stored_preferences_unavailable"[];
   writesEnabled: boolean;

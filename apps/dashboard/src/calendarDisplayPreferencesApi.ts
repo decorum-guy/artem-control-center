@@ -1,4 +1,4 @@
-import type { CalendarDisplayPreferences } from "@artem/contracts";
+import type { CalendarDisplayPreferences, CalendarEventMarkerStyle } from "@artem/contracts";
 
 export class CalendarDisplayPreferencesApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) { super(code); }
@@ -10,6 +10,8 @@ function parsePreferences(value: unknown): CalendarDisplayPreferences {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid preferences");
   const payload = value as Record<string, unknown>;
   if (payload.schemaVersion !== "calendar.display-preferences.v1" || !Number.isInteger(payload.revision) || typeof payload.updatedAt !== "string" || typeof payload.available !== "boolean" || typeof payload.writesEnabled !== "boolean" || !Array.isArray(payload.overrides) || !Array.isArray(payload.warnings)) throw new Error("invalid preferences");
+  const eventMarkerStyle = payload.eventMarkerStyle === undefined ? "dots" : payload.eventMarkerStyle;
+  if (eventMarkerStyle !== "dots" && eventMarkerStyle !== "bars") throw new Error("invalid event marker style");
   const overrides = payload.overrides.map((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("invalid preference override");
     const item = entry as Record<string, unknown>;
@@ -17,7 +19,7 @@ function parsePreferences(value: unknown): CalendarDisplayPreferences {
     return { providerId: item.providerId, calendarId: item.calendarId, color: item.color.toUpperCase() };
   });
   if (!payload.warnings.every((warning) => warning === "stored_preferences_unavailable")) throw new Error("invalid preference warnings");
-  return { schemaVersion: "calendar.display-preferences.v1", revision: payload.revision as number, updatedAt: payload.updatedAt as string, overrides, available: payload.available as boolean, warnings: payload.warnings as "stored_preferences_unavailable"[], writesEnabled: payload.writesEnabled as boolean };
+  return { schemaVersion: "calendar.display-preferences.v1", revision: payload.revision as number, updatedAt: payload.updatedAt as string, overrides, eventMarkerStyle, available: payload.available as boolean, warnings: payload.warnings as "stored_preferences_unavailable"[], writesEnabled: payload.writesEnabled as boolean };
 }
 
 async function request(path: string, init?: RequestInit): Promise<CalendarDisplayPreferences> {
@@ -37,4 +39,8 @@ export function getCalendarDisplayPreferences(): Promise<CalendarDisplayPreferen
 
 export function patchCalendarDisplayPreference(payload: { expectedRevision: number; providerId: string; calendarId: string; color: string | null }): Promise<CalendarDisplayPreferences> {
   return request("/api/v1/settings/calendar/display-colors", { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function patchCalendarEventMarkerStyle(payload: { expectedRevision: number; markerStyle: CalendarEventMarkerStyle }): Promise<CalendarDisplayPreferences> {
+  return request("/api/v1/settings/calendar/event-marker-style", { method: "PATCH", body: JSON.stringify(payload) });
 }

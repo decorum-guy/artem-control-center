@@ -115,8 +115,8 @@ test.describe("Issue #112 B2.1 Calendar Settings", () => {
     await page.goto("/calendar?date=2026-08-26");
     await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
     await expect(page.locator('[data-date="2026-08-26"]').getByTestId("planning-calendar-event-indicator").first()).toHaveAttribute("data-color", "#D65A4A");
-    await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Весь день" })).toHaveCSS("border-left-color", "rgb(214, 90, 74)");
-    await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Встреча" })).toHaveCSS("border-left-color", "rgb(214, 90, 74)");
+    await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Весь день" }).getByTestId("planning-calendar-event-color-dot")).toHaveCSS("background-color", "rgb(214, 90, 74)");
+    await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Встреча" }).getByTestId("planning-calendar-event-color-dot")).toHaveCSS("background-color", "rgb(214, 90, 74)");
     await capture(page, testInfo, "calendar-override-accents.png");
   });
 

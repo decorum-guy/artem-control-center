@@ -192,6 +192,7 @@ test.describe("B2 Planning Overview", () => {
       }]
     }];
     let overrides: Array<{ providerId: string; calendarId: string; color: string }> = [];
+    let markerStyle: "dots" | "bars" = "dots";
     await page.route("**/api/v1/settings/calendar/display-colors", async (route) => {
       await route.fulfill({
         status: 200,
@@ -201,6 +202,7 @@ test.describe("B2 Planning Overview", () => {
           revision: overrides.length,
           updatedAt: "2026-08-12T12:00:00Z",
           overrides,
+          eventMarkerStyle: markerStyle,
           available: true,
           warnings: [],
           writesEnabled: false
@@ -222,10 +224,15 @@ test.describe("B2 Planning Overview", () => {
     expect(rowGeometry.marker?.height).toBeLessThan(rowGeometry.row.height);
     expect(rowGeometry.copy?.left).toBeGreaterThan(rowGeometry.row.left + 8);
 
+    const dotsGeometry = rowGeometry.marker;
+    markerStyle = "bars";
     overrides = [{ providerId: "calendar-provider", calendarId: "primary", color: "#D65A4A" }];
     await page.reload();
     await expect(page.getByTestId("planning-overview-calendar-marker")).toHaveAttribute("data-color", "#D65A4A");
     await expect(page.getByTestId("planning-overview-calendar-marker")).toHaveCSS("background-color", "rgb(214, 90, 74)");
+    const barsGeometry = await page.getByTestId("planning-overview-calendar-marker").boundingBox();
+    expect(barsGeometry?.width).toBe(dotsGeometry?.width);
+    expect(barsGeometry?.height).toBe(dotsGeometry?.height);
   });
 
   test("orders upcoming events by local day before all-day type", async ({ page }) => {

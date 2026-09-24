@@ -43,6 +43,7 @@ def _empty_document() -> dict[str, Any]:
         "revision": 0,
         "updatedAt": _utc_now(),
         "overrides": [],
+        "eventMarkerStyle": "dots",
     }
 
 
@@ -71,7 +72,10 @@ class CalendarDisplayPreferencesStore:
         revision = raw.get("revision")
         updated_at = raw.get("updatedAt")
         entries = raw.get("overrides")
+        marker_style = raw.get("eventMarkerStyle", "dots")
         if not isinstance(revision, int) or revision < 0 or not isinstance(updated_at, str) or not isinstance(entries, list) or len(entries) > MAX_OVERRIDES:
+            return None
+        if marker_style not in {"dots", "bars"}:
             return None
         normalized: list[dict[str, str]] = []
         seen: set[tuple[str, str]] = set()
@@ -90,6 +94,7 @@ class CalendarDisplayPreferencesStore:
             "revision": revision,
             "updatedAt": updated_at,
             "overrides": sorted(normalized, key=lambda item: (item["providerId"], item["calendarId"])),
+            "eventMarkerStyle": marker_style,
         }
 
     def read(self) -> CalendarDisplayPreferencesResponse:
@@ -139,6 +144,34 @@ class CalendarDisplayPreferencesStore:
                 "revision": expected_revision + 1,
                 "updatedAt": _utc_now(),
                 "overrides": [entry.model_dump() for _, entry in sorted(existing.items())],
+                "eventMarkerStyle": current.eventMarkerStyle,
+            }
+            self._atomic_write(document)
+            return CalendarDisplayPreferencesResponse(
+                **document,
+                available=True,
+                warnings=[],
+                writesEnabled=self.writes_enabled,
+            )
+
+    def write_marker_style(
+        self,
+        *,
+        marker_style: str,
+        expected_revision: int,
+    ) -> CalendarDisplayPreferencesResponse:
+        with self._write_lock:
+            current = self.read()
+            if current.revision != expected_revision:
+                raise CalendarDisplayPreferencesConflict("revision_conflict")
+            if marker_style not in {"dots", "bars"}:
+                raise CalendarDisplayPreferencesError("invalid_marker_style")
+            document = {
+                "schemaVersion": SCHEMA_VERSION,
+                "revision": expected_revision + 1,
+                "updatedAt": _utc_now(),
+                "overrides": [entry.model_dump() for entry in current.overrides],
+                "eventMarkerStyle": marker_style,
             }
             self._atomic_write(document)
             return CalendarDisplayPreferencesResponse(

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { PlanningCalendarSource } from "@artem/contracts";
+import type { CalendarEventMarkerStyle, PlanningCalendarSource } from "@artem/contracts";
 import type { AccessStatus } from "../../accessApi";
 import type { ShellNavigationTarget } from "../../Shell";
 import {
@@ -358,7 +358,7 @@ function CalendarSettingsSheet({
   onRefreshCalendarMetadata: () => Promise<boolean>;
   onClose: () => void;
 }) {
-  const { preferences, loading, save } = useCalendarDisplayPreferences();
+  const { preferences, loading, save, saveMarkerStyle } = useCalendarDisplayPreferences();
   const { guardMutation } = useInteractionLock();
   const { ensureCapability } = useAccess();
   const [editing, setEditing] = useState<string | null>(null);
@@ -366,8 +366,29 @@ function CalendarSettingsSheet({
   const [notice, setNotice] = useState<string | null>(null);
   const [sourceRefreshPending, setSourceRefreshPending] = useState(false);
   const [sourceRefreshNotice, setSourceRefreshNotice] = useState<string | null>(null);
+  const [markerStylePending, setMarkerStylePending] = useState(false);
   const sourceRefreshPendingRef = useRef(false);
   const calendars = sources.flatMap((source) => source.calendars.map((calendar) => ({ source, calendar })));
+
+  async function setMarkerStyle(markerStyle: CalendarEventMarkerStyle) {
+    if (!guardMutation()) {
+      setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
+      return;
+    }
+    if (!preferences?.writesEnabled) {
+      setNotice("Вид маркеров сейчас недоступен для изменения.");
+      return;
+    }
+    setMarkerStylePending(true);
+    setNotice(null);
+    try {
+      await saveMarkerStyle(markerStyle);
+    } catch {
+      setNotice("Не удалось сохранить вид маркеров. Показан подтверждённый вариант.");
+    } finally {
+      setMarkerStylePending(false);
+    }
+  }
 
   async function setColor(source: PlanningCalendarSource, calendar: PlanningCalendarSource["calendars"][number], color: string | null) {
     if (!guardMutation()) {
@@ -426,6 +447,25 @@ function CalendarSettingsSheet({
   return (
     <Sheet testId="settings-calendars-sheet" eyebrow="Расписание" title="Календари" description="Цвета действуют только внутри Control Center и не меняют источник." onClose={onClose}>
       <div className="settings-v2-sheet-content settings-calendar-settings" data-testid="settings-calendar-list">
+        <section className="settings-calendar-marker-style" data-testid="settings-calendar-marker-style" aria-labelledby="settings-calendar-marker-style-title">
+          <div className="settings-calendar-marker-style__copy">
+            <strong id="settings-calendar-marker-style-title">Отображение событий</strong>
+            <span>Маркеры в повестке календаря</span>
+          </div>
+          <div className="settings-calendar-marker-style__control" role="group" aria-label="Маркеры событий">
+            {(["dots", "bars"] as const).map((markerStyle) => (
+              <button
+                key={markerStyle}
+                type="button"
+                aria-pressed={(preferences?.eventMarkerStyle ?? "dots") === markerStyle}
+                disabled={loading || markerStylePending || preferences?.writesEnabled !== true}
+                onClick={() => void setMarkerStyle(markerStyle)}
+              >
+                {markerStyle === "dots" ? "Точки" : "Полоски"}
+              </button>
+            ))}
+          </div>
+        </section>
         <div className="settings-calendar-source-refresh">
           <button
             type="button"

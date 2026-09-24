@@ -139,8 +139,11 @@ test.describe("B3 Planning monitoring routes", () => {
     await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(6);
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Первая пересекающаяся встреча" })).toContainText("Пересекается");
     await expect(page.getByTestId("planning-calendar-event-row").filter({ hasText: "Граничная встреча" })).not.toContainText("Пересекается");
-    await expect(page.getByTestId("planning-calendar-event-row").first()).toContainText("Только локально");
-    await openDetailAndClose(page, "planning-calendar-event-row", "planning-calendar-detail");
+    await expect(page.getByTestId("planning-calendar-event-row").first()).toContainText("Локальный");
+    await page.getByTestId("planning-calendar-event-row").first().tap();
+    await expect(page.getByTestId("planning-calendar-detail")).toContainText("Только локально");
+    await page.getByTestId("planning-calendar-detail").getByRole("button", { name: "Закрыть" }).tap();
+    await expect(page.getByTestId("planning-calendar-detail")).toHaveCount(0);
 
     await expect(page.getByTestId("planning-calendar-month")).toBeVisible();
     await page.getByRole("button", { name: "Предыдущий месяц" }).tap();

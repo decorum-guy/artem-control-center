@@ -667,6 +667,13 @@ class CalendarDisplayColorPatch(BaseModel):
         return value.upper()
 
 
+class CalendarEventMarkerStylePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expectedRevision: int = Field(ge=0, le=2_147_483_647)
+    markerStyle: Literal["dots", "bars"]
+
+
 class CalendarDisplayPreferencesResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -674,6 +681,7 @@ class CalendarDisplayPreferencesResponse(BaseModel):
     revision: int = Field(ge=0)
     updatedAt: str
     overrides: List[CalendarDisplayColorOverride] = Field(default_factory=list, max_length=128)
+    eventMarkerStyle: Literal["dots", "bars"] = "dots"
     available: bool
     warnings: List[Literal["stored_preferences_unavailable"]] = Field(default_factory=list, max_length=1)
     writesEnabled: bool = False
