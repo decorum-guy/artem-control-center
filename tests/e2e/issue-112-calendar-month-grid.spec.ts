@@ -242,11 +242,26 @@ test.describe("Issue #112 Calendar Slice A", () => {
       const day = document.querySelector<HTMLElement>('[data-testid="planning-calendar-selected-day"]');
       const events = document.querySelector<HTMLElement>("#planning-calendar-selected-day-events");
       const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="planning-calendar-event-row"]')];
-      const route = document.querySelector<HTMLElement>(".v2-route-content");
-      if (!layout || !day || !events || !route || rows.length === 0) throw new Error("Expanded-day geometry is incomplete");
+      if (!layout || !day || !events || rows.length === 0) throw new Error("Expanded-day geometry is incomplete");
       const layoutBox = layout.getBoundingClientRect();
       const dayBox = day.getBoundingClientRect();
       const lastBox = rows.at(-1)!.getBoundingClientRect();
+
+      // The production V2 shell scrolls .v2-route-content, while the legacy
+      // test shell can delegate the same page scroll to the document. Detect
+      // the actual outer scroll owner instead of hard-coding one shell class.
+      let ancestor: HTMLElement | null = events.parentElement;
+      let scrollOwner: HTMLElement | null = null;
+      while (ancestor) {
+        const style = getComputedStyle(ancestor);
+        const scrollableOverflow = style.overflowY === "auto" || style.overflowY === "scroll";
+        if (scrollableOverflow && ancestor.scrollHeight > ancestor.clientHeight + 1) {
+          scrollOwner = ancestor;
+          break;
+        }
+        ancestor = ancestor.parentElement;
+      }
+      const documentScrollable = document.documentElement.scrollHeight > document.documentElement.clientHeight + 1;
       return {
         layoutHeight: layoutBox.height,
         dayOverflow: getComputedStyle(day).overflow,
@@ -255,8 +270,8 @@ test.describe("Issue #112 Calendar Slice A", () => {
         eventsClientHeight: events.clientHeight,
         lastBottom: lastBox.bottom,
         dayBottom: dayBox.bottom,
-        routeScrollHeight: route.scrollHeight,
-        routeClientHeight: route.clientHeight
+        outerScrollAvailable: Boolean(scrollOwner) || documentScrollable,
+        outerScrollOwnerContainsEvents: scrollOwner ? scrollOwner.contains(events) : documentScrollable
       };
     });
 
@@ -265,7 +280,8 @@ test.describe("Issue #112 Calendar Slice A", () => {
     expect(expanded.eventsOverflowY).toBe("visible");
     expect(expanded.eventsClientHeight).toBeGreaterThanOrEqual(expanded.eventsScrollHeight - 1);
     expect(expanded.lastBottom).toBeLessThanOrEqual(expanded.dayBottom + 1);
-    expect(expanded.routeScrollHeight).toBeGreaterThan(expanded.routeClientHeight);
+    expect(expanded.outerScrollAvailable).toBe(true);
+    expect(expanded.outerScrollOwnerContainsEvents).toBe(true);
 
     await expand.click();
     await expect(layout).toHaveAttribute("data-expanded-day", "false");
