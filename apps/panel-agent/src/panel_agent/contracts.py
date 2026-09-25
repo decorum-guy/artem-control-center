@@ -244,6 +244,7 @@ class DiagnosticsMutationGates(BaseModel):
     planningReminderMutationsEnabled: bool
     planningTaskMutationsEnabled: bool
     planningCalendarMutationsEnabled: bool
+    planningProviderCalendarMutationsEnabled: bool = False
 
 
 class DiagnosticsReport(BaseModel):

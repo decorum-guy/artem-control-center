@@ -106,6 +106,7 @@ class IntegrationSettings:
     panel_planning_reminder_mutations_enabled: bool = False
     panel_planning_task_mutations_enabled: bool = False
     panel_planning_calendar_mutations_enabled: bool = False
+    panel_planning_provider_calendar_mutations_enabled: bool = False
     panel_planning_base_url: str = ""
     panel_planning_internal_secret: str = ""
     panel_planning_secret: str = ""
@@ -423,6 +424,10 @@ class IntegrationSettings:
             ),
             panel_planning_calendar_mutations_enabled=_bool_env(
                 "PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED",
+                False,
+            ),
+            panel_planning_provider_calendar_mutations_enabled=_bool_env(
+                "PANEL_PLANNING_PROVIDER_CALENDAR_MUTATIONS_ENABLED",
                 False,
             ),
             panel_planning_base_url=os.getenv("PANEL_PLANNING_BASE_URL", "").strip().rstrip("/"),

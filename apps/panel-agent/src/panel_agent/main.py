@@ -1340,6 +1340,7 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "planning_reminder_mutations": SETTINGS.panel_planning_reminder_mutations_enabled,
         "planning_task_mutations": SETTINGS.panel_planning_task_mutations_enabled,
         "planning_calendar_mutations": SETTINGS.panel_planning_calendar_mutations_enabled,
+        "planning_provider_calendar_mutations": SETTINGS.panel_planning_provider_calendar_mutations_enabled,
             "panel_writes": SETTINGS.writes_enabled,
             "home_server_maintenance": SETTINGS.home_server_maintenance_enabled,
         "coffee_timing_writes": SETTINGS.coffee_timing_writes_enabled,

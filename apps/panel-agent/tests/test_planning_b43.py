@@ -231,6 +231,7 @@ def test_b43_event_readback_projection_and_local_only_mutations(tmp_path):
     assert external.status_code == 200
     external_object = external.json()["object"]
     assert external_object["localOnlyMutable"] is False
+    assert external_object["canEdit"] is False and external_object["canDelete"] is False
     assert "provider_id" not in external_object and "provider_calendar_id" not in external_object
     assert external_object["calendarIdentity"]["providerLabel"] == "iCloud"
     assert external_object["calendarIdentity"]["calendarLabel"] == "Работа"

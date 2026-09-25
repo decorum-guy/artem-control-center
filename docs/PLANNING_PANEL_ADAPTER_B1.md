@@ -46,6 +46,15 @@ When enabled, all connection values are server-side settings and are required:
 | `PANEL_PLANNING_TIMEZONE` | `Europe/Moscow` | deterministic local-day query timezone |
 | `PANEL_PLANNING_FIXTURE_SCENARIO` | `healthy` | fixture-mode scenario only |
 
+The mutation controls are independent server-side gates and all default to
+`false`: `PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED`,
+`PANEL_PLANNING_TASK_MUTATIONS_ENABLED`,
+`PANEL_PLANNING_CALENDAR_MUTATIONS_ENABLED`, and
+`PANEL_PLANNING_PROVIDER_CALENDAR_MUTATIONS_ENABLED`. The provider gate never
+enables local calendar writes by itself; provider writes also require the
+general calendar gate, a current healthy upstream status, the upstream
+provider capability, and the selected event/calendar capability.
+
 The Panel Agent runtime declares `tzdata` as a bounded dependency so Python's
 `zoneinfo` IANA validation and Europe/Moscow local-day calculations work on
 Windows as well as Unix hosts.

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   mutatePlanningEvent,
+  mutatePlanningProviderEvent,
   mutatePlanningReminder,
   mutatePlanningTask,
   MAX_PLANNING_READ_QUERY_CACHE_ENTRIES,
@@ -13,6 +14,7 @@ import {
   refreshPlanningCalendarSources,
   readPlanningEvents,
   readPlanningEventsForRange,
+  readPlanningCalendarDestinations,
   readPlanningTaskById,
   readPlanningTasks
 } from "./planningReadClient";
@@ -128,6 +130,23 @@ const nativePhaseBSource = {
   observedAt: "2026-08-12T09:01:00Z",
   calendars: []
 } as const;
+
+const providerCalendarEvent = {
+  ...calendarEvent,
+  source: "calendar-provider",
+  sourceLabel: "Calendar provider",
+  syncState: "synced",
+  localOnlyMutable: false,
+  calendarIdentity: phaseBSource && {
+    providerId: phaseBSource.id,
+    providerLabel: "iCloud",
+    calendarId: phaseBSource.calendars[0].id,
+    calendarLabel: "Работа"
+  },
+  canEdit: true,
+  canDelete: true,
+  providerWriteState: "writable"
+};
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -353,6 +372,42 @@ describe("fixed Planning read client", () => {
     expect(() => planningReadParsers.parseCalendarEvent({
       ...event,
       calendarIdentity: { ...event.calendarIdentity, calendarId: "https://secret.example" }
+    })).toThrowError(PlanningReadError);
+  });
+
+  it("parses provider destinations and rejects raw upstream identities", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      schemaVersion: "planning.panel.v1",
+      kind: "calendar_destinations",
+      domain: "calendar_destination",
+      items: [{
+        id: "calendar-0123456789abcdef01234567",
+        label: "Работа",
+        color: "#336699",
+        providerKind: "icloud",
+        writeState: "writable",
+        canCreateEvent: true,
+        canDeleteCalendar: true
+      }],
+      capabilities: { canCreateCalendar: false },
+      providerCapabilities: {
+        providerKind: "icloud",
+        readIntegrationEnabled: true,
+        configured: true,
+        writesEnabled: true,
+        canCreateCalendar: false
+      },
+      sourceStatus: "current",
+      lastSyncedAt: "2026-08-12T09:00:00Z",
+      staleAfter: "2026-08-12T09:05:00Z"
+    }), { status: 200 }));
+    const result = await readPlanningCalendarDestinations();
+    expect(result.items[0].id).toBe("calendar-0123456789abcdef01234567");
+    expect(result.providerCapabilities?.writesEnabled).toBe(true);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "GET", cache: "no-store" });
+    expect(() => planningReadParsers.parseCalendarDestinationsEnvelope({
+      ...result,
+      items: [{ ...result.items[0], id: "icloud_calendar_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
     })).toThrowError(PlanningReadError);
   });
 
@@ -836,6 +891,82 @@ describe("fixed Planning read client", () => {
     expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "DELETE", body: "{}" });
     expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({ "Idempotency-Key": "calendar-edit-001", "If-Match": "1" });
     expect(fetchMock.mock.calls[2][1]?.headers).toMatchObject({ "Idempotency-Key": "calendar-delete-001", "If-Match": "2" });
+  });
+
+  it("uses provider routes without replaying create and only reads back uncertain update/delete", async () => {
+    const updated = { ...providerCalendarEvent, title: "Провайдерская правка", version: 3 };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("provider create response lost"))
+      .mockRejectedValueOnce(new Error("provider edit response lost"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(eventObjectEnvelope(updated)), { status: 200 }))
+      .mockRejectedValueOnce(new Error("provider delete response lost"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(eventObjectEnvelope({ ...updated, deletedAt: "2026-08-12T09:04:00Z", version: 4 })), { status: 200 }));
+
+    await expect(mutatePlanningProviderEvent({
+      action: "create",
+      idempotencyKey: "provider-create-no-replay",
+      destinationId: "calendar-0123456789abcdef01234567",
+      body: { title: "Провайдерская встреча" }
+    })).rejects.toMatchObject({ mutationCode: "uncertain", reconciledObject: null });
+
+    await expect(mutatePlanningProviderEvent({
+      action: "edit",
+      idempotencyKey: "provider-edit-readback",
+      eventId: providerCalendarEvent.id,
+      expectedVersion: 2,
+      body: { title: "Провайдерская правка" }
+    })).rejects.toMatchObject({ mutationCode: "uncertain", reconciledObject: expect.objectContaining({ title: "Провайдерская правка" }) });
+
+    await expect(mutatePlanningProviderEvent({
+      action: "delete",
+      idempotencyKey: "provider-delete-readback",
+      eventId: providerCalendarEvent.id,
+      expectedVersion: 3,
+      body: {}
+    })).rejects.toMatchObject({ mutationCode: "uncertain", reconciledObject: expect.objectContaining({ deletedAt: "2026-08-12T09:04:00Z" }) });
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "/api/v1/planning/provider-events",
+      `/api/v1/planning/provider-events/${providerCalendarEvent.id}`,
+      `/api/v1/planning/events/${providerCalendarEvent.id}`,
+      `/api/v1/planning/provider-events/${providerCalendarEvent.id}`,
+      `/api/v1/planning/events/${providerCalendarEvent.id}`
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      calendar_id: "calendar-0123456789abcdef01234567",
+      title: "Провайдерская встреча"
+    });
+    expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).not.toContain("icloud_calendar_");
+  });
+
+  it("does not replay provider uncertainty codes", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "provider_mutation_uncertain" }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(eventObjectEnvelope({ ...providerCalendarEvent, title: "Подтверждено", version: 3 })), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "idempotency_in_progress" }), { status: 409 }));
+
+    await expect(mutatePlanningProviderEvent({
+      action: "edit",
+      idempotencyKey: "provider-code-readback",
+      eventId: providerCalendarEvent.id,
+      expectedVersion: 2,
+      body: { title: "Подтверждено" }
+    })).rejects.toMatchObject({ mutationCode: "uncertain", reconciledObject: expect.objectContaining({ title: "Подтверждено" }) });
+
+    await expect(mutatePlanningProviderEvent({
+      action: "create",
+      idempotencyKey: "provider-create-in-progress",
+      destinationId: "calendar-0123456789abcdef01234567",
+      body: { title: "Не дублировать" }
+    })).rejects.toMatchObject({ mutationCode: "uncertain", reconciledObject: null });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      `/api/v1/planning/provider-events/${providerCalendarEvent.id}`,
+      `/api/v1/planning/events/${providerCalendarEvent.id}`,
+      "/api/v1/planning/provider-events"
+    ]);
   });
 
   it("replays an uncertain Calendar create with the exact same body and key", async () => {
