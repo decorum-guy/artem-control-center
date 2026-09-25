@@ -1003,7 +1003,7 @@ export interface OverviewLayoutDocument {
   schemaVersion: "overview.layout.v2";
   profileId: "samsung-control";
   presetId: "overview.default";
-  presetVersion: 3;
+  presetVersion: 4;
   revision: number;
   viewportClass: "landscape-12";
   updatedAt: string;

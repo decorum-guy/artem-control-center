@@ -27,7 +27,7 @@ from .contracts import (
 SCHEMA_VERSION = "overview.layout.v2"
 PROFILE_ID = "samsung-control"
 PRESET_ID = "overview.default"
-PRESET_VERSION = 3
+PRESET_VERSION = 4
 VIEWPORT_CLASS = "landscape-12"
 CANONICAL_COLUMNS = 12
 MAX_ITEMS = 32
@@ -50,7 +50,7 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
     },
     "home.climate": {
         "singleton": True,
-        "sizes": {"compact": (4, 5), "standard": (7, 4), "large": (8, 5)},
+        "sizes": {"compact": (4, 5), "standard": (7, 3), "large": (8, 5)},
         "default": "standard",
     },
     "system.rog-g703-operational": {
@@ -312,10 +312,37 @@ def migrate_preset_v2_to_v3(raw: Mapping[str, Any]) -> Dict[str, Any]:
             if isinstance(placement, dict) and all(type(placement.get(key)) is int for key in ("x", "y", "w", "h")):
                 occupied.append(placement)
         placement = _first_fit((7, 4), occupied, 0)
-        source_items.append(_item("fixture.climate", "home.climate", "standard", placement["x"], placement["y"]))
+        source_items.append({
+            "instanceId": "fixture.climate",
+            "widgetType": "home.climate",
+            "visibility": "visible",
+            "placement": _placement_dict(placement["x"], placement["y"], 7, 4),
+            "sizeVariant": "standard",
+            "config": _validate_config("home.climate", {}, strict=False),
+        })
 
     migrated["items"] = source_items
-    migrated["presetVersion"] = PRESET_VERSION
+    migrated["presetVersion"] = 3
+    return migrated
+
+
+def migrate_preset_v3_to_v4(raw: Mapping[str, Any]) -> Dict[str, Any]:
+    """Shrink the persisted Climate standard slot in place from 7x4 to 7x3."""
+    migrated = deepcopy(dict(raw))
+    source_items = [deepcopy(item) for item in raw.get("items", []) if isinstance(item, dict)]
+    for item in source_items:
+        if item.get("widgetType") != "home.climate" or item.get("sizeVariant") != "standard":
+            continue
+        placement = item.get("placement")
+        if (
+            isinstance(placement, dict)
+            and all(type(placement.get(key)) is int for key in ("x", "y", "w", "h"))
+            and placement.get("w") == 7
+            and placement.get("h") == 4
+        ):
+            item["placement"] = _placement_dict(placement["x"], placement["y"], 7, 3)
+    migrated["items"] = source_items
+    migrated["presetVersion"] = 4
     return migrated
 
 
@@ -540,6 +567,8 @@ def recover_stored_layout(raw: Mapping[str, Any]) -> Tuple[Optional[Dict[str, An
         return None, ["stored layout schema is not recognized"], []
     if raw.get("presetVersion") == 2:
         raw = migrate_preset_v2_to_v3(raw)
+    if raw.get("presetVersion") == 3:
+        raw = migrate_preset_v3_to_v4(raw)
     if raw.get("profileId") not in {None, PROFILE_ID}:
         return None, ["stored layout profile is not recognized"], []
     if raw.get("presetId") not in {None, PRESET_ID}:

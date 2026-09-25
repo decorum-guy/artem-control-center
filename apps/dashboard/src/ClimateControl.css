@@ -13,19 +13,16 @@
 
 .climate-control--home { gap: 10px; padding: 12px 12px 18px; }
 .climate-control--overview {
-  display: flex;
-  flex-direction: column;
   gap: 6px;
   padding: 10px 12px 12px;
   border: 0;
   background: transparent;
 }
 .climate-control--overview .climate-control__controls {
-  flex: 1 1 auto;
   grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1fr);
   row-gap: 8px;
-  align-content: space-between;
-  min-height: 120px;
+  align-content: start;
+  min-height: 0;
   margin-top: 4px;
 }
 .climate-control--overview .climate-control__temperature-control { grid-column: 2 / 4; }
