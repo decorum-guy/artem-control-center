@@ -157,7 +157,7 @@ describe("pure Overview migrations and recovery", () => {
     expect(parsed.items.find((item) => item.instanceId === "fixture.climate")).toMatchObject({
       visibility: "hidden",
       placement: { x: 0, y: 5, w: 7, h: 3 },
-      config: { showAuthority: false }
+      config: {}
     });
   });
 

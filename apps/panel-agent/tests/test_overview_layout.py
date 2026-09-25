@@ -228,7 +228,7 @@ def test_preset_v3_to_v4_shrinks_climate_in_place_and_preserves_owner_state(tmp_
         assert payload["revision"] == 12
         assert recovered["placement"] == {"x": 0, "y": 5, "w": 7, "h": 3}
         assert recovered["visibility"] == "hidden"
-        assert recovered["config"]["showAuthority"] is False
+        assert recovered["config"] == {}
     assert path.read_bytes() == original
 
 

@@ -329,6 +329,8 @@ def migrate_preset_v2_to_v3(raw: Mapping[str, Any]) -> Dict[str, Any]:
 def migrate_preset_v3_to_v4(raw: Mapping[str, Any]) -> Dict[str, Any]:
     """Shrink the persisted Climate standard slot in place from 7x4 to 7x3."""
     migrated = deepcopy(dict(raw))
+    if raw.get("schemaVersion") != SCHEMA_VERSION or raw.get("presetVersion") != 3:
+        return migrated
     source_items = [deepcopy(item) for item in raw.get("items", []) if isinstance(item, dict)]
     for item in source_items:
         if item.get("widgetType") != "home.climate" or item.get("sizeVariant") != "standard":
