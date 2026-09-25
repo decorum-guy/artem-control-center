@@ -107,7 +107,7 @@ describe("Overview edit reducer", () => {
     for (const originalItem of original) {
       expect(result.items.find((item) => item.instanceId === originalItem.instanceId)?.placement).toEqual(originalItem.placement);
     }
-    expect(result.items.find((item) => item.widgetType === "weather.alert")?.placement).toEqual({ x: 0, y: 9, w: 6, h: 2 });
+    expect(result.items.find((item) => item.widgetType === "weather.alert")?.placement).toEqual({ x: 0, y: 8, w: 6, h: 2 });
   });
 
   it("keeps appearance config through compact projection without changing the canonical draft", () => {
