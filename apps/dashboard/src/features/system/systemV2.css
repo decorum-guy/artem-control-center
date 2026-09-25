@@ -70,7 +70,14 @@
 .system-rog-detail__state h2 + strong { margin-top: var(--cc-space-1); }
 .system-rog-detail__state span { max-width: 48ch; color: var(--cc-text-secondary); font-size: var(--cc-type-body-size); line-height: var(--cc-type-body-line); }
 .system-rog-detail__footer { display: flex; align-items: center; justify-content: space-between; gap: var(--cc-space-3); min-height: 48px; padding-top: var(--cc-space-2); border-top: 1px solid var(--cc-divider); }
+.system-rog-detail__footer--single-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 288px) minmax(0, 1fr);
+  align-items: center;
+}
 .system-rog-detail__footer > span:first-child { color: var(--cc-text-muted); font-size: var(--cc-type-metadata-size); line-height: var(--cc-type-metadata-line); }
+.system-rog-detail__footer--single-action > span:first-child { justify-self: start; }
+.system-rog-detail__footer--single-action .system-rog-detail__actions { grid-column: 2; justify-self: center; }
 .system-rog-detail__actions { display: grid; grid-template-columns: repeat(2, minmax(132px, 1fr)); gap: 8px; min-width: 288px; }
 .system-rog-detail__actions.rog-g703-actions--single {
   grid-template-columns: minmax(0, 1fr);

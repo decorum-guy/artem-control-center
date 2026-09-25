@@ -233,7 +233,7 @@ export function RogG703DetailControl({ service }: { service: ServiceSnapshot }) 
         <span>{controller.display.detail}</span>
       </div>
 
-      <div className="system-rog-detail__footer">
+      <div className={`system-rog-detail__footer${status === "offline" || status === "waking" ? " system-rog-detail__footer--single-action" : ""}`}>
         <span>{service.presentation?.freshnessLabel ?? "Свежесть не указана"}</span>
         {status === "unavailable" ? (
           <span className="system-rog-detail__unavailable" data-testid="system-rog-action-unavailable">Недоступен</span>

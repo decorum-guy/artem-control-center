@@ -424,10 +424,11 @@ test.describe("Control Center V2 PR7 route density", () => {
     expect(offlineLayout.actions).toHaveLength(1);
     expect(offlineLayout.actions[0].width).toBeGreaterThanOrEqual(48);
     expect(offlineLayout.actions[0].height).toBeGreaterThanOrEqual(48);
-    expect(Math.abs(
-      (offlineLayout.actions[0].left + offlineLayout.actions[0].right) / 2
-      - (offlineLayout.actionGroup.left + offlineLayout.actionGroup.right) / 2
-    )).toBeLessThanOrEqual(1);
+    const actionCenter = (offlineLayout.actions[0].left + offlineLayout.actions[0].right) / 2;
+    const groupCenter = (offlineLayout.actionGroup.left + offlineLayout.actionGroup.right) / 2;
+    const footerCenter = (offlineLayout.footer.left + offlineLayout.footer.right) / 2;
+    expect(Math.abs(actionCenter - groupCenter)).toBeLessThanOrEqual(1);
+    expect(Math.abs(actionCenter - footerCenter)).toBeLessThanOrEqual(1);
     expect(offlineLayout.freshness.right).toBeLessThanOrEqual(offlineLayout.actionGroup.left);
 
     await page.unroute("**/api/v1/snapshot**");
