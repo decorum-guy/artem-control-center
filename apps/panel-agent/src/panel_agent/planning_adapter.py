@@ -895,7 +895,7 @@ def _upstream_error_category(raw: bytes, status_code: int, *, mutation: bool) ->
         "version_conflict", "provider_etag_conflict", "idempotency_conflict", "idempotency_in_progress",
         "not_found", "provider_not_found", "validation_error", "provider_payload_invalid",
         "event_not_local_only", "provider_write_disabled", "provider_not_configured", "provider_read_only",
-        "provider_rate_limited", "provider_transient_failure", "provider_mutation_uncertain",
+        "provider_rate_limited", "provider_authentication_failed", "provider_transient_failure", "provider_mutation_uncertain",
     }
     if code in stable_codes:
         return str(code)
