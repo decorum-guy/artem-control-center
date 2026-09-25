@@ -85,7 +85,7 @@ describe("Overview edit reducer", () => {
     expect(restored.items.find((item) => item.widgetType === "home.climate")).toMatchObject({
       instanceId: "fixture.climate",
       visibility: "visible",
-      placement: { w: 7, h: 4 }
+      placement: { w: 7, h: 3 }
     });
     expect(addOverviewWidget(restored.items, "home.climate").ok).toBe(false);
   });

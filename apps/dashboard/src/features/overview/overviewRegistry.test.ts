@@ -21,7 +21,7 @@ describe("Overview V2 fixed registry", () => {
     const climate = overviewWidgetRegistry.find((entry) => entry.widgetType === "home.climate")!;
     expect(coffee.sizes).toEqual({
       compact: { w: 4, h: 3 },
-      standard: { w: 7, h: 4 },
+      standard: { w: 7, h: 3 },
       large: { w: 8, h: 5 }
     });
     expect(Object.values(overviewWidgetRegistry).every((entry) =>
@@ -32,13 +32,13 @@ describe("Overview V2 fixed registry", () => {
     expect(climate).toMatchObject({
       singleton: true,
       minW: 4,
-      minH: 4,
+      minH: 3,
       maxW: 8,
       maxH: 5,
       defaultSizeVariant: "standard",
       sizes: {
         compact: { w: 4, h: 5 },
-        standard: { w: 7, h: 4 },
+        standard: { w: 7, h: 3 },
         large: { w: 8, h: 5 }
       }
     });

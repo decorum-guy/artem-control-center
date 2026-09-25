@@ -81,16 +81,16 @@ def test_trusted_appearance_schema_matches_registered_widget_vocabulary(tmp_path
         assert all(control["control"] in {"boolean", "enum", "integer_range"} for control in controls)
 
 
-def test_home_climate_registry_shipped_v3_and_strict_size_singleton_validation(tmp_path, monkeypatch):
+def test_home_climate_registry_shipped_v4_and_strict_size_singleton_validation(tmp_path, monkeypatch):
     module = load_app(monkeypatch, tmp_path / "layout.json", writes=True)
     from panel_agent import overview_layout
 
     assert overview_layout.WIDGETS["home.climate"]["sizes"] == {
         "compact": (4, 5),
-        "standard": (7, 4),
+        "standard": (7, 3),
         "large": (8, 5),
     }
-    assert overview_layout.shipped_layout()["presetVersion"] == 3
+    assert overview_layout.shipped_layout()["presetVersion"] == 4
     with TestClient(module.app) as client:
         initial = get_layout(client)
         payload = initial.json()
@@ -100,11 +100,19 @@ def test_home_climate_registry_shipped_v3_and_strict_size_singleton_validation(t
 
         invalid_size = deepcopy(payload["items"])
         invalid_size[3]["sizeVariant"] = "compact"
-        invalid_size[3]["placement"] = {"x": 0, "y": 5, "w": 7, "h": 4}
+        invalid_size[3]["placement"] = {"x": 0, "y": 5, "w": 7, "h": 3}
         assert client.patch(
             "/api/v1/overview/layout",
             headers={"If-Match": initial.headers["etag"]},
             json={"items": invalid_size},
+        ).status_code == 422
+
+        old_standard = deepcopy(payload["items"])
+        old_standard[3]["placement"] = {"x": 0, "y": 5, "w": 7, "h": 4}
+        assert client.patch(
+            "/api/v1/overview/layout",
+            headers={"If-Match": initial.headers["etag"]},
+            json={"items": old_standard},
         ).status_code == 422
 
         duplicate = deepcopy(payload["items"])
@@ -172,9 +180,55 @@ def test_preset_v2_existing_climate_is_not_duplicated_and_read_does_not_write(tm
 
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 3
+        assert payload["presetVersion"] == 4
         assert payload["revision"] == 11
         assert len([item for item in payload["items"] if item["widgetType"] == "home.climate"]) == 1
+    assert path.read_bytes() == original
+
+
+def test_preset_v3_to_v4_shrinks_climate_in_place_and_preserves_owner_state(tmp_path, monkeypatch):
+    path = tmp_path / "layout.json"
+    module = load_app(monkeypatch, path, writes=False)
+    from panel_agent import overview_layout
+
+    v3 = overview_layout.shipped_layout(revision=12)
+    v3["presetVersion"] = 3
+    climate = next(item for item in v3["items"] if item["widgetType"] == "home.climate")
+    climate["placement"] = {"x": 0, "y": 5, "w": 7, "h": 4}
+    climate["visibility"] = "hidden"
+    climate["config"] = {"showAuthority": False}
+    before_others = {
+        item["instanceId"]: deepcopy(item)
+        for item in v3["items"]
+        if item["widgetType"] != "home.climate"
+    }
+
+    migrated = overview_layout.migrate_preset_v3_to_v4(v3)
+    migrated_climate = next(item for item in migrated["items"] if item["widgetType"] == "home.climate")
+    assert migrated["presetVersion"] == 4
+    assert migrated_climate["placement"] == {"x": 0, "y": 5, "w": 7, "h": 3}
+    assert migrated_climate["visibility"] == "hidden"
+    assert migrated_climate["config"] == {"showAuthority": False}
+    assert {
+        item["instanceId"]: item
+        for item in migrated["items"]
+        if item["widgetType"] != "home.climate"
+    } == before_others
+
+    # v4 is idempotent: the v3 migration does not touch an already migrated document.
+    assert overview_layout.migrate_preset_v3_to_v4(migrated) == migrated
+
+    # Read recovery is non-mutating on disk while presenting the current v4 contract.
+    path.write_text(json.dumps(v3, ensure_ascii=False), encoding="utf-8")
+    original = path.read_bytes()
+    with TestClient(module.app) as client:
+        payload = get_layout(client).json()
+        recovered = next(item for item in payload["items"] if item["widgetType"] == "home.climate")
+        assert payload["presetVersion"] == 4
+        assert payload["revision"] == 12
+        assert recovered["placement"] == {"x": 0, "y": 5, "w": 7, "h": 3}
+        assert recovered["visibility"] == "hidden"
+        assert recovered["config"]["showAuthority"] is False
     assert path.read_bytes() == original
 
 
@@ -208,14 +262,14 @@ def test_preset_v2_exact_climate_migration_reflows_a_collision_without_deleting_
     assert any(item["instanceId"] == "owner.other" for item in migrated["items"])
 
 
-def test_get_without_file_returns_shipped_v3_and_no_store(tmp_path, monkeypatch):
+def test_get_without_file_returns_shipped_v4_and_no_store(tmp_path, monkeypatch):
     module = load_app(monkeypatch, tmp_path / "layout.json", writes=False)
     with TestClient(module.app) as client:
         response = get_layout(client)
         payload = response.json()
         assert payload["schemaVersion"] == "overview.layout.v2"
         assert payload["presetId"] == "overview.default"
-        assert payload["presetVersion"] == 3
+        assert payload["presetVersion"] == 4
         assert payload["revision"] == 0
         assert payload["writesEnabled"] is False
         assert response.headers["cache-control"] == "no-store"
@@ -602,7 +656,7 @@ def test_legacy_migration_and_corrupt_fallback_never_overwrite_bytes(tmp_path, m
     module = load_app(monkeypatch, path, writes=False)
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 3
+        assert payload["presetVersion"] == 4
         assert payload["revision"] == 0
         assert payload["warnings"]
     assert path.read_bytes() == corrupt_bytes

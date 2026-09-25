@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { migratePresetV2ToV3, migrateV1ToV2, parseRawLayout } from "./overviewMigrations";
+import { migratePresetV2ToV3, migratePresetV3ToV4, migrateV1ToV2, parseRawLayout } from "./overviewMigrations";
 
 describe("pure Overview migrations and recovery", () => {
   it("migrates configured v1 vocabulary while preserving instance ids", () => {
@@ -118,6 +118,47 @@ describe("pure Overview migrations and recovery", () => {
       }]
     }) as { items: Array<Record<string, unknown>> };
     expect(existing.items.filter((item) => item.widgetType === "home.climate")).toHaveLength(1);
+  });
+
+  it("shrinks preset v3 Climate standard in place while preserving config, visibility, and siblings", () => {
+    const raw = {
+      schemaVersion: "overview.layout.v2",
+      presetVersion: 3,
+      items: [
+        {
+          instanceId: "fixture.coffee",
+          widgetType: "home.coffee-machine",
+          visibility: "visible",
+          placement: { x: 0, y: 1, w: 7, h: 4 },
+          sizeVariant: "standard",
+          config: { imageScalePct: 100 }
+        },
+        {
+          instanceId: "fixture.climate",
+          widgetType: "home.climate",
+          visibility: "hidden",
+          placement: { x: 0, y: 5, w: 7, h: 4 },
+          sizeVariant: "standard",
+          config: { showAuthority: false }
+        }
+      ]
+    };
+    const migrated = migratePresetV3ToV4(raw) as { presetVersion: number; items: Array<Record<string, unknown>> };
+    expect(migrated.presetVersion).toBe(4);
+    expect(migrated.items[0]).toEqual(raw.items[0]);
+    expect(migrated.items[1]).toEqual({
+      ...raw.items[1],
+      placement: { x: 0, y: 5, w: 7, h: 3 }
+    });
+    expect(migratePresetV3ToV4(migrated)).toEqual(migrated);
+
+    const parsed = parseRawLayout(raw);
+    expect(parsed.usedFallback).toBe(false);
+    expect(parsed.items.find((item) => item.instanceId === "fixture.climate")).toMatchObject({
+      visibility: "hidden",
+      placement: { x: 0, y: 5, w: 7, h: 3 },
+      config: { showAuthority: false }
+    });
   });
 
   it("reflows an exact migrated slot when its larger climate bounds collide", () => {
