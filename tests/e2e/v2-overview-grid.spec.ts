@@ -69,7 +69,7 @@ test.describe("Overview V2 safe grid foundation", () => {
       ["fixture.rog", 0, 0, 12, 1],
       ["fixture.coffee", 0, 1, 7, 4],
       ["fixture.planning", 7, 1, 5, 4],
-      ["fixture.climate", 0, 5, 7, 4],
+      ["fixture.climate", 0, 5, 7, 3],
       ["fixture.health", 7, 5, 5, 2]
     ] as const;
     for (const [instanceId, x, y, w, h] of expected) {

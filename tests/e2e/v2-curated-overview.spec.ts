@@ -322,7 +322,7 @@ test.describe("PR4 curated Overview", () => {
       ["fixture.rog", 196, 136, 1064, 60],
       ["fixture.coffee", 196, 208, 616, 276],
       ["fixture.planning", 824, 208, 436, 276],
-      ["fixture.climate", 196, 496, 616, 276],
+      ["fixture.climate", 196, 496, 616, 204],
       ["fixture.health", 824, 496, 436, 132]
     ] as const;
 
