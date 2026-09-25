@@ -167,6 +167,9 @@ test("captures Overview day/night review states with contained controls", async 
   });
   await overview(page, "home-climate-healthy");
   const climate = page.getByTestId("climate-control-overview");
+  const climateGridItem = page.locator('[data-testid="overview-grid-item"][data-instance-id="fixture.climate"]');
+  await expect(climateGridItem).toHaveAttribute("data-grid-w", "7");
+  await expect(climateGridItem).toHaveAttribute("data-grid-h", "3");
   await expect(climate).toBeVisible();
   await expect(climate).toHaveCSS("border-top-width", "0px");
   await expect(climate.getByTestId("climate-temperature-decrease-overview")).toBeEnabled();
@@ -187,11 +190,16 @@ test("captures Overview day/night review states with contained controls", async 
     return {
       fanBottomGap: box.bottom - fan.bottom,
       noticeTopGap: notice ? notice.top - fan.bottom : 0,
-      contentBottomGap: box.bottom - (notice ? notice.bottom : fan.bottom)
+      contentBottomGap: box.bottom - (notice ? notice.bottom : fan.bottom),
+      noInternalOverflow: element.scrollHeight <= element.clientHeight + 1
     };
   });
   expect(climateGeometry.noticeTopGap).toBeLessThanOrEqual(24);
   expect(climateGeometry.contentBottomGap).toBeLessThanOrEqual(16);
+  expect(climateGeometry.noInternalOverflow).toBe(true);
+  const climateSlotHeight = await climateGridItem.evaluate((element) => element.getBoundingClientRect().height);
+  expect(climateSlotHeight).toBeGreaterThanOrEqual(200);
+  expect(climateSlotHeight).toBeLessThanOrEqual(208);
   await climate.screenshot({ path: path.join(artifactDir, "overview-night-climate-available.png"), animations: "disabled" });
   await noHorizontalOverflow(page);
 });

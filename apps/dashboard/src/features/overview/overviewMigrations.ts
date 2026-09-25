@@ -133,6 +133,35 @@ export function migratePresetV2ToV3(raw: unknown): unknown {
   return { ...root, items: sourceItems, presetVersion: 3 };
 }
 
+/** Pure preset v3 -> v4 migration: Climate standard shrinks in place from 7×4 to 7×3. */
+export function migratePresetV3ToV4(raw: unknown): unknown {
+  const root = objectRecord(raw);
+  if (!root || root.schemaVersion !== "overview.layout.v2" || root.presetVersion !== 3) return raw;
+  const sourceItems = Array.isArray(root.items)
+    ? root.items.map((item) => objectRecord(item)).filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+  const items = sourceItems.map((item) => {
+    if (item.widgetType !== "home.climate" || item.sizeVariant !== "standard") return item;
+    const placement = objectRecord(item.placement);
+    if (
+      !placement
+      || placement.w !== 7
+      || placement.h !== 4
+      || typeof placement.x !== "number"
+      || !Number.isInteger(placement.x)
+      || typeof placement.y !== "number"
+      || !Number.isInteger(placement.y)
+    ) {
+      return item;
+    }
+    return {
+      ...item,
+      placement: { x: placement.x, y: placement.y, w: 7, h: 3 }
+    };
+  });
+  return { ...root, items, presetVersion: 4 };
+}
+
 export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
   const root = objectRecord(raw);
   if (!root) {
@@ -144,7 +173,8 @@ export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
     };
   }
   const migrated = root.schemaVersion === "overview.layout.v1" || root.version === 1 ? migrateV1ToV2(root) : root;
-  const presetMigrated = migratePresetV2ToV3(migrated);
+  const presetV3 = migratePresetV2ToV3(migrated);
+  const presetMigrated = migratePresetV3ToV4(presetV3);
   const document = objectRecord(presetMigrated);
   const sourceItems = document && Array.isArray(document.items) ? document.items : null;
   if (!document || document.schemaVersion !== "overview.layout.v2" || !sourceItems) {
