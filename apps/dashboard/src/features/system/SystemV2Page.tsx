@@ -16,6 +16,8 @@ import {
   diagnosticsFallbackCopyText,
   diagnosticsSupportText,
   problemTechnicalEvidenceText,
+  problemOwnerSummary,
+  problemOwnerTitle,
   problemStateLabel,
   problemTone
 } from "../../problemModel";
@@ -108,8 +110,8 @@ function ProblemRow({ problem, onEvidence }: { problem: DiagnosticsProblem; onEv
       data-testid={`system-problem-${problem.id.replace(/[^a-z0-9]+/gi, "-")}`}
     >
       <div className="system-problem-row__copy">
-        <strong>{problem.subsystem}</strong>
-        <span>{problem.summary}</span>
+        <strong>{problemOwnerTitle(problem)}</strong>
+        <span>{problemOwnerSummary(problem)}</span>
       </div>
       <div className="system-problem-row__meta">
         <StatusText label={problemStateLabel(problem.state)} tone={problemTone(problem.state)} />

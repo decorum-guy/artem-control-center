@@ -57,9 +57,19 @@ test("maps the contour to confirmed live ON and keeps warning distinct", async (
     await expect(coffee).toHaveAttribute("data-coffee-active", String(active));
     const style = await coffee.evaluate((element) => {
       const computed = getComputedStyle(element);
-      return { shadow: computed.boxShadow, animation: computed.animationName, borderLeft: computed.borderLeftWidth };
+      const leftBar = getComputedStyle(element, "::before");
+      return {
+        shadow: computed.boxShadow,
+        animation: computed.animationName,
+        borderLeft: computed.borderLeftWidth,
+        leftBarOpacity: Number.parseFloat(leftBar.opacity),
+        leftBarWidth: leftBar.width,
+        leftBarVisible: Number.parseFloat(leftBar.opacity) > 0 && leftBar.width !== "0px"
+      };
     });
     expect(style.shadow === "none", scenario).toBe(!active);
+    expect(style.leftBarVisible, scenario).toBe(active);
+    expect(style.leftBarWidth, scenario).toBe("2px");
     expect(style.animation, scenario).toBe("none");
     if (stage === "ready") readyShadow = style.shadow;
     if (stage === "running_too_long") {
@@ -94,7 +104,8 @@ test("captures Overview day/night review states with contained controls", async 
     ["night", "coffee-off", "overview-night-coffee-off.png"],
     ["night", "coffee-ready", "overview-night-coffee-active.png"],
     ["night", "coffee-running-too-long", "overview-night-coffee-warning.png"],
-    ["night", "coffee-stale", "overview-night-coffee-stale.png"]
+    ["night", "coffee-stale", "overview-night-coffee-stale.png"],
+    ["night", "ha-offline-policy-available", "overview-night-coffee-unavailable.png"]
   ] as const;
 
   for (const [theme, scenario, filename] of states) {
@@ -117,6 +128,9 @@ test("captures Overview day/night review states with contained controls", async 
     await contained(coffee, ["[data-coffee-action]"]);
     await noHorizontalOverflow(page);
     await page.screenshot({ path: path.join(artifactDir, filename), animations: "disabled" });
+    if (scenario === "coffee-ready") {
+      await coffee.screenshot({ path: path.join(artifactDir, "overview-night-coffee-active-close-up.png"), animations: "disabled" });
+    }
   }
 
   const off = await overview(page, "coffee-off");
@@ -165,6 +179,19 @@ test("captures Overview day/night review states with contained controls", async 
     ".climate-control__mode-label select",
     ".climate-control__fan-label select"
   ]);
+  const climateGeometry = await climate.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const fan = element.querySelector(".climate-control__fan-label select")?.getBoundingClientRect();
+    const notice = element.querySelector<HTMLElement>(".climate-control__api-note:not([hidden])")?.getBoundingClientRect();
+    if (!fan) throw new Error("Climate fan control geometry is missing");
+    return {
+      fanBottomGap: box.bottom - fan.bottom,
+      noticeTopGap: notice ? notice.top - fan.bottom : 0,
+      contentBottomGap: box.bottom - (notice ? notice.bottom : fan.bottom)
+    };
+  });
+  expect(climateGeometry.noticeTopGap).toBeLessThanOrEqual(24);
+  expect(climateGeometry.contentBottomGap).toBeLessThanOrEqual(16);
   await climate.screenshot({ path: path.join(artifactDir, "overview-night-climate-available.png"), animations: "disabled" });
   await noHorizontalOverflow(page);
 });
