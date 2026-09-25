@@ -1279,7 +1279,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     : null;
   const editorDestinations = mutationSheet === "edit"
     ? [selectedIsLocal ? localDestination : selectedProviderDestination].filter(Boolean) as CalendarEditorDestination[]
-    : [localDestination, ...providerEditorDestinations];
+    : [...providerEditorDestinations, localDestination];
   const createAction = canCreate ? <button type="button" className="planning-primary-button planning-calendar-create" onClick={() => { setMutationConflict(false); setMutationSheet("create"); }}>Создать событие</button> : undefined;
 
   const monthDates = useMemo(
