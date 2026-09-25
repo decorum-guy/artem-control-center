@@ -941,6 +941,8 @@ def _mutation_error(error: PlanningUpstreamError, *, domain: Literal["reminder",
         return HTTPException(status_code=403, detail=error.category)
     if error.category == "provider_rate_limited":
         return HTTPException(status_code=429, detail="provider_rate_limited")
+    if error.category == "provider_authentication_failed":
+        return HTTPException(status_code=502, detail="provider_authentication_failed")
     if error.category == "provider_transient_failure":
         return HTTPException(status_code=503, detail="provider_transient_failure")
     if error.category in {
