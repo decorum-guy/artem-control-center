@@ -16,8 +16,8 @@ from panel_agent.planning import (
     UpstreamCalendarEvent,
     UpstreamPlanningSource,
 )
-from panel_agent.planning_adapter import PlanningAdapter, PlanningUpstreamError
-from panel_agent.planning_api import build_planning_router
+from panel_agent.planning_adapter import PlanningAdapter, PlanningUpstreamError, _upstream_error_category
+from panel_agent.planning_api import _mutation_error, build_planning_router
 from panel_agent.settings import IntegrationSettings
 
 
@@ -350,3 +350,16 @@ def test_provider_destinations_remain_visible_but_non_writable_when_provider_gat
     assert envelope.items[0].writeState == "read_only"
     assert envelope.items[0].canCreateEvent is False
     assert envelope.items[0].canDeleteCalendar is False
+
+
+def test_provider_authentication_failure_preserves_bounded_error_code():
+    raw = b'{"error":{"code":"provider_authentication_failed"}}'
+    category = _upstream_error_category(raw, 502, mutation=True)
+
+    assert category == "provider_authentication_failed"
+    mapped = _mutation_error(
+        PlanningUpstreamError(category, status_code=502),
+        domain="event",
+    )
+    assert mapped.status_code == 502
+    assert mapped.detail == "provider_authentication_failed"
