@@ -237,7 +237,7 @@ def test_valid_a4_contracts_auth_and_bounded_projection(tmp_path):
     list_requests = [
         query
         for _, path, _, query in transport.requests
-        if path != PLANNING_ROUTES["status"]
+        if path not in {PLANNING_ROUTES["status"], PLANNING_ROUTES["calendar_destinations"]}
     ]
     assert sum("limit=100" in query for query in list_requests) == 1
     assert sum("limit=20" in query for query in list_requests) == len(list_requests) - 1
@@ -337,7 +337,7 @@ def test_fixture_content_is_inert_text_and_client_has_no_proxy_surface(tmp_path)
     assert not hasattr(PlanningClient, "proxy")
     assert not hasattr(PlanningClient, "request")
     assert set(PLANNING_ROUTES) == {
-        "reminders", "parse", "tasks", "events", "projects", "status", "calendar_sources_refresh"
+        "reminders", "parse", "tasks", "events", "projects", "status", "calendar_destinations", "calendar_sources_refresh"
     }
     assert "/alice/interpret" not in PLANNING_ROUTES.values()
     projection = empty_planning_projection(

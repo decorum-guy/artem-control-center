@@ -565,6 +565,7 @@ class DiagnosticsCollector:
                 planningReminderMutationsEnabled=self._settings.panel_planning_reminder_mutations_enabled,
                 planningTaskMutationsEnabled=self._settings.panel_planning_task_mutations_enabled,
                 planningCalendarMutationsEnabled=self._settings.panel_planning_calendar_mutations_enabled,
+                planningProviderCalendarMutationsEnabled=self._settings.panel_planning_provider_calendar_mutations_enabled,
             ),
         )
 

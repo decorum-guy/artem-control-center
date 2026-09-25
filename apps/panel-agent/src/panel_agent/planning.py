@@ -40,6 +40,7 @@ DeliveryState = Literal["not_due", "queued", "retrying", "delivered", "failed"]
 TaskPriority = Literal["none", "low", "normal", "high"]
 TaskStatus = Literal["open", "completed", "archived"]
 EventSyncState = Literal["local_only", "pending", "synced", "stale", "conflict", "error"]
+ProviderWriteState = Literal["writable", "candidate", "read_only", "unavailable"]
 
 _UTC_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$")
 _LOCAL_TIME = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$")
@@ -333,6 +334,13 @@ class UpstreamCalendarEvent(StrictPlanningModel):
         return self
 
 
+class UpstreamEventMutationCapability(StrictPlanningModel):
+    canEdit: StrictBool
+    canDelete: StrictBool
+    providerKind: Literal["icloud"] | None = None
+    writeState: ProviderWriteState | None = None
+
+
 class UpstreamSourceCalendar(StrictPlanningModel):
     """Typed additive Alice source calendar metadata; never browser-facing."""
 
@@ -402,6 +410,75 @@ class PlanningCalendarSourcesRefresh(StrictPlanningModel):
     _correlation = field_validator("correlation_id")(validate_uuid4)
 
 
+class UpstreamCalendarDestination(StrictPlanningModel):
+    id: StrictStr = Field(min_length=1, max_length=256)
+    label: StrictStr = Field(min_length=1, max_length=220)
+    color: StrictStr | None = Field(default=None, max_length=9)
+    providerKind: Literal["icloud"]
+    writeState: ProviderWriteState
+    canCreateEvent: StrictBool
+    canDeleteCalendar: StrictBool
+
+    _identity = field_validator("id")(validate_opaque_identity)
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str | None) -> str | None:
+        if value is not None and _CALENDAR_COLOR.fullmatch(value) is None:
+            raise ValueError("calendar destination color must be a validated hex color")
+        return value
+
+
+class UpstreamCalendarDestinationCapabilities(StrictPlanningModel):
+    canCreateCalendar: StrictBool = False
+
+
+class UpstreamCalendarDestinationsEnvelope(StrictPlanningModel):
+    schemaVersion: Literal["planning.v1"]
+    kind: Literal["calendar_destinations"]
+    domain: Literal["calendar_destination"]
+    items: list[UpstreamCalendarDestination] = Field(max_length=32)
+    capabilities: UpstreamCalendarDestinationCapabilities
+    generatedAt: StrictStr
+    sourceStatus: Literal["current"]
+    lastSyncedAt: StrictStr
+    staleAfter: StrictStr
+    correlation_id: StrictStr = Field(min_length=36, max_length=36)
+
+    _timestamps = _timestamp_fields("generatedAt", "lastSyncedAt", "staleAfter")
+    _correlation = field_validator("correlation_id")(validate_uuid4)
+
+
+class UpstreamCalendarDestinationObjectEnvelope(StrictPlanningModel):
+    schemaVersion: Literal["planning.v1"]
+    kind: Literal["calendar_destination"]
+    domain: Literal["calendar_destination"]
+    destination: UpstreamCalendarDestination
+    sourceStatus: Literal["current"]
+    lastSyncedAt: StrictStr
+    staleAfter: StrictStr
+    correlation_id: StrictStr = Field(min_length=36, max_length=36)
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+    _correlation = field_validator("correlation_id")(validate_uuid4)
+
+
+class UpstreamCalendarDestinationDeletedEnvelope(StrictPlanningModel):
+    schemaVersion: Literal["planning.v1"]
+    kind: Literal["calendar_destination_deleted"]
+    domain: Literal["calendar_destination"]
+    calendarId: StrictStr
+    deleted: StrictBool
+    sourceStatus: Literal["current"]
+    lastSyncedAt: StrictStr
+    staleAfter: StrictStr
+    correlation_id: StrictStr = Field(min_length=36, max_length=36)
+
+    _identity = field_validator("calendarId")(validate_opaque_identity)
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+    _correlation = field_validator("correlation_id")(validate_uuid4)
+
+
 class UpstreamProject(StrictPlanningModel):
     id: StrictStr = Field(min_length=36, max_length=36)
     domain: Literal["project"]
@@ -448,6 +525,18 @@ class TaskListEnvelope(PlanningListEnvelope):
 class EventListEnvelope(PlanningListEnvelope):
     domain: Literal["calendar_event"]
     items: list[UpstreamCalendarEvent] = Field(max_length=100)
+    mutationCapabilities: dict[StrictStr, UpstreamEventMutationCapability] | None = Field(default=None, max_length=100)
+
+    @field_validator("mutationCapabilities")
+    @classmethod
+    def _mutation_capability_ids(
+        cls,
+        value: dict[str, UpstreamEventMutationCapability] | None,
+    ) -> dict[str, UpstreamEventMutationCapability] | None:
+        if value is not None:
+            for event_id in value:
+                validate_uuid4(event_id, "calendar_event.mutationCapabilities.event_id")
+        return value
 
 
 class ProjectListEnvelope(PlanningListEnvelope):
@@ -472,6 +561,14 @@ class UpstreamCapabilities(StrictPlanningModel):
     events: list[CapabilityToken] = Field(max_length=8)
     projects: list[CapabilityToken] = Field(max_length=8)
     status: list[Literal["read"]] = Field(max_length=2)
+
+
+class UpstreamProviderCapabilities(StrictPlanningModel):
+    providerKind: Literal["icloud"]
+    readIntegrationEnabled: StrictBool
+    configured: StrictBool
+    writesEnabled: StrictBool
+    canCreateCalendar: StrictBool
 
 
 class UpstreamTaskCapabilityMetadata(StrictPlanningModel):
@@ -569,6 +666,7 @@ class StatusEnvelope(StrictPlanningModel):
     correlation_id: StrictStr = Field(min_length=36, max_length=36)
     capabilityMetadata: UpstreamCapabilityMetadata
     planningHealth: UpstreamPlanningHealth | None = None
+    providerCapabilities: UpstreamProviderCapabilities | None = None
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
     _correlation = field_validator("correlation_id")(validate_uuid4)
@@ -620,6 +718,7 @@ class EventObjectEnvelope(StrictPlanningModel):
     staleAfter: StrictStr
     sources: list[UpstreamPlanningSource] | None = Field(default=None, max_length=4)
     correlation_id: StrictStr = Field(min_length=36, max_length=36)
+    mutationCapabilities: UpstreamEventMutationCapability | None = None
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
     _correlation = field_validator("correlation_id")(validate_uuid4)
@@ -733,6 +832,9 @@ class CalendarEventProjection(StrictPlanningModel):
     timezone: StrictStr = Field(min_length=1, max_length=64)
     syncState: EventSyncState
     localOnlyMutable: StrictBool
+    canEdit: StrictBool = False
+    canDelete: StrictBool = False
+    providerWriteState: ProviderWriteState | None = None
     startAtUtc: StrictStr | None = None
     endAtUtc: StrictStr | None = None
     startDate: StrictStr | None = None
@@ -817,6 +919,88 @@ class PlanningCalendarCapabilities(StrictPlanningModel):
     create: StrictBool = False
     edit: StrictBool = False
     delete: StrictBool = False
+
+
+class PlanningProviderCapabilities(StrictPlanningModel):
+    providerKind: Literal["icloud"]
+    readIntegrationEnabled: StrictBool
+    configured: StrictBool
+    writesEnabled: StrictBool
+    canCreateCalendar: StrictBool
+
+
+class PlanningCalendarDestination(StrictPlanningModel):
+    id: StrictStr = Field(min_length=1, max_length=128)
+    label: StrictStr = Field(min_length=1, max_length=220)
+    color: StrictStr | None = Field(default=None, max_length=9)
+    providerKind: Literal["icloud"]
+    writeState: ProviderWriteState
+    canCreateEvent: StrictBool
+    canDeleteCalendar: StrictBool
+
+    @field_validator("id")
+    @classmethod
+    def _identity(cls, value: str) -> str:
+        if re.fullmatch(r"calendar-[0-9a-f]{24}", value) is None:
+            raise ValueError("calendar destination id must be browser-safe")
+        return value
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, value: str | None) -> str | None:
+        if value is not None and _CALENDAR_COLOR.fullmatch(value) is None:
+            raise ValueError("calendar destination color must be a validated hex color")
+        return value
+
+
+class PlanningCalendarDestinationCapabilities(StrictPlanningModel):
+    canCreateCalendar: StrictBool = False
+
+
+class PlanningCalendarDestinationsEnvelope(StrictPlanningModel):
+    schemaVersion: Literal["planning.panel.v1"]
+    kind: Literal["calendar_destinations"]
+    domain: Literal["calendar_destination"]
+    items: list[PlanningCalendarDestination] = Field(max_length=32)
+    capabilities: PlanningCalendarDestinationCapabilities
+    providerCapabilities: PlanningProviderCapabilities | None = None
+    sourceStatus: PlanningSourceStatus
+    lastSyncedAt: StrictStr | None = None
+    staleAfter: StrictStr | None = None
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+
+
+class PlanningCalendarDestinationObjectEnvelope(StrictPlanningModel):
+    schemaVersion: Literal["planning.panel.v1"]
+    kind: Literal["calendar_destination"]
+    domain: Literal["calendar_destination"]
+    destination: PlanningCalendarDestination
+    sourceStatus: PlanningSourceStatus
+    lastSyncedAt: StrictStr | None = None
+    staleAfter: StrictStr | None = None
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
+
+
+class PlanningCalendarDestinationDeletedEnvelope(StrictPlanningModel):
+    schemaVersion: Literal["planning.panel.v1"]
+    kind: Literal["calendar_destination_deleted"]
+    domain: Literal["calendar_destination"]
+    calendarId: StrictStr
+    deleted: StrictBool
+    sourceStatus: PlanningSourceStatus
+    lastSyncedAt: StrictStr | None = None
+    staleAfter: StrictStr | None = None
+
+    @field_validator("calendarId")
+    @classmethod
+    def _identity(cls, value: str) -> str:
+        if re.fullmatch(r"calendar-[0-9a-f]{24}", value) is None:
+            raise ValueError("calendar destination id must be browser-safe")
+        return value
+
+    _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
 
 
 class PlanningCapabilities(StrictPlanningModel):
@@ -946,6 +1130,8 @@ class PlanningProjection(StrictPlanningModel):
     reminderMutationsEnabled: StrictBool = False
     taskMutationsEnabled: StrictBool = False
     calendarMutationsEnabled: StrictBool = False
+    providerCalendarMutationsEnabled: StrictBool = False
+    providerCapabilities: PlanningProviderCapabilities | None = None
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     reminders: PlanningReminderLists
@@ -965,6 +1151,8 @@ class PlanningStatusProjection(StrictPlanningModel):
     reminderMutationsEnabled: StrictBool = False
     taskMutationsEnabled: StrictBool = False
     calendarMutationsEnabled: StrictBool = False
+    providerCalendarMutationsEnabled: StrictBool = False
+    providerCapabilities: PlanningProviderCapabilities | None = None
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     capabilities: PlanningCapabilities
@@ -1089,6 +1277,8 @@ def empty_planning_projection(
         reminderMutationsEnabled=False,
         taskMutationsEnabled=False,
         calendarMutationsEnabled=False,
+        providerCalendarMutationsEnabled=False,
+        providerCapabilities=None,
         lastSyncedAt=last_synced_at,
         staleAfter=stale_after,
         reminders=PlanningReminderLists(upcoming=[], overdue=[], deliveryFailures=[]),
@@ -1120,6 +1310,10 @@ def status_projection(projection: PlanningProjection) -> PlanningStatusProjectio
         reminderMutationsEnabled=projection.reminderMutationsEnabled,
         taskMutationsEnabled=projection.taskMutationsEnabled,
         calendarMutationsEnabled=projection.calendarMutationsEnabled and projection.sourceStatus == "current",
+        providerCalendarMutationsEnabled=(
+            projection.providerCalendarMutationsEnabled and projection.sourceStatus == "current"
+        ),
+        providerCapabilities=projection.providerCapabilities,
         lastSyncedAt=projection.lastSyncedAt,
         staleAfter=projection.staleAfter,
         capabilities=projection.capabilities,

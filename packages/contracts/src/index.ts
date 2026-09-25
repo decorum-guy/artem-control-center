@@ -452,6 +452,7 @@ export interface DiagnosticsMutationGates {
   planningReminderMutationsEnabled: boolean;
   planningTaskMutationsEnabled: boolean;
   planningCalendarMutationsEnabled: boolean;
+  planningProviderCalendarMutationsEnabled?: boolean;
 }
 
 export interface DiagnosticsReport {
@@ -590,6 +591,9 @@ export interface PlanningCalendarEvent {
   timezone: string;
   syncState: PlanningEventSyncState;
   localOnlyMutable: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  providerWriteState?: PlanningProviderWriteState | null;
   startAtUtc: string | null;
   endAtUtc: string | null;
   startDate: string | null;
@@ -629,6 +633,26 @@ export interface PlanningCalendarCapabilities {
   create: boolean;
   edit: boolean;
   delete: boolean;
+}
+
+export type PlanningProviderWriteState = "writable" | "candidate" | "read_only" | "unavailable";
+
+export interface PlanningProviderCapabilities {
+  providerKind: "icloud";
+  readIntegrationEnabled: boolean;
+  configured: boolean;
+  writesEnabled: boolean;
+  canCreateCalendar: boolean;
+}
+
+export interface PlanningCalendarDestination {
+  id: string;
+  label: string;
+  color: string | null;
+  providerKind: "icloud";
+  writeState: PlanningProviderWriteState;
+  canCreateEvent: boolean;
+  canDeleteCalendar: boolean;
 }
 
 export interface PlanningCapabilities {
@@ -823,6 +847,9 @@ export interface PlanningSnapshot {
   taskMutationsEnabled?: boolean;
   /** Server/deployment calendar writer gate, distinct from profile permissions. */
   calendarMutationsEnabled?: boolean;
+  /** Independent provider write gate; omitted only by older snapshots. */
+  providerCalendarMutationsEnabled?: boolean;
+  providerCapabilities?: PlanningProviderCapabilities | null;
   lastSyncedAt: string | null;
   staleAfter: string | null;
   reminders: {

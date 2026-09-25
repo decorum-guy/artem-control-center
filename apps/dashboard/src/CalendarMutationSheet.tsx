@@ -39,7 +39,7 @@ export function CalendarMutationSheet({ mode, event, selectedDate, destinations,
   conflict: boolean;
   onReload: () => Promise<void>;
 }) {
-  const [form, setForm] = useState(() => initialCalendarEventEditorState(selectedDate, destinations[0]?.id ?? "", event));
+  const [form, setForm] = useState(() => initialCalendarEventEditorState(selectedDate, destinations.find((destination) => destination.writable)?.id ?? destinations[0]?.id ?? "", event));
   const [activeTime, setActiveTime] = useState<"start" | "end">("start");
   const [saving, setSaving] = useState(false);
   const [phraseOpen, setPhraseOpen] = useState(false);
@@ -97,7 +97,7 @@ export function CalendarMutationSheet({ mode, event, selectedDate, destinations,
     <div className="calendar-editor">
       <div className="calendar-editor__destination">
         <span className="calendar-editor__field-label">Календарь</span>
-        {destinations.length > 1 ? <select aria-label="Календарь" value={form.destinationId} onChange={(change) => setForm({ ...form, destinationId: change.target.value })}>
+        {destinations.length > 1 ? <select aria-label="Календарь" disabled={mode === "edit"} value={form.destinationId} onChange={(change) => setForm({ ...form, destinationId: change.target.value })}>
           {destinations.map((item) => <option value={item.id} disabled={!item.writable} key={item.id}>{item.label}</option>)}
         </select> : <div className="calendar-editor__destination-value" data-testid="calendar-editor-destination">
           <span className="calendar-editor__destination-dot" style={{ backgroundColor: destination?.color }} aria-hidden="true" />

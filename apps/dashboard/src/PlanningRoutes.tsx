@@ -19,6 +19,7 @@ import { calendarMonthGrid, calendarMonthKeyForDate, shiftCalendarMonth } from "
 import {
   mutatePlanningReminder,
   mutatePlanningEvent,
+  mutatePlanningProviderEvent,
   mutatePlanningTask,
   newPlanningIdempotencyKey,
   PlanningMutationError,
@@ -26,6 +27,7 @@ import {
   previewPlanningReminder,
   readPlanningEventById,
   readPlanningEventsForRange,
+  readPlanningCalendarDestinations,
   readPlanningProjects,
   readPlanningReminders,
   readPlanningTasks,
@@ -867,6 +869,17 @@ function calendarMutationAllowed(
     && Boolean(planning?.capabilities.calendar[capability]);
 }
 
+function providerCalendarMutationAllowed(
+  planning: PlanningSnapshot | null,
+  capability: "create" | "edit" | "delete"
+): boolean {
+  return planningCalendarRouteEnabled
+    && planningCalendarMutationsEnabled
+    && planning?.providerCalendarMutationsEnabled === true
+    && planning?.sourceStatus === "current"
+    && Boolean(planning?.capabilities.calendar[capability]);
+}
+
 function calendarDayLabel(localDate: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
     weekday: "long",
@@ -986,7 +999,6 @@ function CalendarDetailSheet({
   onDelete: () => void;
 }) {
   const identity = calendarIdentityForEvent(event);
-  const localEvent = event.localOnlyMutable && event.syncState === "local_only";
   const deleted = Boolean(event.deletedAt);
   const eventDate = calendarLocalDateForEvent(event);
   return (
@@ -995,7 +1007,7 @@ function CalendarDetailSheet({
       eyebrow="Календарь"
       onClose={onClose}
       testId="planning-calendar-detail"
-      footer={localEvent && !deleted && (canEdit || canDelete) ? <div className="calendar-detail__actions">
+      footer={!deleted && (canEdit || canDelete) ? <div className="calendar-detail__actions">
         {canEdit && <button type="button" className="planning-primary-button" disabled={mutationPending} onClick={onEdit}>Изменить</button>}
         {canDelete && <button type="button" className="planning-secondary-button calendar-detail__delete" disabled={mutationPending} onClick={onDelete}>Удалить</button>}
       </div> : undefined}
@@ -1007,7 +1019,7 @@ function CalendarDetailSheet({
         {event.location && <p className="calendar-detail__location">{event.location}</p>}
         {event.notes && <div className="calendar-detail__notes"><span>Заметки</span><p>{event.notes}</p></div>}
       </div>
-      {!localEvent && !deleted && <p className="calendar-detail__readonly">Только просмотр · редактирование недоступно</p>}
+      {!deleted && !canEdit && !canDelete && <p className="calendar-detail__readonly">Только просмотр · редактирование недоступно</p>}
       {deleted && <p className="calendar-detail__readonly">Событие удалено.</p>}
       <section className="calendar-detail__metadata" aria-label="Источник и состояние">
         <h3>Источник и состояние</h3>
@@ -1120,6 +1132,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const [editorReloadRevision, setEditorReloadRevision] = useState(0);
   const [mutationPending, setMutationPending] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [providerDestinations, setProviderDestinations] = useState<Awaited<ReturnType<typeof readPlanningCalendarDestinations>> | null>(null);
   const [expandedDay, setExpandedDay] = useState(false);
   const [calendarRefreshPending, setCalendarRefreshPending] = useState(false);
   const [liveNow, setLiveNow] = useState(() => new Date());
@@ -1143,6 +1156,13 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
       reader: (signal) => readPlanningEventsForRange(monthGrid.range.fromUtc, monthGrid.range.toUtc, signal)
     }
   );
+  useEffect(() => {
+    const controller = new AbortController();
+    void readPlanningCalendarDestinations(controller.signal)
+      .then(setProviderDestinations)
+      .catch(() => setProviderDestinations(null));
+    return () => controller.abort();
+  }, [snapshot.revision, retry]);
   const planning = snapshot.planning ?? null;
   const referenceTime = planningRouteReferenceTime(
     routeRead.data?.sourceStatus ?? "unavailable",
@@ -1168,6 +1188,12 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const calendarServerWriterDisabled = currentPlanning
     && planningCalendarMutationsEnabled
     && planning?.calendarMutationsEnabled === false;
+  const providerServerWriterDisabled = currentPlanning
+    && planningCalendarMutationsEnabled
+    && planning?.providerCalendarMutationsEnabled === false;
+  const providerWriterGateMetadataUnavailable = currentPlanning
+    && planningCalendarMutationsEnabled
+    && planning?.providerCalendarMutationsEnabled === undefined;
   const calendarWriterGateMetadataUnavailable = currentPlanning
     && planningCalendarMutationsEnabled
     && planning?.calendarMutationsEnabled === undefined;
@@ -1181,9 +1207,6 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     && accessAvailable
     && Boolean(accessStatus)
     && !(Object.keys(planningCalendarAccessCapabilities) as Array<keyof typeof planningCalendarAccessCapabilities>).some(accessAllows);
-  const canCreate = calendarMutationAllowed(planning, "create") && accessAllows("create");
-  const canEdit = Boolean(selectedEvent?.localOnlyMutable && calendarMutationAllowed(planning, "edit") && accessAllows("edit"));
-  const canDelete = Boolean(selectedEvent?.localOnlyMutable && !selectedEvent?.deletedAt && calendarMutationAllowed(planning, "delete") && accessAllows("delete"));
   const nativeSource = sources.find((source) => source.kind === "native");
   const nativeCalendar = nativeSource?.calendars[0];
   const localDestination: CalendarEditorDestination = {
@@ -1196,9 +1219,67 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
       overrides: calendarDisplayPreferences?.overrides ?? [],
       local: true
     }),
-    writable: mutationSheet === "edit" ? canEdit : canCreate,
+    writable: mutationSheet === "edit"
+      ? Boolean(selectedEvent?.canEdit ?? (selectedEvent?.localOnlyMutable && selectedEvent.syncState === "local_only"))
+      : calendarMutationAllowed(planning, "create") && accessAllows("create"),
     providerKind: "local"
   };
+  const providerEditorDestinations: CalendarEditorDestination[] = (providerDestinations?.items ?? []).map((destination) => {
+    const source = sources.find((candidate) => candidate.kind === "external" && candidate.calendars.some((calendar) => calendar.id === destination.id));
+    return {
+      id: destination.id,
+      label: destination.label,
+      color: resolveCalendarDisplayColor({
+        providerId: source?.id ?? "external-icloud",
+        calendarId: destination.id,
+        providerColor: destination.color,
+        overrides: calendarDisplayPreferences?.overrides ?? []
+      }),
+      writable: destination.canCreateEvent && providerCalendarMutationAllowed(planning, "create") && accessAllows("create"),
+      providerKind: "icloud"
+    };
+  });
+  const selectedIsLocal = Boolean(selectedEvent?.localOnlyMutable && selectedEvent.syncState === "local_only");
+  const selectedCapabilityEdit = selectedEvent?.canEdit ?? selectedIsLocal;
+  const selectedCapabilityDelete = selectedEvent?.canDelete ?? selectedIsLocal;
+  const canCreate = (
+    (calendarMutationAllowed(planning, "create") || providerEditorDestinations.some((destination) => destination.writable))
+    && accessAllows("create")
+  );
+  const canEdit = Boolean(
+    selectedEvent
+    && selectedCapabilityEdit
+    && (selectedIsLocal ? calendarMutationAllowed(planning, "edit") : providerCalendarMutationAllowed(planning, "edit"))
+    && accessAllows("edit")
+  );
+  const canDelete = Boolean(
+    selectedEvent
+    && !selectedEvent.deletedAt
+    && selectedCapabilityDelete
+    && (selectedIsLocal ? calendarMutationAllowed(planning, "delete") : providerCalendarMutationAllowed(planning, "delete"))
+    && accessAllows("delete")
+  );
+  const selectedProviderDestination: CalendarEditorDestination | null = selectedEvent && !selectedIsLocal
+    ? (() => {
+      const identity = calendarIdentityForEvent(selectedEvent);
+      const known = providerEditorDestinations.find((destination) => destination.id === identity.calendarId);
+      if (known) return { ...known, writable: canEdit };
+      return {
+        id: identity.calendarId,
+        label: identity.calendarLabel,
+        color: resolveCalendarDisplayColor({
+          providerId: identity.providerId,
+          calendarId: identity.calendarId,
+          overrides: calendarDisplayPreferences?.overrides ?? []
+        }),
+        writable: canEdit,
+        providerKind: "icloud"
+      };
+    })()
+    : null;
+  const editorDestinations = mutationSheet === "edit"
+    ? [selectedIsLocal ? localDestination : selectedProviderDestination].filter(Boolean) as CalendarEditorDestination[]
+    : [...providerEditorDestinations, localDestination];
   const createAction = canCreate ? <button type="button" className="planning-primary-button planning-calendar-create" onClick={() => { setMutationConflict(false); setMutationSheet("create"); }}>Создать событие</button> : undefined;
 
   const monthDates = useMemo(
@@ -1231,7 +1312,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     setRetry((value) => value + 1);
   }
 
-  async function ensureCalendarCapability(action: "create" | "edit" | "delete", title: string): Promise<boolean> {
+  async function ensureCalendarCapability(action: "create" | "edit" | "delete", title: string, provider = false): Promise<boolean> {
     if (calendarFrontendWriterDisabled) {
       showNotice({
         id: `planning.calendar.frontend-gate.${action}`,
@@ -1256,6 +1337,24 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         severity: "warning",
         title: "Серверный gate записи календаря не подтверждён",
         detail: "Серверный gate записи календаря не подтверждён. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (provider && providerServerWriterDisabled) {
+      showNotice({
+        id: `planning.calendar.provider-server-gate.${action}`,
+        severity: "warning",
+        title: "Запись провайдера отключена сервером",
+        detail: "Запись событий iCloud отключена отдельным серверным gate. Запрос не отправлен."
+      });
+      return false;
+    }
+    if (provider && providerWriterGateMetadataUnavailable) {
+      showNotice({
+        id: `planning.calendar.provider-gate-unavailable.${action}`,
+        severity: "warning",
+        title: "Серверный gate провайдера не подтверждён",
+        detail: "Серверный gate записи iCloud не подтверждён. Запрос не отправлен."
       });
       return false;
     }
@@ -1292,22 +1391,31 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
 
   async function submitEventMutation(body: EventMutationBody, destination: CalendarEditorDestination): Promise<void> {
     if (!guardMutation()) return;
-    // The only backend mutation contract today is LOCAL-ONLY. #105 supplies a
-    // separate typed provider route before any provider destination is passed.
-    if (!destination.writable || destination.providerKind !== "local" || destination.id !== localDestination.id) return;
+    if (!destination.writable) return;
+    const provider = destination.providerKind === "icloud";
+    if (!provider && destination.id !== localDestination.id) return;
     const action = mutationSheet === "create" ? "create" : "edit";
     const target = action === "edit" ? selectedEvent : null;
-    if (!await ensureCalendarCapability(action, action === "create" ? "Создать событие" : "Изменить событие")) return;
+    if (!await ensureCalendarCapability(action, action === "create" ? "Создать событие" : "Изменить событие", provider)) return;
     if (!guardMutation()) return;
     setMutationPending(true);
     try {
-      const result = await mutatePlanningEvent({
-        action,
-        idempotencyKey: newPlanningIdempotencyKey("panel-calendar"),
-        eventId: target?.id,
-        expectedVersion: target?.version,
-        body
-      });
+      const result = provider
+        ? await mutatePlanningProviderEvent({
+          action,
+          idempotencyKey: newPlanningIdempotencyKey("panel-calendar-provider"),
+          destinationId: action === "create" ? destination.id : undefined,
+          eventId: target?.id,
+          expectedVersion: target?.version,
+          body
+        })
+        : await mutatePlanningEvent({
+          action,
+          idempotencyKey: newPlanningIdempotencyKey("panel-calendar"),
+          eventId: target?.id,
+          expectedVersion: target?.version,
+          body
+        });
       setSelectedEvent(result.object);
       setMutationSheet(null);
       setMutationConflict(false);
@@ -1336,6 +1444,10 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
         if (conflict) setMutationConflict(true);
         const disabled = mutationError?.mutationCode === "disabled";
         const notFound = mutationError?.mutationCode === "not_found";
+        if (provider && mutationError?.mutationCode === "uncertain") {
+          // Re-read authoritative Calendar state once; never replay the provider write.
+          setRetry((value) => value + 1);
+        }
         if (notFound) {
           setSelectedEvent(null);
           setMutationSheet(null);
@@ -1384,20 +1496,29 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     deletePendingRef.current = true;
     setMutationPending(true);
     try {
-      if (!await ensureCalendarCapability("delete", "Удалить событие")) return;
+      const provider = !(target.localOnlyMutable && target.syncState === "local_only");
+      if (!await ensureCalendarCapability("delete", "Удалить событие", provider)) return;
       const confirmation = await confirmAction("planning.calendar.delete", {
         target: target.title,
         revision: String(target.version)
       });
       if (!confirmation.confirmed) return;
       if (!guardMutation()) return;
-      const result = await mutatePlanningEvent({
-        action: "delete",
-        idempotencyKey: newPlanningIdempotencyKey("panel-calendar"),
-        eventId: target.id,
-        expectedVersion: target.version,
-        body: {}
-      });
+      const result = provider
+        ? await mutatePlanningProviderEvent({
+          action: "delete",
+          idempotencyKey: newPlanningIdempotencyKey("panel-calendar-provider"),
+          eventId: target.id,
+          expectedVersion: target.version,
+          body: {}
+        })
+        : await mutatePlanningEvent({
+          action: "delete",
+          idempotencyKey: newPlanningIdempotencyKey("panel-calendar"),
+          eventId: target.id,
+          expectedVersion: target.version,
+          body: {}
+        });
       setSelectedEvent(result.object);
       setRetry((value) => value + 1);
       showNotice({
@@ -1617,7 +1738,7 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
           mode={mutationSheet}
           event={selectedEvent}
           selectedDate={selectedDate}
-          destinations={[localDestination]}
+          destinations={editorDestinations}
           onClose={() => { setMutationConflict(false); setMutationSheet(null); }}
           onSubmit={submitEventMutation}
           conflict={mutationConflict}

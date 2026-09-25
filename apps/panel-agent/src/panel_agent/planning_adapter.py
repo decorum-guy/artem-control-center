@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -26,6 +27,12 @@ from .planning import (
     PlanningCalendarSource,
     PlanningCalendarSourceCalendar,
     PlanningCalendarSourcesRefresh,
+    PlanningCalendarDestination,
+    PlanningCalendarDestinationsEnvelope,
+    PlanningCalendarDestinationObjectEnvelope,
+    PlanningCalendarDestinationDeletedEnvelope,
+    PlanningCalendarDestinationCapabilities,
+    PlanningProviderCapabilities,
     PlanningConflict,
     PlanningDomainHealth,
     PlanningHealthEvidence,
@@ -50,7 +57,11 @@ from .planning import (
     TaskListEnvelope,
     TaskProjection,
     UpstreamCalendarEvent,
+    UpstreamCalendarDestinationsEnvelope,
+    UpstreamCalendarDestinationObjectEnvelope,
+    UpstreamCalendarDestinationDeletedEnvelope,
     UpstreamPlanningSource,
+    UpstreamProviderCapabilities,
     UpstreamProject,
     UpstreamReminder,
     UpstreamTask,
@@ -76,6 +87,7 @@ PLANNING_ROUTES: Mapping[str, str] = {
     "events": "/internal/planning/v1/events",
     "projects": "/internal/planning/v1/projects",
     "status": "/internal/planning/v1/status",
+    "calendar_destinations": "/internal/planning/v1/calendar-destinations",
     "calendar_sources_refresh": "/internal/planning/v1/calendar-sources/refresh",
 }
 PLANNING_MUTATION_ROUTES: Mapping[str, str] = {
@@ -103,6 +115,20 @@ PLANNING_MUTATION_METHODS: Mapping[str, str] = {
     "create_event": "POST",
     "edit_event": "PATCH",
     "delete_event": "DELETE",
+}
+PLANNING_PROVIDER_MUTATION_ROUTES: Mapping[str, str] = {
+    "create_provider_event": "/internal/planning/v1/provider-events",
+    "update_provider_event": "/internal/planning/v1/provider-events/{event_id}",
+    "delete_provider_event": "/internal/planning/v1/provider-events/{event_id}",
+    "create_provider_calendar": "/internal/planning/v1/provider-calendars",
+    "delete_provider_calendar": "/internal/planning/v1/provider-calendars/{calendar_id}",
+}
+PLANNING_PROVIDER_MUTATION_METHODS: Mapping[str, str] = {
+    "create_provider_event": "POST",
+    "update_provider_event": "PATCH",
+    "delete_provider_event": "DELETE",
+    "create_provider_calendar": "POST",
+    "delete_provider_calendar": "DELETE",
 }
 PLANNING_TASK_READ_ROUTE = "/internal/planning/v1/tasks/{task_id}"
 PLANNING_EVENT_READ_ROUTE = "/internal/planning/v1/events/{event_id}"
@@ -158,7 +184,12 @@ class PlanningUpstreamError(RuntimeError):
 
     @property
     def uncertain(self) -> bool:
-        return self.category == "mutation_uncertain"
+        return self.category in {
+            "mutation_uncertain",
+            "provider_mutation_uncertain",
+            "provider_transient_failure",
+            "idempotency_in_progress",
+        }
 
 
 class PlanningBoundedScanError(PlanningUpstreamError):
@@ -329,6 +360,10 @@ class PlanningClient:
     async def status(self) -> StatusEnvelope:
         payload = await self._get_json("status", {})
         return _validate_envelope(StatusEnvelope, payload)
+
+    async def calendar_destinations(self) -> UpstreamCalendarDestinationsEnvelope:
+        payload = await self._get_json("calendar_destinations", {})
+        return _validate_envelope(UpstreamCalendarDestinationsEnvelope, payload)
 
     async def refresh_calendar_sources(self) -> PlanningCalendarSourcesRefresh:
         payload = await self._request_json(
@@ -559,6 +594,104 @@ class PlanningClient:
         )
         return _validate_envelope(EventObjectEnvelope, payload)
 
+    async def create_provider_event(
+        self,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> EventObjectEnvelope:
+        _validate_provider_event_create_body(body)
+        payload = await self._provider_mutation_json(
+            "create_provider_event",
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        return _validate_envelope(EventObjectEnvelope, payload)
+
+    async def update_provider_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> EventObjectEnvelope:
+        validate_uuid4(event_id, "planning.calendar_event_id")
+        _validate_expected_version(expected_version)
+        _validate_event_patch_body(body)
+        payload = await self._provider_mutation_json(
+            "update_provider_event",
+            event_id=event_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        return _validate_envelope(EventObjectEnvelope, payload)
+
+    async def edit_provider_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> EventObjectEnvelope:
+        """Compatibility alias for callers using the local Planning verb."""
+
+        return await self.update_provider_event(
+            event_id=event_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+
+    async def delete_provider_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> EventObjectEnvelope:
+        validate_uuid4(event_id, "planning.calendar_event_id")
+        _validate_expected_version(expected_version)
+        payload = await self._provider_mutation_json(
+            "delete_provider_event",
+            event_id=event_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body={},
+        )
+        return _validate_envelope(EventObjectEnvelope, payload)
+
+    async def create_provider_calendar(
+        self,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> UpstreamCalendarDestinationObjectEnvelope:
+        _validate_provider_calendar_create_body(body)
+        payload = await self._provider_mutation_json(
+            "create_provider_calendar",
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        return _validate_envelope(UpstreamCalendarDestinationObjectEnvelope, payload)
+
+    async def delete_provider_calendar(
+        self,
+        *,
+        calendar_id: str,
+        idempotency_key: str,
+    ) -> UpstreamCalendarDestinationDeletedEnvelope:
+        _validate_provider_calendar_id(calendar_id)
+        payload = await self._provider_mutation_json(
+            "delete_provider_calendar",
+            calendar_id=calendar_id,
+            idempotency_key=idempotency_key,
+            body={},
+        )
+        return _validate_envelope(UpstreamCalendarDestinationDeletedEnvelope, payload)
+
     async def _action_task(
         self,
         route_name: Literal["complete_task", "archive_task"],
@@ -627,6 +760,42 @@ class PlanningClient:
         method = PLANNING_MUTATION_METHODS.get(route_name)
         if method is None:
             raise PlanningUpstreamError("route_not_allowlisted")
+        headers = {"Idempotency-Key": idempotency_key}
+        if expected_version is not None:
+            headers["If-Match"] = str(expected_version)
+        return await self._request_json(
+            method,
+            path,
+            json_body=dict(body),
+            headers=headers,
+            expected_status={200, 201},
+            mutation=True,
+        )
+
+    async def _provider_mutation_json(
+        self,
+        route_name: str,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+        event_id: str | None = None,
+        calendar_id: str | None = None,
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        path = PLANNING_PROVIDER_MUTATION_ROUTES.get(route_name)
+        method = PLANNING_PROVIDER_MUTATION_METHODS.get(route_name)
+        if path is None or method is None:
+            raise PlanningUpstreamError("route_not_allowlisted")
+        _validate_idempotency_key(idempotency_key)
+        if "{event_id}" in path:
+            if event_id is None:
+                raise PlanningUpstreamError("mutation_target_missing")
+            path = path.replace("{event_id}", event_id)
+        if "{calendar_id}" in path:
+            if calendar_id is None:
+                raise PlanningUpstreamError("mutation_target_missing")
+            _validate_provider_calendar_id(calendar_id)
+            path = path.replace("{calendar_id}", calendar_id)
         headers = {"Idempotency-Key": idempotency_key}
         if expected_version is not None:
             headers["If-Match"] = str(expected_version)
@@ -717,15 +886,21 @@ def _validate_envelope(model, payload: dict[str, Any]):
 
 
 def _upstream_error_category(raw: bytes, status_code: int, *, mutation: bool) -> str:
-    if mutation and status_code in {408, 429, 500, 502, 503, 504}:
-        return "mutation_uncertain"
     try:
         payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_duplicate_rejecting_object)
         code = payload.get("error", {}).get("code") if isinstance(payload, dict) else None
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError, AttributeError):
         code = None
-    if code in {"version_conflict", "idempotency_conflict", "idempotency_in_progress", "not_found", "validation_error", "event_not_local_only"}:
+    stable_codes = {
+        "version_conflict", "provider_etag_conflict", "idempotency_conflict", "idempotency_in_progress",
+        "not_found", "provider_not_found", "validation_error", "provider_payload_invalid",
+        "event_not_local_only", "provider_write_disabled", "provider_not_configured", "provider_read_only",
+        "provider_rate_limited", "provider_authentication_failed", "provider_transient_failure", "provider_mutation_uncertain",
+    }
+    if code in stable_codes:
         return str(code)
+    if mutation and status_code in {408, 429, 500, 502, 503, 504}:
+        return "mutation_uncertain"
     return "http_error"
 
 
@@ -854,6 +1029,35 @@ def _validate_event_create_body(body: Mapping[str, Any]) -> None:
     _validate_event_shape(body, category="event_create_invalid", require_shape=True)
 
 
+def _validate_provider_calendar_id(value: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(r"icloud_calendar_[0-9a-f]{64}", value) is None:
+        raise PlanningUpstreamError("provider_payload_invalid")
+
+
+def _validate_provider_event_create_body(body: Mapping[str, Any]) -> None:
+    allowed = {
+        "calendar_id", "title", "notes", "location", "all_day", "timezone",
+        "start_at_utc", "end_at_utc", "start_date", "end_date_exclusive",
+    }
+    required = allowed - {"notes", "location"}
+    if set(body) - allowed or not required <= set(body):
+        raise PlanningUpstreamError("provider_payload_invalid")
+    _validate_provider_calendar_id(body["calendar_id"])
+    _validate_event_create_body({key: value for key, value in body.items() if key != "calendar_id"})
+
+
+def _validate_provider_calendar_create_body(body: Mapping[str, Any]) -> None:
+    if set(body) - {"display_name", "color"} or "display_name" not in body:
+        raise PlanningUpstreamError("provider_payload_invalid")
+    if not isinstance(body["display_name"], str) or not body["display_name"].strip() or len(body["display_name"]) > 200:
+        raise PlanningUpstreamError("provider_payload_invalid")
+    if "color" in body and body["color"] is not None and (
+        not isinstance(body["color"], str)
+        or re.fullmatch(r"#[0-9A-Fa-f]{6,8}", body["color"]) is None
+    ):
+        raise PlanningUpstreamError("provider_payload_invalid")
+
+
 def _validate_event_patch_body(body: Mapping[str, Any]) -> None:
     allowed = {
         "title", "notes", "location", "all_day", "timezone",
@@ -942,6 +1146,22 @@ def _browser_calendar_id(source: UpstreamPlanningSource, calendar_id: str) -> st
 
 def _browser_source_label(source: UpstreamPlanningSource) -> str:
     return "Local Planning" if source.provider == "local" else "iCloud"
+
+
+def _project_provider_capabilities(
+    capabilities: UpstreamProviderCapabilities | None,
+) -> PlanningProviderCapabilities | None:
+    if capabilities is None:
+        return None
+    return PlanningProviderCapabilities(
+        providerKind=capabilities.providerKind,
+        readIntegrationEnabled=capabilities.readIntegrationEnabled,
+        configured=capabilities.configured,
+        writesEnabled=capabilities.writesEnabled,
+        canCreateCalendar=capabilities.canCreateCalendar,
+    )
+
+
 def _fixed_list_query(
     values: Mapping[str, str | int | None],
     *,
@@ -1005,6 +1225,11 @@ class PlanningAdapter:
         self._last_good: PlanningProjection | None = None
         self._last_success_at: float | None = None
         self._last_status: StatusEnvelope | None = None
+        self._latest_upstream_sources: list[UpstreamPlanningSource] | None = None
+        self._provider_destination_map: dict[str, str] = {}
+        self._provider_destination_capabilities: dict[str, PlanningCalendarDestination] = {}
+        self._provider_source_map: dict[str, UpstreamPlanningSource] = {}
+        self._event_mutation_capabilities: dict[str, Any] = {}
         self._last_status_at: float | None = None
         self._last_status_attempt_at: float | None = None
         self._status_refresh_requested = False
@@ -1125,6 +1350,40 @@ class PlanningAdapter:
             and not _status_is_degraded(self._last_status)
         )
 
+    @property
+    def provider_calendar_mutations_enabled(self) -> bool:
+        """The provider writer is an independent, fail-closed feature gate."""
+
+        return bool(getattr(self._settings, "panel_planning_provider_calendar_mutations_enabled", False))
+
+    def provider_calendar_mutation_allowed(
+        self,
+        action: Literal["create", "update", "delete", "create_calendar", "delete_calendar"],
+    ) -> bool:
+        if not self.calendar_mutations_enabled or not self.provider_calendar_mutations_enabled:
+            return False
+        if self._last_status is None or not self._domains_current or _status_is_degraded(self._last_status):
+            return False
+        capabilities = self._last_status.providerCapabilities
+        if capabilities is None or not capabilities.readIntegrationEnabled or not capabilities.configured:
+            return False
+        if not capabilities.writesEnabled:
+            return False
+        if action == "create_calendar":
+            return capabilities.canCreateCalendar
+        if action == "delete_calendar":
+            return True
+        return action in set(self._last_status.capabilities.events)
+
+    def _provider_calendar_mutation_projection_enabled(self) -> bool:
+        return bool(
+            self.provider_calendar_mutation_allowed("create")
+            or self.provider_calendar_mutation_allowed("update")
+            or self.provider_calendar_mutation_allowed("delete")
+            or self.provider_calendar_mutation_allowed("create_calendar")
+            or self.provider_calendar_mutation_allowed("delete_calendar")
+        )
+
     def set_on_change(self, callback: Callable[[], Awaitable[None]] | None) -> None:
         self._on_change = callback
 
@@ -1204,10 +1463,30 @@ class PlanningAdapter:
             "reminderMutationsEnabled": self.reminder_mutations_enabled,
             "taskMutationsEnabled": self.task_mutations_enabled,
             "calendarMutationsEnabled": self._calendar_mutation_projection_enabled(),
+            "providerCalendarMutationsEnabled": self._provider_calendar_mutation_projection_enabled(),
+            "providerCapabilities": _project_provider_capabilities(status.providerCapabilities),
             "capabilities": PlanningCapabilities(**self._effective_capabilities()),
         }
         if status.sources is not None:
             updates["providerStatuses"] = self._project_sources(status.sources)
+        else:
+            self._latest_upstream_sources = None
+            self._provider_destination_map = {}
+            self._provider_destination_capabilities = {}
+            self._provider_source_map = {}
+        # Keep the bounded browser-safe destination map warm.  Older Alice
+        # builds may not expose this additive route; that is handled as an
+        # unavailable provider surface without affecting local Planning.
+        destination_reader = getattr(self._client, "calendar_destinations", None)
+        if destination_reader is not None:
+            self._provider_destination_map = {}
+            self._provider_destination_capabilities = {}
+            try:
+                destinations = await destination_reader()
+                for destination in destinations.items:
+                    self._project_provider_destination(destination)
+            except (PlanningUpstreamError, PlanningReadUnavailable):
+                pass
         await self._set_projection(
             current.model_copy(
                 update=updates,
@@ -1591,6 +1870,273 @@ class PlanningAdapter:
             )
         )
 
+    async def read_calendar_destinations(self) -> PlanningCalendarDestinationsEnvelope:
+        """Read provider destinations without exposing Alice identities."""
+
+        try:
+            upstream = await self._live_client().calendar_destinations()
+        except PlanningUpstreamError as exc:
+            if exc.category in {"http_error", "not_found", "transport_error", "contract_mismatch"}:
+                self._provider_destination_map = {}
+                self._provider_destination_capabilities = {}
+                return self._empty_calendar_destinations("degraded")
+            raise
+        self._provider_destination_map = {}
+        self._provider_destination_capabilities = {}
+        items: list[PlanningCalendarDestination] = []
+        for destination in upstream.items:
+            projected = self._project_provider_destination(destination)
+            if projected is not None:
+                items.append(projected)
+        provider_capabilities = (
+            _project_provider_capabilities(self._last_status.providerCapabilities)
+            if self._last_status is not None
+            else None
+        )
+        return PlanningCalendarDestinationsEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="calendar_destinations",
+            domain="calendar_destination",
+            items=items,
+            capabilities=PlanningCalendarDestinationCapabilities(
+                canCreateCalendar=(
+                    upstream.capabilities.canCreateCalendar
+                    and self.provider_calendar_mutation_allowed("create_calendar")
+                )
+            ),
+            providerCapabilities=provider_capabilities,
+            sourceStatus="current",
+            lastSyncedAt=upstream.lastSyncedAt,
+            staleAfter=upstream.staleAfter,
+        )
+
+    async def create_provider_event(
+        self,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningEventObjectEnvelope:
+        if not self.provider_calendar_mutation_allowed("create"):
+            raise PlanningUpstreamError("provider_write_disabled")
+        browser_calendar_id = body.get("calendar_id")
+        if not isinstance(browser_calendar_id, str):
+            raise PlanningUpstreamError("provider_payload_invalid")
+        await self._require_provider_destination_capability(browser_calendar_id, "create")
+        raw_calendar_id = self._provider_destination_raw_id(browser_calendar_id)
+        upstream_body = {**dict(body), "calendar_id": raw_calendar_id}
+        return self._event_object_readback(
+            await self._live_client().create_provider_event(
+                idempotency_key=idempotency_key,
+                body=upstream_body,
+            )
+        )
+
+    async def update_provider_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningEventObjectEnvelope:
+        await self._require_provider_event_capability(event_id, "update")
+        return self._event_object_readback(
+            await self._live_client().update_provider_event(
+                event_id=event_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+                body=body,
+            )
+        )
+
+    async def edit_provider_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningEventObjectEnvelope:
+        """Compatibility alias for the provider update operation."""
+
+        return await self.update_provider_event(
+            event_id=event_id,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+
+    async def delete_provider_event(
+        self,
+        *,
+        event_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> PlanningEventObjectEnvelope:
+        await self._require_provider_event_capability(event_id, "delete")
+        return self._event_object_readback(
+            await self._live_client().delete_provider_event(
+                event_id=event_id,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    async def create_provider_calendar(
+        self,
+        *,
+        idempotency_key: str,
+        body: Mapping[str, Any],
+    ) -> PlanningCalendarDestinationObjectEnvelope:
+        if not self.provider_calendar_mutation_allowed("create_calendar"):
+            raise PlanningUpstreamError("provider_write_disabled")
+        upstream = await self._live_client().create_provider_calendar(
+            idempotency_key=idempotency_key,
+            body=body,
+        )
+        destination = self._project_provider_destination(upstream.destination)
+        if destination is None:
+            raise PlanningUpstreamError("provider_not_configured")
+        return PlanningCalendarDestinationObjectEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="calendar_destination",
+            domain="calendar_destination",
+            destination=destination,
+            sourceStatus="current",
+            lastSyncedAt=upstream.lastSyncedAt,
+            staleAfter=upstream.staleAfter,
+        )
+
+    async def delete_provider_calendar(
+        self,
+        *,
+        calendar_id: str,
+        idempotency_key: str,
+    ) -> PlanningCalendarDestinationDeletedEnvelope:
+        if not self.provider_calendar_mutation_allowed("delete_calendar"):
+            raise PlanningUpstreamError("provider_write_disabled")
+        await self._require_provider_destination_capability(calendar_id, "delete_calendar")
+        raw_calendar_id = self._provider_destination_raw_id(calendar_id)
+        upstream = await self._live_client().delete_provider_calendar(
+            calendar_id=raw_calendar_id,
+            idempotency_key=idempotency_key,
+        )
+        return PlanningCalendarDestinationDeletedEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="calendar_destination_deleted",
+            domain="calendar_destination",
+            calendarId=calendar_id,
+            deleted=upstream.deleted,
+            sourceStatus="current",
+            lastSyncedAt=upstream.lastSyncedAt,
+            staleAfter=upstream.staleAfter,
+        )
+
+    def _empty_calendar_destinations(
+        self,
+        source_status: PlanningSourceStatus,
+    ) -> PlanningCalendarDestinationsEnvelope:
+        return PlanningCalendarDestinationsEnvelope(
+            schemaVersion="planning.panel.v1",
+            kind="calendar_destinations",
+            domain="calendar_destination",
+            items=[],
+            capabilities=PlanningCalendarDestinationCapabilities(),
+            providerCapabilities=(
+                _project_provider_capabilities(self._last_status.providerCapabilities)
+                if self._last_status is not None
+                else None
+            ),
+            sourceStatus=source_status,
+            lastSyncedAt=None,
+            staleAfter=None,
+        )
+
+    def _project_provider_destination(self, destination: Any) -> PlanningCalendarDestination | None:
+        provider_sources = [
+            source
+            for source in self._latest_upstream_sources or []
+            if source.sourceType == "external_calendar" and source.provider == "icloud"
+        ]
+        matching_sources = [
+            source
+            for source in provider_sources
+            if any(calendar.calendarId == destination.id for calendar in source.calendars)
+        ]
+        if len(matching_sources) > 1:
+            return None
+        if matching_sources:
+            source = matching_sources[0]
+        elif len(provider_sources) == 1:
+            # A just-created calendar may not be present in the source snapshot yet.
+            source = provider_sources[0]
+        else:
+            return None
+        browser_id = _browser_calendar_id(source, destination.id)
+        self._provider_destination_map[browser_id] = destination.id
+        write_state = destination.writeState
+        if write_state == "writable" and not self._provider_calendar_mutation_projection_enabled():
+            write_state = "read_only"
+        projected = PlanningCalendarDestination(
+            id=browser_id,
+            label=destination.label,
+            color=destination.color,
+            providerKind=destination.providerKind,
+            writeState=write_state,
+            canCreateEvent=(
+                destination.canCreateEvent
+                and self.provider_calendar_mutation_allowed("create")
+            ),
+            canDeleteCalendar=(
+                destination.canDeleteCalendar
+                and self.provider_calendar_mutation_allowed("delete_calendar")
+            ),
+        )
+        self._provider_destination_capabilities[browser_id] = projected
+        return projected
+
+    def _provider_destination_raw_id(self, browser_id: str) -> str:
+        raw_id = self._provider_destination_map.get(browser_id)
+        if raw_id is None:
+            raise PlanningUpstreamError("provider_not_found")
+        return raw_id
+
+    async def _require_provider_destination_capability(
+        self,
+        browser_id: str,
+        action: Literal["create", "delete_calendar"],
+    ) -> None:
+        destination = self._provider_destination_capabilities.get(browser_id)
+        if destination is None:
+            try:
+                await self.read_calendar_destinations()
+            except PlanningReadUnavailable as exc:
+                raise PlanningUpstreamError("provider_not_found") from exc
+            destination = self._provider_destination_capabilities.get(browser_id)
+        if destination is None:
+            raise PlanningUpstreamError("provider_not_found")
+        allowed = destination.canCreateEvent if action == "create" else destination.canDeleteCalendar
+        if not allowed:
+            raise PlanningUpstreamError("provider_read_only")
+
+    async def _require_provider_event_capability(self, event_id: str, action: Literal["update", "delete"]) -> None:
+        if not self.provider_calendar_mutation_allowed(action):
+            raise PlanningUpstreamError("provider_write_disabled")
+        capability = self._event_mutation_capabilities.get(event_id)
+        if capability is None:
+            try:
+                await self.read_event_by_id(event_id=event_id)
+            except PlanningUpstreamError:
+                raise
+            except PlanningReadUnavailable as exc:
+                raise PlanningUpstreamError("provider_not_found") from exc
+            capability = self._event_mutation_capabilities.get(event_id)
+        if capability is None:
+            raise PlanningUpstreamError("provider_read_only")
+        allowed = capability.canEdit if action == "update" else capability.canDelete
+        if not allowed or capability.providerKind not in {None, "icloud"}:
+            raise PlanningUpstreamError("provider_read_only")
+
     async def read_reminders(
         self,
         *,
@@ -1931,6 +2477,7 @@ class PlanningAdapter:
                 "sourceStatus": self._cache_source_status(age),
                 "health": self._health_evidence(),
                 "calendarMutationsEnabled": False,
+                "providerCalendarMutationsEnabled": False,
             },
             deep=True,
         )
@@ -1958,6 +2505,10 @@ class PlanningAdapter:
         sources: list[UpstreamPlanningSource] | None,
     ) -> list[PlanningCalendarSource]:
         if sources is None:
+            self._latest_upstream_sources = None
+            self._provider_destination_map = {}
+            self._provider_destination_capabilities = {}
+            self._provider_source_map = {}
             observed = self._now_text(self._wall_now())
             return [
                 PlanningCalendarSource(
@@ -1973,15 +2524,23 @@ class PlanningAdapter:
                     calendars=[],
                 )
             ]
+        self._latest_upstream_sources = [source.model_copy(deep=True) for source in sources]
+        self._provider_destination_map = {}
+        self._provider_destination_capabilities = {}
+        self._provider_source_map = {}
         projected: list[PlanningCalendarSource] = []
         for source in sources:
             source_id = _browser_source_id(source)
+            if source.sourceType == "external_calendar":
+                self._provider_source_map[source_id] = source.model_copy(deep=True)
             display_counts: dict[str, int] = {}
             for calendar in source.calendars:
                 display_counts[calendar.displayName] = display_counts.get(calendar.displayName, 0) + 1
             projected_calendars: list[PlanningCalendarSourceCalendar] = []
             for calendar in source.calendars:
                 browser_calendar_id = _browser_calendar_id(source, calendar.calendarId)
+                if source.sourceType == "external_calendar":
+                    self._provider_destination_map[browser_calendar_id] = calendar.calendarId
                 label = calendar.displayName
                 if display_counts[calendar.displayName] > 1:
                     label = f"{label} · #{browser_calendar_id[-6:]}"
@@ -2046,6 +2605,7 @@ class PlanningAdapter:
         previous: PlanningProjection | None,
         upstream_sources: list[UpstreamPlanningSource] | None,
     ) -> dict[str, Any]:
+        self._event_mutation_capabilities = {}
         previous = previous or empty_planning_projection(
             generated_at=self._now_text(),
             source_status="offline",
@@ -2184,30 +2744,71 @@ class PlanningAdapter:
     ) -> list[CalendarEventProjection]:
         if not isinstance(result, EventListEnvelope):
             return list(fallback)
-        return [
-            CalendarEventProjection(
-                id=item.id,
-                version=item.version,
-                source=item.source,
-                sourceLabel=source_label(item.source),
-                calendarIdentity=self._event_identity(item, upstream_sources),
-                title=item.title,
-                notes=item.notes,
-                location=item.location,
-                allDay=item.all_day,
-                timezone=item.timezone,
-                syncState=item.sync_state,
-                localOnlyMutable=(item.sync_state == "local_only" and item.provider_id is None and item.provider_calendar_id is None),
-                startAtUtc=item.start_at_utc,
-                endAtUtc=item.end_at_utc,
-                startDate=item.start_date,
-                endDateExclusive=item.end_date_exclusive,
-                deletedAt=item.deleted_at,
-                createdAt=item.created_at,
-                updatedAt=item.updated_at,
+        mutation_capabilities = result.mutationCapabilities or {}
+        for item in result.items:
+            if item.id not in mutation_capabilities:
+                self._event_mutation_capabilities.pop(item.id, None)
+        self._event_mutation_capabilities.update(
+            {
+                key: value.model_copy(deep=True)
+                for key, value in mutation_capabilities.items()
+            }
+        )
+        mapped: list[CalendarEventProjection] = []
+        for item in result.items:
+            capability = result.mutationCapabilities.get(item.id) if result.mutationCapabilities else None
+            local_only = (
+                item.sync_state == "local_only"
+                and item.provider_id is None
+                and item.provider_calendar_id is None
             )
-            for item in result.items
-        ]
+            provider_event = not local_only
+            can_edit = bool(
+                self.calendar_mutation_allowed("update")
+                and (capability.canEdit if capability is not None else local_only)
+            )
+            can_delete = bool(
+                self.calendar_mutation_allowed("delete")
+                and (capability.canDelete if capability is not None else local_only)
+            )
+            if provider_event:
+                can_edit = bool(
+                    self.provider_calendar_mutation_allowed("update")
+                    and capability is not None
+                    and capability.canEdit
+                )
+                can_delete = bool(
+                    self.provider_calendar_mutation_allowed("delete")
+                    and capability is not None
+                    and capability.canDelete
+                )
+            mapped.append(
+                CalendarEventProjection(
+                    id=item.id,
+                    version=item.version,
+                    source=item.source,
+                    sourceLabel=source_label(item.source),
+                    calendarIdentity=self._event_identity(item, upstream_sources),
+                    title=item.title,
+                    notes=item.notes,
+                    location=item.location,
+                    allDay=item.all_day,
+                    timezone=item.timezone,
+                    syncState=item.sync_state,
+                    localOnlyMutable=local_only,
+                    canEdit=can_edit,
+                    canDelete=can_delete,
+                    providerWriteState=(capability.writeState if provider_event and capability is not None else None),
+                    startAtUtc=item.start_at_utc,
+                    endAtUtc=item.end_at_utc,
+                    startDate=item.start_date,
+                    endDateExclusive=item.end_date_exclusive,
+                    deletedAt=item.deleted_at,
+                    createdAt=item.created_at,
+                    updatedAt=item.updated_at,
+                )
+            )
+        return mapped
 
     def _event_identity(
         self,
@@ -2291,6 +2892,12 @@ class PlanningAdapter:
             reminderMutationsEnabled=self.reminder_mutations_enabled,
             taskMutationsEnabled=self.task_mutations_enabled,
             calendarMutationsEnabled=self._calendar_mutation_projection_enabled(),
+            providerCalendarMutationsEnabled=self._provider_calendar_mutation_projection_enabled(),
+            providerCapabilities=(
+                _project_provider_capabilities(self._last_status.providerCapabilities)
+                if self._last_status is not None
+                else None
+            ),
             lastSyncedAt=last_synced_at,
             staleAfter=stale_after,
             reminders=mapped["reminders"],
@@ -2388,6 +2995,11 @@ class PlanningAdapter:
                 lastSyncedAt=envelope.lastSyncedAt,
                 staleAfter=envelope.staleAfter,
                 sources=envelope.sources,
+                mutationCapabilities=(
+                    {envelope.object.id: envelope.mutationCapabilities}
+                    if envelope.mutationCapabilities is not None
+                    else None
+                ),
                 pagination={"limit": 1, "offset": 0, "count": 1, "has_more": False, "next_offset": None},
                 correlation_id=envelope.correlation_id,
                 items=[envelope.object],
@@ -2455,6 +3067,7 @@ class PlanningAdapter:
                     "sourceStatus": source_status,
                     "health": self._health_evidence(),
                     "calendarMutationsEnabled": False,
+                    "providerCalendarMutationsEnabled": False,
                 },
                 deep=True,
             )

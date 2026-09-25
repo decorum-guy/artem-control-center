@@ -3,6 +3,9 @@ import type {
   PlanningCalendarEvent,
   PlanningCalendarIdentity,
   PlanningCalendarSource,
+  PlanningCalendarDestination,
+  PlanningProviderCapabilities,
+  PlanningProviderWriteState,
   PlanningProviderFreshnessStatus,
   PlanningProject,
   PlanningReminder,
@@ -48,6 +51,39 @@ export interface PlanningEventObjectEnvelope {
   lastSyncedAt: string | null;
   staleAfter: string | null;
   sources?: PlanningCalendarSource[];
+}
+
+export interface PlanningCalendarDestinationsEnvelope {
+  schemaVersion: "planning.panel.v1";
+  kind: "calendar_destinations";
+  domain: "calendar_destination";
+  items: PlanningCalendarDestination[];
+  capabilities: { canCreateCalendar: boolean };
+  providerCapabilities?: PlanningProviderCapabilities | null;
+  sourceStatus: PlanningSourceStatus;
+  lastSyncedAt: string | null;
+  staleAfter: string | null;
+}
+
+export interface PlanningCalendarDestinationObjectEnvelope {
+  schemaVersion: "planning.panel.v1";
+  kind: "calendar_destination";
+  domain: "calendar_destination";
+  destination: PlanningCalendarDestination;
+  sourceStatus: PlanningSourceStatus;
+  lastSyncedAt: string | null;
+  staleAfter: string | null;
+}
+
+export interface PlanningCalendarDestinationDeletedEnvelope {
+  schemaVersion: "planning.panel.v1";
+  kind: "calendar_destination_deleted";
+  domain: "calendar_destination";
+  calendarId: string;
+  deleted: boolean;
+  sourceStatus: PlanningSourceStatus;
+  lastSyncedAt: string | null;
+  staleAfter: string | null;
 }
 
 export interface PlanningParsePreview {
@@ -147,6 +183,7 @@ const eventSyncValues = new Set<PlanningCalendarEvent["syncState"]>([
   "conflict",
   "error"
 ]);
+const providerWriteValues = new Set<PlanningProviderWriteState>(["writable", "candidate", "read_only", "unavailable"]);
 const providerFreshnessValues = new Set<PlanningProviderFreshnessStatus>([
   "current",
   "stale",
@@ -158,12 +195,18 @@ const disabledMutationDetails = new Set([
   "planning_disabled",
   "planning_reminder_mutations_disabled",
   "planning_task_mutations_disabled",
-  "planning_calendar_mutations_disabled"
+  "planning_calendar_mutations_disabled",
+  "planning_provider_calendar_mutations_disabled",
+  "provider_write_disabled",
+  "provider_not_configured",
+  "provider_read_only"
 ]);
 const notFoundMutationDetails = new Set([
   "planning_reminder_not_found",
   "planning_task_not_found",
-  "planning_calendar_event_not_found"
+  "planning_calendar_event_not_found",
+  "planning_event_not_found",
+  "provider_not_found"
 ]);
 
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
@@ -380,6 +423,104 @@ function optionalPlanningSources(value: Record<string, unknown>, label: string):
   }
 }
 
+function parseProviderCapabilities(value: unknown, label: string): PlanningProviderCapabilities {
+  const capabilities = record(value, label);
+  exactKeys(capabilities, ["providerKind", "readIntegrationEnabled", "configured", "writesEnabled", "canCreateCalendar"], label);
+  if (capabilities.providerKind !== "icloud") throw new PlanningReadError(`${label}.providerKind is invalid`, "contract");
+  return {
+    providerKind: "icloud",
+    readIntegrationEnabled: booleanValue(capabilities.readIntegrationEnabled, `${label}.readIntegrationEnabled`),
+    configured: booleanValue(capabilities.configured, `${label}.configured`),
+    writesEnabled: booleanValue(capabilities.writesEnabled, `${label}.writesEnabled`),
+    canCreateCalendar: booleanValue(capabilities.canCreateCalendar, `${label}.canCreateCalendar`)
+  };
+}
+
+function parseCalendarDestination(value: unknown, index: number): PlanningCalendarDestination {
+  const item = record(value, `planning.calendar_destinations.items[${index}]`);
+  exactKeys(item, ["id", "label", "color", "providerKind", "writeState", "canCreateEvent", "canDeleteCalendar"], `planning.calendar_destinations.items[${index}]`);
+  const id = canonicalIdentityValue(item.id, `planning.calendar_destinations.items[${index}].id`);
+  if (!/^calendar-[0-9a-f]{24}$/.test(id)) throw new PlanningReadError("planning calendar destination id is invalid", "contract");
+  if (item.providerKind !== "icloud") throw new PlanningReadError("planning calendar destination provider is invalid", "contract");
+  const color = item.color === null ? null : stringValue(item.color, `planning.calendar_destinations.items[${index}].color`, 7, 9);
+  if (color !== null && !/^#[0-9A-Fa-f]{6,8}$/.test(color)) throw new PlanningReadError("planning calendar destination color is invalid", "contract");
+  return {
+    id,
+    label: stringValue(item.label, `planning.calendar_destinations.items[${index}].label`, 1, 220),
+    color,
+    providerKind: "icloud",
+    writeState: enumValue(item.writeState, providerWriteValues, `planning.calendar_destinations.items[${index}].writeState`),
+    canCreateEvent: booleanValue(item.canCreateEvent, `planning.calendar_destinations.items[${index}].canCreateEvent`),
+    canDeleteCalendar: booleanValue(item.canDeleteCalendar, `planning.calendar_destinations.items[${index}].canDeleteCalendar`)
+  };
+}
+
+function parseCalendarDestinationsEnvelope(value: unknown): PlanningCalendarDestinationsEnvelope {
+  const envelope = record(value, "planning calendar destinations");
+  exactKeys(
+    envelope,
+    ["schemaVersion", "kind", "domain", "items", "capabilities", "sourceStatus", "lastSyncedAt", "staleAfter"],
+    "planning calendar destinations",
+    ["providerCapabilities"]
+  );
+  if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "calendar_destinations" || envelope.domain !== "calendar_destination") {
+    throw new PlanningReadError("planning calendar destinations schema is invalid", "contract");
+  }
+  if (!Array.isArray(envelope.items) || envelope.items.length > 32) throw new PlanningReadError("planning calendar destinations items are invalid", "contract");
+  const capabilities = record(envelope.capabilities, "planning calendar destinations.capabilities");
+  exactKeys(capabilities, ["canCreateCalendar"], "planning calendar destinations.capabilities");
+  return {
+    schemaVersion: "planning.panel.v1",
+    kind: "calendar_destinations",
+    domain: "calendar_destination",
+    items: envelope.items.map(parseCalendarDestination),
+    capabilities: { canCreateCalendar: booleanValue(capabilities.canCreateCalendar, "planning calendar destinations.capabilities.canCreateCalendar") },
+    providerCapabilities: Object.prototype.hasOwnProperty.call(envelope, "providerCapabilities") && envelope.providerCapabilities !== null
+      ? parseProviderCapabilities(envelope.providerCapabilities, "planning calendar destinations.providerCapabilities")
+      : null,
+    sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning calendar destinations.sourceStatus"),
+    lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning calendar destinations.lastSyncedAt"),
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning calendar destinations.staleAfter")
+  };
+}
+
+function parseCalendarDestinationObjectEnvelope(value: unknown): PlanningCalendarDestinationObjectEnvelope {
+  const envelope = record(value, "planning calendar destination");
+  exactKeys(envelope, ["schemaVersion", "kind", "domain", "destination", "sourceStatus", "lastSyncedAt", "staleAfter"], "planning calendar destination");
+  if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "calendar_destination" || envelope.domain !== "calendar_destination") {
+    throw new PlanningReadError("planning calendar destination schema is invalid", "contract");
+  }
+  return {
+    schemaVersion: "planning.panel.v1",
+    kind: "calendar_destination",
+    domain: "calendar_destination",
+    destination: parseCalendarDestination(envelope.destination, 0),
+    sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning calendar destination.sourceStatus"),
+    lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning calendar destination.lastSyncedAt"),
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning calendar destination.staleAfter")
+  };
+}
+
+function parseCalendarDestinationDeletedEnvelope(value: unknown): PlanningCalendarDestinationDeletedEnvelope {
+  const envelope = record(value, "planning deleted calendar destination");
+  exactKeys(envelope, ["schemaVersion", "kind", "domain", "calendarId", "deleted", "sourceStatus", "lastSyncedAt", "staleAfter"], "planning deleted calendar destination");
+  if (envelope.schemaVersion !== "planning.panel.v1" || envelope.kind !== "calendar_destination_deleted" || envelope.domain !== "calendar_destination") {
+    throw new PlanningReadError("planning deleted calendar destination schema is invalid", "contract");
+  }
+  const calendarId = canonicalIdentityValue(envelope.calendarId, "planning deleted calendar destination.calendarId");
+  if (!/^calendar-[0-9a-f]{24}$/.test(calendarId)) throw new PlanningReadError("planning deleted calendar destination id is invalid", "contract");
+  return {
+    schemaVersion: "planning.panel.v1",
+    kind: "calendar_destination_deleted",
+    domain: "calendar_destination",
+    calendarId,
+    deleted: booleanValue(envelope.deleted, "planning deleted calendar destination.deleted"),
+    sourceStatus: enumValue(envelope.sourceStatus, sourceStatusValues, "planning deleted calendar destination.sourceStatus"),
+    lastSyncedAt: nullableTimestamp(envelope.lastSyncedAt, "planning deleted calendar destination.lastSyncedAt"),
+    staleAfter: nullableTimestamp(envelope.staleAfter, "planning deleted calendar destination.staleAfter")
+  };
+}
+
 function nullableUuid(value: unknown, label: string): string | null {
   return value === null ? null : uuidValue(value, label);
 }
@@ -450,11 +591,12 @@ function parseTask(value: unknown): PlanningTask {
 function parseCalendarEvent(value: unknown): PlanningCalendarEvent {
   const item = record(value, "planning.calendar_event");
   const expectedKeys = ["id", "version", "source", "sourceLabel", "title", "notes", "location", "allDay", "timezone", "syncState", "localOnlyMutable", "startAtUtc", "endAtUtc", "startDate", "endDateExclusive", "deletedAt", "createdAt", "updatedAt"];
-  if ("calendarIdentity" in item) expectedKeys.push("calendarIdentity");
+  const optionalKeys = ["calendarIdentity", "canEdit", "canDelete", "providerWriteState"];
   exactKeys(
     item,
     expectedKeys,
-    "planning.calendar_event"
+    "planning.calendar_event",
+    optionalKeys
   );
   const allDay = booleanValue(item.allDay, "planning.calendar_event.allDay");
   const startAtUtc = nullableTimestamp(item.startAtUtc, "planning.calendar_event.startAtUtc");
@@ -482,6 +624,11 @@ function parseCalendarEvent(value: unknown): PlanningCalendarEvent {
     timezone: timezoneValue(item.timezone, "planning.calendar_event.timezone"),
     syncState: enumValue(item.syncState, eventSyncValues, "planning.calendar_event.syncState"),
     localOnlyMutable: booleanValue(item.localOnlyMutable, "planning.calendar_event.localOnlyMutable"),
+    canEdit: Object.prototype.hasOwnProperty.call(item, "canEdit") ? booleanValue(item.canEdit, "planning.calendar_event.canEdit") : undefined,
+    canDelete: Object.prototype.hasOwnProperty.call(item, "canDelete") ? booleanValue(item.canDelete, "planning.calendar_event.canDelete") : undefined,
+    providerWriteState: Object.prototype.hasOwnProperty.call(item, "providerWriteState")
+      ? item.providerWriteState === null ? null : enumValue(item.providerWriteState, providerWriteValues, "planning.calendar_event.providerWriteState")
+      : undefined,
     startAtUtc,
     endAtUtc,
     startDate,
@@ -670,6 +817,29 @@ export function readPlanningEvents(
   params.set("to", toUtc);
   if (view) params.set("view", view);
   return getRead("/api/v1/planning/events", params, "calendar_event", parseCalendarEvent, signal);
+}
+
+export async function readPlanningCalendarDestinations(
+  signal?: AbortSignal
+): Promise<PlanningCalendarDestinationsEnvelope> {
+  let response: Response;
+  try {
+    response = await fetch("/api/v1/planning/calendar-destinations", {
+      method: "GET",
+      cache: "no-store",
+      signal
+    });
+  } catch (reason) {
+    if (signal?.aborted) throw new PlanningReadError("Planning read aborted", "aborted");
+    throw new PlanningReadError(reason instanceof Error ? reason.message : "Planning read unavailable", "network");
+  }
+  if (!response.ok) throw new PlanningReadError("Planning calendar destinations are unavailable", "http", response.status);
+  try {
+    return parseCalendarDestinationsEnvelope(await response.json());
+  } catch (reason) {
+    if (reason instanceof PlanningReadError) throw reason;
+    throw new PlanningReadError("Planning calendar destinations response is invalid", "contract", response.status);
+  }
 }
 
 function parseCalendarSourcesRefresh(value: unknown): PlanningCalendarSourcesRefresh {
@@ -1075,8 +1245,8 @@ async function mutationResponseDetail(response: Response): Promise<string> {
 }
 
 function mutationCodeForResponse(detail: string, status: number): PlanningMutationError["mutationCode"] {
-  if (detail === "planning_mutation_uncertain") return "uncertain";
-  if (status === 409 || detail === "planning_idempotency_conflict") return "conflict";
+  if (detail === "planning_mutation_uncertain" || detail === "provider_mutation_uncertain" || detail === "provider_transient_failure" || detail === "idempotency_in_progress") return "uncertain";
+  if (status === 409 || detail === "planning_idempotency_conflict" || detail === "planning_provider_etag_conflict" || detail === "planning_version_conflict") return "conflict";
   if (disabledMutationDetails.has(detail)) return "disabled";
   if (notFoundMutationDetails.has(detail)) return "not_found";
   return "http";
@@ -1490,6 +1660,153 @@ export async function mutatePlanningEvent(request: PlanningEventMutationRequest)
   }
 }
 
+export interface PlanningProviderEventMutationRequest {
+  action: PlanningEventMutationAction;
+  idempotencyKey: string;
+  destinationId?: string;
+  eventId?: string;
+  expectedVersion?: number;
+  body: PlanningEventMutationRequest["body"];
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+function providerEventMutationPath(request: PlanningProviderEventMutationRequest): string {
+  if (request.action === "create") {
+    if (!request.destinationId || !/^calendar-[0-9a-f]{24}$/.test(request.destinationId)) {
+      throw new PlanningMutationError("Provider calendar destination is invalid", "contract", 422);
+    }
+    return "/api/v1/planning/provider-events";
+  }
+  if (!request.eventId || !uuid4Pattern.test(request.eventId)) {
+    throw new PlanningMutationError("Calendar event target is invalid", "contract", 422);
+  }
+  return `/api/v1/planning/provider-events/${request.eventId}`;
+}
+
+export async function mutatePlanningProviderEvent(
+  request: PlanningProviderEventMutationRequest
+): Promise<PlanningEventObjectEnvelope> {
+  const path = providerEventMutationPath(request);
+  if (!request.idempotencyKey || request.idempotencyKey.length > 256 || [...request.idempotencyKey].some((character) => character.charCodeAt(0) < 32)) {
+    throw new PlanningMutationError("Idempotency key is invalid", "contract", 422);
+  }
+  if (request.action !== "create" && (!Number.isInteger(request.expectedVersion) || (request.expectedVersion ?? 0) < 1)) {
+    throw new PlanningMutationError("Expected calendar event version is invalid", "contract", 422);
+  }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Idempotency-Key": request.idempotencyKey
+  };
+  if (request.action !== "create") headers["If-Match"] = String(request.expectedVersion);
+  const body = JSON.stringify(request.action === "create" ? { calendar_id: request.destinationId, ...request.body } : request.action === "delete" ? {} : request.body);
+  const method: "POST" | "PATCH" | "DELETE" = request.action === "create" ? "POST" : request.action === "edit" ? "PATCH" : "DELETE";
+  const reconcileUncertain = async (uncertain: PlanningMutationError): Promise<never> => {
+    if (request.action !== "create" && request.eventId) {
+      try {
+        const reconciled = await readPlanningEventById(request.eventId, request.signal);
+        if (eventReconciliationMatches({
+          action: request.action,
+          idempotencyKey: request.idempotencyKey,
+          eventId: request.eventId,
+          expectedVersion: request.expectedVersion,
+          body: request.body
+        }, reconciled)) {
+          throw new PlanningMutationError<PlanningCalendarEvent>("Provider mutation outcome confirmed by canonical readback", "uncertain", uncertain.status, reconciled);
+        }
+      } catch (reason) {
+        if (reason instanceof PlanningMutationError) throw reason;
+      }
+    }
+    throw uncertain;
+  };
+  try {
+    const response = await mutationFetchAttempt(path, method, headers, body, request.signal, request.timeoutMs ?? 10_000);
+    if (!response.ok) {
+      const detail = await mutationResponseDetail(response);
+      throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
+    }
+    try {
+      return parseEventObjectEnvelope(await response.json());
+    } catch (reason) {
+      if (reason instanceof PlanningReadError) throw new PlanningMutationError(reason.message, "uncertain", response.status);
+      throw new PlanningMutationError("Provider event mutation response is invalid", "uncertain", response.status);
+    }
+  } catch (reason) {
+    if (reason instanceof PlanningMutationError) {
+      if (reason.mutationCode === "uncertain") return reconcileUncertain(reason);
+      throw reason;
+    }
+    if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    return reconcileUncertain(new PlanningMutationError("Provider mutation outcome is uncertain", "uncertain"));
+  }
+}
+
+export async function createPlanningProviderCalendar(request: {
+  displayName: string;
+  color?: string | null;
+  idempotencyKey: string;
+  signal?: AbortSignal;
+}): Promise<PlanningCalendarDestinationObjectEnvelope> {
+  if (!request.idempotencyKey || request.idempotencyKey.length > 256) throw new PlanningMutationError("Idempotency key is invalid", "contract", 422);
+  let response: Response;
+  try {
+    response = await mutationFetchAttempt(
+      "/api/v1/planning/provider-calendars",
+      "POST",
+      { "Content-Type": "application/json", "Idempotency-Key": request.idempotencyKey },
+      JSON.stringify({ display_name: request.displayName, ...(request.color === undefined ? {} : { color: request.color }) }),
+      request.signal,
+      10_000
+    );
+  } catch (reason) {
+    if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    throw new PlanningMutationError(reason instanceof Error ? reason.message : "Provider calendar outcome is uncertain", "uncertain");
+  }
+  if (!response.ok) {
+    const detail = await mutationResponseDetail(response);
+    throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
+  }
+  try {
+    return parseCalendarDestinationObjectEnvelope(await response.json());
+  } catch (reason) {
+    if (reason instanceof PlanningReadError) throw new PlanningMutationError(reason.message, "contract", response.status);
+    throw new PlanningMutationError("Provider calendar response is invalid", "contract", response.status);
+  }
+}
+
+export async function deletePlanningProviderCalendar(request: {
+  calendarId: string;
+  idempotencyKey: string;
+  signal?: AbortSignal;
+}): Promise<PlanningCalendarDestinationDeletedEnvelope> {
+  if (!/^calendar-[0-9a-f]{24}$/.test(request.calendarId)) throw new PlanningMutationError("Provider calendar destination is invalid", "contract", 422);
+  let response: Response;
+  try {
+    response = await mutationFetchAttempt(
+      `/api/v1/planning/provider-calendars/${request.calendarId}`,
+      "DELETE",
+      { "Content-Type": "application/json", "Idempotency-Key": request.idempotencyKey },
+      "{}",
+      request.signal,
+      10_000
+    );
+  } catch (reason) {
+    if (request.signal?.aborted) throw new PlanningMutationError("Planning mutation was cancelled", "network");
+    throw new PlanningMutationError(reason instanceof Error ? reason.message : "Provider calendar delete outcome is uncertain", "uncertain");
+  }
+  if (!response.ok) {
+    const detail = await mutationResponseDetail(response);
+    throw new PlanningMutationError(detail, mutationCodeForResponse(detail, response.status), response.status);
+  }
+  try {
+    return parseCalendarDestinationDeletedEnvelope(await response.json());
+  } catch (reason) {
+    if (reason instanceof PlanningReadError) throw new PlanningMutationError(reason.message, "contract", response.status);
+    throw new PlanningMutationError("Provider calendar delete response is invalid", "contract", response.status);
+  }
+}
+
 export interface PlanningReadState<T> {
   loading: boolean;
   refreshing: boolean;
@@ -1645,5 +1962,8 @@ export const planningReadParsers = {
   parseObjectEnvelope,
   parseTaskObjectEnvelope,
   parseEventObjectEnvelope,
+  parseCalendarDestinationsEnvelope,
+  parseCalendarDestinationObjectEnvelope,
+  parseCalendarDestinationDeletedEnvelope,
   parseParsePreview
 };

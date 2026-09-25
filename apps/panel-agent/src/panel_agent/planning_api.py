@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import re
 from typing import Callable, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -16,6 +17,9 @@ from .planning import (
     PlanningParsePreview,
     PlanningReadEnvelope,
     PlanningCalendarSourcesRefresh,
+    PlanningCalendarDestinationsEnvelope,
+    PlanningCalendarDestinationObjectEnvelope,
+    PlanningCalendarDestinationDeletedEnvelope,
     PlanningStatusProjection,
     validate_timezone,
     validate_date,
@@ -259,6 +263,28 @@ class EventPatchRequest(BaseModel):
             if self.end_at_utc <= self.start_at_utc:
                 raise ValueError("timed event range is invalid")
         return self
+
+
+class ProviderEventCreateRequest(EventCreateRequest):
+    calendar_id: StrictStr = Field(min_length=1, max_length=128)
+
+    @field_validator("calendar_id")
+    @classmethod
+    def _calendar_id(cls, value: str) -> str:
+        if re.fullmatch(r"calendar-[0-9a-f]{24}", value) is None:
+            raise ValueError("provider calendar destination is invalid")
+        return value
+
+
+class ProviderEventPatchRequest(EventPatchRequest):
+    pass
+
+
+class ProviderCalendarCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    display_name: StrictStr = Field(min_length=1, max_length=200)
+    color: StrictStr | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6,8}$")
 
 
 class PlanningParseRequest(BaseModel):
@@ -627,6 +653,110 @@ def build_planning_router(
         except PlanningReadUnavailable as exc:
             raise _read_unavailable() from exc
 
+    @router.get("/calendar-destinations", response_model=PlanningCalendarDestinationsEnvelope)
+    async def planning_calendar_destinations(request: Request, response: Response) -> PlanningCalendarDestinationsEnvelope:
+        _enabled(adapter)
+        _no_store(response)
+        _query(request, allowed=set())
+        try:
+            return await adapter.read_calendar_destinations()
+        except (PlanningReadUnavailable, PlanningUpstreamError) as exc:
+            raise _read_unavailable(detail="planning_calendar_destinations_unavailable") from exc
+
+    @router.post("/provider-events", response_model=PlanningEventObjectEnvelope)
+    async def planning_create_provider_event(
+        request: ProviderEventCreateRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningEventObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_provider_calendar_mutation(adapter, "create")
+        _no_store(response)
+        try:
+            return await adapter.create_provider_event(
+                idempotency_key=_idempotency_key(raw_request),
+                body=request.model_dump(exclude_unset=True),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="event") from exc
+
+    @router.patch("/provider-events/{event_id}", response_model=PlanningEventObjectEnvelope)
+    async def planning_edit_provider_event(
+        event_id: str,
+        request: ProviderEventPatchRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningEventObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_provider_calendar_mutation(adapter, "update")
+        _no_store(response)
+        _validate_event_id(event_id)
+        try:
+            return await adapter.update_provider_event(
+                event_id=event_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+                body=request.model_dump(exclude_unset=True),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="event") from exc
+
+    @router.delete("/provider-events/{event_id}", response_model=PlanningEventObjectEnvelope)
+    async def planning_delete_provider_event(
+        event_id: str,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningEventObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_provider_calendar_mutation(adapter, "delete")
+        _no_store(response)
+        _validate_event_id(event_id)
+        await _require_empty_body(raw_request)
+        try:
+            return await adapter.delete_provider_event(
+                event_id=event_id,
+                expected_version=_if_match(raw_request),
+                idempotency_key=_idempotency_key(raw_request),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="event") from exc
+
+    @router.post("/provider-calendars", response_model=PlanningCalendarDestinationObjectEnvelope)
+    async def planning_create_provider_calendar(
+        request: ProviderCalendarCreateRequest,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningCalendarDestinationObjectEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_provider_calendar_mutation(adapter, "create_calendar")
+        _no_store(response)
+        try:
+            return await adapter.create_provider_calendar(
+                idempotency_key=_idempotency_key(raw_request),
+                body=request.model_dump(exclude_unset=True),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="event") from exc
+
+    @router.delete("/provider-calendars/{calendar_id}", response_model=PlanningCalendarDestinationDeletedEnvelope)
+    async def planning_delete_provider_calendar(
+        calendar_id: str,
+        raw_request: Request,
+        response: Response,
+    ) -> PlanningCalendarDestinationDeletedEnvelope:
+        _canonical_mutation_route(prefix)
+        _require_provider_calendar_mutation(adapter, "delete_calendar")
+        _no_store(response)
+        _validate_browser_calendar_id(calendar_id)
+        await _require_empty_body(raw_request)
+        try:
+            return await adapter.delete_provider_calendar(
+                calendar_id=calendar_id,
+                idempotency_key=_idempotency_key(raw_request),
+            )
+        except PlanningUpstreamError as exc:
+            raise _mutation_error(exc, domain="event") from exc
+
     @router.post("/events", response_model=PlanningEventObjectEnvelope)
     async def planning_create_event(
         request: EventCreateRequest,
@@ -738,6 +868,16 @@ def _require_calendar_mutation(adapter: PlanningAdapter, action: str) -> None:
         raise HTTPException(status_code=403, detail="planning_calendar_capability_denied")
 
 
+def _require_provider_calendar_mutation(adapter: PlanningAdapter, action: str) -> None:
+    _enabled(adapter)
+    if not adapter.calendar_mutations_enabled or not adapter.provider_calendar_mutations_enabled:
+        raise HTTPException(status_code=404, detail="planning_provider_calendar_mutations_disabled")
+    if action not in {"create", "update", "delete", "create_calendar", "delete_calendar"}:
+        raise HTTPException(status_code=403, detail="planning_provider_calendar_capability_denied")
+    if not adapter.provider_calendar_mutation_allowed(action):  # type: ignore[arg-type]
+        raise HTTPException(status_code=403, detail="planning_provider_calendar_capability_denied")
+
+
 def _idempotency_key(request: Request) -> str:
     value = request.headers.get("Idempotency-Key", "")
     if not value or len(value) > 256 or any(ord(char) < 0x20 for char in value):
@@ -773,6 +913,11 @@ def _validate_event_id(value: str) -> None:
         raise HTTPException(status_code=422, detail="planning_calendar_event_id_invalid") from exc
 
 
+def _validate_browser_calendar_id(value: str) -> None:
+    if re.fullmatch(r"calendar-[0-9a-f]{24}", value) is None:
+        raise HTTPException(status_code=422, detail="planning_calendar_destination_invalid")
+
+
 async def _require_empty_body(request: Request) -> None:
     body = await request.body()
     if body.strip() not in {b"", b"{}"}:
@@ -780,14 +925,26 @@ async def _require_empty_body(request: Request) -> None:
 
 
 def _mutation_error(error: PlanningUpstreamError, *, domain: Literal["reminder", "task", "event"] = "reminder") -> HTTPException:
-    if error.category == "mutation_uncertain":
-        return HTTPException(status_code=503, detail="planning_mutation_uncertain")
-    if error.category in {"version_conflict", "idempotency_conflict", "idempotency_in_progress"}:
+    if error.category in {"mutation_uncertain", "provider_mutation_uncertain"}:
+        return HTTPException(status_code=503, detail="provider_mutation_uncertain" if error.category.startswith("provider_") else "planning_mutation_uncertain")
+    if error.category == "idempotency_in_progress":
+        return HTTPException(status_code=409, detail="idempotency_in_progress")
+    if error.category in {"version_conflict", "provider_etag_conflict", "idempotency_conflict"}:
         return HTTPException(status_code=409, detail=f"planning_{error.category}")
     if error.category == "event_not_local_only":
         return HTTPException(status_code=409, detail="event_not_local_only")
+    if error.category == "provider_not_found":
+        return HTTPException(status_code=404, detail="provider_not_found")
     if error.category == "not_found":
         return HTTPException(status_code=404, detail=f"planning_{domain}_not_found")
+    if error.category in {"provider_write_disabled", "provider_not_configured", "provider_read_only"}:
+        return HTTPException(status_code=403, detail=error.category)
+    if error.category == "provider_rate_limited":
+        return HTTPException(status_code=429, detail="provider_rate_limited")
+    if error.category == "provider_authentication_failed":
+        return HTTPException(status_code=502, detail="provider_authentication_failed")
+    if error.category == "provider_transient_failure":
+        return HTTPException(status_code=503, detail="provider_transient_failure")
     if error.category in {
         "validation_error",
         "reminder_create_invalid",
@@ -796,6 +953,7 @@ def _mutation_error(error: PlanningUpstreamError, *, domain: Literal["reminder",
         "task_patch_invalid",
         "event_create_invalid",
         "event_patch_invalid",
+        "provider_payload_invalid",
         "idempotency_key_invalid",
         "expected_version_invalid",
     }:
