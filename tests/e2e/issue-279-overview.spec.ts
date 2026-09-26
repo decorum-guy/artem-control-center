@@ -34,7 +34,7 @@ async function noHorizontalOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
 }
 
-test("maps the contour to confirmed live ON and keeps warning distinct", async ({ page }) => {
+test("maps the contour to confirmed live ON while keeping the accepted left accent persistent", async ({ page }) => {
   test.setTimeout(120_000);
   const cases = [
     ["coffee-off", "off", "off", false],
@@ -68,7 +68,11 @@ test("maps the contour to confirmed live ON and keeps warning distinct", async (
       };
     });
     expect(style.shadow === "none", scenario).toBe(!active);
-    expect(style.leftBarVisible, scenario).toBe(active);
+    // The left strip is the accepted Overview identity accent and remains
+    // visible even while the machine is OFF. Only the whole-card halo maps to
+    // confirmed live ON.
+    expect(style.leftBarVisible, scenario).toBe(true);
+    expect(style.leftBarOpacity, scenario).toBeGreaterThanOrEqual(0.69);
     expect(style.leftBarWidth, scenario).toBe("2px");
     expect(style.animation, scenario).toBe("none");
     if (stage === "ready") readyShadow = style.shadow;

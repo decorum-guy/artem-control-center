@@ -285,22 +285,17 @@ html[data-theme="day"] .coffee-panel--overview {
 .coffee-panel--overview::before {
   position: absolute;
   z-index: 2;
-  inset: 14px auto 14px 0;
+  inset: 14px auto 14px -1px;
   width: 2px;
   border-radius: 0 2px 2px 0;
   background: var(--cc-accent);
   box-shadow: 0 0 12px 1px color-mix(in srgb, var(--cc-accent) 36%, transparent);
   content: "";
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--cc-motion-reconcile) ease;
-}
-
-.coffee-panel--overview[data-coffee-active="true"]::before {
   opacity: .7;
+  pointer-events: none;
 }
 
-.coffee-panel--overview.coffee-panel--ready[data-coffee-active="true"]::before {
+.coffee-panel--overview.coffee-panel--ready::before {
   background: var(--cc-success);
   box-shadow: 0 0 12px 1px color-mix(in srgb, var(--cc-success) 36%, transparent);
 }
