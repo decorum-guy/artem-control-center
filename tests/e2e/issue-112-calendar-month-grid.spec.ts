@@ -64,17 +64,17 @@ const sources = [
   }
 ];
 
-async function installCalendarFixture(page: Page): Promise<string[]> {
+async function installCalendarFixture(page: Page, fixtureEvents: Record<string, unknown>[] = monthEvents): Promise<string[]> {
   const methods: string[] = [];
   await page.route("**/api/v1/planning/events**", async (route) => {
     methods.push(route.request().method());
     if (route.request().method() !== "GET") return route.fallback();
     const response = await route.fetch();
     const payload = await response.json() as Record<string, unknown>;
-    payload.items = monthEvents;
+    payload.items = fixtureEvents;
     payload.limit = 100;
     payload.offset = 0;
-    payload.count = monthEvents.length;
+    payload.count = fixtureEvents.length;
     payload.hasMore = false;
     payload.sources = sources;
     await route.fulfill({ response, body: JSON.stringify(payload) });
@@ -205,6 +205,87 @@ test.describe("Issue #112 Calendar Slice A", () => {
     const overflow = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, width: document.documentElement.clientWidth }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.width);
     expect(methods.every((method) => method === "GET")).toBe(true);
+  });
+
+  test("expanded day grows with a dense agenda and delegates vertical scrolling to the route", async ({ page }) => {
+    const denseEvents = Array.from({ length: 12 }, (_, index) => {
+      const startHour = 6 + index;
+      const endHour = startHour + 1;
+      return event(`00000000-0000-4000-8000-${String(1200 + index).padStart(12, "0")}`, {
+        title: `Плотное событие ${index + 1}`,
+        startAtUtc: `2026-08-12T${String(startHour).padStart(2, "0")}:00:00Z`,
+        endAtUtc: `2026-08-12T${String(endHour).padStart(2, "0")}:00:00Z`
+      });
+    });
+    await installCalendarFixture(page, denseEvents);
+    await page.goto("/calendar?date=2026-08-12");
+
+    const layout = page.getByTestId("planning-calendar-month");
+    const eventList = page.locator("#planning-calendar-selected-day-events");
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(denseEvents.length);
+
+    const collapsed = await eventList.evaluate((element) => ({
+      overflowY: getComputedStyle(element).overflowY,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight
+    }));
+    expect(collapsed.overflowY).toBe("auto");
+    expect(collapsed.scrollHeight).toBeGreaterThan(collapsed.clientHeight);
+
+    const expand = page.getByTestId("planning-calendar-expand");
+    await expand.click();
+    await expect(layout).toHaveAttribute("data-expanded-day", "true");
+    await expect(expand).toHaveText("Свернуть день");
+
+    const expanded = await page.evaluate(() => {
+      const layout = document.querySelector<HTMLElement>('[data-testid="planning-calendar-month"]');
+      const day = document.querySelector<HTMLElement>('[data-testid="planning-calendar-selected-day"]');
+      const events = document.querySelector<HTMLElement>("#planning-calendar-selected-day-events");
+      const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="planning-calendar-event-row"]')];
+      if (!layout || !day || !events || rows.length === 0) throw new Error("Expanded-day geometry is incomplete");
+      const layoutBox = layout.getBoundingClientRect();
+      const dayBox = day.getBoundingClientRect();
+      const lastBox = rows.at(-1)!.getBoundingClientRect();
+
+      // The production V2 shell scrolls .v2-route-content, while the legacy
+      // test shell can delegate the same page scroll to the document. Detect
+      // the actual outer scroll owner instead of hard-coding one shell class.
+      let ancestor: HTMLElement | null = events.parentElement;
+      let scrollOwner: HTMLElement | null = null;
+      while (ancestor) {
+        const style = getComputedStyle(ancestor);
+        const scrollableOverflow = style.overflowY === "auto" || style.overflowY === "scroll";
+        if (scrollableOverflow && ancestor.scrollHeight > ancestor.clientHeight + 1) {
+          scrollOwner = ancestor;
+          break;
+        }
+        ancestor = ancestor.parentElement;
+      }
+      const documentScrollable = document.documentElement.scrollHeight > document.documentElement.clientHeight + 1;
+      return {
+        layoutHeight: layoutBox.height,
+        dayOverflow: getComputedStyle(day).overflow,
+        eventsOverflowY: getComputedStyle(events).overflowY,
+        eventsScrollHeight: events.scrollHeight,
+        eventsClientHeight: events.clientHeight,
+        lastBottom: lastBox.bottom,
+        dayBottom: dayBox.bottom,
+        outerScrollAvailable: Boolean(scrollOwner) || documentScrollable,
+        outerScrollOwnerContainsEvents: scrollOwner ? scrollOwner.contains(events) : documentScrollable
+      };
+    });
+
+    expect(expanded.layoutHeight).toBeGreaterThan(430);
+    expect(expanded.dayOverflow).toBe("visible");
+    expect(expanded.eventsOverflowY).toBe("visible");
+    expect(expanded.eventsClientHeight).toBeGreaterThanOrEqual(expanded.eventsScrollHeight - 1);
+    expect(expanded.lastBottom).toBeLessThanOrEqual(expanded.dayBottom + 1);
+    expect(expanded.outerScrollAvailable).toBe(true);
+    expect(expanded.outerScrollOwnerContainsEvents).toBe(true);
+
+    await expand.click();
+    await expect(layout).toHaveAttribute("data-expanded-day", "false");
+    await expect(eventList).toHaveCSS("overflow-y", "auto");
   });
 
   test("centers one- and two-digit current dates inside the same thin ring", async ({ page }) => {

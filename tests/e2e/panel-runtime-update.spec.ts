@@ -1,4 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
 
 const v2Enabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 const lockEnabled = process.env.VITE_TOUCH_INPUT_LOCK_ENABLED === "true";
@@ -593,7 +595,7 @@ test.describe("Control Center runtime update UX", () => {
     expect(api.getStatusCount()).toBeGreaterThan(80);
   });
 
-  test("verified terminal publication follows verifying without a false stale failure", async ({ page }) => {
+  test("verified terminal publication follows verifying without a false stale failure", async ({ page }, testInfo: TestInfo) => {
     await page.clock.install();
     const api = await installRuntimeFixtures(page, "full");
     const zone = await openSystem(page);
@@ -624,6 +626,32 @@ test.describe("Control Center runtime update UX", () => {
     await expect(dialog).toHaveCount(0);
     await expect(zone).toContainText("Обновление панели завершено.");
     await expect(zone).not.toContainText("Обновление остановилось без подтверждённого результата.");
+
+    const terminalNotice = zone.locator('.runtime-controls-status[role="status"]');
+    const actionRow = zone.locator(".runtime-control-actions");
+    await expect(terminalNotice).toContainText("Обновление панели завершено.");
+    await expect(terminalNotice).toBeVisible();
+    const geometry = await page.evaluate(() => {
+      const notice = document.querySelector<HTMLElement>('[data-testid="system-runtime-zone"] [role="status"]');
+      const actions = document.querySelector<HTMLElement>('[data-testid="system-runtime-zone"] .runtime-control-actions');
+      const zone = document.querySelector<HTMLElement>('[data-testid="system-runtime-zone"]');
+      if (!notice || !actions || !zone) throw new Error("Runtime terminal geometry is incomplete");
+      const rect = (element: HTMLElement) => {
+        const box = element.getBoundingClientRect();
+        return { top: box.top, bottom: box.bottom, height: box.height };
+      };
+      return { notice: rect(notice), actions: rect(actions), zone: rect(zone) };
+    });
+    await expect(actionRow).toBeVisible();
+    expect(geometry.actions.top - geometry.notice.bottom).toBeGreaterThanOrEqual(0);
+    expect(geometry.actions.top - geometry.notice.bottom).toBeLessThanOrEqual(24);
+    expect(geometry.actions.bottom).toBeLessThanOrEqual(geometry.zone.bottom + 1);
+    for (const label of ["Скрыть панель", "Обновить панель", "Полностью закрыть"]) {
+      expect(await actionRow.getByRole("button", { name: label }).evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(56);
+    }
+    const artifactDir = process.env.PHYSICAL_POLISH_ARTIFACT_DIR ?? testInfo.outputPath("physical-polish-279-samsung");
+    await mkdir(artifactDir, { recursive: true });
+    await page.screenshot({ path: path.join(artifactDir, "system-runtime-terminal-compact.png"), animations: "disabled" });
   });
 
   test("temporary runtime disappearance reconnects and verifies the served target", async ({ page }) => {

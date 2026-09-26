@@ -19,7 +19,7 @@ type LayoutDocument = {
   schemaVersion: "overview.layout.v2";
   profileId: "samsung-control";
   presetId: "overview.default";
-  presetVersion: 3;
+  presetVersion: 4;
   revision: number;
   viewportClass: "landscape-12";
   updatedAt: string;
@@ -83,7 +83,7 @@ const foundationItems: LayoutItem[] = [
     instanceId: "fixture.climate",
     widgetType: "home.climate",
     visibility: "visible",
-    placement: { x: 0, y: 5, w: 7, h: 4 },
+    placement: { x: 0, y: 5, w: 7, h: 3 },
     sizeVariant: "standard",
     config: {}
   },
@@ -110,7 +110,7 @@ function makeDocument(revision = 0, items: readonly LayoutItem[] = foundationIte
     schemaVersion: "overview.layout.v2",
     profileId: "samsung-control",
     presetId: "overview.default",
-    presetVersion: 3,
+    presetVersion: 4,
     revision,
     viewportClass: "landscape-12",
     updatedAt: "2026-08-14T12:00:00+00:00",
@@ -704,7 +704,7 @@ test.describe("Overview V2 Edit mode and persistence", () => {
       }
       if (climate) {
         climate.sizeVariant = variant === "large" ? "large" : "standard";
-        climate.placement = variant === "large" ? { x: 0, y: 6, w: 8, h: 5 } : { x: 0, y: 5, w: 7, h: 4 };
+        climate.placement = variant === "large" ? { x: 0, y: 6, w: 8, h: 5 } : { x: 0, y: 5, w: 7, h: 3 };
       }
       if (health) health.placement = variant === "large" ? { x: 8, y: 6, w: 4, h: 2 } : { x: 7, y: 5, w: 5, h: 2 };
       routeState.document = makeDocument(0, items);

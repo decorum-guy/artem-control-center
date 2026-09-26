@@ -779,7 +779,7 @@ class OverviewLayoutResponse(BaseModel):
     schemaVersion: Literal["overview.layout.v2"]
     profileId: Literal["samsung-control"]
     presetId: Literal["overview.default"]
-    presetVersion: Literal[3]
+    presetVersion: Literal[4]
     revision: int = Field(ge=0)
     viewportClass: Literal["landscape-12"]
     updatedAt: str

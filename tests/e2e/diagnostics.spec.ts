@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import type { DiagnosticsProblem } from "../../packages/contracts/src/index";
+import { diagnosticsProblem, installDiagnosticsFixture } from "./diagnosticsFixture";
 
 const v2Enabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 
@@ -78,6 +80,71 @@ test.describe("owner diagnostics surface", () => {
     expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
     expect(consoleErrors, httpErrors.join("\n")).toEqual([]);
     expect(httpErrors).toEqual([]);
+  });
+
+  test("keeps same-refresh Planning incidents distinct and gives each a bounded label", async ({ page }) => {
+    let revision: number | null = null;
+    await page.route("**/api/v1/snapshot**", async (route) => {
+      const response = await route.fetch();
+      const snapshot = await response.json() as { revision: number };
+      revision = snapshot.revision;
+      await route.fulfill({ response, body: JSON.stringify(snapshot) });
+    });
+
+    const sameRefresh = "2026-09-25T21:24:59.530718+00:00";
+    const incident = (
+      id: string,
+      code: string | null,
+      title: string,
+      summary: string
+    ): DiagnosticsProblem => ({
+      ...diagnosticsProblem(id, "Дела", "degraded", summary),
+      firstObservedAt: sameRefresh,
+      lastObservedAt: sameRefresh,
+      freshness: null,
+      technicalEvidence: {
+        kind: "planning-domain",
+        source: "planning-status",
+        domain: null,
+        provider: null,
+        providerId: null,
+        status: "degraded",
+        errorCode: code,
+        consecutiveFailures: 0,
+        lastAttemptedAt: null,
+        lastSuccessfulAt: null,
+        observedAt: sameRefresh,
+        cacheUsed: false,
+        fallbackUsed: null,
+        resultStatus: null,
+        projectionStatus: null
+      },
+      subsystem: title
+    });
+    const problems = [
+      incident("planning:planning-status:planning.backup_overdue", "planning.backup_overdue", "Дела", "Дела работает с ограничениями"),
+      incident("planning:planning-status:planning.delivery_terminal_failure", "planning.delivery_terminal_failure", "Дела", "Дела работает с ограничениями"),
+      incident("planning:planning-status", null, "Дела", "Дела работает с ограничениями")
+    ];
+    await installDiagnosticsFixture(page, () => {
+      if (revision === null) throw new Error("Snapshot revision was not observed");
+      return revision;
+    }, problems);
+
+    await page.goto("/system");
+    const rows = page.locator(".system-problem-row");
+    await expect(rows).toHaveCount(3);
+    await expect(rows.locator("strong")).toHaveText(["Резервная копия", "Доставка планирования", "Планирование"]);
+    await expect(rows.locator(".system-problem-row__copy span")).toHaveText([
+      "Резервная копия просрочена",
+      "Доставка планирования не подтверждена",
+      "Планирование работает с ограничениями"
+    ]);
+    await expect(rows.locator(".system-problem-row__meta > span:last-child")).toHaveText([
+      `Наблюдалось ${sameRefresh}`,
+      `Наблюдалось ${sameRefresh}`,
+      `Наблюдалось ${sameRefresh}`
+    ]);
   });
 
   test("diagnostics endpoint exposes a bounded sanitized contract", async ({ request }) => {

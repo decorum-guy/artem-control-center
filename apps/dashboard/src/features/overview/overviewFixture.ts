@@ -29,7 +29,7 @@ const foundationLayout: readonly OverviewLayoutItem[] = [
     instanceId: "fixture.climate",
     widgetType: "home.climate",
     sizeVariant: "standard",
-    placement: { x: 0, y: 5, w: 7, h: 4 },
+    placement: { x: 0, y: 5, w: 7, h: 3 },
     visibility: "visible"
   },
   {

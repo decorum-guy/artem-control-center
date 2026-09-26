@@ -211,6 +211,44 @@ export function problemStateLabel(state: DiagnosticsProblemState): string {
   }
 }
 
+const planningProblemCopy: Record<string, { title: string; summary: string }> = {
+  "planning.backup_failed": {
+    title: "Резервная копия",
+    summary: "Резервное копирование не завершено"
+  },
+  "planning.backup_overdue": {
+    title: "Резервная копия",
+    summary: "Резервная копия просрочена"
+  },
+  "planning.delivery_terminal_failure": {
+    title: "Доставка планирования",
+    summary: "Доставка планирования не подтверждена"
+  },
+  "planning.outbox_stuck": {
+    title: "Очередь планирования",
+    summary: "Очередь планирования не разгружается"
+  }
+};
+
+function planningOwnerCopy(problem: DiagnosticsProblem): { title: string; summary: string } | null {
+  const errorCode = problem.technicalEvidence?.errorCode;
+  if (errorCode && planningProblemCopy[errorCode]) return planningProblemCopy[errorCode];
+  if (problem.id === "planning:planning-status") {
+    return { title: "Планирование", summary: "Планирование работает с ограничениями" };
+  }
+  return null;
+}
+
+/** Bounded owner-facing copy for known operational Planning incidents. */
+export function problemOwnerTitle(problem: DiagnosticsProblem): string {
+  return planningOwnerCopy(problem)?.title ?? problem.subsystem;
+}
+
+/** Keeps distinct safe Planning incidents readable without exposing raw payloads. */
+export function problemOwnerSummary(problem: DiagnosticsProblem): string {
+  return planningOwnerCopy(problem)?.summary ?? problem.summary;
+}
+
 export function problemTone(state: DiagnosticsProblemState): StatusTone {
   switch (state) {
     case "offline": return "offline";

@@ -156,6 +156,9 @@ type RogLayout = {
   status: { top: number; bottom: number; left: number; right: number };
   detail: { top: number; bottom: number; left: number; right: number };
   footer: { top: number; bottom: number; left: number; right: number };
+  freshness: { top: number; bottom: number; left: number; right: number };
+  actionGroup: { top: number; bottom: number; left: number; right: number; width: number; height: number };
+  actions: Array<{ top: number; bottom: number; left: number; right: number; width: number; height: number }>;
   titleInPrimaryState: boolean;
   noInternalOverflow: boolean;
 };
@@ -179,6 +182,9 @@ async function measureRogLayout(page: Page): Promise<RogLayout> {
       status: rect(status),
       detail: rect(detail),
       footer: rect(root.querySelector(".system-rog-detail__footer")),
+      freshness: rect(root.querySelector(".system-rog-detail__footer > span:first-child")),
+      actionGroup: rect(root.querySelector(".system-rog-detail__actions")),
+      actions: [...root.querySelectorAll(".system-rog-detail__actions button")].map((button) => rect(button)),
       titleInPrimaryState: Boolean(title.closest(".system-rog-detail__header")),
       noInternalOverflow: root.scrollHeight <= root.clientHeight && root.scrollWidth <= root.clientWidth
     };
@@ -390,7 +396,15 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(page.getByTestId("system-rog-g703")).toContainText("ASUS отвечает");
     await expect(page.getByTestId("system-rog-sleep")).toHaveText("Сон");
     await expect(page.getByTestId("system-rog-hibernate")).toHaveText("Гибернация");
-    assertRogLayout(await measureRogLayout(page));
+    const onlineLayout = await measureRogLayout(page);
+    assertRogLayout(onlineLayout);
+    expect(onlineLayout.actions).toHaveLength(2);
+    expect(onlineLayout.actionGroup.width).toBeGreaterThanOrEqual(288);
+    for (const action of onlineLayout.actions) {
+      expect(action.width).toBeGreaterThanOrEqual(48);
+      expect(action.height).toBeGreaterThanOrEqual(48);
+    }
+    expect(onlineLayout.actions[0].right).toBeLessThanOrEqual(onlineLayout.actions[1].left);
     await expect(page.getByTestId("system-runtime-zone")).toBeVisible();
     await expect(page.getByTestId("system-fact-update")).toContainText("Обновления");
     await expect(page.getByTestId("system-fact-update")).not.toContainText("Обновления и runtime");
@@ -405,7 +419,17 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(page.getByTestId("system-rog-wake")).toHaveText("Включить");
     await expect(page.getByTestId("system-rog-sleep")).toHaveCount(0);
     await expect(page.getByTestId("system-rog-hibernate")).toHaveCount(0);
-    assertRogLayout(await measureRogLayout(page));
+    const offlineLayout = await measureRogLayout(page);
+    assertRogLayout(offlineLayout);
+    expect(offlineLayout.actions).toHaveLength(1);
+    expect(offlineLayout.actions[0].width).toBeGreaterThanOrEqual(48);
+    expect(offlineLayout.actions[0].height).toBeGreaterThanOrEqual(48);
+    const actionCenter = (offlineLayout.actions[0].left + offlineLayout.actions[0].right) / 2;
+    const groupCenter = (offlineLayout.actionGroup.left + offlineLayout.actionGroup.right) / 2;
+    const footerCenter = (offlineLayout.footer.left + offlineLayout.footer.right) / 2;
+    expect(Math.abs(actionCenter - groupCenter)).toBeLessThanOrEqual(1);
+    expect(Math.abs(actionCenter - footerCenter)).toBeLessThanOrEqual(1);
+    expect(offlineLayout.freshness.right).toBeLessThanOrEqual(offlineLayout.actionGroup.left);
 
     await page.unroute("**/api/v1/snapshot**");
     await page.unroute(/\/api\/v1\/diagnostics(?:\?.*)?$/);

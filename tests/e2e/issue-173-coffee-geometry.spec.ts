@@ -365,6 +365,12 @@ test.describe("#173 Coffee composition stabilization", () => {
     const warmingMidImage = await rect(image);
     await expect(coffee).toHaveAttribute("data-transition", "revealing");
     await expect(progress).toHaveAttribute("data-progress-visible", "true");
+    // Linux CI can observe the data attribute before the max-height/opacity
+    // transition has actually produced its final geometry. Wait for the
+    // presentation to settle before using it as the upper bound for the
+    // intermediate samples.
+    await expect.poll(async () => (await progressPresentation(progress)).opacity).toBeGreaterThan(0.99);
+    await expect.poll(async () => (await progressPresentation(progress)).height).toBeGreaterThan(1);
     const warmingImage = await rect(image);
     const warmingProgress = await progressPresentation(progress);
     const fadeInSamples = await fadeInSamplesPromise;

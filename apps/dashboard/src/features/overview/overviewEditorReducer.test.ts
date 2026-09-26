@@ -85,7 +85,7 @@ describe("Overview edit reducer", () => {
     expect(restored.items.find((item) => item.widgetType === "home.climate")).toMatchObject({
       instanceId: "fixture.climate",
       visibility: "visible",
-      placement: { w: 7, h: 4 }
+      placement: { w: 7, h: 3 }
     });
     expect(addOverviewWidget(restored.items, "home.climate").ok).toBe(false);
   });
@@ -107,7 +107,7 @@ describe("Overview edit reducer", () => {
     for (const originalItem of original) {
       expect(result.items.find((item) => item.instanceId === originalItem.instanceId)?.placement).toEqual(originalItem.placement);
     }
-    expect(result.items.find((item) => item.widgetType === "weather.alert")?.placement).toEqual({ x: 0, y: 9, w: 6, h: 2 });
+    expect(result.items.find((item) => item.widgetType === "weather.alert")?.placement).toEqual({ x: 0, y: 8, w: 6, h: 2 });
   });
 
   it("keeps appearance config through compact projection without changing the canonical draft", () => {

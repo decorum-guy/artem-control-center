@@ -6,6 +6,8 @@ import {
   currentProblemsForSnapshot,
   diagnosticsFallbackCopyText,
   diagnosticsSupportText,
+  problemOwnerSummary,
+  problemOwnerTitle,
   problemTechnicalEvidenceText
 } from "./problemModel";
 
@@ -195,6 +197,32 @@ describe("owner diagnostics problem model", () => {
     const unsafeProblem = currentProblemsForSnapshot(snapshot({ planning: unsafePlanning }))[0];
     expect(unsafeProblem.id).toBe("planning:planning-status");
     expect(unsafeProblem.technicalEvidence?.errorCode).toBeNull();
+  });
+
+  it("gives the physical Planning incident IDs distinct bounded owner copy", () => {
+    const planning = {
+      ...planningFixtures.healthy,
+      health: {
+        lastAttemptedAt: null,
+        lastSuccessfulAt: null,
+        consecutiveFailures: 0,
+        issues: [
+          { source: "planning-status" as const, status: "degraded" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: "planning.backup_overdue", affectsDataFreshness: false },
+          { source: "planning-status" as const, status: "degraded" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: "planning.delivery_terminal_failure", affectsDataFreshness: false },
+          { source: "planning-status" as const, status: "degraded" as const, consecutiveFailures: 0, lastAttemptedAt: null, lastSuccessfulAt: null, errorCode: null, affectsDataFreshness: false }
+        ],
+        domains: []
+      }
+    };
+    const problems = currentProblemsForSnapshot(snapshot({ planning }));
+    expect(problems).toHaveLength(3);
+    expect(new Set(problems.map((problem) => problem.id)).size).toBe(3);
+    expect(problems.map(problemOwnerTitle)).toEqual(["Резервная копия", "Доставка планирования", "Планирование"]);
+    expect(problems.map(problemOwnerSummary)).toEqual([
+      "Резервная копия просрочена",
+      "Доставка планирования не подтверждена",
+      "Планирование работает с ограничениями"
+    ]);
   });
 
   it("formats only the fixed sanitized technical record for copying", () => {
