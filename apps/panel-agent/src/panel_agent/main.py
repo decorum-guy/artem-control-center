@@ -57,6 +57,7 @@ from .project_registry_migration import (
 from .runtime_control import router as runtime_control_router
 from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
+from .station_actions import StationActionExecutor, build_station_action_router
 from .snapshot import SnapshotPublisher
 from .weather import WeatherService, build_weather_router
 from .jarvis_api import JarvisTurnService, build_jarvis_router
@@ -314,6 +315,12 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+if MODE != "production":
+    # Fixture/read-only clients still receive a truthful, bounded projection.
+    # Production installs the real Alice-backed router in production.py.
+    app.include_router(build_station_action_router(
+        StationActionExecutor(SETTINGS, access_policy, lambda: False)
+    ))
 app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(
     build_project_registry_router(

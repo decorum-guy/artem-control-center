@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from uuid import uuid4
 
 import httpx
@@ -34,6 +35,17 @@ def test_fixed_action_contract_and_gate(tmp_path):
         assert decision["allowed"] is False
         with pytest.raises(HTTPException):
             asyncio.run(executor.execute(StationActionRequest(actionId="media.alice.next", requestId=uuid4())))
+
+
+def test_fixture_overview_gets_disabled_station_availability(tmp_path, monkeypatch):
+    monkeypatch.setenv("PANEL_AGENT_MODE", "fixtures")
+    monkeypatch.setenv("PANEL_ACCESS_POLICY_PATH", str(tmp_path / "policy.json"))
+    import panel_agent.main
+    module = importlib.reload(panel_agent.main)
+    with TestClient(module.app) as client:
+        response = client.get("/api/v1/actions/station/availability")
+        assert response.status_code == 200
+        assert response.json()["actions"]["media.alice.play"]["allowed"] is False
 
 
 def test_route_forbids_arbitrary_payload_and_sends_one_bounded_request(tmp_path):
