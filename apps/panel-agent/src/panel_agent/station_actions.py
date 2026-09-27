@@ -6,8 +6,8 @@ from typing import Any, Callable, Literal
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, HTTPException, Response
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, HTTPException, Response, Path, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from .access_policy import AccessPolicyStore
 from .settings import IntegrationSettings
@@ -31,6 +31,24 @@ class StationActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     actionId: StationActionId
     requestId: UUID
+
+
+class PresetExecutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    presetId: str = Field(pattern=r"^[0-9a-f]{12}$")
+    requestId: UUID
+
+
+class PresetCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedRevision: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=32)
+    command: str = Field(min_length=1, max_length=160)
+
+
+class PresetDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedRevision: str = Field(min_length=1, max_length=64)
 
 
 class StationActionExecutor:
@@ -60,6 +78,93 @@ class StationActionExecutor:
                 "gateEnabled": enabled, "integrationAvailable": available, "busy": busy,
             } for action_id in ACTION_NAMES
         }}
+
+    def _require_preset(self, capability: str, *, busy: bool = False) -> None:
+        self.access.require(capability,
+                            gate_enabled=self.settings.writes_enabled and self.settings.alice_station_actions_enabled,
+                            integration_available=self._integration_available(), busy=busy and self._busy())
+
+    async def _preset_call(self, method: str, path: str, *, body: dict[str, Any] | None = None,
+                           execution: bool = False) -> tuple[int, dict[str, Any]]:
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.settings.alice_base_url,
+                headers={"Authorization": f"Bearer {self.settings.alice_control_center_token}"},
+                timeout=self.settings.http_request_timeout_seconds,
+                transport=self.transport,
+            ) as client:
+                response = await client.request(method, path, json=body)
+        except (httpx.HTTPError, TimeoutError):
+            raise HTTPException(status_code=503, detail="station_dispatch_uncertain" if execution else "station_presets_unavailable") from None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=502, detail="station_invalid_response")
+        return response.status_code, payload
+
+    async def presets(self) -> dict[str, Any]:
+        if not self._integration_available():
+            raise HTTPException(status_code=503, detail="alice_unavailable")
+        status, payload = await self._preset_call("GET", "/internal/control-center/station/presets")
+        return self._validated_inventory(status, payload)
+
+    @staticmethod
+    def _validated_inventory(status: int, payload: dict[str, Any]) -> dict[str, Any]:
+        if status != 200:
+            raise HTTPException(status_code=502, detail="station_presets_unavailable")
+        if (payload.get("schemaVersion") != 1 or not isinstance(payload.get("revision"), str)
+                or not isinstance(payload.get("updatedAt"), str)
+                or not isinstance(payload.get("presets"), list)
+                or len(payload["presets"]) > 20
+                or any(not isinstance(item, dict) or set(item) != {"id", "title"}
+                       or not isinstance(item["id"], str) or not isinstance(item["title"], str)
+                       for item in payload["presets"])):
+            raise HTTPException(status_code=502, detail="station_invalid_response")
+        return {"schemaVersion": 1, "revision": payload["revision"],
+                "updatedAt": payload["updatedAt"], "presets": payload["presets"]}
+
+    async def mutate_preset(self, method: str, preset_id: str | None,
+                            body: dict[str, Any]) -> dict[str, Any]:
+        self._require_preset("settings.station_presets.manage")
+        path = "/internal/control-center/station/presets"
+        if preset_id:
+            path += f"/{preset_id}"
+        status, payload = await self._preset_call(method, path, body=body)
+        if status == 409:
+            raise HTTPException(status_code=409, detail="station_presets_revision_conflict")
+        if status == 404:
+            raise HTTPException(status_code=404, detail="unknown_station_preset")
+        if status == 400:
+            raise HTTPException(status_code=400, detail="invalid_station_preset")
+        return self._validated_inventory(status, payload)
+
+    async def execute_preset(self, request: PresetExecutionRequest) -> dict[str, Any]:
+        capability = "media.alice.preset.execute"
+        correlation = str(request.requestId)
+        self._require_preset(capability, busy=True)
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        if self._lock.locked():
+            raise HTTPException(status_code=409, detail="station_action_busy")
+        async with self._lock:
+            if not self._integration_available():
+                raise HTTPException(status_code=503, detail="alice_unavailable")
+            status, payload = await self._preset_call(
+                "POST", f"/internal/control-center/station/presets/{request.presetId}/execute",
+                body={"requestId": correlation}, execution=True)
+            if status == 404:
+                raise HTTPException(status_code=404, detail="unknown_station_preset")
+            if status == 202:
+                raise HTTPException(status_code=503, detail="station_dispatch_uncertain")
+            if (status != 200 or payload.get("schemaVersion") != 1
+                    or payload.get("presetId") != request.presetId
+                    or payload.get("requestId") != correlation or payload.get("status") != "dispatched"):
+                raise HTTPException(status_code=502, detail="station_dispatch_failed")
+        self.access.audit_capability(capability, result="success", correlation_id=correlation)
+        return {"schemaVersion": 1, "presetId": request.presetId,
+                "requestId": correlation, "status": "dispatched"}
 
     async def execute(self, request: StationActionRequest) -> dict[str, Any]:
         action_id = request.actionId
@@ -118,6 +223,10 @@ class StationActionExecutor:
 def build_station_action_router(executor: StationActionExecutor) -> APIRouter:
     router = APIRouter(prefix="/api/v1/actions/station", tags=["station-actions"])
 
+    def require_json(request: Request) -> None:
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+            raise HTTPException(status_code=415, detail="invalid_content_type")
+
     @router.get("/availability")
     def availability(response: Response) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
@@ -127,5 +236,29 @@ def build_station_action_router(executor: StationActionExecutor) -> APIRouter:
     async def execute(payload: StationActionRequest, response: Response) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
         return await executor.execute(payload)
+
+    @router.get("/presets")
+    async def presets(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return await executor.presets()
+
+    @router.post("/presets/execute")
+    async def execute_preset(payload: PresetExecutionRequest, response: Response, request: Request) -> dict[str, Any]:
+        require_json(request)
+        response.headers["Cache-Control"] = "no-store"
+        return await executor.execute_preset(payload)
+
+    @router.post("/presets")
+    async def add_preset(payload: PresetCreateRequest, response: Response, request: Request) -> dict[str, Any]:
+        require_json(request)
+        response.headers["Cache-Control"] = "no-store"
+        return await executor.mutate_preset("POST", None, payload.model_dump())
+
+    @router.delete("/presets/{preset_id}")
+    async def delete_preset(payload: PresetDeleteRequest, response: Response, request: Request,
+                            preset_id: str = Path(pattern=r"^[0-9a-f]{12}$")) -> dict[str, Any]:
+        require_json(request)
+        response.headers["Cache-Control"] = "no-store"
+        return await executor.mutate_preset("DELETE", preset_id, payload.model_dump())
 
     return router

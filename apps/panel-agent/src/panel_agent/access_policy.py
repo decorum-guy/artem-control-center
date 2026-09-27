@@ -49,6 +49,8 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "media.alice.previous": "standard",
     "media.alice.next": "standard",
     "media.alice.like": "standard",
+    "media.alice.preset.execute": "standard",
+    "settings.station_presets.manage": "standard",
     "system.rog_g703.psu.mode.normal": "standard",
     "system.rog_g703.psu.mode.full": "standard",
     "system.rog_g703.psu.bp1.on": "standard",

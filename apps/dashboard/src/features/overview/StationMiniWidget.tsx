@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { executeStationAction, fetchStationAvailability, STATION_ACTIONS,
   type StationActionAvailability, type StationActionId } from "../../stationActionsApi";
 import { WorkZone } from "../../ShellPrimitives";
+import { addStationPreset, deleteStationPreset, executeStationPreset, fetchStationPresets,
+  type StationPresetInventory } from "../../stationPresetsApi";
 
 const LABELS: Record<StationActionId, string> = {
   "media.alice.play": "Play",
@@ -37,6 +39,12 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   const [pending, setPending] = useState(false);
   const [glow, setGlow] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<"closed" | "music" | "manage" | "add">("closed");
+  const [inventory, setInventory] = useState<StationPresetInventory | null>(null);
+  const [title, setTitle] = useState("");
+  const [command, setCommand] = useState("");
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [sheetMessage, setSheetMessage] = useState("");
   const glowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -65,6 +73,67 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     }
   }
 
+  async function refreshPresets() {
+    try {
+      setInventory(await fetchStationPresets());
+    } catch {
+      setSheetMessage("Список подборок временно недоступен");
+    }
+  }
+
+  function openMusic() {
+    if (!interactive) return;
+    setSheet("music");
+    setSheetMessage("");
+    void refreshPresets();
+  }
+
+  async function runPreset(presetId: string) {
+    if (pending || !availability?.actions["media.alice.play"]?.allowed) return;
+    setPending(true);
+    setGlow(true);
+    if (glowTimer.current) clearTimeout(glowTimer.current);
+    glowTimer.current = setTimeout(() => setGlow(false), 420);
+    setSheetMessage("");
+    try {
+      await executeStationPreset(presetId);
+      setMessage("Команда отправлена");
+      setSheet("closed");
+    } catch (error) {
+      setSheetMessage(error instanceof Error && error.message === "station_dispatch_uncertain"
+        ? "Результат отправки неизвестен" : "Не удалось отправить команду");
+      if (error instanceof Error && error.message === "unknown_station_preset") void refreshPresets();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function mutate(kind: "add" | "delete", presetId?: string) {
+    if (!inventory || pending) return;
+    setPending(true);
+    try {
+      const next = kind === "add"
+        ? await addStationPreset(inventory.revision, title, command)
+        : await deleteStationPreset(inventory.revision, presetId ?? "");
+      setInventory(next);
+      setSheet("manage");
+      setTitle("");
+      setCommand("");
+      setDeleteId(null);
+      setSheetMessage("");
+    } catch (error) {
+      if (error instanceof Error && error.message === "revision_conflict") {
+        await refreshPresets();
+        setSheetMessage("Список изменился в другом интерфейсе. Показана актуальная версия.");
+        setDeleteId(null);
+      } else {
+        setSheetMessage("Не удалось изменить подборки");
+      }
+    } finally {
+      setPending(false);
+    }
+  }
+
   return <WorkZone className="overview-v2-real-widget station-mini-widget" data-testid="overview-station-mini-widget">
     <header className="station-mini-widget__header"><h2>Станция Mini 2</h2></header>
     <div className="station-mini-widget__art" data-testid="station-artwork-slot">
@@ -82,6 +151,50 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
         <ActionIcon actionId={actionId} />
       </button>)}
     </div>
+    <button type="button" className="station-mini-widget__music" onClick={openMusic}
+      disabled={!interactive}>🎵 Музыка <span aria-hidden="true">⌄</span></button>
     <p className="station-mini-widget__message" role="status">{message ?? (availability ? "" : "Управление недоступно")}</p>
+    {sheet !== "closed" && <div className="station-presets__backdrop" onClick={() => setSheet("closed")}>
+      <section className="station-presets__sheet" role="dialog" aria-modal="true"
+        aria-label={sheet === "music" ? "Что включить?" : "Настроить подборки"}
+        onClick={(event) => event.stopPropagation()}>
+        <header className="station-presets__header">
+          <h2>{sheet === "music" ? "Что включить?" : sheet === "manage" ? "Настроить подборки" : "Добавить подборку"}</h2>
+          <button type="button" onClick={() => { setSheet("closed"); setDeleteId(null); }} aria-label="Закрыть">×</button>
+        </header>
+        {sheet === "music" && <>
+          <div className="station-presets__list">
+            {inventory?.presets.map((preset) => <button key={preset.id} type="button"
+              className="station-presets__row" disabled={pending || !availability?.actions["media.alice.play"]?.allowed}
+              onClick={() => { void runPreset(preset.id); }}>
+              <span>{preset.title}</span><span aria-hidden="true">▶</span>
+            </button>)}
+          </div>
+          <button className="station-presets__secondary" type="button" onClick={() => setSheet("manage")}>⚙ Настроить подборки</button>
+        </>}
+        {sheet === "manage" && <>
+          <div className="station-presets__list">
+            {inventory?.presets.map((preset) => <div className="station-presets__manage-row" key={preset.id}>
+              <span>{preset.title}</span>
+              <button type="button" onClick={() => setDeleteId(preset.id)}>Удалить</button>
+            </div>)}
+          </div>
+          {deleteId && <div className="station-presets__confirm">
+            <p>Удалить «{inventory?.presets.find((item) => item.id === deleteId)?.title}»?</p>
+            <button type="button" disabled={pending} onClick={() => { void mutate("delete", deleteId); }}>Удалить</button>
+            <button type="button" onClick={() => setDeleteId(null)}>Отмена</button>
+          </div>}
+          <button type="button" className="station-presets__secondary" onClick={() => { setSheet("add"); setSheetMessage(""); }}>➕ Добавить</button>
+          <button type="button" className="station-presets__secondary" onClick={() => setSheet("music")}>← Назад</button>
+        </>}
+        {sheet === "add" && <form className="station-presets__form" onSubmit={(event) => { event.preventDefault(); void mutate("add"); }}>
+          <label>Название кнопки<input value={title} maxLength={32} required onChange={(event) => setTitle(event.target.value)} /></label>
+          <label>Команда для Алисы<input value={command} maxLength={160} required onChange={(event) => setCommand(event.target.value)} /></label>
+          <button type="submit" disabled={pending || !title.trim() || !command.trim()}>Сохранить</button>
+          <button type="button" onClick={() => setSheet("manage")}>Отмена</button>
+        </form>}
+        <p className="station-presets__message" role="status">{sheetMessage}</p>
+      </section>
+    </div>}
   </WorkZone>;
 }
