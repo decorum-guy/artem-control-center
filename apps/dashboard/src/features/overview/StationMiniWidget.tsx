@@ -81,6 +81,13 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     }
   }
 
+  function closeSheet() {
+    setSheet("closed");
+    setTitle("");
+    setCommand("");
+    setDeleteId(null);
+  }
+
   function openMusic() {
     if (!interactive) return;
     setSheet("music");
@@ -98,7 +105,7 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     try {
       await executeStationPreset(presetId);
       setMessage("Команда отправлена");
-      setSheet("closed");
+      closeSheet();
     } catch (error) {
       setSheetMessage(error instanceof Error && error.message === "station_dispatch_uncertain"
         ? "Результат отправки неизвестен" : "Не удалось отправить команду");
@@ -154,13 +161,13 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     <button type="button" className="station-mini-widget__music" onClick={openMusic}
       disabled={!interactive}>🎵 Музыка <span aria-hidden="true">⌄</span></button>
     <p className="station-mini-widget__message" role="status">{message ?? (availability ? "" : "Управление недоступно")}</p>
-    {sheet !== "closed" && <div className="station-presets__backdrop" onClick={() => setSheet("closed")}>
+    {sheet !== "closed" && <div className="station-presets__backdrop" onClick={closeSheet}>
       <section className="station-presets__sheet" role="dialog" aria-modal="true"
         aria-label={sheet === "music" ? "Что включить?" : "Настроить подборки"}
         onClick={(event) => event.stopPropagation()}>
         <header className="station-presets__header">
           <h2>{sheet === "music" ? "Что включить?" : sheet === "manage" ? "Настроить подборки" : "Добавить подборку"}</h2>
-          <button type="button" onClick={() => { setSheet("closed"); setDeleteId(null); }} aria-label="Закрыть">×</button>
+          <button type="button" onClick={closeSheet} aria-label="Закрыть">×</button>
         </header>
         {sheet === "music" && <>
           <div className="station-presets__list">
@@ -170,7 +177,8 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
               <span>{preset.title}</span><span aria-hidden="true">▶</span>
             </button>)}
           </div>
-          <button className="station-presets__secondary" type="button" onClick={() => setSheet("manage")}>⚙ Настроить подборки</button>
+          {availability?.actions["media.alice.play"]?.allowed && <button className="station-presets__secondary"
+            type="button" onClick={() => setSheet("manage")}>⚙ Настроить подборки</button>}
         </>}
         {sheet === "manage" && <>
           <div className="station-presets__list">
@@ -191,7 +199,7 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
           <label>Название кнопки<input value={title} maxLength={32} required onChange={(event) => setTitle(event.target.value)} /></label>
           <label>Команда для Алисы<input value={command} maxLength={160} required onChange={(event) => setCommand(event.target.value)} /></label>
           <button type="submit" disabled={pending || !title.trim() || !command.trim()}>Сохранить</button>
-          <button type="button" onClick={() => setSheet("manage")}>Отмена</button>
+          <button type="button" onClick={() => { setTitle(""); setCommand(""); setSheet("manage"); }}>Отмена</button>
         </form>}
         <p className="station-presets__message" role="status">{sheetMessage}</p>
       </section>
