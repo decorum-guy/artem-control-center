@@ -96,6 +96,32 @@ test.describe("Overview V2 safe grid foundation", () => {
     await expectNoDocumentOverflow(page);
   });
 
+  test("Station music sheet is touch sized and fits 1280×720", async ({ page }) => {
+    test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.route("**/api/v1/actions/station/presets", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        schemaVersion: 1, revision: "fixture-r1", updatedAt: "2026-09-27T00:00:00Z",
+        presets: [{ id: "a1b2c3d4e5f6", title: "Избранное" },
+          { id: "001122334455", title: "Спокойная" },
+          { id: "66778899aabb", title: "Энергичная" }]
+      }) });
+    });
+    await page.goto("/overview");
+    const station = page.getByTestId("overview-station-mini-widget");
+    await expect(station.getByRole("button", { name: /Музыка/ })).toBeVisible();
+    await station.getByRole("button", { name: /Музыка/ }).click();
+    const sheet = page.getByRole("dialog", { name: "Что включить?" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator(".station-presets__row")).toHaveCount(3);
+    for (const row of await sheet.locator(".station-presets__row").all()) {
+      const box = await row.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(48);
+    }
+    await expect(sheet.locator("select")).toHaveCount(0);
+    await expectNoDocumentOverflow(page);
+  });
+
   test("isolates a throwing widget without moving its neighbors", async ({ page }) => {
     test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
     await page.goto("/overview");
