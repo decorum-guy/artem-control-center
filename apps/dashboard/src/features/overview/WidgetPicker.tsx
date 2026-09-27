@@ -10,6 +10,7 @@ function purposeCopy(widgetType: string): string {
   switch (widgetType) {
     case "home.coffee-machine": return "Состояние и управление кофемашиной";
     case "home.climate": return "Состояние и управление кондиционером";
+    case "home.station-mini-2": return "Фиксированные команды Станции Mini 2";
     case "system.rog-g703-operational": return "Операционное состояние компьютера";
     case "planning.summary": return "Ближайшие дела на сегодня";
     case "home.quick-actions": return "Быстрый доступ к домашним устройствам";

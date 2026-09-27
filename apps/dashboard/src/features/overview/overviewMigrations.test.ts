@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { migratePresetV2ToV3, migratePresetV3ToV4, migrateV1ToV2, parseRawLayout } from "./overviewMigrations";
+import { migratePresetV2ToV3, migratePresetV3ToV4, migratePresetV4ToV5, migrateV1ToV2, parseRawLayout } from "./overviewMigrations";
 
 describe("pure Overview migrations and recovery", () => {
+  it("adds the Station without moving persisted widgets", () => {
+    const existing = { instanceId: "owner.widget", widgetType: "home.coffee-machine", sizeVariant: "standard",
+      visibility: "visible", placement: { x: 0, y: 0, w: 7, h: 4 }, config: {} };
+    const migrated = migratePresetV4ToV5({ schemaVersion: "overview.layout.v2", presetVersion: 4,
+      items: [existing] }) as { presetVersion: number; items: Array<typeof existing> };
+    expect(migrated.presetVersion).toBe(5);
+    expect(migrated.items[0]).toEqual(existing);
+    expect(migrated.items[1].widgetType).toBe("home.station-mini-2");
+    expect(migrated.items[1].placement.x).toBe(7);
+    expect(migratePresetV4ToV5(migrated)).toEqual(migrated);
+  });
   it("migrates configured v1 vocabulary while preserving instance ids", () => {
     const migrated = migrateV1ToV2({
       version: 1,

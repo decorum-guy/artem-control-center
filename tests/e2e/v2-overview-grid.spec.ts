@@ -70,7 +70,8 @@ test.describe("Overview V2 safe grid foundation", () => {
       ["fixture.coffee", 0, 1, 7, 4],
       ["fixture.planning", 7, 1, 5, 4],
       ["fixture.climate", 0, 5, 7, 3],
-      ["fixture.health", 7, 5, 5, 2]
+      ["fixture.health", 7, 5, 5, 2],
+      ["fixture.station", 7, 7, 5, 4]
     ] as const;
     for (const [instanceId, x, y, w, h] of expected) {
       await expect(gridItem(page, instanceId)).toHaveAttribute("data-grid-x", String(x));
@@ -83,6 +84,15 @@ test.describe("Overview V2 safe grid foundation", () => {
       getComputedStyle(element).gridTemplateColumns.split(" ").length
     );
     expect(gridColumns).toBe(12);
+    const station = page.getByTestId("overview-station-mini-widget");
+    await expect(station).toBeVisible();
+    const controls = station.locator("button[aria-label]");
+    await expect(controls).toHaveCount(7);
+    for (const button of await controls.all()) {
+      const box = await button.boundingBox();
+      expect(box?.width).toBeGreaterThanOrEqual(48);
+      expect(box?.height).toBeGreaterThanOrEqual(48);
+    }
     await expectNoDocumentOverflow(page);
   });
 
@@ -166,7 +176,7 @@ test.describe("Overview V2 safe grid foundation", () => {
     await expect(page.getByTestId("overview-grid")).toHaveAttribute("data-grid-profile", "compact-4");
     await expect(page.getByTestId("overview-grid")).toHaveAttribute("data-grid-columns", "4");
     expect(await page.locator(".overview-v2-grid-item").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-instance-id"))))
-      .toEqual(["fixture.rog", "fixture.coffee", "fixture.planning", "fixture.climate", "fixture.health"]);
+      .toEqual(["fixture.rog", "fixture.coffee", "fixture.planning", "fixture.climate", "fixture.health", "fixture.station"]);
     const columns = await page.locator(".overview-v2-grid-item").evaluateAll((elements) => elements.map((element) => Number(element.getAttribute("data-grid-x")) + Number(element.getAttribute("data-grid-w"))));
     expect(columns.every((end) => end <= 4)).toBe(true);
     const controls = await page.locator(".overview-v2-grid button, .overview-v2-grid a, .overview-v2-grid input, .overview-v2-grid select").evaluateAll((elements) => elements.flatMap((element) => {
