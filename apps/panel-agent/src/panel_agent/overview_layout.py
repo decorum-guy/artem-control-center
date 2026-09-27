@@ -27,7 +27,7 @@ from .contracts import (
 SCHEMA_VERSION = "overview.layout.v2"
 PROFILE_ID = "samsung-control"
 PRESET_ID = "overview.default"
-PRESET_VERSION = 4
+PRESET_VERSION = 5
 VIEWPORT_CLASS = "landscape-12"
 CANONICAL_COLUMNS = 12
 MAX_ITEMS = 32
@@ -51,6 +51,11 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
     "home.climate": {
         "singleton": True,
         "sizes": {"compact": (4, 5), "standard": (7, 3), "large": (8, 5)},
+        "default": "standard",
+    },
+    "home.station-mini-2": {
+        "singleton": True,
+        "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (7, 5)},
         "default": "standard",
     },
     "system.rog-g703-operational": {
@@ -94,6 +99,7 @@ DEFAULT_INSTANCE_IDS = {
     "system.rog-g703-operational": "fixture.rog",
     "home.coffee-machine": "fixture.coffee",
     "home.climate": "fixture.climate",
+    "home.station-mini-2": "fixture.station",
     "planning.summary": "fixture.planning",
     "home.quick-actions": "fixture.quick-actions",
     "system.health-summary": "fixture.health",
@@ -217,6 +223,7 @@ def shipped_items() -> List[Dict[str, Any]]:
         _item("fixture.planning", "planning.summary", "standard", 7, 1),
         _item("fixture.climate", "home.climate", "standard", 0, 5),
         _item("fixture.health", "system.health-summary", "compact", 7, 5),
+        _item("fixture.station", "home.station-mini-2", "standard", 7, 7),
     ]
 
 
@@ -345,6 +352,25 @@ def migrate_preset_v3_to_v4(raw: Mapping[str, Any]) -> Dict[str, Any]:
             item["placement"] = _placement_dict(placement["x"], placement["y"], 7, 3)
     migrated["items"] = source_items
     migrated["presetVersion"] = 4
+    return migrated
+
+
+def migrate_preset_v4_to_v5(raw: Mapping[str, Any]) -> Dict[str, Any]:
+    """Add Station at first free fit without moving a saved widget."""
+    migrated = deepcopy(dict(raw))
+    if raw.get("schemaVersion") != SCHEMA_VERSION or raw.get("presetVersion") != 4:
+        return migrated
+    items = [deepcopy(item) for item in raw.get("items", []) if isinstance(item, dict)]
+    if not any(item.get("widgetType") == "home.station-mini-2" for item in items):
+        occupied = [item["placement"] for item in items
+                    if item.get("visibility", "visible") != "hidden"
+                    and isinstance(item.get("placement"), dict)
+                    and all(type(item["placement"].get(key)) is int for key in ("x", "y", "w", "h"))]
+        placement = _first_fit((5, 4), occupied, 0)
+        items.append(_item("fixture.station", "home.station-mini-2", "standard",
+                           placement["x"], placement["y"]))
+    migrated["items"] = items
+    migrated["presetVersion"] = 5
     return migrated
 
 
@@ -571,6 +597,8 @@ def recover_stored_layout(raw: Mapping[str, Any]) -> Tuple[Optional[Dict[str, An
         raw = migrate_preset_v2_to_v3(raw)
     if raw.get("presetVersion") == 3:
         raw = migrate_preset_v3_to_v4(raw)
+    if raw.get("presetVersion") == 4:
+        raw = migrate_preset_v4_to_v5(raw)
     if raw.get("profileId") not in {None, PROFILE_ID}:
         return None, ["stored layout profile is not recognized"], []
     if raw.get("presetId") not in {None, PRESET_ID}:

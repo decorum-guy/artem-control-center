@@ -38,6 +38,13 @@ const foundationLayout: readonly OverviewLayoutItem[] = [
     sizeVariant: "compact",
     placement: { x: 7, y: 5, w: 5, h: 2 },
     visibility: "visible"
+  },
+  {
+    instanceId: "fixture.station",
+    widgetType: "home.station-mini-2",
+    sizeVariant: "standard",
+    placement: { x: 7, y: 7, w: 5, h: 4 },
+    visibility: "visible"
   }
 ];
 

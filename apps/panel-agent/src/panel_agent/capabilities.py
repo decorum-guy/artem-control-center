@@ -87,6 +87,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("coffee_notification_writes", "Запись уведомлений кофемашины", "Разрешение менять уведомления кофемашины.", "Системные действия", "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED", "immediate", "none"),
     CapabilityDefinition("coffee_actions", "Действия кофемашины", "Разрешение выполнять действия кофемашины.", "Системные действия", "PANEL_COFFEE_ACTIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("home_climate_actions", "Управление кондиционером", "Разрешение выполнять фиксированные действия кондиционера через Home Assistant.", "Дом", "PANEL_HOME_CLIMATE_ACTIONS_ENABLED", "immediate", "none", True),
+    CapabilityDefinition("alice_station_actions", "Управление Станцией Mini 2", "Разрешение выполнять фиксированные команды станции через AliceTG_Bot.", "Дом", "PANEL_ALICE_STATION_ACTIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("rog_g703_psu_actions", "Управление блоками питания ASUS", "Разрешение выполнять фиксированные действия двух БП через Home Assistant.", "Дом", "PANEL_ROG_G703_PSU_ACTIONS_ENABLED", "immediate", "none", True),
     CapabilityDefinition("avalar_ssh", "Статус AVALAR по SSH", "Получение состояния инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SSH_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_actions", "Действия AVALAR", "Инфраструктурные действия внешнего сервиса.", "Инфраструктура", "PANEL_AVALAR_ACTIONS_ENABLED", "immediate", "none"),

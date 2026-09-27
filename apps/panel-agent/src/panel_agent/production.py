@@ -22,6 +22,7 @@ from .rog_g703_power import RogG703ActionExecutor, build_rog_g703_action_router
 from .yandex_rog_voice import YandexRogVoiceBridge
 from .static_dashboard import install_dashboard_routes
 from .system_update import build_system_update_router
+from .station_actions import StationActionExecutor, build_station_action_router
 
 logging.getLogger("uvicorn.access").disabled = True
 
@@ -44,6 +45,11 @@ home_assistant_actions = HomeAssistantActionExecutor(
     runtime.home_assistant,
     gate_provider=effective_immediate_capability_enabled,
 )
+station_actions = StationActionExecutor(
+    SETTINGS, access_policy,
+    lambda: any(service.id == "alice-tg-bot" and service.health == "healthy" and service.source == "live"
+                for service in runtime.http.services()),
+)
 home_assistant_maintenance = HomeServerMaintenanceExecutor(
     SETTINGS,
     access_policy,
@@ -63,6 +69,7 @@ app.include_router(build_access_router(access_policy))
 app.include_router(build_avalar_action_router(avalar_actions))
 app.include_router(build_connectivity_action_router(connectivity_actions))
 app.include_router(build_home_assistant_action_router(home_assistant_actions))
+app.include_router(build_station_action_router(station_actions))
 app.include_router(build_home_assistant_maintenance_router(home_assistant_maintenance))
 app.include_router(build_rog_g703_action_router(rog_g703_actions))
 app.include_router(build_system_update_router(access_policy))

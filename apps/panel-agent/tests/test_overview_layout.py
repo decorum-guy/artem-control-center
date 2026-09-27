@@ -81,6 +81,23 @@ def test_trusted_appearance_schema_matches_registered_widget_vocabulary(tmp_path
         assert all(control["control"] in {"boolean", "enum", "integer_range"} for control in controls)
 
 
+def test_station_v5_migration_preserves_owner_placements(tmp_path, monkeypatch):
+    load_app(monkeypatch, tmp_path / "layout.json", writes=False)
+    from panel_agent import overview_layout
+
+    old = overview_layout.shipped_layout()
+    old["presetVersion"] = 4
+    old["items"] = [item for item in old["items"] if item["widgetType"] != "home.station-mini-2"]
+    before = deepcopy(old["items"])
+    migrated = overview_layout.migrate_preset_v4_to_v5(old)
+    assert migrated["presetVersion"] == 5
+    assert migrated["items"][:-1] == before
+    station = migrated["items"][-1]
+    assert station["widgetType"] == "home.station-mini-2"
+    assert all(not overview_layout._rectangle_overlap(station["placement"], item["placement"])
+               for item in before if item.get("visibility") != "hidden")
+
+
 def test_home_climate_registry_shipped_v4_and_strict_size_singleton_validation(tmp_path, monkeypatch):
     module = load_app(monkeypatch, tmp_path / "layout.json", writes=True)
     from panel_agent import overview_layout
@@ -90,7 +107,7 @@ def test_home_climate_registry_shipped_v4_and_strict_size_singleton_validation(t
         "standard": (7, 3),
         "large": (8, 5),
     }
-    assert overview_layout.shipped_layout()["presetVersion"] == 4
+    assert overview_layout.shipped_layout()["presetVersion"] == 5
     with TestClient(module.app) as client:
         initial = get_layout(client)
         payload = initial.json()
@@ -180,7 +197,7 @@ def test_preset_v2_existing_climate_is_not_duplicated_and_read_does_not_write(tm
 
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 4
+        assert payload["presetVersion"] == 5
         assert payload["revision"] == 11
         assert len([item for item in payload["items"] if item["widgetType"] == "home.climate"]) == 1
     assert path.read_bytes() == original
@@ -224,7 +241,7 @@ def test_preset_v3_to_v4_shrinks_climate_in_place_and_preserves_owner_state(tmp_
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
         recovered = next(item for item in payload["items"] if item["widgetType"] == "home.climate")
-        assert payload["presetVersion"] == 4
+        assert payload["presetVersion"] == 5
         assert payload["revision"] == 12
         assert recovered["placement"] == {"x": 0, "y": 5, "w": 7, "h": 3}
         assert recovered["visibility"] == "hidden"
@@ -269,7 +286,7 @@ def test_get_without_file_returns_shipped_v4_and_no_store(tmp_path, monkeypatch)
         payload = response.json()
         assert payload["schemaVersion"] == "overview.layout.v2"
         assert payload["presetId"] == "overview.default"
-        assert payload["presetVersion"] == 4
+        assert payload["presetVersion"] == 5
         assert payload["revision"] == 0
         assert payload["writesEnabled"] is False
         assert response.headers["cache-control"] == "no-store"
@@ -656,7 +673,7 @@ def test_legacy_migration_and_corrupt_fallback_never_overwrite_bytes(tmp_path, m
     module = load_app(monkeypatch, path, writes=False)
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 4
+        assert payload["presetVersion"] == 5
         assert payload["revision"] == 0
         assert payload["warnings"]
     assert path.read_bytes() == corrupt_bytes
@@ -680,7 +697,7 @@ def test_unknown_stored_widget_keeps_valid_items_and_is_safe_metadata(tmp_path, 
     module = load_app(monkeypatch, path, writes=False)
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert len(payload["items"]) == 5
+        assert len(payload["items"]) == 6
         assert payload["unplaced"] == [{"instanceId": "unknown.instance", "widgetType": "plugin.remote", "reason": "widget type is not registered"}]
     assert path.read_bytes() == stored_bytes
     serialized = path.read_text(encoding="utf-8")

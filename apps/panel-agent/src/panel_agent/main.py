@@ -1333,6 +1333,7 @@ def effective_immediate_capability_enabled(capability_id: str) -> bool:
 
 def _read_only_capability_enabled(capability_id: str) -> bool:
     return {
+        "alice_station_actions": SETTINGS.alice_station_actions_enabled,
         "planning_integration": SETTINGS.panel_planning_enabled,
         "ai_text": SETTINGS.ai_text_enabled,
         "ai_provider_settings": SETTINGS.ai_settings_writes_enabled,

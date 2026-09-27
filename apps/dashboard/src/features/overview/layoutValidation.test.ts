@@ -241,7 +241,8 @@ describe("Overview V2 responsive projection", () => {
       "fixture.coffee",
       "fixture.planning",
       "fixture.climate",
-      "fixture.health"
+      "fixture.health",
+      "fixture.station"
     ]);
     expect(projection.items.find((entry) => entry.item.instanceId === "fixture.coffee")?.sizeVariant).toBe("compact");
     expect(projection.items.find((entry) => entry.item.instanceId === "fixture.planning")?.sizeVariant).toBe("compact");

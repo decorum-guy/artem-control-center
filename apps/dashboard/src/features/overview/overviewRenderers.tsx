@@ -8,6 +8,7 @@ import { CoffeeWidget } from "../../widgets";
 import { PlanningOverviewCard } from "../../PlanningOverviewCard";
 import { RogG703CompactControl, RogG703PsuCompactControl } from "../../RogG703Controls";
 import { ClimateControl } from "../../ClimateControl";
+import { StationMiniWidget } from "./StationMiniWidget";
 import type { OverviewRuntimeContext } from "./overviewRuntime";
 import { coffeeAppearanceConfig, planningDensityFor } from "./appearanceConfig";
 import type {
@@ -329,6 +330,8 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
       return renderCoffee(item, runtime);
     case "home.climate":
       return renderClimate(item, runtime);
+    case "home.station-mini-2":
+      return <StationMiniWidget interactive={!runtime.editMode} />;
     case "planning.summary":
       return renderPlanning(item, runtime);
     case "home.quick-actions":

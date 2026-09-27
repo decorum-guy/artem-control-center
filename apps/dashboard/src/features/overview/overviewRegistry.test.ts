@@ -6,6 +6,7 @@ describe("Overview V2 fixed registry", () => {
     expect(overviewWidgetRegistry.map((entry) => entry.widgetType)).toEqual([
       "home.coffee-machine",
       "home.climate",
+      "home.station-mini-2",
       "system.rog-g703-operational",
       "planning.summary",
       "home.quick-actions",

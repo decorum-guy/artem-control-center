@@ -162,6 +162,25 @@ export function migratePresetV3ToV4(raw: unknown): unknown {
   return { ...root, items, presetVersion: 4 };
 }
 
+export function migratePresetV4ToV5(raw: unknown): unknown {
+  const root = objectRecord(raw);
+  if (!root || root.schemaVersion !== "overview.layout.v2" || root.presetVersion !== 4) return raw;
+  const items = Array.isArray(root.items)
+    ? root.items.map((item) => objectRecord(item)).filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+  if (!items.some((item) => item.widgetType === "home.station-mini-2")) {
+    const occupied = items.filter((item) => item.visibility !== "hidden")
+      .map((item) => objectRecord(item.placement))
+      .filter((item): item is Record<string, unknown> => item !== null &&
+        ["x", "y", "w", "h"].every((key) => typeof item[key] === "number" && Number.isInteger(item[key])))
+      .map((item) => ({ x: Number(item.x), y: Number(item.y), w: Number(item.w), h: Number(item.h) }));
+    const placement = findFirstFit({ w: 5, h: 4 }, occupied, 12, 0);
+    if (placement) items.push({ instanceId: "fixture.station", widgetType: "home.station-mini-2",
+      visibility: "visible", placement, sizeVariant: "standard", config: {} });
+  }
+  return { ...root, items, presetVersion: 5 };
+}
+
 export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
   const root = objectRecord(raw);
   if (!root) {
@@ -174,7 +193,7 @@ export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
   }
   const migrated = root.schemaVersion === "overview.layout.v1" || root.version === 1 ? migrateV1ToV2(root) : root;
   const presetV3 = migratePresetV2ToV3(migrated);
-  const presetMigrated = migratePresetV3ToV4(presetV3);
+  const presetMigrated = migratePresetV4ToV5(migratePresetV3ToV4(presetV3));
   const document = objectRecord(presetMigrated);
   const sourceItems = document && Array.isArray(document.items) ? document.items : null;
   if (!document || document.schemaVersion !== "overview.layout.v2" || !sourceItems) {
