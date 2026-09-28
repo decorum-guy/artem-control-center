@@ -287,10 +287,12 @@ export function validateOverviewLayout(
 
   for (let index = 0; index < records.length; index += 1) {
     const first = records[index];
-    if (!first.placement || first.issues.some((current) => current.code === "invalid-integer")) continue;
+    if (first.item.visibility === "hidden" || !first.placement ||
+      first.issues.some((current) => current.code === "invalid-integer")) continue;
     for (let nextIndex = index + 1; nextIndex < records.length; nextIndex += 1) {
       const second = records[nextIndex];
-      if (!second.placement || second.issues.some((current) => current.code === "invalid-integer")) continue;
+      if (second.item.visibility === "hidden" || !second.placement ||
+        second.issues.some((current) => current.code === "invalid-integer")) continue;
       if (!rectanglesOverlap(first.placement, second.placement)) continue;
       addIssue(first, "overlap", "Overview rectangles may not overlap.");
       addIssue(second, "overlap", "Overview rectangles may not overlap.");
