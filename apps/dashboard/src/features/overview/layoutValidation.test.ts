@@ -22,6 +22,25 @@ function item(
   return { instanceId, widgetType, sizeVariant, placement };
 }
 
+function samsungOverlapLayout(healthVisibility: "hidden" | "visible"): OverviewLayoutItem[] {
+  return [
+    {
+      instanceId: "fixture.health",
+      widgetType: "system.health-summary",
+      visibility: healthVisibility,
+      sizeVariant: "compact",
+      placement: { x: 7, y: 5, w: 5, h: 2 }
+    },
+    {
+      instanceId: "fixture.station",
+      widgetType: "home.station-mini-2",
+      visibility: "visible",
+      sizeVariant: "standard",
+      placement: { x: 7, y: 5, w: 5, h: 4 }
+    }
+  ];
+}
+
 function expectInvalidProjection(
   projection: ReturnType<typeof projectOverviewLayout>,
   canonicalIndex: number
@@ -101,6 +120,72 @@ describe("Overview V2 placement validation", () => {
       item("second", "home.quick-actions", "compact", { x: 2, y: 1, w: 4, h: 2 })
     ]);
     expect(result.issues.map((issue) => issue.code)).toContain("overlap");
+  });
+
+  it("accepts Station at the Samsung coordinates when the overlapping health widget is hidden", () => {
+    const layout = samsungOverlapLayout("hidden");
+    const validation = validateOverviewLayout(layout);
+    expect(validation.valid).toBe(true);
+    expect(validation.issues).toEqual([]);
+    expect(validation.records.map((record) => record.valid)).toEqual([true, true]);
+    expect(validation.records[0].issues).toEqual([]);
+    expect(validation.records[1].issues).toEqual([]);
+
+    const projection = projectOverviewLayout(layout, 1280);
+    expect(projection.issues).toEqual([]);
+    expect(projection.items).toHaveLength(1);
+    expect(projection.items[0]).toMatchObject({
+      canonicalIndex: 1,
+      state: "rendered",
+      sizeVariant: "standard",
+      placement: { x: 7, y: 5, w: 5, h: 4 }
+    });
+  });
+
+  it("rejects both widgets when the overlapping health widget becomes visible", () => {
+    const layout = samsungOverlapLayout("visible");
+    const validation = validateOverviewLayout(layout);
+    expect(validation.valid).toBe(false);
+    expect(validation.records.map((record) => record.valid)).toEqual([false, false]);
+    for (const record of validation.records) {
+      expect(record.issues.map((issue) => issue.code)).toContain("overlap");
+    }
+
+    const projection = projectOverviewLayout(layout, 1280);
+    expectInvalidProjection(projection, 0);
+    expectInvalidProjection(projection, 1);
+  });
+
+  it("continues to validate hidden widget size, placement and config", () => {
+    const [health, station] = samsungOverlapLayout("hidden");
+    const validation = validateOverviewLayout([
+      { ...health, sizeVariant: "unsupported", placement: { x: -1, y: 5, w: 5, h: 2 }, config: { unexpected: true } },
+      station
+    ]);
+    expect(validation.records[0].issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      "unknown-size-variant", "negative-x", "invalid-config"
+    ]));
+    expect(validation.records[0].issues.map((issue) => issue.code)).not.toContain("overlap");
+    expect(validation.records[1].valid).toBe(true);
+  });
+
+  it("continues to validate hidden widget identity, type and visibility", () => {
+    const [health, station] = samsungOverlapLayout("hidden");
+    expect(validateOverviewLayout([{ ...health, instanceId: "" }]).issues.map((issue) => issue.code))
+      .toContain("invalid-instance-id");
+    expect(validateOverviewLayout([{ ...health, widgetType: "future.unknown" }]).issues.map((issue) => issue.code))
+      .toContain("unknown-widget-type");
+    expect(validateOverviewLayout([{ ...health, visibility: "concealed" as "hidden" }]).issues.map((issue) => issue.code))
+      .toContain("invalid-visibility");
+    const duplicateId = validateOverviewLayout([{ ...health, instanceId: station.instanceId }, station]);
+    expect(duplicateId.records.map((record) => record.issues.map((issue) => issue.code)))
+      .toEqual([["duplicate-instance-id"], ["duplicate-instance-id"]]);
+    const duplicateSingleton = validateOverviewLayout([
+      health,
+      { ...health, instanceId: "fixture.health-again", placement: { x: 0, y: 0, w: 5, h: 2 } }
+    ]);
+    expect(duplicateSingleton.records.map((record) => record.issues.map((issue) => issue.code)))
+      .toEqual([["duplicate-singleton"], ["duplicate-singleton"]]);
   });
 
   it("classifies unknown widget types without treating them as generic services", () => {
@@ -203,6 +288,26 @@ describe("Overview V2 deterministic collision helpers", () => {
 });
 
 describe("Overview V2 responsive projection", () => {
+  it("projects Station with hidden health according to registered responsive sizes", () => {
+    const layout = samsungOverlapLayout("hidden");
+    for (const [width, profile, variant, size] of [
+      [1280, "landscape-12", "standard", { w: 5, h: 4 }],
+      [959, "medium-8", "standard", { w: 5, h: 4 }],
+      [719, "compact-4", "compact", { w: 4, h: 4 }]
+    ] as const) {
+      const projection = projectOverviewLayout(layout, width);
+      expect(projection.profile.id).toBe(profile);
+      expect(projection.issues).toEqual([]);
+      expect(projection.items).toHaveLength(1);
+      expect(projection.items[0]).toMatchObject({
+        item: { instanceId: "fixture.station" },
+        state: "rendered",
+        sizeVariant: variant,
+        placement: size
+      });
+    }
+  });
+
   it("uses the exact 12/8/4 breakpoint profiles", () => {
     expect(profileForWorkspaceWidth(960)).toMatchObject({ id: "landscape-12", columns: 12, rowHeight: 60, gap: 12 });
     expect(profileForWorkspaceWidth(959)).toMatchObject({ id: "medium-8", columns: 8, rowHeight: 64, gap: 12 });
