@@ -279,7 +279,8 @@ export function CoffeeWidget({
     showStateMarker: true,
     showAuthority: true,
     showImage: true,
-    buttonLayout: "balanced"
+    buttonLayout: "balanced",
+    activityIndicatorStyle: "bar"
   };
   const requestedDensity = appearance.composition === "compact"
     ? "dense"
@@ -336,6 +337,7 @@ export function CoffeeWidget({
       data-stage={view.stage}
       data-canonical-state={data.machine.state}
       data-coffee-active={coffeeActiveGlowEligible(data.machine)}
+      data-coffee-indicator={variant === "overview" ? appearance.activityIndicatorStyle : undefined}
       data-transition={coffeeTransition}
       data-progress-tone={view.progressTone ?? "unknown"}
       data-progress-visible={progressVisible}

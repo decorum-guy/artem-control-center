@@ -159,6 +159,7 @@ export interface CoffeeAppearanceConfig {
   stateReadyXOffsetPx: number;
   composition: "auto" | "compact" | "spacious";
   buttonLayout: "compact" | "balanced" | "wide";
+  activityIndicatorStyle: "bar" | "contour";
   showStateMarker: boolean;
   showAuthority: boolean;
   showImage: boolean;
@@ -175,6 +176,7 @@ export function coffeeAppearanceConfig(item: OverviewLayoutItem): CoffeeAppearan
     stateReadyXOffsetPx: value.stateReadyXOffsetPx as number,
     composition: value.composition as CoffeeAppearanceConfig["composition"],
     buttonLayout: value.buttonLayout as CoffeeAppearanceConfig["buttonLayout"],
+    activityIndicatorStyle: value.activityIndicatorStyle as CoffeeAppearanceConfig["activityIndicatorStyle"],
     showStateMarker: value.showStateMarker as boolean,
     showAuthority: value.showAuthority as boolean,
     showImage: value.showImage as boolean
@@ -237,7 +239,7 @@ export function appearanceControlSection(widgetType: string, control: Appearance
 export function appearanceControlsForPresentation(widgetType: string): readonly AppearanceControl[] {
   const controls = appearanceControlsFor(widgetType).filter((control) => control.key !== "showStateMarker");
   if (widgetType !== "home.coffee-machine") return controls;
-  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx", "composition", "buttonLayout", "showAuthority"];
+  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx", "composition", "buttonLayout", "activityIndicatorStyle", "showAuthority"];
   return [...controls].sort((left, right) => order.indexOf(left.key) - order.indexOf(right.key));
 }
 

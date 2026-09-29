@@ -36,6 +36,7 @@ describe("bounded Overview appearance schema", () => {
       stateReadyXOffsetPx: -8,
       composition: "auto",
       buttonLayout: "balanced",
+      activityIndicatorStyle: "bar",
       showStateMarker: true,
       showAuthority: true,
       showImage: true
@@ -54,6 +55,7 @@ describe("bounded Overview appearance schema", () => {
       stateWarmingXOffsetPx: 10,
       stateReadyXOffsetPx: -8
     });
+    expect(coffeeAppearanceConfig(normalized).activityIndicatorStyle).toBe("bar");
     expect(normalized.placement).toEqual(old.placement);
   });
 
@@ -106,6 +108,25 @@ describe("bounded Overview appearance schema", () => {
     expect(validateAppearanceConfig("home.coffee-machine", {}).value.buttonLayout).toBe("balanced");
   });
 
+  it("exposes exactly two Coffee indicator styles in the display section", () => {
+    const control = appearanceControlsForPresentation("home.coffee-machine")
+      .find((entry) => entry.key === "activityIndicatorStyle");
+    expect(control).toMatchObject({
+      control: "enum", label: "Индикация состояния", section: "Отображение", defaultValue: "bar",
+      values: [
+        { value: "bar", label: "Палка слева" },
+        { value: "contour", label: "Контур карточки" }
+      ]
+    });
+    for (const activityIndicatorStyle of ["bar", "contour"]) {
+      expect(validateAppearanceConfig("home.coffee-machine", { activityIndicatorStyle }, true).valid).toBe(true);
+    }
+    for (const activityIndicatorStyle of ["halo", "none", "box-shadow: red", "", null]) {
+      expect(validateAppearanceConfig("home.coffee-machine", { activityIndicatorStyle }, true).valid).toBe(false);
+    }
+    expect(validateAppearanceConfig("home.coffee-machine", {}).value.activityIndicatorStyle).toBe("bar");
+  });
+
   it("keeps schemas source-owned and conservative for unsupported widgets", () => {
     expect(appearanceControlsFor("system.rog-g703-operational")).toEqual([]);
     expect(appearanceControlsFor("system.health-summary")).toEqual([]);
@@ -126,6 +147,7 @@ describe("bounded Overview appearance schema", () => {
       "stateReadyXOffsetPx",
       "composition",
       "buttonLayout",
+      "activityIndicatorStyle",
       "showStateMarker",
       "showAuthority",
       "showImage"

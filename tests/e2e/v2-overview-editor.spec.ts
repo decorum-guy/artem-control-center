@@ -879,6 +879,13 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     await expect(coffeeFrame.locator(".coffee-panel--overview")).toHaveAttribute("data-image-y", "1");
     await expect(appearance.getByLabel("Показывать изображение")).toBeChecked();
     await expect(appearance.getByLabel("Показывать источник")).toBeChecked();
+    const indicatorSection = appearance.locator(".overview-appearance__section").filter({ hasText: "Индикация состояния" });
+    await expect(indicatorSection.getByRole("heading", { name: "Отображение" })).toBeVisible();
+    await expect(indicatorSection.getByRole("group", { name: "Индикация состояния" })).toBeVisible();
+    await expect(indicatorSection.getByRole("button", { name: "Палка слева" })).toHaveAttribute("aria-pressed", "true");
+    await expect(indicatorSection.getByRole("button", { name: "Контур карточки" })).toBeVisible();
+    await indicatorSection.getByRole("button", { name: "Контур карточки" }).click();
+    await expect(coffeeFrame.locator(".coffee-panel--overview")).toHaveAttribute("data-coffee-indicator", "contour");
     await appearance.getByRole("button", { name: "Просторно" }).click();
     await appearance.getByLabel("Показывать источник").click();
     await expect(appearance.getByLabel("Показывать источник")).not.toBeChecked();
@@ -910,9 +917,11 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageXStep).toBe(-2);
     expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.imageYStep).toBe(1);
     expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.showAuthority).toBe(false);
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config.activityIndicatorStyle).toBe("contour");
     expect(routeState.lastPatch?.some((item) => item.widgetType === "weather.alert")).toBe(true);
 
     await page.reload();
+    await expect(page.locator(".coffee-panel--overview")).toHaveAttribute("data-coffee-indicator", "contour");
     await expect(page.locator('.overview-v2-grid-item[data-widget-type="weather.alert"]')).toHaveCount(1);
   });
 
