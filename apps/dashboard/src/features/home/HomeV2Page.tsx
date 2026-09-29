@@ -5,6 +5,7 @@ import { resolveManifest } from "../../registry";
 import { RouteHeader, SectionHeader, StatusText } from "../../ShellPrimitives";
 import { CoffeeWidget } from "../../widgets";
 import { ClimateControl } from "../../ClimateControl";
+import { KettleControl } from "../../KettleControl";
 import { RogG703HomeControl } from "../../RogG703Controls";
 import { RogPsuControls } from "../../RogPsuControls";
 import { DeviceRow } from "../operations/DeviceRow";
@@ -82,9 +83,9 @@ export function HomeV2Page({
             <ClimateControl service={selection.climate} variant="home" />
           </ErrorBoundary>
         )}
-        {selection.kettle && !selection.climate && (
+        {selection.kettle && (
           <ErrorBoundary title={selection.kettle.title}>
-            <DeviceRow service={selection.kettle} primary />
+            <KettleControl service={selection.kettle} />
           </ErrorBoundary>
         )}
         {!selection.coffee && !selection.climate && !selection.kettle && selection.fallback && (

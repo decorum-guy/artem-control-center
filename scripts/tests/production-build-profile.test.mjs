@@ -43,6 +43,7 @@ test("the persisted capability allow-list contains exactly the current mutable I
     "planning_calendar_route",
     "planning_reminders_route",
     "home_climate_actions",
+    "kettle_actions",
     "rog_g703_psu_actions"
   ];
 
@@ -115,6 +116,7 @@ test("a mixed canonical store accepts immediate IDs but returns only delayed bui
     updatedAt: "2026-09-09T10:40:00Z",
     overrides: {
       home_climate_actions: true,
+      kettle_actions: true,
       rog_g703_psu_actions: true,
       overview_layout_editor: true,
       planning_calendar_route: false
@@ -136,6 +138,7 @@ test("an immediate-only canonical store is accepted without producing build over
     updatedAt: "2026-09-09T10:40:00Z",
     overrides: {
       home_climate_actions: true,
+      kettle_actions: true,
       rog_g703_psu_actions: true
     }
   }));
@@ -155,6 +158,7 @@ test("mixed canonical store values only change the intended planning build capab
     updatedAt: "2026-09-09T10:40:00Z",
     overrides: {
       home_climate_actions: true,
+      kettle_actions: true,
       rog_g703_psu_actions: true,
       planning_calendar_route: false
     }
@@ -174,6 +178,7 @@ test("mixed canonical store values only change the intended planning build capab
   assert.deepEqual(Object.keys(capabilities.active), planningCapabilityIds);
   assert.equal(capabilities.active.planning_calendar_route, false);
   assert.equal(capabilities.active.home_climate_actions, undefined);
+  assert.equal(capabilities.active.kettle_actions, undefined);
   assert.equal(capabilities.active.rog_g703_psu_actions, undefined);
   assert.equal(environment.VITE_PLANNING_CALENDAR_ROUTE_ENABLED, "false");
   assert.equal(environment.VITE_HOME_CLIMATE_ACTIONS_ENABLED, undefined);

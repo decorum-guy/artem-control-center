@@ -37,6 +37,7 @@ def test_healthy_snapshot_has_zero_current_problems():
     assert report.problems == []
     assert report.calendar.resultStatus == "unavailable"
     assert report.mutationGates.planningCalendarMutationsEnabled is False
+    assert report.mutationGates.kettleActionsEnabled is False
 
 
 def test_unhealthy_service_becomes_a_concrete_problem_without_raw_summary():

@@ -83,6 +83,7 @@ class IntegrationSettings:
     home_server_ssh_command_timeout_seconds: float = 150.0
     home_server_ssh_output_limit_bytes: int = 16 * 1024
     home_climate_actions_enabled: bool = False
+    kettle_actions_enabled: bool = False
     alice_station_actions_enabled: bool = False
     rog_g703_psu_actions_enabled: bool = False
     coffee_timing_writes_enabled: bool = False
@@ -344,6 +345,7 @@ class IntegrationSettings:
                 "PANEL_HOME_CLIMATE_ACTIONS_ENABLED",
                 False,
             ),
+            kettle_actions_enabled=_bool_env("PANEL_KETTLE_ACTIONS_ENABLED", False),
             alice_station_actions_enabled=_bool_env("PANEL_ALICE_STATION_ACTIONS_ENABLED", False),
             rog_g703_psu_actions_enabled=_bool_env(
                 "PANEL_ROG_G703_PSU_ACTIONS_ENABLED",

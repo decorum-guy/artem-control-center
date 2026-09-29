@@ -100,8 +100,14 @@
       },
       "data": {
         "stage": "off",
-        "entityId": "water_heater.chainik",
+        "entityId": "water_heater.kukhnia_chainik",
         "authority": "home-assistant",
+        "available": true,
+        "currentTemperature": 61,
+        "targetTemperature": 100,
+        "operationMode": "off",
+        "availableTeaModes": ["white_tea", "green_tea", "red_tea", "herbal_tea", "flower_tea", "puerh_tea", "oolong_tea", "black_tea"],
+        "stale": false,
         "observedAt": "2026-07-29T12:00:00Z"
       }
     },
@@ -697,7 +703,8 @@
       "kettle": {
         "summary": "Включен",
         "data": {
-          "stage": "on"
+          "stage": "on",
+          "operationMode": "on"
         }
       }
     },
@@ -707,7 +714,8 @@
         "health": "offline",
         "summary": "Entity unavailable",
         "data": {
-          "stage": "unavailable"
+          "stage": "unavailable",
+          "available": false
         }
       }
     },

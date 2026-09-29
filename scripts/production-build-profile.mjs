@@ -34,6 +34,7 @@ export const PERSISTED_CAPABILITY_IDS = Object.freeze([
   "planning_calendar_route",
   "planning_reminders_route",
   "home_climate_actions",
+  "kettle_actions",
   "rog_g703_psu_actions"
 ]);
 

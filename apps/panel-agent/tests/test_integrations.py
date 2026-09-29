@@ -56,24 +56,11 @@ def _ha_states():
             "attributes": {},
         },
         {
-            "entity_id": "water_heater.chainik",
+            "entity_id": "water_heater.kukhnia_chainik",
             "state": "off",
             "last_updated": "2026-07-29T11:59:30Z",
-            "attributes": {},
+            "attributes": {"operation_mode": "off", "current_temperature": 61, "temperature": 100, "operation_list": ["on", "off", "white_tea"]},
         },
-        *[
-            {
-                "entity_id": entity,
-                "state": "off",
-                "last_updated": "2026-07-29T11:59:30Z",
-                "attributes": {},
-            }
-            for entity in (
-                "switch.chainik_podderzhanie_tepla",
-                "switch.chainik_podsvetka",
-                "switch.chainik_bez_zvuka",
-            )
-        ],
         {
             "entity_id": "sensor.not_allowlisted",
             "state": "private",
@@ -155,10 +142,7 @@ def test_absent_kettle_does_not_degrade_home_assistant_aggregate(tmp_path):
     states = [
         state for state in _ha_states()
         if state["entity_id"] not in {
-            "water_heater.chainik",
-            "switch.chainik_podderzhanie_tepla",
-            "switch.chainik_podsvetka",
-            "switch.chainik_bez_zvuka",
+            "water_heater.kukhnia_chainik",
         }
     ]
     adapter = HomeAssistantAdapter(

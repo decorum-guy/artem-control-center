@@ -1320,6 +1320,7 @@ def _immediate_baseline(capability_id: str) -> bool:
         "calendar_display_colors": SETTINGS.calendar_display_color_writes_enabled,
         "overview_layout_editor": SETTINGS.overview_layout_writes_enabled,
         "home_climate_actions": SETTINGS.home_climate_actions_enabled,
+        "kettle_actions": SETTINGS.kettle_actions_enabled,
         "rog_g703_psu_actions": SETTINGS.rog_g703_psu_actions_enabled,
     }[capability_id]
 

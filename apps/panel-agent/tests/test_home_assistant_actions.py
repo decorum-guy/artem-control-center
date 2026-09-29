@@ -15,6 +15,9 @@ from pydantic import ValidationError
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.home_assistant import (
     CLIMATE_ENTITY,
+    KETTLE_ENTITY,
+    KETTLE_TEA_MODES,
+    WATCHED_ENTITIES,
     REQUIRED_ENTITIES,
     PSU_1_ENTITY,
     PSU_2_ENTITY,
@@ -55,10 +58,7 @@ def base_states(
         "input_number.coffee_long_running_minutes": entity("input_number.coffee_long_running_minutes", "60"),
         "input_datetime.coffee_last_turned_on": entity("input_datetime.coffee_last_turned_on", "unknown"),
         "input_boolean.coffee_timing_initialized": entity("input_boolean.coffee_timing_initialized", "on"),
-        "water_heater.chainik": entity("water_heater.chainik", "off"),
-        "switch.chainik_podderzhanie_tepla": entity("switch.chainik_podderzhanie_tepla", "off"),
-        "switch.chainik_podsvetka": entity("switch.chainik_podsvetka", "off"),
-        "switch.chainik_bez_zvuka": entity("switch.chainik_bez_zvuka", "off"),
+        "water_heater.kukhnia_chainik": entity("water_heater.kukhnia_chainik", "off", {"current_temperature": 61, "temperature": 100, "operation_mode": "off", "operation_list": ["on", "off", "white_tea", "green_tea", "red_tea", "herbal_tea", "flower_tea", "puerh_tea", "oolong_tea", "black_tea"]}),
     }
     if include_climate:
         states[CLIMATE_ENTITY] = entity(
@@ -131,6 +131,11 @@ class HomeAssistantStub:
             state["state"] = body["hvac_mode"]
         elif path.endswith("/climate/set_fan_mode"):
             state.setdefault("attributes", {})["fan_mode"] = body["fan_mode"]
+        elif path.endswith("/water_heater/set_temperature"):
+            state.setdefault("attributes", {})["temperature"] = body["temperature"]
+        elif path.endswith("/water_heater/set_operation_mode"):
+            state.setdefault("attributes", {})["operation_mode"] = body["operation_mode"]
+            state["state"] = body["operation_mode"]
         elif path.endswith("/switch/turn_on"):
             state["state"] = "on"
         elif path.endswith("/switch/turn_off"):
@@ -166,6 +171,7 @@ def make_stack(
     *,
     climate_gate: bool = True,
     psu_gate: bool = True,
+    kettle_gate: bool = True,
     writes: bool = True,
     profile: str = "standard",
     gate_provider=None,
@@ -178,6 +184,7 @@ def make_stack(
         state_cache_path=str(tmp_path / "ha-cache.json"),
         writes_enabled=writes,
         home_climate_actions_enabled=climate_gate,
+        kettle_actions_enabled=kettle_gate,
         rog_g703_psu_actions_enabled=psu_gate,
         ha_stale_after_seconds=90,
     )
@@ -639,17 +646,21 @@ def test_action_gates_and_access_profile_fail_closed(tmp_path: Path) -> None:
 def test_effective_owner_gate_provider_changes_climate_and_psu_availability_without_restart(tmp_path: Path) -> None:
     gates = {
         "home_climate_actions": False,
+        "kettle_actions": False,
         "rog_g703_psu_actions": False,
     }
     provider = lambda capability_id: gates[capability_id]
     _, _, _, executor = make_stack(tmp_path, climate_gate=False, psu_gate=False, gate_provider=provider)
 
     assert executor.availability()["actions"]["home.climate.power_on"]["availability"] == "gate_disabled"
+    assert executor.availability()["actions"]["home.kettle.boil"]["availability"] == "gate_disabled"
     assert executor.availability()["actions"]["system.rog_g703.psu.mode.full"]["availability"] == "gate_disabled"
 
     gates["home_climate_actions"] = True
+    gates["kettle_actions"] = True
     gates["rog_g703_psu_actions"] = True
     assert executor.availability()["actions"]["home.climate.power_on"]["availability"] == "allowed"
+    assert executor.availability()["actions"]["home.kettle.boil"]["availability"] == "allowed"
     assert executor.availability()["actions"]["system.rog_g703.psu.mode.full"]["availability"] == "allowed"
 
     _, _, _, writes_disabled = make_stack(
@@ -991,3 +1002,123 @@ def test_climate_and_psu_action_groups_own_distinct_locks(tmp_path: Path) -> Non
     assert climate_on == climate_mode
     assert psu_full == psu_bp1
     assert climate_on != psu_full
+
+
+def test_kettle_entity_watchlist_and_snapshot_are_sanitized(tmp_path: Path) -> None:
+    assert KETTLE_ENTITY == "water_heater.kukhnia_chainik"
+    assert "water_heater.chainik" not in WATCHED_ENTITIES
+    assert not any(entity.startswith("switch.chainik_") for entity in WATCHED_ENTITIES)
+    raw = entity(KETTLE_ENTITY, "green_tea", {
+        "current_temperature": 61.5, "temperature": 75, "operation_mode": "green_tea",
+        "operation_list": ["off", "black_tea", "green_tea", "unknown", "black_tea"],
+        "token": "must-not-expose", "friendly_name": "Private",
+    })
+    sanitized = _sanitize_state(KETTLE_ENTITY, raw)
+    assert sanitized["attributes"] == {
+        "current_temperature": 61.5, "temperature": 75, "operation_mode": "green_tea",
+        "operation_list": ["green_tea", "black_tea"],
+    }
+    states = base_states()
+    states[KETTLE_ENTITY] = raw
+    _, adapter, _, _ = make_stack(tmp_path, HomeAssistantStub(states))
+    kettle = next(service for service in adapter.services() if service.id == "kettle")
+    assert kettle.data["stage"] == "on"
+    assert kettle.data["currentTemperature"] == 61.5
+    assert kettle.data["targetTemperature"] == 75
+    assert kettle.data["operationMode"] == "green_tea"
+    assert kettle.data["availableTeaModes"] == ["green_tea", "black_tea"]
+    assert "token" not in json.dumps(kettle.data)
+    assert _sanitize_state(KETTLE_ENTITY, entity(KETTLE_ENTITY, "off", {"operation_mode": "off"}))["state"] == "off"
+    assert _sanitize_state(KETTLE_ENTITY, entity(KETTLE_ENTITY, "on", {"current_temperature": float("nan"), "temperature": "100", "operation_mode": "evil", "operation_list": ["evil"]}))["attributes"] == {"current_temperature": None, "temperature": None, "operation_mode": None, "operation_list": []}
+
+
+def test_kettle_request_contract_rejects_arbitrary_fields_and_modes() -> None:
+    for field, value in (("temperature", 90), ("entity_id", KETTLE_ENTITY), ("service", "turn_on"), ("mode", "cool"), ("teaMode", "green_tea")):
+        with pytest.raises(ValidationError):
+            request("home.kettle.boil", **{field: value})
+    for mode in ("on", "off", "evil", "GREEN_TEA"):
+        with pytest.raises(ValidationError):
+            request("home.kettle.set_tea_mode", teaMode=mode)
+    for mode in KETTLE_TEA_MODES:
+        assert request("home.kettle.set_tea_mode", teaMode=mode).teaMode == mode
+
+
+def test_kettle_boil_sequence_readback_and_idempotence(tmp_path: Path) -> None:
+    server, _, _, executor = make_stack(tmp_path)
+    result = run(executor.execute(request("home.kettle.boil")))
+    assert result["status"] == "confirmed"
+    assert result["kettle"] == {"operationMode": "on", "currentTemperature": 61, "targetTemperature": 100}
+    assert server.calls == [
+        ("/api/services/water_heater/set_temperature", {"entity_id": KETTLE_ENTITY, "temperature": 100}),
+        ("/api/services/water_heater/set_operation_mode", {"entity_id": KETTLE_ENTITY, "operation_mode": "on"}),
+    ]
+    assert server.events.index(("get", f"/api/states/{KETTLE_ENTITY}")) < server.events.index(("post", "/api/services/water_heater/set_temperature"))
+    assert run(executor.execute(request("home.kettle.boil")))["status"] == "confirmed"
+    assert len(server.calls) == 2
+
+
+def test_kettle_boil_partial_failure_and_readback_never_confirm(tmp_path: Path) -> None:
+    server = HomeAssistantStub(base_states())
+    server.service_failures["/api/services/water_heater/set_operation_mode"] = (500, "private token")
+    _, _, _, executor = make_stack(tmp_path, server)
+    with pytest.raises(HTTPException) as failure:
+        run(executor.execute(request("home.kettle.boil")))
+    assert failure.value.detail == "ha_service_failed"
+    assert "private" not in str(failure.value)
+    assert [path for path, _ in server.calls] == ["/api/services/water_heater/set_temperature", "/api/services/water_heater/set_operation_mode"]
+    assert server.states[KETTLE_ENTITY]["attributes"]["temperature"] == 100
+    assert server.states[KETTLE_ENTITY]["attributes"]["operation_mode"] == "off"
+    server2 = HomeAssistantStub(base_states(), mutate=False)
+    _, _, _, executor2 = make_stack(tmp_path / "readback", server2)
+    with pytest.raises(HTTPException) as timeout:
+        run(executor2.execute(request("home.kettle.boil")))
+    assert timeout.value.detail == "ha_verification_timeout"
+    assert len(server2.calls) == 2
+
+
+def test_kettle_tea_mode_fixed_call_and_fresh_readback(tmp_path: Path) -> None:
+    server, _, _, executor = make_stack(tmp_path)
+    result = run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert result["kettle"]["operationMode"] == "green_tea"
+    assert server.calls == [("/api/services/water_heater/set_operation_mode", {"entity_id": KETTLE_ENTITY, "operation_mode": "green_tea"})]
+    server2 = HomeAssistantStub(base_states(), mutate=False)
+    _, _, _, executor2 = make_stack(tmp_path / "no-readback", server2)
+    with pytest.raises(HTTPException) as timeout:
+        run(executor2.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert timeout.value.detail == "ha_verification_timeout"
+    assert len(server2.calls) == 1
+    with pytest.raises(ValidationError):
+        request("home.kettle.set_tea_mode", teaMode="untrusted")
+    assert len(server2.calls) == 1
+
+
+def test_kettle_gate_profile_and_lock_are_independent(tmp_path: Path) -> None:
+    _, _, _, executor = make_stack(tmp_path)
+    async def check_locks() -> None:
+        assert executor._lock_for("home.kettle.boil") is executor._lock_for("home.kettle.set_tea_mode")
+        assert executor._lock_for("home.kettle.boil") is not executor._lock_for("home.climate.power_on")
+        assert executor._lock_for("home.kettle.boil") is not executor._lock_for("system.rog_g703.psu.bp1.on")
+    run(check_locks())
+    _, _, _, gated = make_stack(tmp_path / "gate", kettle_gate=False)
+    assert gated.availability()["actions"]["home.kettle.boil"]["availability"] == "gate_disabled"
+    assert gated.availability()["actions"]["home.climate.power_on"]["allowed"] is True
+    _, _, _, read_only = make_stack(tmp_path / "profile", profile="read_only")
+    assert read_only.availability()["actions"]["home.kettle.boil"]["availability"] == "profile_blocked"
+    _, _, _, writes_off = make_stack(tmp_path / "writes", writes=False)
+    assert writes_off.availability()["actions"]["home.kettle.boil"]["availability"] == "gate_disabled"
+
+
+def test_unknown_kettle_physical_mode_fails_closed_before_service_call(tmp_path: Path) -> None:
+    states = base_states()
+    states[KETTLE_ENTITY]["state"] = "on"
+    states[KETTLE_ENTITY]["attributes"]["operation_mode"] = "vendor_unknown_mode"
+    server = HomeAssistantStub(states)
+    _, adapter, _, executor = make_stack(tmp_path, server)
+    kettle = next(service for service in adapter.services() if service.id == "kettle")
+    assert kettle.health == "offline"
+    assert kettle.data["operationMode"] is None
+    assert executor.availability()["actions"]["home.kettle.boil"]["availability"] == "integration_unavailable"
+    with pytest.raises(HTTPException) as failure:
+        run(executor.execute(request("home.kettle.boil")))
+    assert failure.value.detail == "ha_integration_unavailable"
+    assert server.calls == []

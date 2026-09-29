@@ -239,6 +239,7 @@ class DiagnosticsMutationGates(BaseModel):
 
     writesEnabled: bool
     coffeeActionsEnabled: bool
+    kettleActionsEnabled: bool = False
     coffeeTimingWritesEnabled: bool
     coffeeNotificationWritesEnabled: bool
     planningReminderMutationsEnabled: bool
@@ -730,6 +731,7 @@ class CapabilityPatch(BaseModel):
         "calendar_display_colors",
         "overview_layout_editor",
         "home_climate_actions",
+        "kettle_actions",
         "rog_g703_psu_actions",
         "planning_overview",
         "planning_tasks_route",

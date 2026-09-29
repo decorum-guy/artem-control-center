@@ -185,6 +185,7 @@ try {
     foreach ($gate in @(
         'PANEL_WRITES_ENABLED = "false"',
         'PANEL_HOME_CLIMATE_ACTIONS_ENABLED = "false"',
+        'PANEL_KETTLE_ACTIONS_ENABLED = "false"',
         'PANEL_ROG_G703_PSU_ACTIONS_ENABLED = "false"'
     )) {
         if ($configureHomeText -notmatch [regex]::Escape($gate)) {
@@ -194,6 +195,7 @@ try {
     foreach ($gate in @(
         '"PANEL_WRITES_ENABLED"',
         '"PANEL_HOME_CLIMATE_ACTIONS_ENABLED"',
+        '"PANEL_KETTLE_ACTIONS_ENABLED"',
         '"PANEL_ROG_G703_PSU_ACTIONS_ENABLED"'
     )) {
         if ($configureHomeText -notmatch [regex]::Escape($gate)) {

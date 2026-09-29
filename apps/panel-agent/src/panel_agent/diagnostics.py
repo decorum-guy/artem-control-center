@@ -560,6 +560,7 @@ class DiagnosticsCollector:
             mutationGates=DiagnosticsMutationGates(
                 writesEnabled=self._settings.writes_enabled,
                 coffeeActionsEnabled=self._settings.coffee_actions_enabled,
+                kettleActionsEnabled=self._settings.kettle_actions_enabled,
                 coffeeTimingWritesEnabled=self._settings.coffee_timing_writes_enabled,
                 coffeeNotificationWritesEnabled=self._settings.coffee_notification_writes_enabled,
                 planningReminderMutationsEnabled=self._settings.panel_planning_reminder_mutations_enabled,

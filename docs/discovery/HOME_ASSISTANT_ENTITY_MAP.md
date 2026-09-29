@@ -392,3 +392,19 @@ bot state is migration input only.
 
 Authorized non-secret local files under `/Users/aartemida/Documents/Homeassistant`
 were modified. No server configuration, service or device state was changed.
+
+## 2026-09-29 owner-supplied replacement kettle
+
+The owner supplied the current physical Home Assistant contract for
+`water_heater.kukhnia_chainik`. This **supersedes** the historical
+`water_heater.chainik` mapping above for Control Center. The observed state
+was `off`, `operation_mode: off`, `current_temperature: 61`, and target
+`temperature: 100`. `operation_list` contained `on`, `off`, `white_tea`,
+`green_tea`, `red_tea`, `herbal_tea`, `flower_tea`, `puerh_tea`, `oolong_tea`,
+and `black_tea`. `min_temp` was 30, `max_temp` 100, and supported features 3.
+These are owner-supplied observations, not a live write test.
+
+Control Center no longer subscribes to the historical panel-side support
+switches for keep-warm, light, or mute. Repository search found no other
+current Panel Agent feature consuming them. AliceTG_Bot was not changed.
+Physical action acceptance remains pending with the production gate disabled.
