@@ -6,6 +6,9 @@
         "imageScalePct": 100,
         "imageXStep": 0,
         "imageYStep": 0,
+        "stateOffXOffsetPx": -18,
+        "stateWarmingXOffsetPx": 10,
+        "stateReadyXOffsetPx": -8,
         "composition": "auto",
         "buttonLayout": "balanced",
         "showStateMarker": true,
@@ -42,6 +45,36 @@
           "defaultValue": 0,
           "label": "По вертикали",
           "section": "Композиция"
+        },
+        {
+          "key": "stateOffXOffsetPx",
+          "control": "integer_range",
+          "min": -40,
+          "max": 40,
+          "step": 2,
+          "defaultValue": -18,
+          "label": "Выключена — положение",
+          "section": "Изображение"
+        },
+        {
+          "key": "stateWarmingXOffsetPx",
+          "control": "integer_range",
+          "min": -40,
+          "max": 40,
+          "step": 2,
+          "defaultValue": 10,
+          "label": "Разогревается — положение",
+          "section": "Изображение"
+        },
+        {
+          "key": "stateReadyXOffsetPx",
+          "control": "integer_range",
+          "min": -40,
+          "max": 40,
+          "step": 2,
+          "defaultValue": -8,
+          "label": "Разогрета — положение",
+          "section": "Изображение"
         },
         {
           "key": "composition",

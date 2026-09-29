@@ -364,6 +364,11 @@ def test_valid_appearance_patch_is_atomic_revisioned_and_survives_restart(tmp_pa
         candidate = initial.json()["items"]
         coffee = next(item for item in candidate if item["widgetType"] == "home.coffee-machine")
         coffee["config"]["imageScalePct"] = 120
+        coffee["config"].update({
+            "stateOffXOffsetPx": -40,
+            "stateWarmingXOffsetPx": 32,
+            "stateReadyXOffsetPx": 40,
+        })
         saved = client.patch(
             "/api/v1/overview/layout",
             headers={"If-Match": initial.headers["etag"]},
@@ -374,6 +379,9 @@ def test_valid_appearance_patch_is_atomic_revisioned_and_survives_restart(tmp_pa
         assert saved.headers["etag"] == '"1"'
         assert saved.headers["cache-control"] == "no-store"
         assert saved.json()["items"][1]["config"]["imageScalePct"] == 120
+        assert {key: saved.json()["items"][1]["config"][key] for key in (
+            "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"
+        )} == {"stateOffXOffsetPx": -40, "stateWarmingXOffsetPx": 32, "stateReadyXOffsetPx": 40}
 
     assert path.read_bytes()[:3] != b"\xef\xbb\xbf"
     serialized = path.read_bytes().decode("utf-8")
@@ -385,6 +393,56 @@ def test_valid_appearance_patch_is_atomic_revisioned_and_survives_restart(tmp_pa
         loaded = get_layout(client).json()
         assert loaded["revision"] == 1
         assert next(item for item in loaded["items"] if item["widgetType"] == "home.coffee-machine")["config"]["imageScalePct"] == 120
+        coffee = next(item for item in loaded["items"] if item["widgetType"] == "home.coffee-machine")
+        assert [coffee["config"][key] for key in (
+            "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"
+        )] == [-40, 32, 40]
+
+
+def test_stored_coffee_config_missing_state_targets_uses_visual_defaults_without_migration(tmp_path, monkeypatch):
+    path = tmp_path / "layout.json"
+    module = load_app(monkeypatch, path, writes=False)
+    from panel_agent import overview_layout
+
+    old = overview_layout.shipped_layout(revision=7)
+    coffee = next(item for item in old["items"] if item["widgetType"] == "home.coffee-machine")
+    for key in ("stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"):
+        coffee["config"].pop(key)
+    coffee["config"]["imageXStep"] = 2
+    before_placements = [item["placement"] for item in old["items"]]
+    path.write_text(json.dumps(old), encoding="utf-8")
+    original = path.read_bytes()
+
+    with TestClient(module.app) as client:
+        loaded = get_layout(client).json()
+    recovered = next(item for item in loaded["items"] if item["widgetType"] == "home.coffee-machine")
+    assert loaded["revision"] == 7
+    assert loaded["warnings"] == []
+    assert [recovered["config"][key] for key in (
+        "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"
+    )] == [-18, 10, -8]
+    assert recovered["config"]["imageXStep"] == 2
+    assert [item["placement"] for item in loaded["items"]] == before_placements
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("key", ["stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"])
+@pytest.mark.parametrize("value", [-42, 42, 1, 2.5, "10px", None, True])
+def test_panel_agent_rejects_invalid_coffee_state_targets(tmp_path, monkeypatch, key, value):
+    path = tmp_path / "layout.json"
+    module = load_app(monkeypatch, path, writes=True)
+    with TestClient(module.app) as client:
+        initial = get_layout(client)
+        items = initial.json()["items"]
+        coffee = next(item for item in items if item["widgetType"] == "home.coffee-machine")
+        coffee["config"][key] = value
+        response = client.patch(
+            "/api/v1/overview/layout",
+            headers={"If-Match": initial.headers["etag"]},
+            json={"items": items},
+        )
+        assert response.status_code == 422
+    assert not path.exists()
 
 
 def test_overview_body_below_limit_is_read_and_strictly_validated(tmp_path, monkeypatch):

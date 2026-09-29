@@ -3,6 +3,7 @@ import type { OverviewLayoutItem } from "@artem/contracts";
 import {
   appearanceControlsFor,
   appearanceControlsForPresentation,
+  appearanceControlValueLabel,
   coffeeAppearanceConfig,
   defaultAppearanceConfig,
   normalizeLayoutItem,
@@ -30,6 +31,9 @@ describe("bounded Overview appearance schema", () => {
       imageScalePct: 100,
       imageXStep: 0,
       imageYStep: 0,
+      stateOffXOffsetPx: -18,
+      stateWarmingXOffsetPx: 10,
+      stateReadyXOffsetPx: -8,
       composition: "auto",
       buttonLayout: "balanced",
       showStateMarker: true,
@@ -37,6 +41,42 @@ describe("bounded Overview appearance schema", () => {
       showImage: true
     });
     expect(coffeeAppearanceConfig(coffee()).imageScalePct).toBe(100);
+  });
+
+  it("normalizes older Coffee configs to the exact existing motion targets", () => {
+    const old = { ...coffee(), config: { imageScalePct: 110, imageXStep: 2, imageYStep: -1 } };
+    const normalized = normalizeLayoutItem(old);
+    expect(coffeeAppearanceConfig(normalized)).toMatchObject({
+      imageScalePct: 110,
+      imageXStep: 2,
+      imageYStep: -1,
+      stateOffXOffsetPx: -18,
+      stateWarmingXOffsetPx: 10,
+      stateReadyXOffsetPx: -8
+    });
+    expect(normalized.placement).toEqual(old.placement);
+  });
+
+  it("exposes three stepped position controls with signed pixel labels", () => {
+    const controls = appearanceControlsForPresentation("home.coffee-machine");
+    expect(controls.map((control) => control.key).slice(0, 7)).toEqual([
+      "showImage", "imageScalePct", "imageXStep", "imageYStep",
+      "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"
+    ]);
+    for (const key of ["stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"]) {
+      const control = controls.find((entry) => entry.key === key)!;
+      expect(control).toMatchObject({ control: "integer_range", min: -40, max: 40, step: 2 });
+      for (const value of [-40, -18, -8, 0, 10, 40]) {
+        expect(validateAppearanceConfig("home.coffee-machine", { [key]: value }, true).valid).toBe(true);
+      }
+      for (const value of [-42, 42, -39, 1, 2.5, "10px", null]) {
+        expect(validateAppearanceConfig("home.coffee-machine", { [key]: value }, true).valid).toBe(false);
+      }
+    }
+    const off = controls.find((entry) => entry.key === "stateOffXOffsetPx")!;
+    const warming = controls.find((entry) => entry.key === "stateWarmingXOffsetPx")!;
+    expect(appearanceControlValueLabel(off, -18)).toBe("-18 px");
+    expect(appearanceControlValueLabel(warming, 10)).toBe("+10 px");
   });
 
   it("rejects arbitrary config and enforces every numeric bound", () => {
@@ -81,6 +121,9 @@ describe("bounded Overview appearance schema", () => {
       "imageScalePct",
       "imageXStep",
       "imageYStep",
+      "stateOffXOffsetPx",
+      "stateWarmingXOffsetPx",
+      "stateReadyXOffsetPx",
       "composition",
       "buttonLayout",
       "showStateMarker",

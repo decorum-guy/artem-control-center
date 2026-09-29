@@ -272,6 +272,9 @@ export function CoffeeWidget({
     imageScalePct: 100,
     imageXStep: 0,
     imageYStep: 0,
+    stateOffXOffsetPx: -18,
+    stateWarmingXOffsetPx: 10,
+    stateReadyXOffsetPx: -8,
     composition: "auto",
     showStateMarker: true,
     showAuthority: true,
@@ -342,7 +345,12 @@ export function CoffeeWidget({
       data-image-scale={imageScale}
       data-image-x={appearance.imageXStep}
       data-image-y={appearance.imageYStep}
-      style={{ "--cc-coffee-progress-color": view.progressColor ?? "var(--cc-accent-strong)" } as CSSProperties}
+      style={{
+        "--cc-coffee-progress-color": view.progressColor ?? "var(--cc-accent-strong)",
+        "--cc-coffee-state-off-x": `${appearance.stateOffXOffsetPx}px`,
+        "--cc-coffee-state-warming-x": `${appearance.stateWarmingXOffsetPx}px`,
+        "--cc-coffee-state-ready-x": `${appearance.stateReadyXOffsetPx}px`
+      } as CSSProperties}
     >
       <div className="coffee-panel__status" data-testid="coffee-online-status">
         <HealthMark health={service.health} compact healthyLabel="Онлайн" />

@@ -447,6 +447,87 @@ test.describe("Overview V2 Edit mode and persistence", () => {
     test.skip(!overviewV2Enabled || !overviewEditorEnabled, "Run with V2 and the Overview editor flags enabled.");
   });
 
+  test("Coffee state targets stay separate from global offsets and persist through the editor", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const routeState = await installLayoutRoute(page);
+    await openEditor(page, "/overview?scenario=coffee-off&theme=night");
+    const frame = page.locator('.overview-edit-frame[data-instance-id="fixture.coffee"]');
+    await selectFrame(page, "fixture.coffee");
+    await frame.getByRole("button", { name: "Настройки виджета" }).click();
+    const sheet = page.getByTestId("overview-widget-appearance");
+    const stateLabels = ["Выключена — положение", "Разогревается — положение", "Разогрета — положение"];
+    for (const label of stateLabels) await expect(sheet.getByLabel(label)).toBeVisible();
+    await expect(sheet.getByText("-18 px")).toBeVisible();
+    await expect(sheet.getByText("+10 px")).toBeVisible();
+    await expect(sheet.getByText("-8 px")).toBeVisible();
+    const labelsInOrder = await sheet.locator(".overview-appearance__section").first().locator(".overview-appearance__control-heading label, .overview-appearance__switch-row > span:first-child").allTextContents();
+    expect(labelsInOrder.map((label) => label.trim())).toEqual([
+      "Показывать изображение", "Размер изображения", "По горизонтали", "По вертикали", ...stateLabels
+    ]);
+    await sheet.getByLabel(stateLabels[0]).fill("-24");
+    await sheet.getByLabel(stateLabels[1]).fill("34");
+    await sheet.getByLabel(stateLabels[2]).fill("-30");
+    await sheet.getByLabel("По горизонтали").fill("-2");
+    await sheet.getByLabel("По вертикали").fill("1");
+    await sheet.getByLabel("Размер изображения").fill("110");
+    await sheet.getByRole("button", { name: "Широкая кнопка" }).click();
+    await sheet.getByLabel("Показывать источник").click();
+    await sheet.getByLabel("Показывать изображение").click();
+    await expect(frame.locator(".coffee-asset__motion")).toHaveCount(0);
+    await sheet.getByLabel("Показывать изображение").click();
+    const undersized = await sheet.locator("button, input").evaluateAll((elements) => elements.flatMap((element) => {
+      const box = element.getBoundingClientRect();
+      return box.width >= 48 && box.height >= 48 ? [] : [element.getAttribute("aria-label") ?? element.tagName];
+    }));
+    expect(undersized).toEqual([]);
+    await sheet.getByRole("button", { name: "Закрыть" }).click();
+
+    const coffee = frame.locator(".coffee-panel--overview");
+    const motion = coffee.locator(".coffee-asset__motion");
+    const shift = () => motion.evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m41);
+    expect(await shift()).toBeCloseTo(-24, 1);
+    for (const name of ["turning_on", "warming", "transition-moving", "transition-revealing"]) {
+      await coffee.evaluate((element, next) => {
+        for (const candidate of ["turning_on", "warming", "transition-moving", "transition-revealing", "ready"]) {
+          element.classList.remove(`coffee-panel--${candidate}`);
+        }
+        element.classList.add(`coffee-panel--${next}`);
+      }, name);
+      expect(await shift(), name).toBeCloseTo(34, 1);
+    }
+    await coffee.evaluate((element) => {
+      element.classList.remove("coffee-panel--transition-revealing");
+      element.classList.add("coffee-panel--ready");
+    });
+    expect(await shift()).toBeCloseTo(-30, 1);
+    const geometry = await coffee.evaluate((panel) => {
+      const asset = panel.querySelector<HTMLElement>(".coffee-asset")!;
+      const visual = panel.querySelector<HTMLElement>(".coffee-asset__visual")!;
+      const assetMatrix = new DOMMatrixReadOnly(getComputedStyle(asset).transform);
+      return { x: assetMatrix.m41, y: assetMatrix.m42, scale: new DOMMatrixReadOnly(getComputedStyle(visual).transform).a };
+    });
+    expect(geometry.x).toBeCloseTo(-24, 1);
+    expect(geometry.y).toBeCloseTo(4, 1);
+    expect(geometry.scale).toBeCloseTo(1.1, 2);
+    await expect(coffee.locator(".coffee-action-row")).toHaveAttribute("data-button-layout", "wide");
+    await expect(coffee.locator(".coffee-authority")).toHaveCount(0);
+    expect(await motion.evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration))).toBeLessThanOrEqual(0.001);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+
+    await page.getByTestId("overview-save").click();
+    await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "normal");
+    expect(routeState.lastPatch?.find((item) => item.instanceId === "fixture.coffee")?.config).toMatchObject({
+      stateOffXOffsetPx: -24, stateWarmingXOffsetPx: 34, stateReadyXOffsetPx: -30,
+      imageXStep: -2, imageYStep: 1, imageScalePct: 110,
+      buttonLayout: "wide", showAuthority: false, showImage: true
+    });
+    await page.reload();
+    const reloaded = page.locator(".coffee-panel--overview");
+    await expect(reloaded).toHaveAttribute("data-image-x", "-2");
+    expect(await reloaded.locator(".coffee-asset__motion").evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m41)).toBeCloseTo(-24, 1);
+  });
+
   test("keeps Overview clean and handles edit requests truthfully", async ({ page }) => {
     for (const [mode, entersEdit, copy] of [
       ["writer-true", true, null],
