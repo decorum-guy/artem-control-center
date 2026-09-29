@@ -164,7 +164,7 @@
 }
 .station-mini-widget__button:focus-visible { outline: 2px solid var(--cc-accent-strong); outline-offset: 2px; }
 .station-mini-widget__button:disabled { opacity: .45; cursor: default; }
-.station-mini-widget__message { margin: 0; min-height: 1.1em; color: var(--cc-text-muted); font-size: 12px; text-align: center; }
+.station-mini-widget__message { margin: 0; min-height: 1.25em; color: var(--cc-text-muted); font-size: 12px; line-height: 1.25; text-align: center; }
 .station-mini-widget__music { width: 100%; min-height: 48px; border: 1px solid var(--cc-border); border-radius: 12px; color: var(--cc-text); background: var(--cc-surface-2); font: inherit; cursor: pointer; }
 .station-mini-widget__music span { margin-left: 8px; }
 .station-presets__backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(12, 10, 18, .64); }

@@ -34,7 +34,175 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   )).toBe(true);
 }
 
+async function readStationGeometry(page: Page) {
+  return page.evaluate(() => {
+    const widget = document.querySelector<HTMLElement>(".station-mini-widget")!;
+    const art = widget.querySelector<HTMLElement>(".station-mini-widget__art")!;
+    const image = widget.querySelector<HTMLElement>(".station-mini-widget__image")!;
+    const controls = widget.querySelector<HTMLElement>(".station-mini-widget__controls")!;
+    const music = widget.querySelector<HTMLElement>(".station-mini-widget__music")!;
+    const message = widget.querySelector<HTMLElement>(".station-mini-widget__message")!;
+    const glow = widget.querySelector<HTMLElement>(".station-mini-widget__glow")!;
+    const rect = (element: HTMLElement) => {
+      const { top, bottom, width, height } = element.getBoundingClientRect();
+      return { top, bottom, width, height };
+    };
+    const widgetStyle = getComputedStyle(widget);
+    const imageStyle = getComputedStyle(image);
+    const messageStyle = getComputedStyle(message);
+    return {
+      widget: rect(widget),
+      art: rect(art),
+      image: rect(image),
+      controls: rect(controls),
+      music: rect(music),
+      message: rect(message),
+      gridTemplateRows: widgetStyle.gridTemplateRows,
+      imageStyle: {
+        width: imageStyle.width,
+        height: imageStyle.height,
+        transform: imageStyle.transform,
+        transition: imageStyle.transition,
+        objectFit: imageStyle.objectFit,
+        objectPosition: imageStyle.objectPosition
+      },
+      messageStyle: {
+        lineHeight: messageStyle.lineHeight,
+        minHeight: messageStyle.minHeight
+      },
+      pending: widget.querySelector<HTMLButtonElement>('[aria-label="Play"]')?.getAttribute("aria-busy"),
+      disabledButtons: widget.querySelectorAll(".station-mini-widget__button:disabled").length,
+      messageText: message.textContent,
+      glow: {
+        active: glow.classList.contains("station-mini-widget__glow--active"),
+        animationName: getComputedStyle(glow).animationName,
+        count: widget.querySelectorAll(".station-mini-widget__glow").length
+      }
+    };
+  });
+}
+
+type StationRect = { top: number; bottom: number; width: number; height: number };
+type StationGeometry = Awaited<ReturnType<typeof readStationGeometry>>;
+
+function expectStationGeometryStable(
+  baseline: StationGeometry,
+  actual: StationGeometry,
+  phase: string
+): void {
+  for (const key of ["widget", "art", "image", "controls", "music", "message"] as const) {
+    const baselineRect = baseline[key] as StationRect;
+    const actualRect = actual[key] as StationRect;
+    for (const coordinate of ["top", "bottom", "width", "height"] as const) {
+      expect(Math.abs(actualRect[coordinate] - baselineRect[coordinate]), `${phase} ${key}.${coordinate}`).toBeLessThanOrEqual(0.5);
+    }
+  }
+  expect(actual.gridTemplateRows, `${phase} grid tracks`).toBe(baseline.gridTemplateRows);
+  expect(actual.imageStyle.transform, `${phase} artwork transform`).toBe("none");
+  expect(actual.imageStyle.objectFit, `${phase} artwork containment`).toBe("contain");
+  expect(actual.imageStyle.objectPosition, `${phase} artwork centering`).toBe("50% 50%");
+  expect(actual.messageStyle.lineHeight, `${phase} message line height`).toBe("15px");
+  expect(actual.messageStyle.minHeight, `${phase} reserved message height`).toBe("15px");
+  expect(actual.glow.count, `${phase} glow count`).toBe(1);
+}
+
 test.describe("Issue 298 Station Mini 2 owner artwork", () => {
+  test("keeps Station layout fixed through initial and repeated action lifecycles", async ({ page }) => {
+    test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await installStationAvailability(page);
+    let releaseRequest: (() => Promise<void>) | undefined;
+    let requestCount = 0;
+    const requests: Array<{ actionId: string; requestId: string }> = [];
+    await page.route("**/api/v1/actions/station", async (route) => {
+      requestCount += 1;
+      const request = route.request().postDataJSON() as { actionId: string; requestId: string };
+      requests.push(request);
+      if (requestCount <= 2) {
+        await new Promise<void>((resolve) => {
+          releaseRequest = async () => {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ schemaVersion: 1, ...request, status: "dispatched" })
+            });
+            resolve();
+          };
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ schemaVersion: 1, ...request, status: "dispatched" })
+      });
+    });
+
+    await page.goto("/overview");
+    const widget = page.getByTestId("overview-station-mini-widget");
+    const image = widget.locator(".station-mini-widget__image");
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
+    const play = widget.getByRole("button", { name: "Play" });
+    await expect(play).toBeEnabled();
+    await play.scrollIntoViewIfNeeded();
+
+    const snapshots: Record<string, StationGeometry> = {};
+    const glow = widget.locator(".station-mini-widget__glow");
+    const beforeFirst = await readStationGeometry(page);
+    snapshots.beforeFirst = beforeFirst;
+
+    await play.click();
+    await expect.poll(() => requestCount).toBe(1);
+    await expect(play).toHaveAttribute("aria-busy", "true");
+    snapshots.firstPending = await readStationGeometry(page);
+    await page.waitForTimeout(150);
+    snapshots.firstEarly = await readStationGeometry(page);
+    await releaseRequest?.();
+    await expect(play).toHaveAttribute("aria-busy", "false");
+    await expect(widget.getByRole("status")).toHaveText("Команда отправлена");
+    snapshots.firstResolved = await readStationGeometry(page);
+    await page.waitForTimeout(450);
+    snapshots.firstMidGlow = await readStationGeometry(page);
+    await expect.poll(() => glow.evaluate((element) => element.classList.contains("station-mini-widget__glow--active"))).toBe(false);
+    snapshots.firstGlowFinished = await readStationGeometry(page);
+
+    const pause = widget.getByRole("button", { name: "Pause" });
+    await pause.click();
+    await expect.poll(() => requestCount).toBe(2);
+    await expect(pause).toHaveAttribute("aria-busy", "true");
+    snapshots.repeatPending = await readStationGeometry(page);
+    await page.waitForTimeout(150);
+    snapshots.repeatEarly = await readStationGeometry(page);
+    await releaseRequest?.();
+    await expect(pause).toHaveAttribute("aria-busy", "false");
+    await expect(widget.getByRole("status")).toHaveText("Команда отправлена");
+    snapshots.repeatResolved = await readStationGeometry(page);
+    await page.waitForTimeout(450);
+    snapshots.repeatMidGlow = await readStationGeometry(page);
+    await expect.poll(() => glow.evaluate((element) => element.classList.contains("station-mini-widget__glow--active"))).toBe(false);
+    snapshots.repeatGlowFinished = await readStationGeometry(page);
+
+    expect(requestCount).toBe(2);
+    expect(requests.map(({ actionId }) => actionId)).toEqual(["media.alice.play", "media.alice.pause"]);
+    for (const request of requests) expect(request.requestId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(snapshots.firstPending.pending).toBe("true");
+    expect(snapshots.repeatPending.pending).toBe("true");
+    expect(snapshots.firstPending.disabledButtons).toBe(7);
+    expect(snapshots.repeatPending.disabledButtons).toBe(7);
+    expect(snapshots.firstPending.glow.active).toBe(true);
+    expect(snapshots.firstResolved.messageText).toBe("Команда отправлена");
+    expect(snapshots.repeatPending.messageText).toBe("");
+    expect(snapshots.repeatResolved.messageText).toBe("Команда отправлена");
+    expect(snapshots.firstGlowFinished.glow.active).toBe(false);
+    expect(snapshots.repeatGlowFinished.glow.active).toBe(false);
+    expect(snapshots.firstPending.message.height).toBe(15);
+    expect(snapshots.firstResolved.message.height).toBe(15);
+    for (const [phase, snapshot] of Object.entries(snapshots)) {
+      expectStationGeometryStable(beforeFirst, snapshot, phase);
+    }
+    await expectNoHorizontalOverflow(page);
+  });
+
   test("renders the bundled image contained in the art slot with the glow behind it", async ({ page }) => {
     test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
     await page.setViewportSize({ width: 1280, height: 720 });
@@ -242,10 +410,12 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
     const slot = widget.getByTestId("station-artwork-slot");
     const image = slot.locator("img.station-mini-widget__image");
     await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
-    await widget.getByRole("button", { name: "Play" }).scrollIntoViewIfNeeded();
-    const before = await Promise.all([slot.boundingBox(), image.boundingBox()]);
+    const play = widget.getByRole("button", { name: "Play" });
+    await play.scrollIntoViewIfNeeded();
+    const before = await readStationGeometry(page);
 
-    await widget.getByRole("button", { name: "Play" }).click();
+    await play.click();
+    await expect(play).toHaveAttribute("aria-busy", "true");
     await expect(widget.locator(".station-mini-widget__glow--active")).toHaveCount(1);
     const reducedStyle = await glow.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -262,12 +432,18 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
     expect(reducedStyle.transform).toBe("none");
     expect(reducedStyle.opacity).toBe("0.78");
     expect(reducedStyle.runningAnimations).toBe(0);
-    expect(await Promise.all([slot.boundingBox(), image.boundingBox()])).toEqual(before);
+    const pending = await readStationGeometry(page);
+    expectStationGeometryStable(before, pending, "reduced-motion pending");
     await releaseFirstFailure?.();
     await expect(widget.getByRole("status")).toHaveText("Результат отправки неизвестен");
+    const resolved = await readStationGeometry(page);
+    expectStationGeometryStable(before, resolved, "reduced-motion resolved");
 
     await widget.getByRole("button", { name: "Pause" }).click();
+    await expect(widget.getByRole("button", { name: "Pause" })).toHaveAttribute("aria-busy", "false");
     await expect(widget.getByRole("status")).toHaveText("Не удалось отправить команду");
+    const repeated = await readStationGeometry(page);
+    expectStationGeometryStable(before, repeated, "reduced-motion repeated action");
     await expect.poll(() => glow.evaluate((element) => element.classList.contains("station-mini-widget__glow--active"))).toBe(false);
     expect(await glow.evaluate((element) => getComputedStyle(element).opacity)).toBe("0");
     await expectNoHorizontalOverflow(page);
@@ -308,27 +484,55 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
     }));
     let executedPresetId: string | null = null;
     let executedRequestId: string | null = null;
+    let releaseExecute: (() => Promise<void>) | undefined;
     await page.route("**/api/v1/actions/station/presets/execute", async (route) => {
       const request = route.request().postDataJSON() as { presetId: string; requestId: string };
       executedPresetId = request.presetId;
       executedRequestId = request.requestId;
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ status: "dispatched", ...request })
+      await new Promise<void>((resolve) => {
+        releaseExecute = async () => {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ status: "dispatched", ...request })
+          });
+          resolve();
+        };
       });
     });
 
     await page.goto("/overview");
     const widget = page.getByTestId("overview-station-mini-widget");
-    await widget.getByRole("button", { name: /Музыка/ }).click();
+    const music = widget.getByRole("button", { name: /Музыка/ });
+    await music.scrollIntoViewIfNeeded();
+    const before = await readStationGeometry(page);
+    await music.click();
     await expect(widget.locator(".station-mini-widget__glow--active")).toHaveCount(0);
-    await page.getByRole("dialog", { name: "Что включить?" }).getByRole("button", { name: /Избранное/ }).click();
+    expect(executedPresetId).toBeNull();
+    const musicOpen = await readStationGeometry(page);
+    expectStationGeometryStable(before, musicOpen, "Music opened");
+    const preset = page.getByRole("dialog", { name: "Что включить?" }).getByRole("button", { name: /Избранное/ });
+    await preset.click();
     await expect.poll(() => executedPresetId).toBe("a1b2c3d4e5f6");
     expect(executedRequestId).toBeTruthy();
+    expect(executedRequestId).toMatch(/^[0-9a-f-]{36}$/i);
     await expect(widget.locator(".station-mini-widget__glow--active")).toHaveCount(1);
     await expect(widget.locator(".station-mini-widget__glow")).toHaveCount(1);
+    await expect(widget.getByRole("button", { name: "Play" })).toHaveAttribute("aria-busy", "true");
+    const pending = await readStationGeometry(page);
+    const early = await page.waitForTimeout(150).then(() => readStationGeometry(page));
+    expectStationGeometryStable(before, pending, "preset pending");
+    expectStationGeometryStable(before, early, "preset early feedback");
+    await releaseExecute?.();
     await expect(page.getByRole("dialog", { name: "Что включить?" })).toHaveCount(0);
     await expect(widget.getByRole("status")).toContainText("Команда отправлена");
+    const resolved = await readStationGeometry(page);
+    expectStationGeometryStable(before, resolved, "preset resolved");
+    const midGlow = await page.waitForTimeout(450).then(() => readStationGeometry(page));
+    expectStationGeometryStable(before, midGlow, "preset glow mid-point");
+    await expect.poll(() => widget.locator(".station-mini-widget__glow").evaluate((element) => element.classList.contains("station-mini-widget__glow--active"))).toBe(false);
+    const finished = await readStationGeometry(page);
+    expectStationGeometryStable(before, finished, "preset glow finished");
+    await expectNoHorizontalOverflow(page);
   });
 });
