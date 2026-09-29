@@ -4,6 +4,9 @@ import { executeStationAction, fetchStationAvailability, STATION_ACTIONS,
 import { WorkZone } from "../../ShellPrimitives";
 import { addStationPreset, deleteStationPreset, executeStationPreset, fetchStationPresets,
   type StationPresetInventory } from "../../stationPresetsApi";
+import { resolveWidgetAsset } from "../../widgetAssets";
+
+const STATION_ARTWORK = resolveWidgetAsset("./assets/widgets/station-mini-2.png");
 
 const LABELS: Record<StationActionId, string> = {
   "media.alice.play": "Play",
@@ -38,6 +41,7 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   const [availability, setAvailability] = useState<StationActionAvailability | null>(null);
   const [pending, setPending] = useState(false);
   const [glow, setGlow] = useState(false);
+  const [artworkFailed, setArtworkFailed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [sheet, setSheet] = useState<"closed" | "music" | "manage" | "add">("closed");
   const [inventory, setInventory] = useState<StationPresetInventory | null>(null);
@@ -145,10 +149,12 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     <header className="station-mini-widget__header"><h2>Станция Mini 2</h2></header>
     <div className="station-mini-widget__art" data-testid="station-artwork-slot">
       <span className={`station-mini-widget__glow${glow ? " station-mini-widget__glow--active" : ""}`} aria-hidden="true" />
-      <svg className="station-mini-widget__fallback" viewBox="0 0 80 100" aria-hidden="true">
+      {STATION_ARTWORK && !artworkFailed && <img className="station-mini-widget__image" src={STATION_ARTWORK}
+        alt="" aria-hidden="true" draggable={false} decoding="async" onError={() => setArtworkFailed(true)} />}
+      {(!STATION_ARTWORK || artworkFailed) && <svg className="station-mini-widget__fallback" viewBox="0 0 80 100" aria-hidden="true">
         <rect x="16" y="8" width="48" height="84" rx="20" fill="none" stroke="currentColor" strokeWidth="2" />
         <circle cx="40" cy="77" r="3" fill="currentColor" />
-      </svg>
+      </svg>}
     </div>
     <div className="station-mini-widget__controls" aria-label="Управление Станцией Mini 2">
       {STATION_ACTIONS.map((actionId) => <button key={actionId} type="button"
