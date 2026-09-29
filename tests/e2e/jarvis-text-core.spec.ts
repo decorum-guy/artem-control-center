@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+const jarvisVisibilityStorageKey = "artem-control-center.jarvis-visible";
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((storageKey) => {
+    window.localStorage.setItem(storageKey, "true");
+  }, jarvisVisibilityStorageKey);
+});
+
 test("Jarvis is global, bounded, private, and can navigate without leaving its overlay", async ({ page }) => {
   await page.goto("/overview");
   const routeBefore = await page.getByTestId("route-overview").boundingBox();
@@ -14,7 +22,10 @@ test("Jarvis is global, bounded, private, and can navigate without leaving its o
   const routeAfter = await page.getByTestId("route-settings").boundingBox();
   expect(routeBefore?.width).toBe(routeAfter?.width);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBeTruthy();
-  expect(await page.evaluate(() => Object.keys(localStorage).some((key) => key.toLowerCase().includes("jarvis")))).toBeFalsy();
+  expect(await page.evaluate((storageKey) =>
+    Object.keys(localStorage).some((key) => key.toLowerCase().includes("jarvis") && key !== storageKey),
+    jarvisVisibilityStorageKey
+  )).toBeFalsy();
 });
 
 test("Jarvis renders server text as text and has touch-sized controls", async ({ page }) => {
