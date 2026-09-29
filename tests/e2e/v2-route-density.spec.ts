@@ -323,6 +323,7 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(kettle.getByRole("status")).toHaveText("Данные устарели");
     await expect(kettle.getByRole("button", { name: "Включить" })).toBeDisabled();
     await expect(kettle.getByRole("button", { name: "Выбрать чай" })).toBeDisabled();
+    expect(await kettle.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
 
     await page.unroute("**/api/v1/snapshot**");
     await installSnapshotMock(page, (snapshot) => setKettleHealth(snapshot, "offline", "Последнее состояние недоступно"));
@@ -331,6 +332,7 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(kettle.getByRole("status")).toHaveText("Недоступен");
     await expect(kettle.getByRole("button", { name: "Включить" })).toBeDisabled();
     await expect(kettle.getByRole("button", { name: "Выбрать чай" })).toBeDisabled();
+    expect(await kettle.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
   });
 
   test("Home HA stale/offline states remain truthful and Coffee keeps its existing action path", async ({ page }) => {

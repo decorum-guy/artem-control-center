@@ -96,12 +96,21 @@ describe("Overview V2 placement validation", () => {
       item("climate-one", "home.climate", "standard", { x: 0, y: 0, w: 7, h: 3 }),
       item("climate-two", "home.climate", "standard", { x: 0, y: 3, w: 7, h: 3 })
     ]).issues.map((issue) => issue.code)).toContain("duplicate-singleton");
+    const kettle = getOverviewWidgetDefinition("home.kettle")!;
+    for (const variant of ["compact", "standard", "large"]) {
+      const size = resolveOverviewWidgetSize(kettle, variant)!;
+      expect(validateOverviewLayout([item(`kettle-${variant}`, "home.kettle", variant, { x: 0, y: 0, ...size })]).valid).toBe(true);
+    }
+    expect(validateOverviewLayout([
+      item("kettle-one", "home.kettle", "compact", { x: 0, y: 0, w: 4, h: 4 }),
+      item("kettle-two", "home.kettle", "compact", { x: 4, y: 0, w: 4, h: 4 })
+    ]).issues.map((issue) => issue.code)).toContain("duplicate-singleton");
   });
 
   it("rejects duplicate instance IDs and singleton definitions", () => {
     const result = validateOverviewLayout([
       item("same"),
-      item("same", "home.quick-actions", "standard", { x: 0, y: 4, w: 7, h: 2 }),
+      item("same", "home.kettle", "large", { x: 0, y: 4, w: 7, h: 5 }),
       item("coffee-again", "home.coffee-machine", "compact", { x: 7, y: 0, w: 4, h: 3 })
     ]);
     expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
@@ -116,8 +125,8 @@ describe("Overview V2 placement validation", () => {
       { x: 3, y: 0, w: 3, h: 1 }
     )).toBe(false);
     const result = validateOverviewLayout([
-      item("first", "home.quick-actions", "compact", { x: 0, y: 0, w: 4, h: 2 }),
-      item("second", "home.quick-actions", "compact", { x: 2, y: 1, w: 4, h: 2 })
+      item("first", "home.kettle", "compact", { x: 0, y: 0, w: 4, h: 4 }),
+      item("second", "home.kettle", "compact", { x: 2, y: 1, w: 4, h: 4 })
     ]);
     expect(result.issues.map((issue) => issue.code)).toContain("overlap");
   });
@@ -208,7 +217,7 @@ describe("Overview V2 trusted-render eligibility", () => {
   it("never renders either record when instance IDs are duplicated", () => {
     const projection = projectOverviewLayout([
       item("same"),
-      item("same", "home.quick-actions", "standard", { x: 0, y: 4, w: 7, h: 2 })
+      item("same", "home.kettle", "large", { x: 0, y: 4, w: 7, h: 5 })
     ], 1280);
     expectInvalidProjection(projection, 0);
     expectInvalidProjection(projection, 1);

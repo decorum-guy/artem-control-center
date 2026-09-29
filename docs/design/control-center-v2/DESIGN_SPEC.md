@@ -484,14 +484,14 @@ states remain one compact row. Loading preserves three rows. Stale/offline use
 the summary-level truth banner and per-row last-known data. Future B4 may add
 one header `Добавить` control; it must not change the grid anatomy.
 
-### F4. Home actions (`home.quick-actions`)
+### F4. Kettle (`home.kettle`)
 
-- compact `4×2`: one action;
-- standard/default `7×2`: up to two actions side by side;
-- each action cell has device name/state and a 48–56 px contextual button;
-- loading/stale/offline is per device, so one failure does not disable the
-  other cell;
-- action origin shows requested/executing/verifying state.
+- compact `4×4`, standard/default `5×4`, large `7×5`;
+- current water temperature and freshness remain visible;
+- the shared typed Kettle control provides boil and explicit tea start;
+- edit mode disables physical actions.
+
+The former `home.quick-actions` widget is retired from saved layouts in preset v6.
 
 ### F5. Services health (`system.health-summary`)
 

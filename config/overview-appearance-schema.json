@@ -141,7 +141,7 @@
         }
       ]
     },
-    "home.quick-actions": { "defaults": {}, "controls": [] },
+    "home.kettle": { "defaults": {}, "controls": [] },
     "home.climate": { "defaults": {}, "controls": [] },
     "home.station-mini-2": { "defaults": {}, "controls": [] },
     "system.health-summary": { "defaults": {}, "controls": [] },

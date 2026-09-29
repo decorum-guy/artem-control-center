@@ -22,6 +22,7 @@ describe("KettleControl", () => {
   it("shows current water temperature and bounded Russian status", () => {
     const html = markup(kettle());
     expect(html).toContain('data-testid="kettle-current-temperature"');
+    expect(html).toContain("Текущая температура:");
     expect(html).toContain('>61°</div>');
     expect(html).toContain("Выключен");
     expect(html).toContain("Включить");

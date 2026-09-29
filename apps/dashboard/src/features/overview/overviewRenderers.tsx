@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
+import type { ServiceSnapshot } from "@artem/contracts";
 import { useConnectivityActions } from "../../ConnectivityActions";
 import { Icon } from "../../icons";
 import { StatusText, WorkZone } from "../../ShellPrimitives";
@@ -8,6 +8,7 @@ import { CoffeeWidget } from "../../widgets";
 import { PlanningOverviewCard } from "../../PlanningOverviewCard";
 import { RogG703CompactControl, RogG703PsuCompactControl } from "../../RogG703Controls";
 import { ClimateControl } from "../../ClimateControl";
+import { KettleControl } from "../../KettleControl";
 import { StationMiniWidget } from "./StationMiniWidget";
 import type { OverviewRuntimeContext } from "./overviewRuntime";
 import { coffeeAppearanceConfig, planningDensityFor } from "./appearanceConfig";
@@ -126,56 +127,14 @@ function renderClimate(item: OverviewProjectionItem, runtime: OverviewRuntimeCon
   );
 }
 
-function quickDevices(snapshot: DashboardSnapshot): ServiceSnapshot[] {
-  return servicesByPriority(snapshot.services)
-    .filter((service) => service.presentation?.overview === "quick-control" && service.dataContract !== "home.climate.v1")
-    .slice(0, 2);
-}
-
-function renderHome(runtime: OverviewRuntimeContext): ReactNode {
-  const devices = quickDevices(runtime.snapshot);
-  const stateCopy = (service: ServiceSnapshot): string => {
-    const stage = (service.data as { stage?: unknown }).stage;
-    return stage === "on" ? "Включён" : stage === "off" ? "Выключен" : "Недоступен";
-  };
-  const stateTone = (service: ServiceSnapshot): "success" | "warning" | "offline" | "unavailable" => {
-    if (service.health === "healthy") return "success";
-    if (service.health === "degraded" || service.health === "stale") return "warning";
-    if (service.health === "offline") return "offline";
-    return "unavailable";
-  };
-  return (
-      <WorkZone className="overview-v2-real-widget overview-home-widget" data-testid="overview-home-widget">
-        <header className="overview-v2-real-widget__header">
-          <span className="overview-v2-real-widget__icon" aria-hidden="true"><Icon name="home" /></span>
-          <div className="overview-v2-real-widget__heading">
-            <h2>Быстрые действия</h2>
-          </div>
-        </header>
-      <div
-        className="overview-home-widget__cells"
-        data-testid="overview-home-cells"
-        data-device-count={devices.length}
-      >
-        {devices.length ? devices.map((service) => (
-          <button
-            className="overview-home-widget__cell"
-            key={service.id}
-            type="button"
-            data-testid={`overview-home-device-${service.id}`}
-            onClick={() => runtime.onNavigate("/home")}
-            aria-label={`${service.title}. ${stateCopy(service)}. Открыть Дом`}
-          >
-            <span className="overview-home-widget__cell-kicker">Домашнее устройство</span>
-            <strong>{service.title}</strong>
-            <StatusText label={stateCopy(service)} tone={stateTone(service)} className="overview-home-widget__cell-state" />
-          </button>
-        )) : (
-          <p className="overview-v2-real-widget__empty">Нет доступных устройств для быстрого просмотра.</p>
-        )}
-      </div>
-    </WorkZone>
-  );
+function renderKettle(runtime: OverviewRuntimeContext): ReactNode {
+  const kettle = runtime.snapshot.services.find((service) => service.enabled && service.dataContract === "home.kettle.v1") ?? null;
+  if (!kettle) {
+    return <OverviewRuntimeUnavailable title="Чайник" detail="Данные Home Assistant пока недоступны." testId="overview-kettle-unavailable" />;
+  }
+  return <WorkZone className="overview-v2-real-widget overview-kettle-widget" data-testid="overview-kettle-widget" data-widget-type="home.kettle">
+    <KettleControl service={kettle} variant="overview" interactive={!runtime.editMode} />
+  </WorkZone>;
 }
 
 function liveService(service: ServiceSnapshot | undefined): boolean {
@@ -330,12 +289,12 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
       return renderCoffee(item, runtime);
     case "home.climate":
       return renderClimate(item, runtime);
+    case "home.kettle":
+      return renderKettle(runtime);
     case "home.station-mini-2":
       return <StationMiniWidget interactive={!runtime.editMode} />;
     case "planning.summary":
       return renderPlanning(item, runtime);
-    case "home.quick-actions":
-      return renderHome(runtime);
     case "system.health-summary":
       return <OverviewHealthWidget {...runtime} />;
     default:

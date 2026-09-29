@@ -34,7 +34,7 @@ function errorCopy(code: string): string {
   return "Команда чайника не выполнена.";
 }
 
-export function KettleControl({ service }: { service: ServiceSnapshot }) {
+export function KettleControl({ service, variant = "home", interactive = true }: { service: ServiceSnapshot; variant?: "home" | "overview"; interactive?: boolean }) {
   const data = service.data as unknown as KettleData;
   const { ensureCapability, explainAvailability } = useAccess();
   const { guardMutation, locked } = useInteractionLock();
@@ -42,6 +42,8 @@ export function KettleControl({ service }: { service: ServiceSnapshot }) {
   const [availability, setAvailability] = useState<HomeAssistantActionAvailability | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
+  const interactiveRef = useRef(interactive);
+  interactiveRef.current = interactive;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selected, setSelected] = useState<KettleTeaMode | null>(null);
   const wheelRef = useRef<HTMLDivElement>(null);
@@ -60,6 +62,9 @@ export function KettleControl({ service }: { service: ServiceSnapshot }) {
     }
   }, []);
   useEffect(() => {
+    if (!interactive) setPickerOpen(false);
+  }, [interactive]);
+  useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => window.clearInterval(timer);
@@ -73,10 +78,10 @@ export function KettleControl({ service }: { service: ServiceSnapshot }) {
 
   const canUse = (actionId: KettleActionId) => {
     const decision = availability?.actions[actionId];
-    return Boolean(live && !locked && !pending && decision && (decision.allowed || decision.availability === "elevation_required"));
+    return Boolean(interactive && live && !locked && !pending && decision && (decision.allowed || decision.availability === "elevation_required"));
   };
   const run = async (actionId: KettleActionId, teaMode?: KettleTeaMode) => {
-    if (!live || pendingRef.current || !guardMutation()) return;
+    if (!interactiveRef.current || !live || pendingRef.current || !guardMutation()) return;
     pendingRef.current = true;
     setPending(true);
     try {
@@ -89,7 +94,7 @@ export function KettleControl({ service }: { service: ServiceSnapshot }) {
         showNotice({ id: "home.kettle.action", severity: "warning", title: "Чайник", detail: decision ? explainAvailability(decision.availability) : "Управление чайником сейчас недоступно.", timeoutMs: 6_000 });
         return;
       }
-      if (!guardMutation()) return;
+      if (!interactiveRef.current || !guardMutation()) return;
       showNotice({ id: "home.kettle.action", severity: "progress", title: "Чайник", detail: "Отправляем команду и ждём подтверждение…" });
       await executeHomeAssistantAction({ actionId, requestId: newHomeAssistantRequestId(), ...(teaMode ? { teaMode } : {}) });
       showNotice({ id: "home.kettle.action", severity: "success", title: "Чайник", detail: "Изменение подтверждено Home Assistant.", timeoutMs: 6_000 });
@@ -114,8 +119,9 @@ export function KettleControl({ service }: { service: ServiceSnapshot }) {
     setSelected(options[index] ?? null);
   };
 
-  return <section className="kettle-control" data-testid="kettle-control" aria-label="Чайник">
+  return <section className={`kettle-control kettle-control--${variant}`} data-testid="kettle-control" aria-label="Чайник">
     <h2>Чайник</h2>
+    <p className="kettle-control__temperature-label" aria-hidden="true">Текущая температура:</p>
     <div className="kettle-control__temperature" data-testid="kettle-current-temperature" aria-label={`Текущая температура воды ${currentTemperature}`}>{currentTemperature}</div>
     <p className="kettle-control__status" role="status">{status(data, service)}</p>
     <div className="kettle-control__actions">
@@ -123,7 +129,7 @@ export function KettleControl({ service }: { service: ServiceSnapshot }) {
       <button type="button" disabled={!canUse(HOME_KETTLE_SET_TEA_MODE) || options.length === 0} onClick={openPicker}>Выбрать чай</button>
     </div>
     {!live && <p className="kettle-control__notice">Управление отключено до подтверждения свежего состояния.</p>}
-    {pickerOpen && <div className="kettle-picker-backdrop" onClick={() => { if (!pending) setPickerOpen(false); }}>
+    {pickerOpen && interactive && <div className="kettle-picker-backdrop" onClick={() => { if (!pending) setPickerOpen(false); }}>
       <div className="kettle-picker" role="dialog" aria-modal="true" aria-labelledby="kettle-picker-title" onClick={(event) => event.stopPropagation()}>
         <div className="kettle-picker__header"><h3 id="kettle-picker-title">Выбрать чай</h3><button type="button" aria-label="Закрыть" disabled={pending} onClick={() => setPickerOpen(false)}>Закрыть</button></div>
         <div className="kettle-picker__wheel" ref={wheelRef} onScroll={onWheelScroll} aria-label="Виды чая">

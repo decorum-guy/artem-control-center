@@ -98,6 +98,53 @@ def test_station_v5_migration_preserves_owner_placements(tmp_path, monkeypatch):
                for item in before if item.get("visibility") != "hidden")
 
 
+def test_kettle_v6_vocabulary_and_quick_actions_retirement(tmp_path, monkeypatch):
+    path = tmp_path / "layout.json"
+    module = load_app(monkeypatch, path, writes=False)
+    from panel_agent import overview_layout
+
+    assert overview_layout.WIDGETS["home.kettle"]["sizes"] == {
+        "compact": (4, 4), "standard": (5, 4), "large": (7, 5)
+    }
+    assert "home.quick-actions" not in overview_layout.WIDGETS
+    stored = overview_layout.shipped_layout(revision=17)
+    stored["presetVersion"] = 5
+    coffee = next(item for item in stored["items"] if item["widgetType"] == "home.coffee-machine")
+    coffee["config"]["imageScalePct"] = 115
+    planning = next(item for item in stored["items"] if item["widgetType"] == "planning.summary")
+    planning["visibility"] = "hidden"
+    stored["items"].insert(2, {
+        "instanceId": "owner.quick", "widgetType": "home.quick-actions", "visibility": "visible",
+        "placement": {"x": 0, "y": 12, "w": 4, "h": 2}, "sizeVariant": "compact", "config": {}
+    })
+    others = [deepcopy(item) for item in stored["items"] if item["widgetType"] != "home.quick-actions"]
+    migrated = overview_layout.migrate_preset_v5_to_v6(stored)
+    assert migrated["presetVersion"] == 6
+    assert migrated["items"] == others
+    assert overview_layout.migrate_preset_v5_to_v6(migrated) == migrated
+    original = json.dumps(stored, ensure_ascii=False).encode()
+    path.write_bytes(original)
+    recovered, warnings, unplaced = overview_layout.recover_stored_layout(stored)
+    assert recovered is not None
+    assert recovered["revision"] == 17
+    assert recovered["items"] == others
+    assert warnings == []
+    assert unplaced == []
+    assert not any(item["widgetType"] == "home.kettle" for item in recovered["items"])
+    with TestClient(module.app) as client:
+        payload = get_layout(client).json()
+        assert payload["items"] == others
+        assert payload["warnings"] == []
+        assert payload["unplaced"] == []
+    assert path.read_bytes() == original
+    current = {**stored, "presetVersion": 6, "items": others}
+    assert overview_layout.migrate_preset_v5_to_v6(current) == current
+    only_quick = {**stored, "items": [stored["items"][2]]}
+    empty, warnings, unplaced = overview_layout.recover_stored_layout(only_quick)
+    assert empty is not None and empty["items"] == []
+    assert warnings == [] and unplaced == []
+
+
 def test_home_climate_registry_shipped_v4_and_strict_size_singleton_validation(tmp_path, monkeypatch):
     module = load_app(monkeypatch, tmp_path / "layout.json", writes=True)
     from panel_agent import overview_layout
@@ -107,7 +154,7 @@ def test_home_climate_registry_shipped_v4_and_strict_size_singleton_validation(t
         "standard": (7, 3),
         "large": (8, 5),
     }
-    assert overview_layout.shipped_layout()["presetVersion"] == 5
+    assert overview_layout.shipped_layout()["presetVersion"] == 6
     with TestClient(module.app) as client:
         initial = get_layout(client)
         payload = initial.json()
@@ -197,7 +244,7 @@ def test_preset_v2_existing_climate_is_not_duplicated_and_read_does_not_write(tm
 
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 5
+        assert payload["presetVersion"] == 6
         assert payload["revision"] == 11
         assert len([item for item in payload["items"] if item["widgetType"] == "home.climate"]) == 1
     assert path.read_bytes() == original
@@ -241,7 +288,7 @@ def test_preset_v3_to_v4_shrinks_climate_in_place_and_preserves_owner_state(tmp_
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
         recovered = next(item for item in payload["items"] if item["widgetType"] == "home.climate")
-        assert payload["presetVersion"] == 5
+        assert payload["presetVersion"] == 6
         assert payload["revision"] == 12
         assert recovered["placement"] == {"x": 0, "y": 5, "w": 7, "h": 3}
         assert recovered["visibility"] == "hidden"
@@ -286,7 +333,7 @@ def test_get_without_file_returns_shipped_v4_and_no_store(tmp_path, monkeypatch)
         payload = response.json()
         assert payload["schemaVersion"] == "overview.layout.v2"
         assert payload["presetId"] == "overview.default"
-        assert payload["presetVersion"] == 5
+        assert payload["presetVersion"] == 6
         assert payload["revision"] == 0
         assert payload["writesEnabled"] is False
         assert response.headers["cache-control"] == "no-store"
@@ -731,7 +778,7 @@ def test_legacy_migration_and_corrupt_fallback_never_overwrite_bytes(tmp_path, m
     module = load_app(monkeypatch, path, writes=False)
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 5
+        assert payload["presetVersion"] == 6
         assert payload["revision"] == 0
         assert payload["warnings"]
     assert path.read_bytes() == corrupt_bytes

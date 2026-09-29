@@ -181,6 +181,15 @@ export function migratePresetV4ToV5(raw: unknown): unknown {
   return { ...root, items, presetVersion: 5 };
 }
 
+export function migratePresetV5ToV6(raw: unknown): unknown {
+  const root = objectRecord(raw);
+  if (!root || root.schemaVersion !== "overview.layout.v2" || root.presetVersion !== 5) return raw;
+  const items = Array.isArray(root.items)
+    ? root.items.filter((item) => objectRecord(item)?.widgetType !== "home.quick-actions")
+    : [];
+  return { ...root, items, presetVersion: 6 };
+}
+
 export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
   const root = objectRecord(raw);
   if (!root) {
@@ -193,7 +202,7 @@ export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
   }
   const migrated = root.schemaVersion === "overview.layout.v1" || root.version === 1 ? migrateV1ToV2(root) : root;
   const presetV3 = migratePresetV2ToV3(migrated);
-  const presetMigrated = migratePresetV4ToV5(migratePresetV3ToV4(presetV3));
+  const presetMigrated = migratePresetV5ToV6(migratePresetV4ToV5(migratePresetV3ToV4(presetV3)));
   const document = objectRecord(presetMigrated);
   const sourceItems = document && Array.isArray(document.items) ? document.items : null;
   if (!document || document.schemaVersion !== "overview.layout.v2" || !sourceItems) {
@@ -210,6 +219,7 @@ export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
   for (const [index, rawItem] of sourceItems.entries()) {
     const candidate = objectRecord(rawItem);
     const widgetType = candidate?.widgetType;
+    if (widgetType === "home.quick-actions") continue;
     const instanceId = safeId(candidate?.instanceId, `stored.item.${index}`);
     if (typeof widgetType !== "string" || !getOverviewWidgetDefinition(widgetType)) {
       unplaced.push({ instanceId, widgetType: String(widgetType ?? "unknown"), reason: "Виджет не зарегистрирован в текущей версии панели." });
@@ -239,6 +249,10 @@ export function parseRawLayout(raw: unknown): ParsedOverviewLayout {
     });
   }
   if (!items.length) {
+    if (Array.isArray(root.items) && root.items.length > 0 &&
+      root.items.every((item) => objectRecord(item)?.widgetType === "home.quick-actions")) {
+      return { items: [], warnings: [], unplaced: [], usedFallback: false };
+    }
     return {
       items: makeShippedOverviewDocument().items,
       warnings: [...warnings, "В сохранённой панели не осталось валидных виджетов."],

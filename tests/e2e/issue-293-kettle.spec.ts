@@ -26,6 +26,20 @@ test.describe("Issue 293 · dedicated kettle control", () => {
     await expect(page.getByTestId("climate-control-home")).toBeVisible();
     await expect(page.getByTestId("kettle-control")).toBeVisible();
     await expect(page.getByTestId("kettle-current-temperature")).toHaveText("61°");
+    await expect(page.getByTestId("kettle-control")).toContainText("Текущая температура:");
+    const homeGeometry = await page.getByTestId("kettle-control").evaluate(element => {
+      const card = element.getBoundingClientRect();
+      const buttons = Array.from(element.querySelectorAll(".kettle-control__actions button"))
+        .map(button => ({ width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height }));
+      return { width: card.width, height: card.height, column: getComputedStyle(element).gridColumnStart,
+        row: getComputedStyle(element).gridRowStart, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, buttons };
+    });
+    expect(homeGeometry.column).toBe("span 5");
+    expect(homeGeometry.row).toBe("span 3");
+    expect(homeGeometry.width).toBeLessThan(540);
+    expect(homeGeometry.height).toBeLessThan(260);
+    expect(homeGeometry.scrollHeight).toBeLessThanOrEqual(homeGeometry.clientHeight + 1);
+    expect(homeGeometry.buttons.every(button => button.width >= 48 && button.height >= 48)).toBe(true);
     await expect(page.getByTestId("home-secondary-devices").getByText("Чайник")).toHaveCount(0);
     const kettle = page.getByTestId("kettle-control");
     await expect(kettle.getByRole("button", { name: "Включить" })).toBeEnabled();

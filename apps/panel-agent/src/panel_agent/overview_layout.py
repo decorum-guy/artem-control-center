@@ -27,7 +27,7 @@ from .contracts import (
 SCHEMA_VERSION = "overview.layout.v2"
 PROFILE_ID = "samsung-control"
 PRESET_ID = "overview.default"
-PRESET_VERSION = 5
+PRESET_VERSION = 6
 VIEWPORT_CLASS = "landscape-12"
 CANONICAL_COLUMNS = 12
 MAX_ITEMS = 32
@@ -53,6 +53,11 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
         "sizes": {"compact": (4, 5), "standard": (7, 3), "large": (8, 5)},
         "default": "standard",
     },
+    "home.kettle": {
+        "singleton": True,
+        "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (7, 5)},
+        "default": "standard",
+    },
     "home.station-mini-2": {
         "singleton": True,
         "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (7, 5)},
@@ -66,11 +71,6 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
     "planning.summary": {
         "singleton": True,
         "sizes": {"compact": (4, 3), "standard": (5, 4), "large": (7, 5)},
-        "default": "standard",
-    },
-    "home.quick-actions": {
-        "singleton": True,
-        "sizes": {"compact": (4, 2), "standard": (7, 2)},
         "default": "standard",
     },
     "system.health-summary": {
@@ -101,7 +101,6 @@ DEFAULT_INSTANCE_IDS = {
     "home.climate": "fixture.climate",
     "home.station-mini-2": "fixture.station",
     "planning.summary": "fixture.planning",
-    "home.quick-actions": "fixture.quick-actions",
     "system.health-summary": "fixture.health",
 }
 
@@ -374,6 +373,19 @@ def migrate_preset_v4_to_v5(raw: Mapping[str, Any]) -> Dict[str, Any]:
     return migrated
 
 
+def migrate_preset_v5_to_v6(raw: Mapping[str, Any]) -> Dict[str, Any]:
+    """Retire Quick Actions without moving or changing any other saved item."""
+    migrated = deepcopy(dict(raw))
+    if raw.get("schemaVersion") != SCHEMA_VERSION or raw.get("presetVersion") != 5:
+        return migrated
+    source_items = raw.get("items")
+    if isinstance(source_items, list):
+        migrated["items"] = [deepcopy(item) for item in source_items
+                             if not isinstance(item, dict) or item.get("widgetType") != "home.quick-actions"]
+    migrated["presetVersion"] = 6
+    return migrated
+
+
 def _safe_identifier(value: Any, fallback: str) -> str:
     if isinstance(value, str) and 1 <= len(value) <= 80 and value[:1].isalnum():
         if all(char.isalnum() or char in "._-" for char in value):
@@ -589,6 +601,11 @@ def _recover_item(
 
 def recover_stored_layout(raw: Mapping[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[str], List[Dict[str, str]]]:
     """Recover stored/legacy data without writing it back."""
+    original_items = raw.get("items")
+    only_retired_input = isinstance(original_items, list) and bool(original_items) and all(
+        isinstance(candidate, dict) and candidate.get("widgetType") == "home.quick-actions"
+        for candidate in original_items
+    )
     if raw.get("schemaVersion") == "overview.layout.v1" or raw.get("version") == 1:
         raw = migrate_v1_to_v2(raw)
     if raw.get("schemaVersion") != SCHEMA_VERSION:
@@ -599,6 +616,8 @@ def recover_stored_layout(raw: Mapping[str, Any]) -> Tuple[Optional[Dict[str, An
         raw = migrate_preset_v3_to_v4(raw)
     if raw.get("presetVersion") == 4:
         raw = migrate_preset_v4_to_v5(raw)
+    if raw.get("presetVersion") == 5:
+        raw = migrate_preset_v5_to_v6(raw)
     if raw.get("profileId") not in {None, PROFILE_ID}:
         return None, ["stored layout profile is not recognized"], []
     if raw.get("presetId") not in {None, PRESET_ID}:
@@ -624,12 +643,14 @@ def recover_stored_layout(raw: Mapping[str, Any]) -> Tuple[Optional[Dict[str, An
         if not isinstance(candidate, dict):
             warnings.append(f"item {index}: malformed item skipped")
             continue
+        if candidate.get("widgetType") == "home.quick-actions":
+            continue
         item, unknown = _recover_item(candidate, index, occupied, seen_ids, singleton_types, warnings)
         if unknown:
             unplaced.append(unknown)
         elif item:
             items.append(item)
-    if not items:
+    if not items and not only_retired_input:
         return None, warnings + ["stored layout has no valid widgets"], unplaced
     result = {
         "schemaVersion": SCHEMA_VERSION,

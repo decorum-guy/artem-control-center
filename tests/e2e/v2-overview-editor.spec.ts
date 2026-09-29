@@ -19,7 +19,7 @@ type LayoutDocument = {
   schemaVersion: "overview.layout.v2";
   profileId: "samsung-control";
   presetId: "overview.default";
-  presetVersion: 5;
+  presetVersion: 6;
   revision: number;
   viewportClass: "landscape-12";
   updatedAt: string;
@@ -110,7 +110,7 @@ function makeDocument(revision = 0, items: readonly LayoutItem[] = foundationIte
     schemaVersion: "overview.layout.v2",
     profileId: "samsung-control",
     presetId: "overview.default",
-    presetVersion: 5,
+    presetVersion: 6,
     revision,
     viewportClass: "landscape-12",
     updatedAt: "2026-08-14T12:00:00+00:00",

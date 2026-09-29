@@ -1,7 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { migratePresetV2ToV3, migratePresetV3ToV4, migratePresetV4ToV5, migrateV1ToV2, parseRawLayout } from "./overviewMigrations";
+import { migratePresetV2ToV3, migratePresetV3ToV4, migratePresetV4ToV5, migratePresetV5ToV6, migrateV1ToV2, parseRawLayout } from "./overviewMigrations";
 
 describe("pure Overview migrations and recovery", () => {
+  it("retires only Quick Actions in v6 and leaves unrelated saved values intact", () => {
+    const coffee = { instanceId: "owner.coffee", widgetType: "home.coffee-machine", visibility: "hidden",
+      placement: { x: 2, y: 6, w: 7, h: 4 }, sizeVariant: "standard", config: { imageScalePct: 115, stateReadyXOffsetPx: 8 } };
+    const planning = { instanceId: "owner.planning", widgetType: "planning.summary", visibility: "visible",
+      placement: { x: 7, y: 1, w: 5, h: 4 }, sizeVariant: "standard", config: { density: "compact" } };
+    const quick = { instanceId: "owner.quick", widgetType: "home.quick-actions", visibility: "visible",
+      placement: { x: 0, y: 1, w: 4, h: 2 }, sizeVariant: "compact", config: {} };
+    const input = { schemaVersion: "overview.layout.v2", presetVersion: 5, items: [coffee, quick, planning] };
+    const migrated = migratePresetV5ToV6(input) as typeof input;
+    expect(migrated).toEqual({ ...input, presetVersion: 6, items: [coffee, planning] });
+    expect(migratePresetV5ToV6(migrated)).toEqual(migrated);
+    const parsed = parseRawLayout(input);
+    expect(parsed.items.map((item) => item.widgetType)).toEqual(["home.coffee-machine", "planning.summary"]);
+    expect(parsed.unplaced).toEqual([]);
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.items.some((item) => item.widgetType === "home.kettle")).toBe(false);
+    const unchanged = migratePresetV5ToV6({ ...input, items: [coffee, planning] }) as typeof input;
+    expect(unchanged.items).toEqual([coffee, planning]);
+    expect(parseRawLayout({ ...input, items: [quick] })).toEqual({
+      items: [], warnings: [], unplaced: [], usedFallback: false
+    });
+  });
   it("adds the Station without moving persisted widgets", () => {
     const existing = { instanceId: "owner.widget", widgetType: "home.coffee-machine", sizeVariant: "standard",
       visibility: "visible", placement: { x: 0, y: 0, w: 7, h: 4 }, config: {} };

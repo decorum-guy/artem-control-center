@@ -961,10 +961,10 @@ export interface MaterializedWidget {
 export type OverviewWidgetType =
   | "home.coffee-machine"
   | "home.climate"
+  | "home.kettle"
   | "home.station-mini-2"
   | "system.rog-g703-operational"
   | "planning.summary"
-  | "home.quick-actions"
   | "system.health-summary"
   | "weather.alert"
   | "planning.calendar-agenda"
@@ -1011,7 +1011,7 @@ export interface OverviewLayoutDocument {
   schemaVersion: "overview.layout.v2";
   profileId: "samsung-control";
   presetId: "overview.default";
-  presetVersion: 5;
+  presetVersion: 6;
   revision: number;
   viewportClass: "landscape-12";
   updatedAt: string;
