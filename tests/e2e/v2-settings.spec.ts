@@ -6,6 +6,7 @@ const v2Enabled = process.env.VITE_V2_VISUAL_SHELL === "true";
 const overviewRouteTestId = process.env.VITE_OVERVIEW_V2_ENABLED === "true"
   ? "route-overview-v2"
   : "route-overview";
+const jarvisVisibilityStorageKey = "artem-control-center.jarvis-visible";
 
 type TimingSettings = {
   schemaVersion: 1;
@@ -267,6 +268,10 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(page.getByTestId("settings-summary-reminder-delivery")).toBeVisible();
     await expect(page.getByTestId("settings-summary-access")).toBeVisible();
     await expect(page.getByTestId("settings-summary-runtime")).toBeVisible();
+    const jarvisToggle = page.getByTestId("settings-jarvis-visible");
+    await expect(jarvisToggle).toBeVisible();
+    await expect(jarvisToggle.locator('input[type="checkbox"]')).not.toBeChecked();
+    await expectSwitchGeometry(jarvisToggle, "Выкл");
 
     const motionLabels = [
       ["full", "Полное"],
@@ -308,6 +313,35 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     expect(appearance?.height).toBeGreaterThanOrEqual(100);
     expect(appearance?.height).toBeLessThanOrEqual(140);
     expect(columns[1]).toBeGreaterThan(columns[0]);
+    await expectNoDocumentOverflow(page);
+  });
+
+  test("Jarvis overlay defaults hidden and can be restored persistently from Appearance", async ({ page }) => {
+    await mockCoffeeSettings(page);
+    await page.goto("/settings");
+    await page.evaluate((storageKey) => window.localStorage.removeItem(storageKey), jarvisVisibilityStorageKey);
+    await page.reload();
+    await expect(page.getByTestId("route-settings")).toBeVisible();
+
+    const toggle = page.getByTestId("settings-jarvis-visible");
+    const checkbox = toggle.locator('input[type="checkbox"]');
+    await expect(checkbox).not.toBeChecked();
+    await expect(page.getByTestId("jarvis-launcher")).toHaveCount(0);
+
+    await checkbox.check();
+    await expect(checkbox).toBeChecked();
+    await expectSwitchGeometry(toggle, "Вкл");
+    await expect(page.getByTestId("jarvis-launcher")).toBeVisible();
+    expect(await page.evaluate((storageKey) => window.localStorage.getItem(storageKey), jarvisVisibilityStorageKey)).toBe("true");
+
+    await page.reload();
+    await expect(page.getByTestId("route-settings")).toBeVisible();
+    await expect(page.getByTestId("settings-jarvis-visible").locator('input[type="checkbox"]')).toBeChecked();
+    await expect(page.getByTestId("jarvis-launcher")).toBeVisible();
+
+    await page.getByTestId("settings-jarvis-visible").locator('input[type="checkbox"]').uncheck();
+    await expect(page.getByTestId("jarvis-launcher")).toHaveCount(0);
+    expect(await page.evaluate((storageKey) => window.localStorage.getItem(storageKey), jarvisVisibilityStorageKey)).toBe("false");
     await expectNoDocumentOverflow(page);
   });
 
