@@ -27,6 +27,7 @@ import { InterfaceCopySettingsSheet } from "./InterfaceCopySettings";
 import { DeviceVisibilitySettingsSheet, deviceVisibilityStateLabel, deviceVisibilitySummary } from "./DeviceVisibilitySettings";
 import { ProjectSettingsSheet } from "./ProjectSettings";
 import { SystemControlsSettings } from "./SystemControlsSettings";
+import { SettingSwitchRow } from "./SettingSwitchRow";
 import { projectRegistryStateLabel, projectRegistrySummary } from "../../projectRegistryPresentation";
 import { useDeviceVisibility } from "../../DeviceVisibility";
 import { useInterfaceCopy } from "../../interfaceCopy";
@@ -56,6 +57,8 @@ export function SettingsV2Page({
   calendarSources,
   onThemeChange,
   onMotionChange,
+  jarvisVisible,
+  onJarvisVisibleChange,
   onRefreshCalendarMetadata,
   onNavigate
 }: {
@@ -64,6 +67,8 @@ export function SettingsV2Page({
   calendarSources: PlanningCalendarSource[];
   onThemeChange: (theme: Theme) => void;
   onMotionChange: (motion: MotionMode) => void;
+  jarvisVisible: boolean;
+  onJarvisVisibleChange: (visible: boolean) => void;
   onRefreshCalendarMetadata: () => Promise<boolean>;
   onNavigate: (target: ShellNavigationTarget) => void;
 }) {
@@ -124,6 +129,16 @@ export function SettingsV2Page({
                 </button>
               ))}
             </div>
+          </div>
+          <div className="settings-v2-control settings-v2-control--jarvis">
+            <span className="settings-v2-control__label">Jarvis</span>
+            <SettingSwitchRow
+              label="Показывать окно"
+              description="Окно помощника поверх панели"
+              checked={jarvisVisible}
+              onChange={onJarvisVisibleChange}
+              testId="settings-jarvis-visible"
+            />
           </div>
         </div>
       </section>
