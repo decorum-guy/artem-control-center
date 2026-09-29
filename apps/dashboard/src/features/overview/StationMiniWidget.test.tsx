@@ -70,7 +70,7 @@ describe("Station Mini 2 Overview widget", () => {
   });
 
   it("keeps artwork contained and behind the transient glow while preserving touch and motion rules", () => {
-    const css = readFileSync("src/features/overview/overviewWidgets.css", "utf8");
+    const css = readFileSync("src/features/overview/overviewWidgets.css", "utf8").replace(/\r\n/g, "\n");
     const html = renderToStaticMarkup(<StationMiniWidget interactive />);
     const keyframes = css.slice(css.indexOf("@keyframes station-mini-widget-glow-pulse"), css.indexOf(".station-mini-widget__image"));
     const reducedMotion = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce) {\n  .station-mini-widget__glow"));
