@@ -96,6 +96,13 @@ export function SettingsV2Page({
         <div className="settings-v2-appearance__copy">
           <h2 id="settings-v2-appearance-title">Внешний вид</h2>
           <p>Спокойная тема и предсказуемое движение для этого экрана.</p>
+          <SettingSwitchRow
+            label="Jarvis"
+            description="Показывать окно помощника поверх панели"
+            checked={jarvisVisible}
+            onChange={onJarvisVisibleChange}
+            testId="settings-jarvis-visible"
+          />
         </div>
         <div className="settings-v2-appearance__controls">
           <div className="settings-v2-control" role="group" aria-label="Тема">
@@ -129,16 +136,6 @@ export function SettingsV2Page({
                 </button>
               ))}
             </div>
-          </div>
-          <div className="settings-v2-control settings-v2-control--jarvis">
-            <span className="settings-v2-control__label">Jarvis</span>
-            <SettingSwitchRow
-              label="Показывать окно"
-              description="Окно помощника поверх панели"
-              checked={jarvisVisible}
-              onChange={onJarvisVisibleChange}
-              testId="settings-jarvis-visible"
-            />
           </div>
         </div>
       </section>
