@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { overviewWidgetRegistry, resolveOverviewWidgetSize } from "./overviewRegistry";
+import { getOverviewWidgetDefinition, overviewWidgetRegistry, resolveOverviewWidgetSize } from "./overviewRegistry";
 
 describe("Overview V2 fixed registry", () => {
   it("contains only the bounded PR3 widget vocabulary", () => {
     expect(overviewWidgetRegistry.map((entry) => entry.widgetType)).toEqual([
       "home.coffee-machine",
+      "home.kettle",
       "home.climate",
       "home.station-mini-2",
       "system.rog-g703-operational",
       "planning.summary",
-      "home.quick-actions",
       "system.health-summary",
       "weather.alert",
       "planning.calendar-agenda",
@@ -43,5 +43,10 @@ describe("Overview V2 fixed registry", () => {
         large: { w: 8, h: 5 }
       }
     });
+    expect(overviewWidgetRegistry.find((entry) => entry.widgetType === "home.kettle")).toMatchObject({
+      title: "Чайник", category: "Дом", singleton: true,
+      sizes: { compact: { w: 4, h: 4 }, standard: { w: 5, h: 4 }, large: { w: 7, h: 5 } }
+    });
+    expect(getOverviewWidgetDefinition("home.quick-actions")).toBeNull();
   });
 });

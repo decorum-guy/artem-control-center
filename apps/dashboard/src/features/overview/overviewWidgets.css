@@ -717,14 +717,8 @@ html[data-theme="day"] .coffee-panel--overview.coffee-panel--running_too_long[da
   flex: 0 0 auto;
 }
 
-.overview-home-widget {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  gap: var(--cc-space-2);
-  padding: 12px 16px;
-}
-
-.overview-climate-widget {
+.overview-climate-widget,
+.overview-kettle-widget {
   display: block;
   min-width: 0;
   min-height: 0;
@@ -732,7 +726,8 @@ html[data-theme="day"] .coffee-panel--overview.coffee-panel--running_too_long[da
   overflow: hidden;
 }
 
-.overview-climate-widget > .climate-control {
+.overview-climate-widget > .climate-control,
+.overview-kettle-widget > .kettle-control {
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -740,77 +735,6 @@ html[data-theme="day"] .coffee-panel--overview.coffee-panel--running_too_long[da
   border: 0;
   border-radius: inherit;
   background: transparent;
-}
-
-.overview-home-widget__cells {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
-  gap: 8px;
-  min-width: 0;
-  min-height: 0;
-}
-
-.overview-home-widget__cells[data-device-count="1"] {
-  grid-template-columns: 1fr;
-}
-
-.overview-home-widget__cell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  align-content: center;
-  align-items: center;
-  min-width: 0;
-  width: 100%;
-  min-height: 48px;
-  padding: 8px 10px;
-  overflow: hidden;
-  border: 1px solid var(--cc-divider);
-  border-radius: var(--cc-radius-control);
-  color: var(--cc-text);
-  background: var(--cc-surface-2);
-  text-align: left;
-}
-
-.overview-home-widget__cell-kicker {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  color: var(--cc-text-muted);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 16px;
-  letter-spacing: .08em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.overview-home-widget__cell strong {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  color: var(--cc-text);
-  font-size: var(--cc-type-body-size);
-  line-height: var(--cc-type-body-line);
-}
-
-.overview-home-widget__cell-state {
-  justify-self: end;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--cc-type-metadata-size);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.overview-home-widget__cell:focus-visible,
-.overview-home-widget__cell:hover {
-  border-color: var(--cc-accent);
-}
-
-.overview-home-widget__cell:focus-visible {
-  outline: 2px solid var(--cc-focus);
-  outline-offset: 2px;
 }
 
 .overview-v2-real-widget__empty {
@@ -1034,19 +958,6 @@ html[data-theme="day"] .coffee-panel--overview.coffee-panel--running_too_long[da
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .climate-control--overview .climate-control__mode-label,
 .overview-v2-grid-shell[data-grid-profile="compact-4"] .climate-control--overview .climate-control__fan-label {
   grid-column: 1 / -1;
-}
-
-.overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-home-widget {
-  padding: 10px;
-}
-
-.overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-home-widget__cells {
-  grid-template-columns: 1fr;
-  overflow: auto;
-}
-
-.overview-v2-grid-shell[data-grid-profile="compact-4"] .overview-home-widget__cell:nth-child(n + 2) {
-  display: none;
 }
 
 @media (max-width: 719px) {

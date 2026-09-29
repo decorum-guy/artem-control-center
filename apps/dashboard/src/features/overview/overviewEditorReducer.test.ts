@@ -4,6 +4,7 @@ import {
   addOverviewWidget,
   createOverviewEditorState,
   makeShippedOverviewDocument,
+  normalizeOverviewDocument,
   moveOverviewItem,
   overviewEditorDirty,
   overviewEditorReducer,
@@ -16,6 +17,16 @@ import {
 import { projectOverviewLayout } from "./layoutValidation";
 
 describe("Overview edit reducer", () => {
+  it("filters retired Quick Actions from an older canonical response", () => {
+    const original = makeShippedOverviewDocument(true);
+    const retired = { instanceId: "owner.quick", widgetType: "home.quick-actions", visibility: "visible" as const,
+      placement: { x: 0, y: 12, w: 4, h: 2 }, sizeVariant: "compact", config: {} };
+    const recovered = normalizeOverviewDocument({ ...original, items: [...original.items, retired],
+      unplaced: [{ instanceId: "owner.quick", widgetType: "home.quick-actions", reason: "old" }] });
+    expect(recovered.items).toEqual(original.items);
+    expect(recovered.unplaced).toEqual([]);
+    expect(recovered.presetVersion).toBe(6);
+  });
   it("enters with an in-memory clone and live state does not dirty it", () => {
     const state = createOverviewEditorState(makeShippedOverviewDocument(true));
     const editing = overviewEditorReducer(state, { type: "enter" });
@@ -88,6 +99,18 @@ describe("Overview edit reducer", () => {
       placement: { w: 7, h: 3 }
     });
     expect(addOverviewWidget(restored.items, "home.climate").ok).toBe(false);
+  });
+
+  it("adds and removes one Kettle without moving existing widgets", () => {
+    const before = overviewFoundationLayout();
+    const added = addOverviewWidget(before, "home.kettle");
+    expect(added.ok).toBe(true);
+    expect(added.items.slice(0, before.length)).toEqual(before);
+    const kettle = added.items.find((item) => item.widgetType === "home.kettle")!;
+    expect(kettle).toMatchObject({ sizeVariant: "standard", placement: { w: 5, h: 4 }, config: {} });
+    expect(addOverviewWidget(added.items, "home.kettle").ok).toBe(false);
+    const removed = removeOverviewWidget(added.items, kettle.instanceId);
+    expect(removed.find((item) => item.instanceId === kettle.instanceId)?.visibility).toBe("hidden");
   });
 
   it("tracks config dirty state, resets only one widget, and preserves config across resize", () => {

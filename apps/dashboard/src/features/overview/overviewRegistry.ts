@@ -54,6 +54,24 @@ export const overviewWidgetRegistry: readonly OverviewWidgetDefinition[] = [
     fixtureCopy: "Структурный слот состояния и безопасного действия."
   }),
   definition({
+    widgetType: "home.kettle",
+    title: "Чайник",
+    category: "Дом",
+    iconKey: "home",
+    singleton: true,
+    minW: 4,
+    minH: 4,
+    maxW: 7,
+    maxH: 5,
+    defaultSizeVariant: "standard",
+    sizes: {
+      compact: { w: 4, h: 4 },
+      standard: { w: 5, h: 4 },
+      large: { w: 7, h: 5 }
+    },
+    fixtureCopy: "Текущая температура и управление чайником."
+  }),
+  definition({
     widgetType: "home.climate",
     title: "Кондиционер",
     category: "Дом",
@@ -120,23 +138,6 @@ export const overviewWidgetRegistry: readonly OverviewWidgetDefinition[] = [
       large: { w: 7, h: 5 }
     },
     fixtureCopy: "Структурный слот ближайших дел без фиктивных счётчиков."
-  }),
-  definition({
-    widgetType: "home.quick-actions",
-    title: "Быстрые действия дома",
-    category: "Дом",
-    iconKey: "home",
-    singleton: true,
-    minW: 4,
-    minH: 2,
-    maxW: 7,
-    maxH: 2,
-    defaultSizeVariant: "standard",
-    sizes: {
-      compact: { w: 4, h: 2 },
-      standard: { w: 7, h: 2 }
-    },
-    fixtureCopy: "Структурный слот будущих локальных действий."
   }),
   definition({
     widgetType: "system.health-summary",

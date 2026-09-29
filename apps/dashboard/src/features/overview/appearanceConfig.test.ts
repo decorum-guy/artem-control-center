@@ -109,7 +109,7 @@ describe("bounded Overview appearance schema", () => {
   it("keeps schemas source-owned and conservative for unsupported widgets", () => {
     expect(appearanceControlsFor("system.rog-g703-operational")).toEqual([]);
     expect(appearanceControlsFor("system.health-summary")).toEqual([]);
-    expect(appearanceControlsFor("home.quick-actions")).toEqual([]);
+    expect(appearanceControlsFor("home.kettle")).toEqual([]);
     expect(appearanceControlsFor("planning.summary").map((control) => control.key)).toEqual(["density"]);
   });
 
