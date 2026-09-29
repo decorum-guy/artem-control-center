@@ -97,10 +97,24 @@ describe("Overview V2 placement validation", () => {
       item("climate-two", "home.climate", "standard", { x: 0, y: 3, w: 7, h: 3 })
     ]).issues.map((issue) => issue.code)).toContain("duplicate-singleton");
     const kettle = getOverviewWidgetDefinition("home.kettle")!;
-    for (const variant of ["compact", "standard", "large"]) {
+    expect(kettle.minH).toBe(3);
+    expect(kettle.sizes).toEqual({
+      compact: { w: 4, h: 4 },
+      standard: { w: 5, h: 4 },
+      large: { w: 7, h: 5 },
+      detail: { w: 7, h: 3 }
+    });
+    for (const variant of ["compact", "standard", "large", "detail"]) {
       const size = resolveOverviewWidgetSize(kettle, variant)!;
       expect(validateOverviewLayout([item(`kettle-${variant}`, "home.kettle", variant, { x: 0, y: 0, ...size })]).valid).toBe(true);
     }
+    const legacyStandard = item("kettle-standard", "home.kettle", "standard", { x: 2, y: 6, w: 5, h: 4 });
+    expect(validateOverviewLayout([legacyStandard]).valid).toBe(true);
+    expect(projectOverviewLayout([legacyStandard], 1280).items[0]).toMatchObject({
+      item: legacyStandard,
+      sizeVariant: "standard",
+      placement: { x: 2, y: 6, w: 5, h: 4 }
+    });
     expect(validateOverviewLayout([
       item("kettle-one", "home.kettle", "compact", { x: 0, y: 0, w: 4, h: 4 }),
       item("kettle-two", "home.kettle", "compact", { x: 4, y: 0, w: 4, h: 4 })

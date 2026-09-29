@@ -78,6 +78,15 @@ describe("Overview edit reducer", () => {
     expect(result.items.find((item) => item.instanceId === "fixture.planning")?.placement.y).toBeGreaterThan(1);
   });
 
+  it("resizes Kettle to the opt-in 7 by 3 detail size", () => {
+    const kettle = { instanceId: "owner.kettle", widgetType: "home.kettle", visibility: "visible" as const,
+      placement: { x: 0, y: 4, w: 5, h: 4 }, sizeVariant: "standard", config: {} };
+    const result = resizeOverviewItem([kettle], "owner.kettle", "detail");
+    expect(result.ok).toBe(true);
+    expect(result.items).toEqual([{ ...kettle, sizeVariant: "detail", placement: { x: 0, y: 4, w: 7, h: 3 } }]);
+    expect(kettle).toMatchObject({ sizeVariant: "standard", placement: { w: 5, h: 4 } });
+  });
+
   it("adds first-fit, blocks visible singleton duplicates, hides, and restores identity", () => {
     const removed = removeOverviewWidget(overviewFoundationLayout(), "fixture.coffee");
     const restored = addOverviewWidget(removed, "home.coffee-machine");
