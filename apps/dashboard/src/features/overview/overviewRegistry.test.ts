@@ -20,6 +20,7 @@ describe("Overview V2 fixed registry", () => {
   it("declares the normative named sizes without runtime bindings", () => {
     const coffee = overviewWidgetRegistry.find((entry) => entry.widgetType === "home.coffee-machine")!;
     const climate = overviewWidgetRegistry.find((entry) => entry.widgetType === "home.climate")!;
+    const kettle = overviewWidgetRegistry.find((entry) => entry.widgetType === "home.kettle")!;
     expect(coffee.sizes).toEqual({
       compact: { w: 4, h: 3 },
       standard: { w: 7, h: 4 },
@@ -43,10 +44,22 @@ describe("Overview V2 fixed registry", () => {
         large: { w: 8, h: 5 }
       }
     });
-    expect(overviewWidgetRegistry.find((entry) => entry.widgetType === "home.kettle")).toMatchObject({
+    expect(kettle).toMatchObject({
       title: "Чайник", category: "Дом", singleton: true,
-      sizes: { compact: { w: 4, h: 4 }, standard: { w: 5, h: 4 }, large: { w: 7, h: 5 } }
+      minW: 4,
+      minH: 3,
+      maxW: 7,
+      maxH: 5,
+      defaultSizeVariant: "standard",
+      sizes: {
+        compact: { w: 4, h: 4 },
+        standard: { w: 5, h: 4 },
+        large: { w: 7, h: 5 },
+        detail: { w: 7, h: 3 }
+      }
     });
+    expect(Object.keys(kettle.sizes)).toEqual(["compact", "standard", "large", "detail"]);
+    expect(resolveOverviewWidgetSize(kettle, "detail")).toEqual({ w: 7, h: 3 });
     expect(getOverviewWidgetDefinition("home.quick-actions")).toBeNull();
   });
 });

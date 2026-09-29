@@ -104,7 +104,7 @@ def test_kettle_v6_vocabulary_and_quick_actions_retirement(tmp_path, monkeypatch
     from panel_agent import overview_layout
 
     assert overview_layout.WIDGETS["home.kettle"]["sizes"] == {
-        "compact": (4, 4), "standard": (5, 4), "large": (7, 5)
+        "compact": (4, 4), "standard": (5, 4), "large": (7, 5), "detail": (7, 3)
     }
     assert "home.quick-actions" not in overview_layout.WIDGETS
     stored = overview_layout.shipped_layout(revision=17)
@@ -143,6 +143,77 @@ def test_kettle_v6_vocabulary_and_quick_actions_retirement(tmp_path, monkeypatch
     empty, warnings, unplaced = overview_layout.recover_stored_layout(only_quick)
     assert empty is not None and empty["items"] == []
     assert warnings == [] and unplaced == []
+
+
+def test_kettle_detail_size_is_opt_in_and_preserves_stored_layout_until_explicit_resize(tmp_path, monkeypatch):
+    path = tmp_path / "layout.json"
+    module = load_app(monkeypatch, path, writes=True)
+    from panel_agent import overview_layout
+
+    assert overview_layout.PRESET_VERSION == 6
+    assert overview_layout.shipped_layout()["presetVersion"] == 6
+    stored = {
+        "schemaVersion": overview_layout.SCHEMA_VERSION,
+        "profileId": overview_layout.PROFILE_ID,
+        "presetId": overview_layout.PRESET_ID,
+        "presetVersion": 6,
+        "revision": 21,
+        "viewportClass": overview_layout.VIEWPORT_CLASS,
+        "updatedAt": "2026-09-29T00:00:00+00:00",
+        "items": [{
+            "instanceId": "owner.kettle",
+            "widgetType": "home.kettle",
+            "visibility": "visible",
+            "placement": {"x": 0, "y": 4, "w": 5, "h": 4},
+            "sizeVariant": "standard",
+            "config": {},
+        }, {
+            "instanceId": "owner.planning",
+            "widgetType": "planning.summary",
+            "visibility": "visible",
+            "placement": {"x": 7, "y": 4, "w": 5, "h": 4},
+            "sizeVariant": "standard",
+            "config": {"density": "comfortable"},
+        }],
+    }
+    original = json.dumps(stored, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    path.write_bytes(original)
+
+    recovered, warnings, unplaced = overview_layout.recover_stored_layout(stored)
+    assert recovered == stored
+    assert warnings == []
+    assert unplaced == []
+
+    with TestClient(module.app) as client:
+        old_layout = get_layout(client)
+        old_payload = old_layout.json()
+        assert old_payload["presetVersion"] == 6
+        assert old_payload["revision"] == 21
+        assert old_payload["items"] == stored["items"]
+        assert old_payload["warnings"] == []
+        assert path.read_bytes() == original
+
+        resized_items = deepcopy(old_payload["items"])
+        resized_items[0]["sizeVariant"] = "detail"
+        resized_items[0]["placement"] = {"x": 0, "y": 4, "w": 7, "h": 3}
+        assert resized_items[1] == stored["items"][1]
+        resized = client.patch(
+            "/api/v1/overview/layout",
+            headers={"If-Match": old_layout.headers["etag"]},
+            json={"items": resized_items},
+        )
+        assert resized.status_code == 200
+        assert resized.json()["presetVersion"] == 6
+        assert resized.json()["revision"] == 22
+        assert resized.json()["items"] == resized_items
+
+    restarted_module = load_app(monkeypatch, path, writes=True)
+    with TestClient(restarted_module.app) as client:
+        reloaded = get_layout(client).json()
+        assert reloaded["presetVersion"] == 6
+        assert reloaded["revision"] == 22
+        assert reloaded["items"] == resized_items
+        assert reloaded["warnings"] == []
 
 
 def test_home_climate_registry_shipped_v4_and_strict_size_singleton_validation(tmp_path, monkeypatch):

@@ -52,6 +52,43 @@ async function installActions(page: Page) {
   return posts;
 }
 
+async function measureKettleGeometry(kettle: ReturnType<Page["locator"]>) {
+  return kettle.evaluate(element => {
+    const control = element.querySelector<HTMLElement>(".kettle-control");
+    const status = element.querySelector<HTMLElement>(".kettle-control__status");
+    const actions = element.querySelector<HTMLElement>(".kettle-control__actions");
+    const widget = element.closest<HTMLElement>(".overview-v2-grid-item");
+    if (!control || !status || !actions || !widget) throw new Error("Kettle geometry is incomplete");
+    const widgetRect = widget.getBoundingClientRect();
+    const content = Array.from(control.querySelectorAll<HTMLElement>(
+      "h2, .kettle-control__temperature-label, .kettle-control__temperature, .kettle-control__status, .kettle-control__actions"
+    )).map(node => {
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+    });
+    const buttons = Array.from(actions.querySelectorAll("button")).map(button => {
+      const rect = button.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    });
+    return {
+      statusToActionsGap: actions.getBoundingClientRect().top - status.getBoundingClientRect().bottom,
+      widgetHeight: widgetRect.height,
+      widgetTop: widgetRect.top,
+      widgetBottom: widgetRect.bottom,
+      contentTop: Math.min(...content.map(rect => rect.top)),
+      contentBottom: Math.max(...content.map(rect => rect.bottom)),
+      contentHeight: Math.max(...content.map(rect => rect.bottom)) - Math.min(...content.map(rect => rect.top)),
+      contentInsetTop: Math.min(...content.map(rect => rect.top)) - widgetRect.top,
+      contentInsetBottom: widgetRect.bottom - Math.max(...content.map(rect => rect.bottom)),
+      contentWithinWidget: content.every(rect => rect.top >= widgetRect.top - 1 && rect.bottom <= widgetRect.bottom + 1 &&
+        rect.left >= widgetRect.left - 1 && rect.right <= widgetRect.right + 1),
+      controlHasNoVerticalOverflow: control.scrollHeight <= control.clientHeight + 1,
+      buttons,
+      pageWidth: { document: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth }
+    };
+  });
+}
+
 test.describe("Issue 297 · trusted Overview Kettle", () => {
   test.skip(!enabled, "Requires the V2 Overview shell.");
 
@@ -66,6 +103,12 @@ test.describe("Issue 297 · trusted Overview Kettle", () => {
     await expect(kettle.getByTestId("kettle-current-temperature")).toHaveText("61°");
     await expect(kettle.getByRole("status")).toHaveText("Выключен");
     expect(await kettle.getByTestId("kettle-control").evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+    const gap = await kettle.locator(".kettle-control__actions").evaluate(actions => {
+      const status = actions.parentElement?.querySelector(".kettle-control__status");
+      return status ? actions.getBoundingClientRect().top - status.getBoundingClientRect().bottom : Number.NaN;
+    });
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(8);
     const sizes = await kettle.locator(".kettle-control__actions button").evaluateAll(buttons => buttons.map(button => {
       const rect = button.getBoundingClientRect();
       return { width: rect.width, height: rect.height };
@@ -131,6 +174,83 @@ test.describe("Issue 297 · trusted Overview Kettle", () => {
     expect(state.patches[1].find(item => item.widgetType === "home.coffee-machine"))
       .toEqual(state.patches[0].find(item => item.widgetType === "home.coffee-machine"));
     expect(posts).toHaveLength(0);
+  });
+
+  test("editor resize to 7 by 3 persists and fits all Kettle content at 1280 by 720", async ({ page }) => {
+    test.skip(!editorEnabled, "Requires the Overview editor.");
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const state = await installLayout(page, [kettleItem]);
+    const posts = await installActions(page);
+    await page.goto("/overview?scenario=home-climate-healthy&overviewEdit=1");
+
+    const frame = page.locator('.overview-edit-frame[data-widget-type="home.kettle"]');
+    await expect(frame).toBeVisible();
+    await frame.click();
+    await frame.getByRole("button", { name: "Меню перемещения виджета" }).click();
+    await page.getByRole("menuitem", { name: "Размер 7 × 3" }).click();
+    const resizedFrame = page.locator('.overview-v2-grid-item[data-widget-type="home.kettle"]');
+    await expect(resizedFrame).toHaveAttribute("data-size-variant", "detail");
+    await expect(resizedFrame).toHaveAttribute("data-grid-w", "7");
+    await expect(resizedFrame).toHaveAttribute("data-grid-h", "3");
+    await expect(frame.getByRole("button", { name: "Включить" })).toBeDisabled();
+    await expect(frame.getByRole("button", { name: "Выбрать чай" })).toBeDisabled();
+    await frame.getByRole("button", { name: "Включить" }).evaluate(button => (button as HTMLButtonElement).click());
+    await frame.getByRole("button", { name: "Выбрать чай" }).evaluate(button => (button as HTMLButtonElement).click());
+    await expect(page.getByRole("dialog", { name: "Выбрать чай" })).toHaveCount(0);
+    expect(posts).toHaveLength(0);
+
+    await page.getByTestId("overview-save").click();
+    expect(state.patches).toHaveLength(1);
+    expect(state.patches[0].find(item => item.widgetType === "home.kettle")).toMatchObject({
+      sizeVariant: "detail", placement: { w: 7, h: 3 }
+    });
+
+    await page.goto("/overview?scenario=home-climate-healthy");
+    const kettle = page.getByTestId("overview-kettle-widget");
+    await expect(kettle).toBeVisible();
+    await expect(kettle).toContainText("Чайник");
+    await expect(kettle).toContainText("Текущая температура:");
+    await expect(kettle.getByTestId("kettle-current-temperature")).toHaveText("61°");
+    await expect(kettle.getByRole("status")).toHaveText("Выключен");
+    await expect(kettle.getByRole("button", { name: "Включить" })).toBeVisible();
+    await expect(kettle.getByRole("button", { name: "Выбрать чай" })).toBeVisible();
+
+    const geometry = await measureKettleGeometry(kettle);
+    console.info("7x3 Kettle geometry at 1280x720", geometry);
+    expect(geometry.statusToActionsGap).toBeGreaterThanOrEqual(0);
+    expect(geometry.statusToActionsGap).toBeLessThanOrEqual(8);
+    expect(geometry.buttons).toHaveLength(2);
+    expect(geometry.buttons.every(button => button.width >= 48 && button.height >= 48)).toBe(true);
+    expect(geometry.contentWithinWidget).toBe(true);
+    expect(geometry.controlHasNoVerticalOverflow).toBe(true);
+    expect(geometry.pageWidth.document).toBeLessThanOrEqual(geometry.pageWidth.viewport + 1);
+
+    await kettle.getByRole("button", { name: "Выбрать чай" }).click();
+    const dialog = page.getByRole("dialog", { name: "Выбрать чай" });
+    await expect(dialog.locator(".kettle-picker__option")).toHaveCount(8);
+    await dialog.getByRole("button", { name: "Отмена" }).click();
+    expect(posts).toHaveLength(0);
+  });
+
+  test("Home Kettle keeps the status-to-actions gap bounded", async ({ page }) => {
+    await installActions(page);
+    await page.goto("/home?scenario=home-climate-healthy");
+    const kettle = page.locator(".kettle-control--home");
+    await expect(kettle).toBeVisible();
+    const gap = await kettle.locator(".kettle-control__actions").evaluate(actions => {
+      const status = actions.parentElement?.querySelector(".kettle-control__status");
+      return status ? actions.getBoundingClientRect().top - status.getBoundingClientRect().bottom : Number.NaN;
+    });
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(8);
+    await expect(kettle.getByRole("button", { name: "Включить" })).toBeVisible();
+    await expect(kettle.getByRole("button", { name: "Выбрать чай" })).toBeVisible();
+    const actionHeights = await kettle.locator(".kettle-control__actions button").evaluateAll(buttons =>
+      buttons.map(button => button.getBoundingClientRect().height)
+    );
+    expect(actionHeights).toHaveLength(2);
+    expect(actionHeights.every(height => height >= 48)).toBe(true);
+    expect(await kettle.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
   });
 
   test("missing live contract stays unavailable and never displays a fake temperature", async ({ page }) => {
