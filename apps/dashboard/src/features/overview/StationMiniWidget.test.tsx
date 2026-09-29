@@ -20,6 +20,7 @@ describe("Station Mini 2 Overview widget", () => {
     root = null;
     host = null;
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("resolves the canonical Station asset through the bounded local asset registry", () => {
@@ -69,13 +70,97 @@ describe("Station Mini 2 Overview widget", () => {
   });
 
   it("keeps artwork contained and behind the transient glow while preserving touch and motion rules", () => {
-    const css = readFileSync("src/features/overview/overviewWidgets.css", "utf8");
+    const css = readFileSync("src/features/overview/overviewWidgets.css", "utf8").replace(/\r\n/g, "\n");
+    const html = renderToStaticMarkup(<StationMiniWidget interactive />);
+    const keyframes = css.slice(css.indexOf("@keyframes station-mini-widget-glow-pulse"), css.indexOf(".station-mini-widget__image"));
+    const reducedMotion = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce) {\n  .station-mini-widget__glow"));
+    expect(html.match(/class="station-mini-widget__glow(?: station-mini-widget__glow--active)?"/g)).toHaveLength(1);
     expect(css).toMatch(/\.station-mini-widget__image\s*\{[^}]*object-fit:\s*contain;[^}]*pointer-events:\s*none;/s);
-    expect(css).toMatch(/\.station-mini-widget__glow\s*\{[^}]*z-index:\s*0;/s);
+    expect(css).toMatch(/\.station-mini-widget__glow\s*\{[^}]*z-index:\s*0;[^}]*width:\s*124px;[^}]*height:\s*124px;[^}]*rgba\(191, 126, 206, \.50\)[^}]*rgba\(162, 105, 194, \.24\)[^}]*filter:\s*blur\(20px\);[^}]*pointer-events:\s*none;/s);
     expect(css).toMatch(/\.station-mini-widget__image\s*\{[^}]*z-index:\s*1;/s);
     expect(css).toMatch(/\.station-mini-widget__fallback\s*\{[^}]*z-index:\s*1;/s);
+    expect(css).toMatch(/\.station-mini-widget__glow--active\s*\{\s*animation:\s*station-mini-widget-glow-pulse 1200ms both;/);
+    expect(keyframes).toContain("33% {\n    opacity: .96;\n    transform: scale(1);");
+    expect(keyframes).toContain("50% {\n    opacity: .92;");
+    expect(keyframes).toContain("100% {\n    opacity: 0;\n    transform: scale(1.03);");
     expect(css).toMatch(/\.station-mini-widget__button\s*\{[^}]*min-width:\s*48px;[^}]*min-height:\s*48px;/s);
     expect(css).toMatch(/\.station-mini-widget__music\s*\{[^}]*min-height:\s*48px;/s);
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[^}]*\.station-mini-widget__glow\s*\{\s*transition:\s*none;\s*transform:\s*none;/s);
+    expect(reducedMotion).toContain(".station-mini-widget__glow {\n    animation: none;\n    transition: none;\n    transform: none;");
+    expect(reducedMotion).toContain(".station-mini-widget__glow--active { opacity: .78; }");
+  });
+
+  it("starts immediately for accepted fixed actions, replays on the next press, and expires without stale timers", async () => {
+    const actions = Object.fromEntries(STATION_ACTIONS.map((actionId) => [actionId, { allowed: true } ]));
+    const actionCalls: Array<{ path: string; method?: string; body?: Record<string, string> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/availability")) {
+        return new Response(JSON.stringify({ schemaVersion: 1, actions }), { status: 200 });
+      }
+      const body = options?.body ? JSON.parse(String(options.body)) as Record<string, string> : undefined;
+      actionCalls.push({ path, method: options?.method, body });
+      return new Response(JSON.stringify({
+        schemaVersion: 1,
+        actionId: body?.actionId,
+        requestId: body?.requestId,
+        status: "dispatched"
+      }), { status: 200 });
+    }));
+    vi.useFakeTimers();
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => { root?.render(<StationMiniWidget interactive />); await Promise.resolve(); });
+    const timersBeforePress = vi.getTimerCount();
+    const play = host.querySelector<HTMLButtonElement>('button[aria-label="Play"]');
+    const volumeUp = host.querySelector<HTMLButtonElement>('button[aria-label="Volume up"]');
+    expect(play?.disabled).toBe(false);
+    expect(volumeUp?.disabled).toBe(false);
+
+    await act(async () => {
+      play?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const firstGlow = host.querySelector(".station-mini-widget__glow");
+    expect(host.querySelectorAll(".station-mini-widget__glow")).toHaveLength(1);
+    expect(firstGlow?.classList.contains("station-mini-widget__glow--active")).toBe(true);
+    expect(vi.getTimerCount()).toBe(timersBeforePress + 1);
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(volumeUp?.disabled).toBe(false);
+    await act(async () => {
+      volumeUp?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const secondGlow = host.querySelector(".station-mini-widget__glow");
+    expect(secondGlow).not.toBe(firstGlow);
+    expect(host.querySelectorAll(".station-mini-widget__glow")).toHaveLength(1);
+    expect(secondGlow?.classList.contains("station-mini-widget__glow--active")).toBe(true);
+    expect(vi.getTimerCount()).toBe(timersBeforePress + 1);
+    expect(actionCalls).toHaveLength(2);
+    expect(actionCalls.map((call) => call.path)).toEqual([
+      "/api/v1/actions/station", "/api/v1/actions/station"
+    ]);
+    expect(actionCalls.map((call) => call.method)).toEqual(["POST", "POST"]);
+    expect(actionCalls.map((call) => call.body?.actionId)).toEqual(["media.alice.play", "media.alice.volume_up"]);
+    for (const call of actionCalls) {
+      expect(Object.keys(call.body ?? {}).sort()).toEqual(["actionId", "requestId"]);
+      expect(call.body?.requestId).toBeTruthy();
+    }
+    expect(host.textContent).toContain("Команда отправлена");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1199); });
+    expect(host.querySelector(".station-mini-widget__glow--active")).not.toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(host.querySelector(".station-mini-widget__glow--active")).toBeNull();
+    expect(vi.getTimerCount()).toBe(timersBeforePress);
+
+    await act(async () => { play?.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(host.querySelector(".station-mini-widget__glow--active")).not.toBeNull();
+    await act(async () => root?.unmount());
+    root = null;
+    expect(vi.getTimerCount()).toBe(timersBeforePress);
   });
 });

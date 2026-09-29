@@ -99,17 +99,39 @@
 .station-mini-widget__glow {
   position: absolute;
   z-index: 0;
-  width: 110px;
-  height: 110px;
+  width: 124px;
+  height: 124px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(191, 126, 206, .43) 0%, rgba(162, 105, 194, .20) 42%, transparent 72%);
-  filter: blur(17px);
+  background: radial-gradient(circle, rgba(191, 126, 206, .50) 0%, rgba(162, 105, 194, .24) 42%, transparent 72%);
+  filter: blur(20px);
   opacity: 0;
-  transform: scale(.82);
-  transition: opacity 180ms ease, transform 220ms ease;
+  transform: scale(.86);
   pointer-events: none;
 }
-.station-mini-widget__glow--active { opacity: 1; transform: scale(1); }
+.station-mini-widget__glow--active {
+  animation: station-mini-widget-glow-pulse 1200ms both;
+}
+@keyframes station-mini-widget-glow-pulse {
+  0% {
+    opacity: 0;
+    transform: scale(.86);
+    animation-timing-function: cubic-bezier(.22, .61, .36, 1);
+  }
+  33% {
+    opacity: .96;
+    transform: scale(1);
+    animation-timing-function: linear;
+  }
+  50% {
+    opacity: .92;
+    transform: scale(1.005);
+    animation-timing-function: cubic-bezier(.4, 0, .2, 1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+}
 .station-mini-widget__image {
   position: absolute;
   inset: 0;
@@ -163,7 +185,12 @@
 .station-presets__confirm button { margin-right: 8px; padding: 0 14px; }
 .station-presets__message { min-height: 1.2em; margin-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
-  .station-mini-widget__glow { transition: none; transform: none; }
+  .station-mini-widget__glow {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+  .station-mini-widget__glow--active { opacity: .78; }
 }
 
 .overview-v2-real-widget__header {

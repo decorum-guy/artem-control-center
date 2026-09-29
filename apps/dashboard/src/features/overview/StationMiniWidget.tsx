@@ -7,6 +7,7 @@ import { addStationPreset, deleteStationPreset, executeStationPreset, fetchStati
 import { resolveWidgetAsset } from "../../widgetAssets";
 
 const STATION_ARTWORK = resolveWidgetAsset("./assets/widgets/station-mini-2.png");
+const STATION_GLOW_FEEDBACK_DURATION_MS = 1200;
 
 const LABELS: Record<StationActionId, string> = {
   "media.alice.play": "Play",
@@ -40,7 +41,8 @@ function ActionIcon({ actionId }: { actionId: StationActionId }) {
 export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   const [availability, setAvailability] = useState<StationActionAvailability | null>(null);
   const [pending, setPending] = useState(false);
-  const [glow, setGlow] = useState(false);
+  const [glowPulse, setGlowPulse] = useState(0);
+  const [glowActive, setGlowActive] = useState(false);
   const [artworkFailed, setArtworkFailed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [sheet, setSheet] = useState<"closed" | "music" | "manage" | "add">("closed");
@@ -58,13 +60,21 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     return () => { active = false; if (glowTimer.current) clearTimeout(glowTimer.current); };
   }, []);
 
+  function triggerGlowFeedback() {
+    setGlowPulse((pulse) => pulse + 1);
+    setGlowActive(true);
+    if (glowTimer.current) clearTimeout(glowTimer.current);
+    glowTimer.current = setTimeout(() => {
+      glowTimer.current = null;
+      setGlowActive(false);
+    }, STATION_GLOW_FEEDBACK_DURATION_MS);
+  }
+
   async function run(actionId: StationActionId) {
     if (pending || !interactive || !availability?.actions[actionId]?.allowed) return;
     setPending(true);
     setMessage(null);
-    setGlow(true);
-    if (glowTimer.current) clearTimeout(glowTimer.current);
-    glowTimer.current = setTimeout(() => setGlow(false), 420);
+    triggerGlowFeedback();
     try {
       await executeStationAction(actionId);
       setMessage("Команда отправлена");
@@ -102,9 +112,7 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   async function runPreset(presetId: string) {
     if (pending || !availability?.actions["media.alice.play"]?.allowed) return;
     setPending(true);
-    setGlow(true);
-    if (glowTimer.current) clearTimeout(glowTimer.current);
-    glowTimer.current = setTimeout(() => setGlow(false), 420);
+    triggerGlowFeedback();
     setSheetMessage("");
     try {
       await executeStationPreset(presetId);
@@ -148,7 +156,7 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   return <WorkZone className="overview-v2-real-widget station-mini-widget" data-testid="overview-station-mini-widget">
     <header className="station-mini-widget__header"><h2>Станция Mini 2</h2></header>
     <div className="station-mini-widget__art" data-testid="station-artwork-slot">
-      <span className={`station-mini-widget__glow${glow ? " station-mini-widget__glow--active" : ""}`} aria-hidden="true" />
+      <span key={glowPulse} className={`station-mini-widget__glow${glowActive ? " station-mini-widget__glow--active" : ""}`} aria-hidden="true" />
       {STATION_ARTWORK && !artworkFailed && <img className="station-mini-widget__image" src={STATION_ARTWORK}
         alt="" aria-hidden="true" draggable={false} decoding="async" onError={() => setArtworkFailed(true)} />}
       {(!STATION_ARTWORK || artworkFailed) && <svg className="station-mini-widget__fallback" viewBox="0 0 80 100" aria-hidden="true">
