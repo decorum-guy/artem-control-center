@@ -268,10 +268,8 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(page.getByTestId("settings-summary-reminder-delivery")).toBeVisible();
     await expect(page.getByTestId("settings-summary-access")).toBeVisible();
     await expect(page.getByTestId("settings-summary-runtime")).toBeVisible();
-    const jarvisToggle = page.getByTestId("settings-jarvis-visible");
-    await expect(jarvisToggle).toBeVisible();
-    await expect(jarvisToggle.locator('input[type="checkbox"]')).not.toBeChecked();
-    await expectSwitchGeometry(jarvisToggle, "Выкл");
+    await expect(page.getByTestId("settings-summary-jarvis")).toBeVisible();
+    await expect(page.getByTestId("settings-summary-jarvis")).toContainText("Выкл");
 
     const motionLabels = [
       ["full", "Полное"],
@@ -316,19 +314,25 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expectNoDocumentOverflow(page);
   });
 
-  test("Jarvis overlay defaults hidden and can be restored persistently from Appearance", async ({ page }) => {
+  test("Jarvis overlay defaults hidden and can be restored persistently from Settings", async ({ page }) => {
     await mockCoffeeSettings(page);
     await page.goto("/settings");
     await page.evaluate((storageKey) => window.localStorage.removeItem(storageKey), jarvisVisibilityStorageKey);
     await page.reload();
     await expect(page.getByTestId("route-settings")).toBeVisible();
 
-    const toggle = page.getByTestId("settings-jarvis-visible");
-    const checkbox = toggle.locator('input[type="checkbox"]');
-    await expect(checkbox).not.toBeChecked();
+    const summary = page.getByTestId("settings-summary-jarvis");
+    await expect(summary).toContainText("Выкл");
     await expect(page.getByTestId("jarvis-launcher")).toHaveCount(0);
 
-    await checkbox.check();
+    await summary.click();
+    const sheet = page.getByTestId("settings-jarvis-sheet");
+    await expect(sheet).toBeVisible();
+    const toggle = sheet.getByTestId("settings-jarvis-visible");
+    const checkbox = toggle.locator('input[type="checkbox"]');
+    await expect(checkbox).not.toBeChecked();
+
+    await toggle.click();
     await expect(checkbox).toBeChecked();
     await expectSwitchGeometry(toggle, "Вкл");
     await expect(page.getByTestId("jarvis-launcher")).toBeVisible();
@@ -336,11 +340,15 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
 
     await page.reload();
     await expect(page.getByTestId("route-settings")).toBeVisible();
-    await expect(page.getByTestId("settings-jarvis-visible").locator('input[type="checkbox"]')).toBeChecked();
+    await expect(page.getByTestId("settings-summary-jarvis")).toContainText("Вкл");
     await expect(page.getByTestId("jarvis-launcher")).toBeVisible();
 
-    await page.getByTestId("settings-jarvis-visible").locator('input[type="checkbox"]').uncheck();
+    await page.getByTestId("settings-summary-jarvis").click();
+    const reloadedToggle = page.getByTestId("settings-jarvis-sheet").getByTestId("settings-jarvis-visible");
+    await expect(reloadedToggle.locator('input[type="checkbox"]')).toBeChecked();
+    await reloadedToggle.click();
     await expect(page.getByTestId("jarvis-launcher")).toHaveCount(0);
+    await expect(page.getByTestId("settings-summary-jarvis")).toContainText("Выкл");
     expect(await page.evaluate((storageKey) => window.localStorage.getItem(storageKey), jarvisVisibilityStorageKey)).toBe("false");
     await expectNoDocumentOverflow(page);
   });
