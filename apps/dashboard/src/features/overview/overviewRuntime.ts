@@ -1,5 +1,6 @@
 import type { CoffeeDelayedStartRecord, DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import type { ShellNavigationTarget } from "../../Shell";
+import type { CoffeeEditorPreviewStage } from "../../coffee";
 
 /** Runtime-only dependencies for trusted, source-owned Overview renderers. */
 export interface OverviewRuntimeContext {
@@ -11,4 +12,5 @@ export interface OverviewRuntimeContext {
   readonly coffeeDelayedStartPending: boolean;
   readonly onCoffeeDelayedStart: () => void;
   readonly editMode: boolean;
+  readonly editorPreview?: { readonly instanceId: string; readonly stage: CoffeeEditorPreviewStage } | null;
 }

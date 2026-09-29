@@ -81,14 +81,16 @@ function renderCoffee(item: OverviewProjectionItem, runtime: OverviewRuntimeCont
       generatedAt={runtime.snapshot.generatedAt}
       manifest={overviewManifest}
       variant="overview"
-      onAction={runtime.editMode ? undefined : runtime.onCoffeeAction}
+      onAction={runtime.onCoffeeAction}
       actionPending={runtime.coffeeActionPending}
       delayedStart={runtime.coffeeDelayedStart}
       delayedStartPending={runtime.coffeeDelayedStartPending}
-      onDelayedStart={runtime.editMode ? undefined : runtime.onCoffeeDelayedStart}
+      onDelayedStart={runtime.onCoffeeDelayedStart}
       interactive={!runtime.editMode}
+      showDelayedStart
       appearanceConfig={coffeeAppearanceConfig(item.item)}
       overviewSizeVariant={overviewSizeVariant(item.sizeVariant)}
+      editorPreviewStage={runtime.editorPreview?.instanceId === item.item.instanceId ? runtime.editorPreview.stage : undefined}
     />
   );
 }

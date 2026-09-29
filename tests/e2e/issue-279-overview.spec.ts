@@ -49,7 +49,7 @@ test("Coffee indicator selection keeps state truth and renders one visual system
   ] as const;
   for (const theme of ["day", "night"] as const) {
     const colors: Record<string, string> = {};
-    const shadows: Record<string, string> = {};
+    const contours: Record<string, string> = {};
     for (const [scenario, stage, canonical, active] of cases) {
       const coffee = await overview(page, scenario, theme);
       await expect(coffee).toHaveAttribute("data-stage", stage);
@@ -66,7 +66,8 @@ test("Coffee indicator selection keeps state truth and renders one visual system
           barContent: bar.content,
           barWidth: bar.width,
           barColor: bar.backgroundColor,
-          barOpacity: parseFloat(bar.opacity)
+          barOpacity: parseFloat(bar.opacity),
+          contourColor: computed.getPropertyValue("--cc-coffee-contour-color").trim()
         };
       });
       const barStyle = await readStyle();
@@ -83,21 +84,26 @@ test("Coffee indicator selection keeps state truth and renders one visual system
       }
 
       await coffee.evaluate((element) => element.setAttribute("data-coffee-indicator", "contour"));
-      await expect.poll(async () => (await readStyle()).shadow === "none").toBe(!active);
-      if (active) await page.waitForTimeout(350);
+      await expect.poll(async () => (await readStyle()).shadow !== "none").toBe(true);
       const contourStyle = await readStyle();
       expect(contourStyle.barContent, `${theme} ${scenario}`).toBe("none");
       expect(contourStyle.animation).toBe("none");
-      expect(contourStyle.borderLeft, `${theme} ${scenario}`).toBe(stage === "running_too_long" ? 3 : 1);
-      if (stage === "running_too_long") {
-        expect(contourStyle.shadow).not.toBe("none");
+      expect(contourStyle.borderLeft, `${theme} ${scenario}`).toBe(1);
+      expect(contourStyle.contourColor, `${theme} ${scenario}`).not.toBe("");
+      if (["off", "turning_on", "warming", "ready", "running", "running_too_long", "stale", "unavailable"].includes(stage)) {
+        contours[stage] = contourStyle.contourColor;
       }
-      if (["ready", "running_too_long"].includes(stage)) shadows[stage] = contourStyle.shadow;
+      expect(contourStyle.contourColor, `${theme} ${scenario}`).not.toBe("rgb(255, 0, 0)");
       await noHorizontalOverflow(page);
     }
     expect(colors.ready).not.toBe(colors.off);
     expect(colors.running_too_long).not.toBe(colors.ready);
-    expect(shadows.running_too_long).not.toBe(shadows.ready);
+    expect(contours.off).not.toBe(contours.turning_on);
+    expect(contours.turning_on).toBe(contours.warming);
+    expect(contours.ready).toBe(contours.running);
+    expect(contours.running_too_long).not.toBe(contours.ready);
+    expect(contours.stale).toBe(contours.unavailable);
+    expect(contours.stale).not.toBe(contours.ready);
   }
 
   await page.emulateMedia({ reducedMotion: "reduce" });

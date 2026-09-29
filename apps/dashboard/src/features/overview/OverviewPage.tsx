@@ -13,6 +13,7 @@ import { overviewEditorDirty, overviewEditorReducer, createOverviewEditorState, 
 import { validateOverviewLayout } from "./layoutValidation";
 import { useInteractionLock } from "../../InteractionLock";
 import { useInterfaceCopy } from "../../interfaceCopy";
+import { coffeeEditorPreviewPresentation, type CoffeeEditorPreviewStage } from "../../coffee";
 import "./overviewEditor.css";
 
 export function OverviewV2Page({
@@ -45,6 +46,7 @@ export function OverviewV2Page({
   const [layoutLoading, setLayoutLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [appearanceInstanceId, setAppearanceInstanceId] = useState<string | null>(null);
+  const [editorPreview, setEditorPreview] = useState<{ instanceId: string; stage: CoffeeEditorPreviewStage } | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [capabilityRevision, setCapabilityRevision] = useState(0);
   const etagRef = useRef('"0"');
@@ -91,6 +93,17 @@ export function OverviewV2Page({
     ? editor.draft.find((item) => item.instanceId === appearanceInstanceId) ?? null
     : null;
 
+  function startEditorPreview(instanceId: string, stage: CoffeeEditorPreviewStage): void {
+    setEditorPreview({ instanceId, stage });
+    setAppearanceInstanceId(null);
+  }
+
+  function closeEditorPreview(): void {
+    const current = editorPreview;
+    setEditorPreview(null);
+    if (current) setAppearanceInstanceId(current.instanceId);
+  }
+
   const runtime = {
     snapshot,
     onNavigate: editMode ? (() => undefined) : onNavigate,
@@ -99,8 +112,21 @@ export function OverviewV2Page({
     coffeeDelayedStart,
     coffeeDelayedStartPending,
     onCoffeeDelayedStart,
-    editMode
+    editMode,
+    editorPreview
   };
+
+  useEffect(() => {
+    if (!editorPreview) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setEditorPreview(null);
+      setAppearanceInstanceId(editorPreview.instanceId);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editorPreview]);
 
   useEffect(() => {
     if (layoutLoading || editMode) return;
@@ -141,6 +167,7 @@ export function OverviewV2Page({
       if (overviewItemsEqual(read.document.items, candidate)) {
         dispatch({ type: "save-succeeded", document: read.document });
         setAppearanceInstanceId(null);
+        setEditorPreview(null);
         showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Изменения применены.", timeoutMs: 6_000 });
         return;
       }
@@ -184,7 +211,8 @@ export function OverviewV2Page({
       etagRef.current = result.etag;
       dispatch({ type: "save-succeeded", document: result.document });
       setAppearanceInstanceId(null);
-        showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Изменения применены.", timeoutMs: 6_000 });
+      setEditorPreview(null);
+      showNotice({ id: "overview.layout.save", severity: "success", title: "Панель сохранена", detail: "Изменения применены.", timeoutMs: 6_000 });
     } catch (error) {
       if (error instanceof OverviewLayoutApiError && error.conflict) {
         dispatch({ type: "save-conflict", message: "Панель изменилась в другом окне. Ваши изменения остаются на экране." });
@@ -218,6 +246,7 @@ export function OverviewV2Page({
       etagRef.current = result.etag;
       dispatch({ type: "load-server", document: result.document });
       setAppearanceInstanceId(null);
+      setEditorPreview(null);
     } catch {
       dispatch({ type: "message", message: "Не удалось загрузить текущую версию панели." });
     }
@@ -227,10 +256,25 @@ export function OverviewV2Page({
     dispatch({ type: "cancel" });
     setPickerOpen(false);
     setAppearanceInstanceId(null);
+    setEditorPreview(null);
     setAnnouncement("");
   }
 
-  const toolbar = editMode ? (
+  const toolbar = editMode && editorPreview ? (
+    <header className="overview-v2-toolbar overview-v2-toolbar--edit overview-v2-toolbar--preview" data-testid="overview-editor-preview-toolbar">
+      <p className="overview-v2-preview-label" role="status" aria-live="polite">
+        Предпросмотр: {coffeeEditorPreviewPresentation(editorPreview.stage).label}
+      </p>
+      <button
+        type="button"
+        className="overview-v2-toolbar__secondary"
+        data-testid="overview-editor-preview-close"
+        onClick={closeEditorPreview}
+      >
+        Закрыть предпросмотр
+      </button>
+    </header>
+  ) : editMode ? (
     <EditToolbar
       dirty={dirty}
       saving={saving}
@@ -242,6 +286,7 @@ export function OverviewV2Page({
       onReset={() => {
         dispatch({ type: "reset" });
         setAppearanceInstanceId(null);
+        setEditorPreview(null);
       }}
       onCancel={cancelEdit}
       onSave={() => void saveDraft()}
@@ -277,7 +322,7 @@ export function OverviewV2Page({
         runtime={runtime}
         editMode={editMode}
         selectedInstanceId={editor.selectedInstanceId}
-        chromeHiddenInstanceId={appearanceInstanceId}
+        chromeHiddenInstanceId={editorPreview?.instanceId ?? appearanceInstanceId}
         editingDisabled={saving || uncertain}
         onSelect={(instanceId) => dispatch({ type: "select", instanceId })}
         onMove={(instanceId, dx, dy) => {
@@ -291,6 +336,7 @@ export function OverviewV2Page({
         onRemove={(instanceId) => {
           dispatch({ type: "remove", instanceId });
           setAppearanceInstanceId(null);
+          setEditorPreview(null);
         }}
         onOpenAppearance={(instanceId) => {
           dispatch({ type: "select", instanceId });
@@ -310,6 +356,7 @@ export function OverviewV2Page({
           item={appearanceItem}
           onChange={(key, value) => dispatch({ type: "set-config", instanceId: appearanceItem.instanceId, key, value })}
           onReset={() => dispatch({ type: "reset-widget-config", instanceId: appearanceItem.instanceId })}
+          onPreview={(stage) => startEditorPreview(appearanceItem.instanceId, stage)}
           onClose={() => setAppearanceInstanceId(null)}
         />
       )}

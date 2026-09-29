@@ -99,6 +99,14 @@ describe("bounded Overview appearance schema", () => {
     expect(validateAppearanceConfig("home.coffee-machine", { composition: "spacious" }, true).valid).toBe(true);
   });
 
+  it("keeps the image scale bounded while preserving strictly ordered supported values", () => {
+    expect([90, 100, 120].map((value) => sourceOwnedCoffeeScale(value))).toEqual([90, 100, 120]);
+    expect(sourceOwnedCoffeeScale(70)).toBe(70);
+    expect(sourceOwnedCoffeeScale(120, 100)).toBe(100);
+    expect(sourceOwnedCoffeeScale(65)).toBe(70);
+    expect(sourceOwnedCoffeeScale(125)).toBe(120);
+  });
+
   it("accepts only the bounded Coffee action-row layout enum", () => {
     for (const buttonLayout of ["compact", "balanced", "wide"]) {
       expect(validateAppearanceConfig("home.coffee-machine", { buttonLayout }, true).valid).toBe(true);

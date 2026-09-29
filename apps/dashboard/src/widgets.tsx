@@ -8,7 +8,12 @@ import type {
 } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { titleForServiceAction, useAvalarActions } from "./AvalarActions";
-import { coffeeActiveGlowEligible, coffeePresentation } from "./coffee";
+import {
+  coffeeActiveGlowEligible,
+  coffeeEditorPreviewPresentation,
+  coffeePresentation,
+  type CoffeeEditorPreviewStage
+} from "./coffee";
 import { resolveWidgetAsset } from "./widgetAssets";
 import type { CoffeeAppearanceConfig } from "./features/overview/appearanceConfig";
 import { sourceOwnedCoffeeScale } from "./features/overview/appearanceConfig";
@@ -67,13 +72,7 @@ function formatDelayedTarget(dueAt: string): string {
     : date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
-function CoffeeAsset({
-  manifest,
-  scale
-}: {
-  manifest: WidgetManifest;
-  scale: number;
-}) {
+function CoffeeAsset({ manifest }: { manifest: WidgetManifest }) {
   const asset = manifest.visualAsset;
   const resolved = asset ? resolveWidgetAsset(asset.sourcePath) : null;
   const [failed, setFailed] = useState(false);
@@ -94,7 +93,7 @@ function CoffeeAsset({
       src={resolved}
       alt={asset.alt}
       decoding="async"
-      style={{ objectFit: asset.fit, "--cc-coffee-image-scale": scale / 100 } as CSSProperties}
+      style={{ objectFit: asset.fit }}
       onError={() => setFailed(true)}
     />
   );
@@ -112,7 +111,9 @@ export function CoffeeWidget({
   onDelayedStart,
   interactive = true,
   appearanceConfig,
-  overviewSizeVariant
+  overviewSizeVariant,
+  showDelayedStart = Boolean(onDelayedStart),
+  editorPreviewStage
 }: {
   service: ServiceSnapshot;
   generatedAt: string;
@@ -126,6 +127,8 @@ export function CoffeeWidget({
   interactive?: boolean;
   appearanceConfig?: CoffeeAppearanceConfig;
   overviewSizeVariant?: "compact" | "standard" | "large";
+  showDelayedStart?: boolean;
+  editorPreviewStage?: CoffeeEditorPreviewStage;
 }) {
   const { status: accessStatus } = useAccess();
   const data = service.data as unknown as CoffeeData;
@@ -231,41 +234,49 @@ export function CoffeeWidget({
     data,
     new Date(presentationTime).toISOString()
   );
+  const editorPreview = editorPreviewStage
+    ? coffeeEditorPreviewPresentation(editorPreviewStage)
+    : null;
+  const presentationStage = editorPreview?.stage ?? view.stage;
+  const presentationLabel = editorPreview?.label ?? view.label;
+  const presentationProgress = editorPreview ? null : view.progress;
   const duration = formatDuration(view.runningSeconds);
   const remaining = formatDuration(view.remainingSeconds);
-  const warming = view.stage === "warming" && view.progress !== null;
+  const warming = presentationStage === "warming" && presentationProgress !== null;
   const progressVisible = variant === "overview" || variant === "home-v2"
-    ? warming && view.progress !== null && coffeeTransition !== "moving"
+    ? warming && presentationProgress !== null && coffeeTransition !== "moving"
     : warming;
   const progressMounted = variant === "home-v2"
-    || variant === "overview" && (view.progress !== null || coffeeTransition !== "idle")
+    || variant === "overview" && (presentationProgress !== null || coffeeTransition !== "idle")
     || progressVisible;
   const activeAction = service.actions.find((action) =>
-    view.stage === "off" ? action.id.endsWith("turn_on") : action.id.endsWith("turn_off")
+    presentationStage === "off" ? action.id.endsWith("turn_on") : action.id.endsWith("turn_off")
   );
   let stateDetail = service.summary;
   if (warming && remaining) stateDetail = `Осталось примерно ${remaining}`;
-  if (view.stage === "ready" && duration) stateDetail = `Работает ${duration}`;
-  if (view.stage === "running" && duration) stateDetail = `Работает ${duration}`;
-  if (view.stage === "running_too_long" && duration) stateDetail = `Включена уже ${duration}`;
-  if (activeDelayedStart?.status === "executing") {
+  if (presentationStage === "ready" && duration && !editorPreview) stateDetail = `Работает ${duration}`;
+  if (presentationStage === "running" && duration) stateDetail = `Работает ${duration}`;
+  if (presentationStage === "running_too_long" && duration) stateDetail = `Включена уже ${duration}`;
+  if (editorPreview) {
+    stateDetail = editorPreview.detail;
+  } else if (activeDelayedStart?.status === "executing") {
     stateDetail = `Запуск выполняется · в ${formatDelayedTarget(activeDelayedStart.dueAt)}`;
-  } else if (activeDelayedStart && view.stage === "off") {
+  } else if (activeDelayedStart && presentationStage === "off") {
     const remaining = formatDelayedRemaining(activeDelayedStart.dueAt, presentationTime);
     stateDetail = remaining === "время наступило"
       ? "Время запуска наступило · проверяем состояние"
       : `Включится через ${remaining} · в ${formatDelayedTarget(activeDelayedStart.dueAt)}`;
   } else if (activeDelayedStart) {
     stateDetail = `Запуск запланирован · в ${formatDelayedTarget(activeDelayedStart.dueAt)}`;
-  } else if (view.stage === "off" && data.machine.entityLastChangedAt) {
+  } else if (presentationStage === "off" && data.machine.entityLastChangedAt) {
     stateDetail = `Последнее изменение ${new Date(data.machine.entityLastChangedAt).toLocaleTimeString("ru-RU", {
       hour: "2-digit",
       minute: "2-digit"
     })}`;
   }
-  const showsPolicyNote = data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable"
-    || (view.progress === null && (view.stage === "running" || view.stage === "running_too_long"));
-  const overviewCopyDensity = warming || stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
+  const showsPolicyNote = !editorPreview && (data.timingPolicy.stale || !data.timingPolicy.sourceAvailable || view.stage === "unavailable"
+    || (view.progress === null && (view.stage === "running" || view.stage === "running_too_long")));
+  const overviewCopyDensity = presentationStage === "warming" || stateDetail.length + (showsPolicyNote ? view.timingMessage.length : 0) > 64
     ? "dense"
     : "spacious";
   const appearance: CoffeeAppearanceConfig = appearanceConfig ?? {
@@ -287,10 +298,9 @@ export function CoffeeWidget({
     : appearance.composition === "spacious"
       ? "spacious"
       : overviewCopyDensity;
-  const safeMaximum = requestedDensity === "dense" || view.stage === "unavailable" ? 100 : 120;
-  const imageScale = sourceOwnedCoffeeScale(appearance.imageScalePct, safeMaximum);
+  const imageScale = sourceOwnedCoffeeScale(appearance.imageScalePct, 120);
   const coffeeImage = appearance.showImage
-    ? <CoffeeAsset manifest={manifest} scale={imageScale} />
+    ? <CoffeeAsset manifest={manifest} />
     : null;
   const coffeeActivity = view.stage === "warming" && variant !== "overview" && appearance.showImage
     ? (
@@ -329,19 +339,25 @@ export function CoffeeWidget({
       : activeDelayedStart
         ? "Изменить отложенный запуск"
         : "Отложить включение";
+  const shouldRenderDelayedStart = showDelayedStart && (
+    Boolean(activeDelayedStart) || presentationStage === "off" && Boolean(activeAction?.enabled)
+  );
 
   return (
     <article
-      className={`coffee-panel coffee-panel--${variant} coffee-panel--${view.stage} coffee-panel--density-${requestedDensity} coffee-panel--image-x-${appearance.imageXStep + 3} coffee-panel--image-y-${appearance.imageYStep + 2}${coffeeTransition === "idle" ? "" : ` coffee-panel--transition-${coffeeTransition}`} ${view.warning ? "surface--warning" : ""}`}
+      className={`coffee-panel coffee-panel--${variant} coffee-panel--${presentationStage} coffee-panel--density-${requestedDensity} coffee-panel--image-x-${appearance.imageXStep + 3} coffee-panel--image-y-${appearance.imageYStep + 2}${editorPreview || coffeeTransition === "idle" ? "" : ` coffee-panel--transition-${coffeeTransition}`} ${!editorPreview && view.warning ? "surface--warning" : ""}`}
       data-testid="widget-coffee-machine"
       data-stage={view.stage}
       data-canonical-state={data.machine.state}
       data-coffee-active={coffeeActiveGlowEligible(data.machine)}
+      data-editor-preview-stage={editorPreview?.stage}
+      data-editor-noninteractive={variant === "overview" && !interactive ? "true" : undefined}
       data-coffee-indicator={variant === "overview" ? appearance.activityIndicatorStyle : undefined}
       data-transition={coffeeTransition}
       data-progress-tone={view.progressTone ?? "unknown"}
       data-progress-visible={progressVisible}
       data-overview-copy-density={variant === "overview" ? requestedDensity : undefined}
+      data-overview-composition={variant === "overview" ? appearance.composition : undefined}
       data-overview-size-variant={variant === "overview" ? overviewSizeVariant ?? "standard" : undefined}
       data-overview-interactive={variant === "overview" && accessStatus !== null && accessStatus.effectiveProfile !== "read_only" ? "true" : "false"}
       data-image-scale={imageScale}
@@ -365,8 +381,8 @@ export function CoffeeWidget({
           </div>
         </div>
 
-        <div className={`coffee-panel__state ${view.stage === "ready" ? "coffee-panel__state--ready" : ""}`} aria-live="polite">
-          <strong>{view.label}</strong>
+        <div className={`coffee-panel__state ${presentationStage === "ready" ? "coffee-panel__state--ready" : ""}`} aria-live="polite">
+          <strong>{presentationLabel}</strong>
           <span>{stateDetail}</span>
         </div>
 
@@ -378,10 +394,10 @@ export function CoffeeWidget({
             aria-hidden={!progressVisible}
             aria-label={progressVisible ? `Разогрев ${view.progressText}` : undefined}
           >
-            <div className="coffee-progress__track">
-              <span style={{ width: `${view.progress! * 100}%`, backgroundColor: "var(--cc-coffee-progress-color)" }} />
-            </div>
-            <output>{view.progressText}</output>
+          <div className="coffee-progress__track">
+            {presentationProgress !== null && <span style={{ width: `${presentationProgress * 100}%`, backgroundColor: "var(--cc-coffee-progress-color)" }} />}
+          </div>
+            <output>{editorPreview ? "Предпросмотр" : view.progressText}</output>
           </div>
         )}
 
@@ -391,7 +407,7 @@ export function CoffeeWidget({
           </p>
         )}
 
-        {(activeAction || (activeDelayedStart && onDelayedStart)) && (
+        {(activeAction || shouldRenderDelayedStart) && (
           <div
             className={`coffee-action-row coffee-action-row--${appearance.buttonLayout}`}
             data-button-layout={appearance.buttonLayout}
@@ -400,22 +416,25 @@ export function CoffeeWidget({
               <button
                 className="primary-action"
                 type="button"
-                data-coffee-action={view.stage === "off" ? "off-primary" : "on-quiet"}
+                data-coffee-action={presentationStage === "off" ? "off-primary" : "on-quiet"}
+                data-editor-locked={!interactive && activeAction.enabled && Boolean(onAction) && !actionPending ? "true" : undefined}
+                aria-label={!interactive ? `${activeAction.title}. Недоступно в режиме редактирования.` : undefined}
                 disabled={!interactive || !activeAction.enabled || !onAction || actionPending}
-                onClick={() => onAction?.(service, activeAction.id)}
+                onClick={() => { if (interactive) onAction?.(service, activeAction.id); }}
               >
                 {actionPending ? "Подтверждаем…" : activeAction.title}
               </button>
             )}
-            {onDelayedStart && (activeDelayedStart || view.stage === "off" && activeAction?.enabled) && (
+            {shouldRenderDelayedStart && (
               <button
                 type="button"
                 className="coffee-delayed-start-action"
                 data-testid="coffee-delayed-start-action"
-                aria-label={delayedStartLabel}
+                aria-label={!interactive ? `${delayedStartLabel}. Недоступно в режиме редактирования.` : delayedStartLabel}
                 title={delayedStartLabel}
-                disabled={!interactive || delayedStartPending}
-                onClick={onDelayedStart}
+                data-editor-locked={!interactive && Boolean(onDelayedStart) && !delayedStartPending ? "true" : undefined}
+                disabled={!interactive || delayedStartPending || !onDelayedStart}
+                onClick={() => { if (interactive) onDelayedStart?.(); }}
               >
                 <Icon name="timer" size={22} />
               </button>

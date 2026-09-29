@@ -442,6 +442,7 @@ test("Coffee action-row enum stays touch-safe across all supported widget sizes"
     });
   });
 
+  const standardPrimaryWidths: Record<string, number> = {};
   for (const buttonLayout of ["compact", "balanced", "wide"] as const) {
     for (const sizeVariant of ["compact", "standard", "large"] as const) {
       layout = {
@@ -453,7 +454,7 @@ test("Coffee action-row enum stays touch-safe across all supported widget sizes"
               : sizeVariant === "large"
                 ? { x: 0, y: 1, w: 8, h: 5 }
                 : { x: 0, y: 1, w: 7, h: 4 };
-            return { ...item, sizeVariant, placement, config: { ...(item.config as Record<string, unknown>), buttonLayout } };
+            return { ...item, sizeVariant, placement, config: { ...(item.config as Record<string, unknown>), buttonLayout, imageScalePct: 120 } };
           }
           if (item.instanceId === "fixture.planning") {
             return {
@@ -484,24 +485,35 @@ test("Coffee action-row enum stays touch-safe across all supported widget sizes"
       const coffee = page.getByTestId("widget-coffee-machine");
       await expect(coffee).toHaveAttribute("data-overview-size-variant", sizeVariant);
       await expect(coffee.locator(".coffee-action-row")).toHaveAttribute("data-button-layout", buttonLayout);
+      await expect(coffee.locator(".coffee-asset__image")).toBeVisible();
+      await expect.poll(() => coffee.locator(".coffee-asset__image").evaluate((element) => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0)).toBe(true);
       const metrics = await coffee.evaluate((element) => {
         const panel = element as HTMLElement;
         const row = element.querySelector<HTMLElement>(".coffee-action-row")!;
         const buttons = Array.from(row.querySelectorAll("button"));
         const panelRect = panel.getBoundingClientRect();
+        const assetRect = element.querySelector<HTMLElement>(".coffee-asset")!.getBoundingClientRect();
+        const imageRect = element.querySelector<HTMLImageElement>(".coffee-asset__image")!.getBoundingClientRect();
         const rowRect = row.getBoundingClientRect();
         return {
           targets: buttons.map((button) => {
             const rect = button.getBoundingClientRect();
             return { width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom };
           }),
+          primaryWidth: buttons.find((button) => button.classList.contains("primary-action"))?.getBoundingClientRect().width ?? 0,
+          imageInsideAsset: imageRect.left >= assetRect.left - 1 && imageRect.right <= assetRect.right + 1
+            && imageRect.top >= assetRect.top - 1 && imageRect.bottom <= assetRect.bottom + 1,
           rowInsidePanel: rowRect.left >= panelRect.left && rowRect.right <= panelRect.right && rowRect.bottom <= panelRect.bottom,
           rootOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1
         };
       });
       expect(metrics.targets.every((target) => target.width >= 48 && target.height >= 48)).toBe(true);
+      expect(metrics.imageInsideAsset).toBe(true);
       expect(metrics.rowInsidePanel).toBe(true);
       expect(metrics.rootOverflow).toBe(true);
+      if (sizeVariant === "standard") standardPrimaryWidths[buttonLayout] = metrics.primaryWidth;
     }
   }
+  expect(standardPrimaryWidths.compact).toBeLessThan(standardPrimaryWidths.balanced);
+  expect(standardPrimaryWidths.balanced).toBeLessThan(standardPrimaryWidths.wide);
 });
