@@ -11,7 +11,7 @@ import { getOverviewWidgetDefinition } from "./overviewRegistry";
 
 function controlDisabled(item: OverviewLayoutItem, control: AppearanceControl): boolean {
   return item.widgetType === "home.coffee-machine" && item.sizeVariant === "compact" &&
-    ["imageScalePct", "imageXStep", "imageYStep", "composition", "showImage"].includes(control.key);
+    ["imageScalePct", "imageXStep", "imageYStep", "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx", "composition", "showImage"].includes(control.key);
 }
 
 export function WidgetAppearanceSheet({

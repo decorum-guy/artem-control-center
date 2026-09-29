@@ -154,6 +154,9 @@ export interface CoffeeAppearanceConfig {
   imageScalePct: number;
   imageXStep: number;
   imageYStep: number;
+  stateOffXOffsetPx: number;
+  stateWarmingXOffsetPx: number;
+  stateReadyXOffsetPx: number;
   composition: "auto" | "compact" | "spacious";
   buttonLayout: "compact" | "balanced" | "wide";
   showStateMarker: boolean;
@@ -167,6 +170,9 @@ export function coffeeAppearanceConfig(item: OverviewLayoutItem): CoffeeAppearan
     imageScalePct: value.imageScalePct as number,
     imageXStep: value.imageXStep as number,
     imageYStep: value.imageYStep as number,
+    stateOffXOffsetPx: value.stateOffXOffsetPx as number,
+    stateWarmingXOffsetPx: value.stateWarmingXOffsetPx as number,
+    stateReadyXOffsetPx: value.stateReadyXOffsetPx as number,
     composition: value.composition as CoffeeAppearanceConfig["composition"],
     buttonLayout: value.buttonLayout as CoffeeAppearanceConfig["buttonLayout"],
     showStateMarker: value.showStateMarker as boolean,
@@ -186,6 +192,9 @@ export function sourceOwnedCoffeeScale(configured: number, safeMaximum = 120): n
 export function appearanceControlValueLabel(control: AppearanceControl, value: OverviewConfigValue): string {
   if (control.control === "integer_range") {
     if (control.key === "imageScalePct") return `${value}%`;
+    if (["stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"].includes(control.key)) {
+      return `${(value as number) > 0 ? "+" : ""}${value} px`;
+    }
     if (control.key === "imageXStep") {
       return {
         "-3": "Левее",
@@ -219,7 +228,7 @@ export function appearanceControlLabel(control: AppearanceControl): string {
 
 export function appearanceControlSection(widgetType: string, control: AppearanceControl): string {
   if (widgetType !== "home.coffee-machine") return control.section;
-  if (["showImage", "imageScalePct", "imageXStep", "imageYStep"].includes(control.key)) return "Изображение";
+  if (["showImage", "imageScalePct", "imageXStep", "imageYStep", "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx"].includes(control.key)) return "Изображение";
   if (control.key === "composition") return "Композиция";
   if (["showStateMarker", "showAuthority"].includes(control.key)) return "Информация";
   return control.section;
@@ -228,7 +237,7 @@ export function appearanceControlSection(widgetType: string, control: Appearance
 export function appearanceControlsForPresentation(widgetType: string): readonly AppearanceControl[] {
   const controls = appearanceControlsFor(widgetType).filter((control) => control.key !== "showStateMarker");
   if (widgetType !== "home.coffee-machine") return controls;
-  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "composition", "buttonLayout", "showAuthority"];
+  const order = ["showImage", "imageScalePct", "imageXStep", "imageYStep", "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx", "composition", "buttonLayout", "showAuthority"];
   return [...controls].sort((left, right) => order.indexOf(left.key) - order.indexOf(right.key));
 }
 

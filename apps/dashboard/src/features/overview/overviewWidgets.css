@@ -591,7 +591,7 @@ html[data-theme="day"] .coffee-panel--overview.coffee-panel--running_too_long[da
 .coffee-panel--overview .coffee-asset__motion {
   /* The live Samsung appearance config is neutral; keep the source baseline
      a little larger and left-biased without overriding appearance controls. */
-  --cc-home-coffee-shift: -18px;
+  --cc-home-coffee-shift: var(--cc-coffee-state-off-x, -18px);
   --cc-overview-coffee-state-scale: .92;
   display: grid;
   width: 100%;
@@ -625,10 +625,10 @@ html[data-theme="day"] .coffee-panel--overview.coffee-panel--running_too_long[da
 .coffee-panel--overview.coffee-panel--warming .coffee-asset__motion,
 .coffee-panel--overview.coffee-panel--transition-moving .coffee-asset__motion,
 .coffee-panel--overview.coffee-panel--transition-revealing .coffee-asset__motion {
-  --cc-home-coffee-shift: 10px;
+  --cc-home-coffee-shift: var(--cc-coffee-state-warming-x, 10px);
 }
 .coffee-panel--overview.coffee-panel--ready .coffee-asset__motion {
-  --cc-home-coffee-shift: -8px;
+  --cc-home-coffee-shift: var(--cc-coffee-state-ready-x, -8px);
 }
 .coffee-panel--overview.coffee-panel--turning_on .coffee-asset__motion,
 .coffee-panel--overview.coffee-panel--warming .coffee-asset__motion,

@@ -767,8 +767,12 @@ boolean, enum, or stepped integer controls; the schema carries labels, bounds,
 defaults and safe sections. The current policy is deliberately narrow:
 
 - Coffee allows image scale `70..120%` in `5%` steps, semantic x/y composition
-  steps, `auto/compact/spacious` composition, and visibility of image/state/
-  authority markers;
+  steps, and separate off/warming/ready artwork X targets from `-40..40px` in
+  `2px` steps. The targets default to `-18/+10/-8px`, preserving the existing
+  animation. The warming target also applies during turning-on, moving, and
+  revealing phases. Global x/y offsets still move the whole image composition.
+  Coffee also allows `auto/compact/spacious` composition and visibility of
+  image/state/authority markers;
 - Planning allows only `comfortable/compact` density;
 - ROG, Home actions, Health, Weather and future Planning slots expose no
   appearance controls until a separate source-owned schema is added.
