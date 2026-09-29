@@ -93,11 +93,12 @@
   display: grid;
   place-items: center;
   min-height: 65px;
+  min-width: 0;
   isolation: isolate;
 }
 .station-mini-widget__glow {
   position: absolute;
-  z-index: -1;
+  z-index: 0;
   width: 110px;
   height: 110px;
   border-radius: 50%;
@@ -109,7 +110,19 @@
   pointer-events: none;
 }
 .station-mini-widget__glow--active { opacity: 1; transform: scale(1); }
-.station-mini-widget__fallback { width: 55px; height: 75px; color: var(--cc-text-muted); }
+.station-mini-widget__image {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  pointer-events: none;
+  user-select: none;
+}
+.station-mini-widget__fallback { position: relative; z-index: 1; width: 55px; height: 75px; color: var(--cc-text-muted); }
 .station-mini-widget__controls {
   display: flex;
   flex-wrap: wrap;
