@@ -73,9 +73,11 @@ describe("Station Mini 2 Overview widget", () => {
     const css = readFileSync("src/features/overview/overviewWidgets.css", "utf8").replace(/\r\n/g, "\n");
     const html = renderToStaticMarkup(<StationMiniWidget interactive />);
     const keyframes = css.slice(css.indexOf("@keyframes station-mini-widget-glow-pulse"), css.indexOf(".station-mini-widget__image"));
+    const artwork = css.slice(css.indexOf(".station-mini-widget__image"), css.indexOf(".station-mini-widget__fallback"));
     const reducedMotion = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce) {\n  .station-mini-widget__glow"));
     expect(html.match(/class="station-mini-widget__glow(?: station-mini-widget__glow--active)?"/g)).toHaveLength(1);
     expect(css).toMatch(/\.station-mini-widget__image\s*\{[^}]*object-fit:\s*contain;[^}]*pointer-events:\s*none;/s);
+    expect(artwork).not.toMatch(/(?:animation|transform|transition)\s*:/);
     expect(css).toMatch(/\.station-mini-widget__glow\s*\{[^}]*z-index:\s*0;[^}]*width:\s*124px;[^}]*height:\s*124px;[^}]*rgba\(191, 126, 206, \.50\)[^}]*rgba\(162, 105, 194, \.24\)[^}]*filter:\s*blur\(20px\);[^}]*pointer-events:\s*none;/s);
     expect(css).toMatch(/\.station-mini-widget__image\s*\{[^}]*z-index:\s*1;/s);
     expect(css).toMatch(/\.station-mini-widget__fallback\s*\{[^}]*z-index:\s*1;/s);
@@ -85,6 +87,7 @@ describe("Station Mini 2 Overview widget", () => {
     expect(keyframes).toContain("100% {\n    opacity: 0;\n    transform: scale(1.03);");
     expect(css).toMatch(/\.station-mini-widget__button\s*\{[^}]*min-width:\s*48px;[^}]*min-height:\s*48px;/s);
     expect(css).toMatch(/\.station-mini-widget__music\s*\{[^}]*min-height:\s*48px;/s);
+    expect(css).toMatch(/\.station-mini-widget__message\s*\{[^}]*min-height:\s*1\.25em;[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.25;/s);
     expect(reducedMotion).toContain(".station-mini-widget__glow {\n    animation: none;\n    transition: none;\n    transform: none;");
     expect(reducedMotion).toContain(".station-mini-widget__glow--active { opacity: .78; }");
   });
