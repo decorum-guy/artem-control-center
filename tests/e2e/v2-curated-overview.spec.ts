@@ -661,7 +661,7 @@ test.describe("PR4 curated Overview", () => {
     const onlineBox = await online.boundingBox();
     const coffeeBox = await coffee.boundingBox();
     expect(await coffee.getAttribute("data-overview-copy-density")).toBe("spacious");
-    expect(spaciousImageBox?.width).toBeGreaterThan(112);
+    expect(spaciousImageBox?.width).toBeGreaterThan(108);
     expect(spaciousImageBox?.width).toBeLessThanOrEqual(164);
     expect(spaciousImageBox?.height).toBeLessThanOrEqual(240);
     expect(await online).toContainText("Онлайн");

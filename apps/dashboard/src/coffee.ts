@@ -19,6 +19,29 @@ const labels: Record<CoffeeStage, string> = {
 
 export type CoffeeProgressTone = "cool-blue" | "transition-teal" | "ready-green";
 
+export type CoffeeEditorPreviewStage = "off" | "warming" | "ready";
+
+export interface CoffeeEditorPreviewPresentation {
+  readonly stage: CoffeeEditorPreviewStage;
+  readonly label: string;
+  readonly detail: string;
+}
+
+/**
+ * The editor preview is a presentation projection only. It deliberately takes
+ * no CoffeeData and cannot change canonical machine or timing-policy truth.
+ */
+export function coffeeEditorPreviewPresentation(stage: CoffeeEditorPreviewStage): CoffeeEditorPreviewPresentation {
+  switch (stage) {
+    case "off":
+      return { stage, label: "Выключена", detail: "Предпросмотр состояния" };
+    case "warming":
+      return { stage, label: "Разогревается", detail: "Предпросмотр состояния" };
+    case "ready":
+      return { stage, label: "Разогрета", detail: "Предпросмотр состояния" };
+  }
+}
+
 function clampProgress(progress: number): number {
   return Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
 }

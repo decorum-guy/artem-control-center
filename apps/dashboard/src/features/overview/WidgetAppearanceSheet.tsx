@@ -1,4 +1,5 @@
 import type { OverviewConfigValue, OverviewLayoutItem } from "@artem/contracts";
+import type { CoffeeEditorPreviewStage } from "../../coffee";
 import { Sheet } from "../../Sheet";
 import {
   appearanceControlLabel,
@@ -14,15 +15,30 @@ function controlDisabled(item: OverviewLayoutItem, control: AppearanceControl): 
     ["imageScalePct", "imageXStep", "imageYStep", "stateOffXOffsetPx", "stateWarmingXOffsetPx", "stateReadyXOffsetPx", "composition", "showImage"].includes(control.key);
 }
 
+function previewStageFor(control: AppearanceControl): CoffeeEditorPreviewStage | null {
+  if (control.key === "stateOffXOffsetPx") return "off";
+  if (control.key === "stateWarmingXOffsetPx") return "warming";
+  if (control.key === "stateReadyXOffsetPx") return "ready";
+  return null;
+}
+
+function previewStageLabel(stage: CoffeeEditorPreviewStage): string {
+  if (stage === "off") return "Выключена";
+  if (stage === "warming") return "Разогревается";
+  return "Разогрета";
+}
+
 export function WidgetAppearanceSheet({
   item,
   onChange,
   onReset,
+  onPreview,
   onClose
 }: {
   item: OverviewLayoutItem;
   onChange: (key: string, value: OverviewConfigValue) => void;
   onReset: () => void;
+  onPreview: (stage: CoffeeEditorPreviewStage) => void;
   onClose: () => void;
 }) {
   const definition = getOverviewWidgetDefinition(item.widgetType);
@@ -52,6 +68,7 @@ export function WidgetAppearanceSheet({
             const unavailable = controlDisabled(item, control);
             const label = appearanceControlLabel(control);
             const valueLabel = appearanceControlValueLabel(control, value);
+            const previewStage = previewStageFor(control);
             const controlId = `appearance-${item.instanceId}-${control.key}`;
             return (
               <div className={`overview-appearance__control${unavailable ? " overview-appearance__control--unavailable" : ""}`} key={control.key}>
@@ -62,19 +79,33 @@ export function WidgetAppearanceSheet({
                   </div>
                 )}
                 {control.control === "integer_range" && (
-                  <input
-                    id={controlId}
-                    className="overview-appearance__range"
-                    type="range"
-                    min={control.min}
-                    max={control.max}
-                    step={control.step}
-                    value={value as number}
-                    disabled={unavailable}
-                    onChange={(event) => onChange(control.key, Number(event.target.value))}
-                    aria-label={label}
-                    aria-valuetext={valueLabel}
-                  />
+                  <>
+                    <input
+                      id={controlId}
+                      className="overview-appearance__range"
+                      type="range"
+                      min={control.min}
+                      max={control.max}
+                      step={control.step}
+                      value={value as number}
+                      disabled={unavailable}
+                      onChange={(event) => onChange(control.key, Number(event.target.value))}
+                      aria-label={label}
+                      aria-valuetext={valueLabel}
+                    />
+                    {previewStage && (
+                      <button
+                        type="button"
+                        className="overview-appearance__preview"
+                        aria-label={`Предпросмотр: ${previewStageLabel(previewStage)}`}
+                        data-preview-stage={previewStage}
+                        disabled={unavailable}
+                        onClick={() => onPreview(previewStage)}
+                      >
+                        Предпросмотр
+                      </button>
+                    )}
+                  </>
                 )}
                 {control.control === "boolean" && (
                   <label className="overview-appearance__switch-row" htmlFor={controlId}>

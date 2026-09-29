@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { CoffeeData } from "@artem/contracts";
-import { coffeeActiveGlowEligible, coffeePresentation, coffeeProgressColor, coffeeProgressTone } from "./coffee";
+import {
+  coffeeActiveGlowEligible,
+  coffeeEditorPreviewPresentation,
+  coffeePresentation,
+  coffeeProgressColor,
+  coffeeProgressTone
+} from "./coffee";
 
 const base: CoffeeData = {
   machine: {
@@ -25,6 +31,20 @@ const base: CoffeeData = {
 };
 
 describe("coffee presentation", () => {
+  it("projects the three editor preview stages without changing Coffee data", () => {
+    const before = JSON.stringify(base);
+    expect(["off", "warming", "ready"].map((stage) =>
+      coffeeEditorPreviewPresentation(stage as "off" | "warming" | "ready")
+    )).toEqual([
+      { stage: "off", label: "Выключена", detail: "Предпросмотр состояния" },
+      { stage: "warming", label: "Разогревается", detail: "Предпросмотр состояния" },
+      { stage: "ready", label: "Разогрета", detail: "Предпросмотр состояния" }
+    ]);
+    expect(JSON.stringify(base)).toBe(before);
+    expect(coffeePresentation(base, "2026-07-29T12:00:00Z").stage).toBe("running");
+    expect(coffeeActiveGlowEligible(base.machine)).toBe(true);
+  });
+
   it("allows an active contour only for a live, fresh canonical ON switch", () => {
     expect(coffeeActiveGlowEligible(base.machine)).toBe(true);
     for (const state of ["off", "turning_on", "turning_off", "unavailable", "stale"] as const) {
