@@ -261,16 +261,18 @@ export function useWeather() {
 
 export function WeatherHeaderSummary({ onOpen }: { onOpen: () => void }) {
   const { forecast, loading, error } = useWeather();
+  const temperature = forecast && Number.isFinite(forecast.current.temperature)
+    ? formatTemperature(forecast.current.temperature)
+    : "—°";
   return (
     <button className="weather-summary" type="button" onClick={onOpen} aria-label="Открыть погоду">
-      <span>{forecast?.location.title ?? "Погода"}</span>
-      <strong>
-        {forecast
-          ? `${formatTemperature(forecast.current.temperature)} · ${weatherLabel(forecast.current.weatherCode)}`
-          : loading
-            ? "Обновляем прогноз…"
-            : error ?? "Добавьте место"}
-      </strong>
+      <span className="weather-summary__temperature">{temperature}</span>
+      <span className="weather-summary__copy">
+        <span className="weather-summary__location">{forecast?.location.title ?? "Погода"}</span>
+        <span className="weather-summary__condition">
+          {forecast ? weatherLabel(forecast.current.weatherCode) : loading ? "Обновляем прогноз…" : error ?? "Добавьте место"}
+        </span>
+      </span>
     </button>
   );
 }

@@ -1,17 +1,52 @@
 .weather-summary {
   display: grid;
-  gap: 2px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   min-width: 150px;
   min-height: 48px;
-  padding: 7px 10px;
+  padding: 5px 10px;
   border: 0;
   border-radius: var(--radius-control);
-  text-align: right;
+  text-align: left;
   background: transparent;
 }
 .weather-summary:hover { background: var(--surface-inline); }
-.weather-summary span { color: var(--text); font-size: 13px; font-weight: 650; }
-.weather-summary strong { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.weather-summary__copy { display: grid; align-content: center; min-width: 0; }
+.weather-summary .weather-summary__temperature {
+  display: block;
+  color: var(--cc-text, var(--text));
+  font-size: 32px;
+  font-weight: 720;
+  line-height: 36px;
+  letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.weather-summary .weather-summary__location,
+.weather-summary .weather-summary__condition {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.weather-summary .weather-summary__location { color: var(--cc-text, var(--text)); font-size: 13px; font-weight: 650; line-height: 17px; }
+.weather-summary .weather-summary__condition { color: var(--cc-text-muted, var(--text-muted)); font-size: 12px; font-weight: 500; line-height: 16px; }
+
+.v2-product-header .weather-summary {
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: min(180px, 34vw);
+  min-height: 52px;
+  padding: 5px 10px;
+  text-align: left;
+}
+.v2-product-header .weather-summary .weather-summary__temperature { font-size: 32px; line-height: 36px; }
+.v2-product-header .weather-summary .weather-summary__copy { display: grid; min-width: 0; overflow: hidden; }
+.v2-product-header .weather-summary .weather-summary__location { font-size: 13px; line-height: 17px; }
+.v2-product-header .weather-summary .weather-summary__condition { font-size: 12px; line-height: 16px; }
 
 .weather-page { display: grid; gap: var(--space-4); }
 .weather-toolbar {

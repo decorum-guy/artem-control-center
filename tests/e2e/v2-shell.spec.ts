@@ -128,6 +128,83 @@ test.describe("Control Center V2 shell", () => {
     await expect(page.getByTestId("route-settings")).toBeVisible();
   });
 
+  test("shows a dominant left temperature in one touch-safe weather control", async ({ page }) => {
+    const location = { id: "moscow", title: "Москва", normalizedAddress: "Москва", latitude: 55.75, longitude: 37.62, isDefault: true, order: 0 };
+    const hour = { time: "2026-09-29T12:00:00Z", temperature: 8, precipitationProbability: 0, precipitation: 0, weatherCode: 3, windSpeed: 3 };
+    const day = { date: "2026-09-29", weatherCode: 3, temperatureMax: 10, temperatureMin: 4, precipitationProbabilityMax: 0, sunrise: "2026-09-29T06:00:00Z", sunset: "2026-09-29T18:00:00Z" };
+    await page.route("**/api/v1/weather/locations", route => route.fulfill({ json: [location] }));
+    await page.route("**/api/v1/weather?*", route => route.fulfill({ json: {
+      schemaVersion: 1, location, timezone: "Europe/Moscow", timezoneAbbreviation: "MSK",
+      observedAt: "2026-09-29T12:00:00Z", ageSeconds: 0, sourceMode: "fixture", stale: false,
+      current: { ...hour, apparentTemperature: 6, windDirection: 180, isDay: true },
+      hourly: Array.from({ length: 24 }, (_, index) => ({ ...hour, time: `2026-09-29T${String(index).padStart(2, "0")}:00:00Z` })),
+      daily: Array.from({ length: 7 }, (_, index) => ({ ...day, date: new Date(Date.UTC(2026, 8, 29 + index)).toISOString().slice(0, 10) })),
+      attribution: "Fixture"
+    } }));
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/overview");
+    await waitForShell(page);
+    const header = page.getByTestId("product-header");
+    const weather = header.locator(".weather-summary");
+    const temperature = weather.locator(".weather-summary__temperature");
+    const locationText = weather.locator(".weather-summary__location");
+    const condition = weather.locator(".weather-summary__condition");
+    await expect(temperature).toHaveText("8°");
+    await expect(locationText).toHaveText("Москва");
+    await expect(condition).toHaveText("Облачно");
+    const geometry = await weather.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const temp = element.querySelector<HTMLElement>(".weather-summary__temperature")!;
+      const copy = element.querySelector<HTMLElement>(".weather-summary__copy")!;
+      const place = element.querySelector<HTMLElement>(".weather-summary__location")!;
+      const condition = element.querySelector<HTMLElement>(".weather-summary__condition")!;
+      return { width: rect.width, height: rect.height, tempLeft: temp.getBoundingClientRect().left, copyLeft: copy.getBoundingClientRect().left,
+        tempFont: parseFloat(getComputedStyle(temp).fontSize), placeFont: parseFloat(getComputedStyle(place).fontSize), conditionFont: parseFloat(getComputedStyle(condition).fontSize) };
+    });
+    expect(geometry.height).toBeGreaterThanOrEqual(48);
+    expect(geometry.height).toBeLessThanOrEqual(56);
+    expect(geometry.width).toBeGreaterThanOrEqual(48);
+    expect(geometry.tempLeft).toBeLessThan(geometry.copyLeft);
+    expect(geometry.tempFont).toBeGreaterThanOrEqual(30);
+    expect([geometry.tempFont, geometry.placeFont, geometry.conditionFont]).toEqual([32, 13, 12]);
+    expect(geometry.tempFont).toBeGreaterThanOrEqual(geometry.placeFont * 2);
+    expect(geometry.tempFont).toBeGreaterThanOrEqual(geometry.conditionFont * 2);
+    expect(await header.boundingBox()).toMatchObject({ x: 176, y: 0, width: 1104, height: 64 });
+    await expectNoDocumentOverflow(page);
+    await page.setViewportSize({ width: 640, height: 720 });
+    await expectNoDocumentOverflow(page);
+    expect((await weather.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+    location.title = "Санкт-Петербургский городской округ и пригородные районы";
+    await page.reload();
+    await expect(locationText).toHaveText(location.title);
+    expect(await locationText.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+    await expectNoDocumentOverflow(page);
+    await weather.locator(".weather-summary__temperature").click();
+    await expect(page.getByTestId("route-weather")).toBeVisible();
+  });
+
+  test("weather loading and error keep one truthful clickable control", async ({ page }) => {
+    let release: (() => void) | undefined;
+    await page.route("**/api/v1/weather/locations", async route => {
+      await new Promise<void>(resolve => { release = resolve; });
+      await route.fulfill({ json: [] });
+    });
+    await page.goto("/overview");
+    await waitForShell(page);
+    const weather = page.getByTestId("product-header").locator(".weather-summary");
+    await expect(weather.locator(".weather-summary__temperature")).toHaveText("—°");
+    await expect(weather.locator(".weather-summary__condition")).toHaveText("Обновляем прогноз…");
+    release?.();
+    await expect(weather.locator(".weather-summary__condition")).toHaveText("Добавьте место");
+    await page.unroute("**/api/v1/weather/locations");
+    await page.route("**/api/v1/weather/locations", route => route.fulfill({ status: 503, json: {} }));
+    await page.reload();
+    await expect(weather.locator(".weather-summary__temperature")).toHaveText("—°");
+    await expect(weather.locator(".weather-summary__condition")).toHaveText("Не удалось обновить погоду");
+    await weather.locator(".weather-summary__condition").click();
+    await expect(page.getByTestId("route-weather")).toBeVisible();
+  });
+
   test("preserves direct route contracts for hidden primary routes", async ({ page }) => {
     for (const route of ["/apps", "/backups", "/calendar", "/tasks", "/reminders"]) {
       await page.goto(route);
