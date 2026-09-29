@@ -300,8 +300,15 @@ test.describe("#173 Coffee composition stabilization", () => {
       });
       await expect(online).toHaveText("Онлайн");
       await expect(coffee).toHaveAttribute("data-coffee-active", String(stage !== "off"));
-      const contour = await coffee.evaluate((element) => getComputedStyle(element).boxShadow);
-      expect(contour === "none").toBe(stage === "off");
+      await expect(coffee).toHaveAttribute("data-coffee-indicator", "bar");
+      await expect(coffee).toHaveCSS("box-shadow", "none");
+      const bar = await coffee.evaluate((element) => {
+        const style = getComputedStyle(element, "::before");
+        return { content: style.content, opacity: parseFloat(style.opacity), width: style.width };
+      });
+      expect(bar.content, stage).not.toBe("none");
+      expect(bar.opacity, stage).toBeGreaterThan(0);
+      expect(bar.width, stage).toBe("2px");
       await page.screenshot({ path: await reviewScreenshotPath(testInfo, screenshotName) });
       await expectNoOverflow(page);
     }
