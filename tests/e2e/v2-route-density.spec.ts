@@ -245,7 +245,11 @@ test.describe("Control Center V2 PR7 route density", () => {
     await expect(page.getByTestId("home-authority-line")).not.toContainText("WebSocket");
     await expect(page.getByTestId("home-authority-line")).not.toContainText("Источник дома");
     await expect(page.getByTestId("widget-coffee-machine")).toBeVisible();
-    await expect(page.getByTestId("device-row-kettle")).toBeVisible();
+    const kettleControl = page.getByTestId("kettle-control");
+    await expect(kettleControl).toBeVisible();
+    await expect(kettleControl.getByRole("heading", { name: "Чайник" })).toBeVisible();
+    await expect(page.getByTestId("device-row-kettle")).toHaveCount(0);
+    await expect(page.getByTestId("home-secondary-devices").getByText("Чайник", { exact: true })).toHaveCount(0);
     await expect(page.locator(".future-device")).toHaveCount(0);
 
     const coffeeGeometry = await page.locator(".coffee-panel--home-v2").evaluate((panel) => {
@@ -275,40 +279,58 @@ test.describe("Control Center V2 PR7 route density", () => {
     expect(coffeeGeometry!.naturalRatio).toBeCloseTo(1024 / 1536, 2);
 
     const coffee = await page.getByTestId("widget-coffee-machine").boundingBox();
-    const kettle = await page.getByTestId("device-row-kettle").boundingBox();
+    const kettle = await kettleControl.boundingBox();
+    const kettleButtons = await kettleControl.getByRole("button").all();
     expect(coffee?.height).toBeGreaterThanOrEqual(180);
-    expect(kettle?.height).toBeGreaterThanOrEqual(110);
+    expect(kettle?.width).toBeGreaterThanOrEqual(240);
+    expect(kettle?.height).toBeGreaterThanOrEqual(180);
+    expect(kettleButtons).toHaveLength(2);
+    for (const button of kettleButtons) {
+      const box = await button.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(48);
+      expect(box?.width).toBeGreaterThanOrEqual(48);
+    }
+    await expectNoOverflow(page);
 
     await page.goto("/home?scenario=home-coffee-only");
     await expect(page.getByTestId("widget-coffee-machine")).toBeVisible();
+    await expect(page.getByTestId("kettle-control")).toHaveCount(0);
     await expect(page.getByTestId("device-row-kettle")).toHaveCount(0);
     await page.goto("/home?scenario=home-no-coffee");
     await expect(page.getByTestId("widget-coffee-machine")).toHaveCount(0);
-    await expect(page.getByTestId("device-row-kettle")).toBeVisible();
+    await expect(page.getByTestId("kettle-control")).toBeVisible();
+    await expect(page.getByTestId("device-row-kettle")).toHaveCount(0);
     await page.goto("/home?scenario=home-no-devices");
     await expect(page.getByTestId("home-no-devices")).toBeVisible();
+    await expect(page.getByTestId("kettle-control")).toHaveCount(0);
+    await expect(page.getByTestId("device-row-kettle")).toHaveCount(0);
     await expect(page.locator(".future-device")).toHaveCount(0);
   });
 
-  test("Home hides healthy device transport copy but keeps degraded device warnings", async ({ page }) => {
+  test("Home KettleControl keeps healthy, stale, and offline states truthful", async ({ page }) => {
     await installSnapshotMock(page, (snapshot) => setKettleHealth(snapshot, "healthy", "WebSocket подключен"));
     await page.goto("/home?scenario=home-coffee-kettle");
-    const kettle = page.getByTestId("device-row-kettle");
-    await expect(kettle).toContainText("Выключен");
-    await expect(kettle).toContainText("В норме");
+    const kettle = page.getByTestId("kettle-control");
+    await expect(kettle).toBeVisible();
+    await expect(kettle.getByRole("status")).toHaveText("Выключен");
     await expect(kettle).not.toContainText("WebSocket");
     await expect(page.getByTestId("home-authority-line")).toContainText("Home Assistant");
 
     await page.unroute("**/api/v1/snapshot**");
     await installSnapshotMock(page, (snapshot) => setKettleHealth(snapshot, "stale", "Данные устарели"));
     await page.goto("/home?scenario=home-coffee-kettle");
-    await expect(page.getByTestId("device-row-kettle")).toContainText("Данные устарели");
+    await expect(kettle).toBeVisible();
+    await expect(kettle.getByRole("status")).toHaveText("Данные устарели");
+    await expect(kettle.getByRole("button", { name: "Включить" })).toBeDisabled();
+    await expect(kettle.getByRole("button", { name: "Выбрать чай" })).toBeDisabled();
 
     await page.unroute("**/api/v1/snapshot**");
     await installSnapshotMock(page, (snapshot) => setKettleHealth(snapshot, "offline", "Последнее состояние недоступно"));
     await page.goto("/home?scenario=home-coffee-kettle");
-    await expect(page.getByTestId("device-row-kettle")).toContainText("Недоступен");
-    await expect(page.getByTestId("device-row-kettle")).toContainText("Последнее состояние недоступно");
+    await expect(kettle).toBeVisible();
+    await expect(kettle.getByRole("status")).toHaveText("Недоступен");
+    await expect(kettle.getByRole("button", { name: "Включить" })).toBeDisabled();
+    await expect(kettle.getByRole("button", { name: "Выбрать чай" })).toBeDisabled();
   });
 
   test("Home HA stale/offline states remain truthful and Coffee keeps its existing action path", async ({ page }) => {
