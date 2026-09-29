@@ -34,7 +34,7 @@ async function noHorizontalOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
 }
 
-test("maps the contour to confirmed live ON while keeping the accepted left accent persistent", async ({ page }) => {
+test("Coffee indicator selection keeps state truth and renders one visual system in both themes", async ({ page }) => {
   test.setTimeout(120_000);
   const cases = [
     ["coffee-off", "off", "off", false],
@@ -47,43 +47,58 @@ test("maps the contour to confirmed live ON while keeping the accepted left acce
     ["coffee-turning-off", "turning_off", "turning_off", false],
     ["ha-offline-policy-available", "unavailable", "unavailable", false]
   ] as const;
-  let readyShadow = "";
-  let warningShadow = "";
+  for (const theme of ["day", "night"] as const) {
+    const colors: Record<string, string> = {};
+    const shadows: Record<string, string> = {};
+    for (const [scenario, stage, canonical, active] of cases) {
+      const coffee = await overview(page, scenario, theme);
+      await expect(coffee).toHaveAttribute("data-stage", stage);
+      await expect(coffee).toHaveAttribute("data-canonical-state", canonical);
+      await expect(coffee).toHaveAttribute("data-coffee-active", String(active));
+      await expect(coffee).toHaveAttribute("data-coffee-indicator", "bar");
+      const readStyle = () => coffee.evaluate((element) => {
+        const computed = getComputedStyle(element);
+        const bar = getComputedStyle(element, "::before");
+        return {
+          shadow: computed.boxShadow,
+          animation: computed.animationName,
+          borderLeft: parseFloat(computed.borderLeftWidth),
+          barContent: bar.content,
+          barWidth: bar.width,
+          barColor: bar.backgroundColor,
+          barOpacity: parseFloat(bar.opacity)
+        };
+      });
+      const barStyle = await readStyle();
+      expect(barStyle.barContent, `${theme} ${scenario}`).not.toBe("none");
+      expect(barStyle.barWidth).toBe("2px");
+      expect(barStyle.barOpacity).toBeGreaterThanOrEqual(0.69);
+      expect(barStyle.shadow, `${theme} ${scenario}`).toBe("none");
+      expect(barStyle.borderLeft, `${theme} ${scenario}`).toBe(1);
+      expect(barStyle.animation).toBe("none");
+      if (["off", "ready", "running_too_long"].includes(stage)) colors[stage] = barStyle.barColor;
+      if (stage === "running_too_long") {
+        await expect(coffee).toHaveClass(/surface--warning/);
+        expect(barStyle.barColor).not.toBe("");
+      }
 
-  for (const [scenario, stage, canonical, active] of cases) {
-    const coffee = await overview(page, scenario);
-    await expect(coffee).toHaveAttribute("data-stage", stage);
-    await expect(coffee).toHaveAttribute("data-canonical-state", canonical);
-    await expect(coffee).toHaveAttribute("data-coffee-active", String(active));
-    const style = await coffee.evaluate((element) => {
-      const computed = getComputedStyle(element);
-      const leftBar = getComputedStyle(element, "::before");
-      return {
-        shadow: computed.boxShadow,
-        animation: computed.animationName,
-        borderLeft: computed.borderLeftWidth,
-        leftBarOpacity: Number.parseFloat(leftBar.opacity),
-        leftBarWidth: leftBar.width,
-        leftBarVisible: Number.parseFloat(leftBar.opacity) > 0 && leftBar.width !== "0px"
-      };
-    });
-    expect(style.shadow === "none", scenario).toBe(!active);
-    // The left strip is the accepted Overview identity accent and remains
-    // visible even while the machine is OFF. Only the whole-card halo maps to
-    // confirmed live ON.
-    expect(style.leftBarVisible, scenario).toBe(true);
-    expect(style.leftBarOpacity, scenario).toBeGreaterThanOrEqual(0.69);
-    expect(style.leftBarWidth, scenario).toBe("2px");
-    expect(style.animation, scenario).toBe("none");
-    if (stage === "ready") readyShadow = style.shadow;
-    if (stage === "running_too_long") {
-      warningShadow = style.shadow;
-      await expect(coffee).toHaveClass(/surface--warning/);
-      expect(parseFloat(style.borderLeft)).toBeGreaterThanOrEqual(3);
+      await coffee.evaluate((element) => element.setAttribute("data-coffee-indicator", "contour"));
+      await expect.poll(async () => (await readStyle()).shadow === "none").toBe(!active);
+      if (active) await page.waitForTimeout(350);
+      const contourStyle = await readStyle();
+      expect(contourStyle.barContent, `${theme} ${scenario}`).toBe("none");
+      expect(contourStyle.animation).toBe("none");
+      expect(contourStyle.borderLeft, `${theme} ${scenario}`).toBe(stage === "running_too_long" ? 3 : 1);
+      if (stage === "running_too_long") {
+        expect(contourStyle.shadow).not.toBe("none");
+      }
+      if (["ready", "running_too_long"].includes(stage)) shadows[stage] = contourStyle.shadow;
+      await noHorizontalOverflow(page);
     }
-    await noHorizontalOverflow(page);
+    expect(colors.ready).not.toBe(colors.off);
+    expect(colors.running_too_long).not.toBe(colors.ready);
+    expect(shadows.running_too_long).not.toBe(shadows.ready);
   }
-  expect(warningShadow).not.toBe(readyShadow);
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   const reduced = await overview(page, "coffee-ready");

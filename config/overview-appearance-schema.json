@@ -11,6 +11,7 @@
         "stateReadyXOffsetPx": -8,
         "composition": "auto",
         "buttonLayout": "balanced",
+        "activityIndicatorStyle": "bar",
         "showStateMarker": true,
         "showAuthority": true,
         "showImage": true
@@ -99,6 +100,17 @@
           "defaultValue": "balanced",
           "label": "Ряд действий",
           "section": "Композиция"
+        },
+        {
+          "key": "activityIndicatorStyle",
+          "control": "enum",
+          "values": [
+            { "value": "bar", "label": "Палка слева" },
+            { "value": "contour", "label": "Контур карточки" }
+          ],
+          "defaultValue": "bar",
+          "label": "Индикация состояния",
+          "section": "Отображение"
         },
         {
           "key": "showStateMarker",
