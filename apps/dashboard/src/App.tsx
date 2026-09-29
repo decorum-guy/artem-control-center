@@ -42,6 +42,24 @@ import { JarvisOverlay } from "./JarvisOverlay";
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
 
+const JARVIS_VISIBILITY_STORAGE_KEY = "artem-control-center.jarvis-visible";
+
+function readStoredJarvisVisible(): boolean {
+  try {
+    return window.localStorage.getItem(JARVIS_VISIBILITY_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistJarvisVisible(visible: boolean): void {
+  try {
+    window.localStorage.setItem(JARVIS_VISIBILITY_STORAGE_KEY, visible ? "true" : "false");
+  } catch {
+    // Visibility is a best-effort local UI preference; keep the in-memory state if storage is unavailable.
+  }
+}
+
 const userRoutes: ShellRoutePath[] = [
   "/overview",
   "/weather",
@@ -97,6 +115,7 @@ export function App() {
       "full"
     )
   );
+  const [jarvisVisible, setJarvisVisible] = useState(readStoredJarvisVisible);
   const [kiosk, setKiosk] = useState(false);
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
   const [coffeeActionPending, setCoffeeActionPending] = useState(false);
@@ -182,6 +201,11 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.motion = motion;
   }, [motion]);
+
+  const changeJarvisVisibility = useCallback((visible: boolean) => {
+    setJarvisVisible(visible);
+    persistJarvisVisible(visible);
+  }, []);
 
   const widgets = useMemo(
     () => (snapshot ? reconcileLayout(snapshot.services) : []),
@@ -543,6 +567,8 @@ export function App() {
                 calendarSources={snapshot?.planning?.providerStatuses ?? []}
                 onThemeChange={setTheme}
                 onMotionChange={setMotion}
+                jarvisVisible={jarvisVisible}
+                onJarvisVisibleChange={changeJarvisVisibility}
                 onRefreshCalendarMetadata={reconcileSnapshotAfterAction}
                 onNavigate={navigate}
               />
@@ -575,7 +601,7 @@ export function App() {
           onClose={() => setCoffeeDelayedStartDialogOpen(false)}
         />
       )}
-      <JarvisOverlay onNavigate={navigate} />
+      {jarvisVisible && <JarvisOverlay onNavigate={navigate} />}
       <GlobalNoticeRegion />
       <B0NoticeFixture />
     </div>
