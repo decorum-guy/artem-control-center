@@ -48,9 +48,9 @@
 
 .settings-v2-appearance__controls {
   display: grid;
-  grid-template-columns: minmax(128px, .55fr) minmax(250px, 1.25fr) minmax(190px, .8fr);
+  grid-template-columns: minmax(150px, .65fr) minmax(0, 1.35fr);
   align-items: center;
-  gap: 16px;
+  gap: 20px;
 }
 
 .settings-v2-control {
@@ -65,10 +65,10 @@
   line-height: var(--cc-type-short-label-line);
 }
 
-.settings-v2-control--jarvis .setting-switch-row {
+.settings-v2-appearance__copy > .setting-switch-row {
   min-height: 48px;
-  padding: 0;
-  border-top: 0;
+  margin-top: 6px;
+  padding-bottom: 0;
 }
 
 .settings-v2-segmented,
