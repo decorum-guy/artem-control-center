@@ -3,6 +3,10 @@ export const HOME_CLIMATE_POWER_OFF = "home.climate.power_off" as const;
 export const HOME_CLIMATE_SET_TEMPERATURE = "home.climate.set_temperature" as const;
 export const HOME_CLIMATE_SET_MODE = "home.climate.set_mode" as const;
 export const HOME_CLIMATE_SET_FAN_MODE = "home.climate.set_fan_mode" as const;
+export const HOME_KETTLE_BOIL = "home.kettle.boil" as const;
+export const HOME_KETTLE_SET_TEA_MODE = "home.kettle.set_tea_mode" as const;
+export type KettleTeaMode = "white_tea" | "green_tea" | "red_tea" | "herbal_tea" | "flower_tea" | "puerh_tea" | "oolong_tea" | "black_tea";
+export type KettleActionId = typeof HOME_KETTLE_BOIL | typeof HOME_KETTLE_SET_TEA_MODE;
 
 export const ROG_PSU_MODE_NORMAL = "system.rog_g703.psu.mode.normal" as const;
 export const ROG_PSU_MODE_FULL = "system.rog_g703.psu.mode.full" as const;
@@ -26,7 +30,7 @@ export type RogPsuActionId =
   | typeof ROG_PSU_BP2_ON
   | typeof ROG_PSU_BP2_OFF;
 
-export type HomeAssistantActionId = ClimateActionId | RogPsuActionId;
+export type HomeAssistantActionId = ClimateActionId | RogPsuActionId | KettleActionId;
 export type ClimateHvacMode = "cool" | "heat" | "fan_only" | "dry" | "auto" | "off";
 export type ClimateFanMode = "one" | "two" | "three" | "four" | "five";
 export type HomeAssistantAvailability =
@@ -63,6 +67,7 @@ export interface HomeAssistantActionRequest {
   temperature?: number | null;
   mode?: ClimateHvacMode | null;
   fanMode?: ClimateFanMode | null;
+  teaMode?: KettleTeaMode;
 }
 
 export interface HomeAssistantActionResponse {
@@ -80,6 +85,11 @@ export interface HomeAssistantActionResponse {
     mode: "full" | "normal" | "secondary_only" | "off" | "unavailable";
     psu1State: "on" | "off" | "unavailable";
     psu2State: "on" | "off" | "unavailable";
+  } | null;
+  kettle?: {
+    operationMode: "on" | "off" | KettleTeaMode;
+    currentTemperature: number | null;
+    targetTemperature: number | null;
   } | null;
 }
 
@@ -125,16 +135,21 @@ export async function fetchHomeAssistantActionAvailability(): Promise<HomeAssist
 export async function executeHomeAssistantAction(
   request: HomeAssistantActionRequest
 ): Promise<HomeAssistantActionResponse> {
-  return parse<HomeAssistantActionResponse>(await fetch("/api/v1/actions/home-assistant", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+  const body = request.actionId === HOME_KETTLE_BOIL
+    ? { actionId: request.actionId, requestId: request.requestId }
+    : request.actionId === HOME_KETTLE_SET_TEA_MODE
+    ? { actionId: request.actionId, requestId: request.requestId, teaMode: request.teaMode }
+    : {
       actionId: request.actionId,
       requestId: request.requestId,
       temperature: request.temperature ?? null,
       mode: request.mode ?? null,
       fanMode: request.fanMode ?? null
-    })
+    };
+  return parse<HomeAssistantActionResponse>(await fetch("/api/v1/actions/home-assistant", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
   }));
 }
 

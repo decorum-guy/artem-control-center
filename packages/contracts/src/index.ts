@@ -293,9 +293,15 @@ export interface CoffeeDiaryPhotoUploadResult {
 
 export interface KettleData {
   stage: KettleStage;
-  entityId: "water_heater.chainik";
+  entityId: "water_heater.kukhnia_chainik";
   authority: "home-assistant";
+  available: boolean;
+  currentTemperature: number | null;
+  targetTemperature: number | null;
+  operationMode: "on" | "off" | "white_tea" | "green_tea" | "red_tea" | "herbal_tea" | "flower_tea" | "puerh_tea" | "oolong_tea" | "black_tea" | null;
+  availableTeaModes: Array<"white_tea" | "green_tea" | "red_tea" | "herbal_tea" | "flower_tea" | "puerh_tea" | "oolong_tea" | "black_tea">;
   observedAt: string;
+  stale: boolean;
 }
 
 export type RogG703DeviceStatus =
@@ -447,6 +453,7 @@ export interface DiagnosticsPlanningSummary {
 export interface DiagnosticsMutationGates {
   writesEnabled: boolean;
   coffeeActionsEnabled: boolean;
+  kettleActionsEnabled?: boolean;
   coffeeTimingWritesEnabled: boolean;
   coffeeNotificationWritesEnabled: boolean;
   planningReminderMutationsEnabled: boolean;

@@ -20,12 +20,12 @@ WARMUP_ENTITY = "input_number.coffee_warmup_minutes"
 LONG_RUNNING_ENTITY = "input_number.coffee_long_running_minutes"
 LAST_ON_ENTITY = "input_datetime.coffee_last_turned_on"
 TIMING_INITIALIZED_ENTITY = "input_boolean.coffee_timing_initialized"
-KETTLE_ENTITY = "water_heater.chainik"
-KETTLE_SUPPORT_ENTITIES = (
-    "switch.chainik_podderzhanie_tepla",
-    "switch.chainik_podsvetka",
-    "switch.chainik_bez_zvuka",
+KETTLE_ENTITY = "water_heater.kukhnia_chainik"
+KETTLE_TEA_MODES = (
+    "white_tea", "green_tea", "red_tea", "herbal_tea",
+    "flower_tea", "puerh_tea", "oolong_tea", "black_tea",
 )
+KETTLE_MODES = ("on", "off", *KETTLE_TEA_MODES)
 CLIMATE_ENTITY = "climate.konditsioner"
 PSU_1_ENTITY = "switch.bp_1"
 PSU_2_ENTITY = "switch.bp_2"
@@ -41,7 +41,6 @@ REQUIRED_ENTITIES = (
 WATCHED_ENTITIES = (
     *REQUIRED_ENTITIES,
     KETTLE_ENTITY,
-    *KETTLE_SUPPORT_ENTITIES,
     CLIMATE_ENTITY,
     PSU_1_ENTITY,
     PSU_2_ENTITY,
@@ -206,6 +205,8 @@ class HomeAssistantAdapter:
     def mutation_entity_current(self, entity_id: str) -> bool:
         if not self.mutation_transport_available():
             return False
+        if entity_id == KETTLE_ENTITY:
+            return _kettle_state(self._states.get(KETTLE_ENTITY)) != "unavailable"
         state = self.mutation_entity_state(entity_id)
         return state not in {None, "unknown", "unavailable"}
 
@@ -311,6 +312,7 @@ class HomeAssistantAdapter:
 
         kettle = self._states.get(KETTLE_ENTITY)
         kettle_state = _kettle_state(kettle)
+        kettle_attributes = (kettle or {}).get("attributes", {})
         kettle_health = (
             "stale"
             if stale and kettle
@@ -524,7 +526,10 @@ class HomeAssistantAdapter:
                     "unavailable": "Недоступен",
                 }[kettle_state],
                 dataContract="home.kettle.v1",
-                actions=[],
+                actions=[
+                    ActionDescriptor(id="home.kettle.boil", title="Включить", enabled=self._kettle_action_descriptor_enabled(kettle_state != "unavailable"), risk="medium"),
+                    ActionDescriptor(id="home.kettle.set_tea_mode", title="Выбрать чай", enabled=self._kettle_action_descriptor_enabled(kettle_state != "unavailable"), risk="medium"),
+                ],
                 source=source,
                 presentation=ServicePresentation(
                     category="home-device",
@@ -538,7 +543,13 @@ class HomeAssistantAdapter:
                     "stage": kettle_state,
                     "entityId": KETTLE_ENTITY,
                     "authority": "home-assistant",
+                    "available": kettle_state != "unavailable" and not stale,
+                    "currentTemperature": kettle_attributes.get("current_temperature"),
+                    "targetTemperature": kettle_attributes.get("temperature"),
+                    "operationMode": kettle_attributes.get("operation_mode"),
+                    "availableTeaModes": kettle_attributes.get("operation_list", []),
                     "observedAt": observed.isoformat(),
+                    "stale": stale,
                 },
             ),
         ]
@@ -638,6 +649,14 @@ class HomeAssistantAdapter:
         return bool(
             self._settings.writes_enabled
             and self._settings.home_climate_actions_enabled
+            and self.mutation_transport_available()
+            and entity_available
+        )
+
+    def _kettle_action_descriptor_enabled(self, entity_available: bool) -> bool:
+        return bool(
+            self._settings.writes_enabled
+            and self._settings.kettle_actions_enabled
             and self.mutation_transport_available()
             and entity_available
         )
@@ -933,6 +952,21 @@ def _sanitize_state(entity_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(raw_attributes, dict):
         raw_attributes = {}
     raw_state = state.get("state")
+    if entity_id == KETTLE_ENTITY:
+        normalized_state = raw_state if raw_state in KETTLE_MODES or raw_state in {"unknown", "unavailable"} else "unknown"
+        mode = raw_attributes.get("operation_mode")
+        return {
+            "entity_id": entity_id,
+            "state": normalized_state,
+            "last_changed": state.get("last_changed"),
+            "last_updated": state.get("last_updated"),
+            "attributes": {
+                "current_temperature": _kettle_number(raw_attributes.get("current_temperature")),
+                "temperature": _kettle_number(raw_attributes.get("temperature")),
+                "operation_mode": mode if mode in KETTLE_MODES else None,
+                "operation_list": [item for item in KETTLE_TEA_MODES if item in raw_attributes.get("operation_list", [])] if isinstance(raw_attributes.get("operation_list"), list) else [],
+            },
+        }
     if entity_id == CLIMATE_ENTITY:
         normalized_state = (
             raw_state
@@ -1004,6 +1038,15 @@ def _climate_modes(value: Any, allowed: tuple[str, ...]) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str) and item in allowed]
+
+
+def _kettle_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number) or number < 0 or number > 120:
+        return None
+    return int(number) if number.is_integer() else number
 
 
 def _bounded_int(value: Any, minimum: int, maximum: int) -> int | None:
@@ -1125,10 +1168,15 @@ def _timing_revision(
 
 
 def _kettle_state(state: Optional[Dict[str, Any]]) -> str:
-    value = str((state or {}).get("state", "")).lower()
-    if value in {"off", "idle"}:
+    value = (state or {}).get("state")
+    mode = (state or {}).get("attributes", {}).get("operation_mode")
+    if value in {"unknown", "unavailable", None} or (value not in KETTLE_MODES):
+        return "unavailable"
+    if mode not in KETTLE_MODES:
+        return "unavailable"
+    if value == "off" and mode == "off":
         return "off"
-    if value in {"on", "heat", "heating"}:
+    if value != "off" and mode != "off":
         return "on"
     return "unavailable"
 

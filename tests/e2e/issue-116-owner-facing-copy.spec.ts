@@ -159,8 +159,11 @@ test.describe("Issue #116 owner-facing copy", () => {
         await expect(page.getByTestId("home-authority-line")).toContainText("Home Assistant");
         await expect(home).not.toContainText("WebSocket");
         await expect(home).not.toContainText("Источник дома");
-        await expect(page.getByTestId("device-row-kettle")).toContainText("Выключен");
-        await expect(page.getByTestId("device-row-kettle")).toContainText("В норме");
+        const kettle = page.getByTestId("kettle-control");
+        await expect(kettle).toBeVisible();
+        await expect(kettle.getByRole("status")).toHaveText("Выключен");
+        await expect(kettle).not.toContainText("WebSocket");
+        await expect(page.getByTestId("device-row-kettle")).toHaveCount(0);
       }
       await page.screenshot({ path: `${directory}/${filename}`, animations: "disabled" });
     }

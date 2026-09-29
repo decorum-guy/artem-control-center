@@ -37,7 +37,7 @@ def test_default_is_visible_and_valid_update_survives_reload(tmp_path, monkeypat
         assert hidden.status_code == 200
         assert hidden.json()["devices"][0]["visible"] is False
         registered = {entry["id"]: entry for entry in client.get("/api/v1/snapshot?scenario=kettle-on").json()["services"]}["kettle"]
-        assert registered["data"]["entityId"] == "water_heater.chainik"
+        assert registered["data"]["entityId"] == "water_heater.kukhnia_chainik"
         assert registered["dataContract"] == "home.kettle.v1"
         assert registered["actions"] == []
         shown = patch_visibility(client, 1, True)
@@ -71,7 +71,7 @@ def test_writes_disabled_and_registration_contract_remain_intact(tmp_path, monke
         assert client.get("/api/v1/settings/device-visibility").json()["writesEnabled"] is False
         assert patch_visibility(client, 0, False).status_code == 403
         services = {entry["id"]: entry for entry in client.get("/api/v1/snapshot?scenario=kettle-on").json()["services"]}
-        assert services["kettle"]["data"]["entityId"] == "water_heater.chainik"
+        assert services["kettle"]["data"]["entityId"] == "water_heater.kukhnia_chainik"
         assert services["kettle"]["dataContract"] == "home.kettle.v1"
         assert services["kettle"]["actions"] == []
 

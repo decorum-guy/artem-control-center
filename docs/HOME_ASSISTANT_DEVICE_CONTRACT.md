@@ -319,3 +319,37 @@ Codex must not:
 - call production write actions during discovery.
 
 Any proposed HA changes are documented as patches/specifications inside `artem-control-panel` for later review and manual implementation in the correct project.
+
+## 2026-09-29 kitchen kettle contract (issue #293)
+
+The owner supplied the physical state of the replacement kettle. For Control
+Center, `water_heater.kukhnia_chainik` supersedes the historical
+`water_heater.chainik`. The panel watches only the new entity; the old
+keep-warm, light and mute switches are not part of this contract.
+
+`home.kettle.v1` exposes only the fixed entity ID, `stage`, `available`,
+`currentTemperature`, `targetTemperature`, `operationMode`, ordered
+`availableTeaModes`, `observedAt`, `stale` and the Home Assistant authority.
+`currentTemperature` is read only from `attributes.current_temperature`;
+`targetTemperature` is read only from `attributes.temperature`. Nonfinite,
+out-of-range and nonnumeric values become `null`. Mode is confined to `on`,
+`off` and the eight tea modes. Tea choices are the ordered intersection of
+`operation_list` and the eight known tea modes. Unrecognized physical state or
+mode cannot be used as a command.
+
+`home.kettle.boil` is a fixed 100 °C intent. Under the kettle-only lock, Panel
+Agent first reads the entity. An already confirmed 100 °C / `on` state needs
+no service call. Otherwise it calls `water_heater.set_temperature` with
+`temperature: 100`, waits for target read-back, then calls
+`water_heater.set_operation_mode` with `operation_mode: on`, and waits for a
+fresh final read confirming both values and an active entity state. The target
+step is first so the final `on` command starts the intended 100 °C heating.
+Failure after the first mutation is reported without retry or rollback.
+
+`home.kettle.set_tea_mode` accepts only the eight known tea IDs, requires the
+mode to be advertised by the current entity, calls the fixed
+`water_heater.set_operation_mode` service, and verifies fresh read-back. The
+kettle integration owns tea temperatures. Both actions require Standard access,
+`PANEL_WRITES_ENABLED=true`, a current HA mutation transport/entity, and the
+independent `PANEL_KETTLE_ACTIONS_ENABLED` gate, which defaults to false.
+The browser never supplies an entity, service, or temperature.

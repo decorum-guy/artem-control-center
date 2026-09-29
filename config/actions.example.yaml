@@ -68,54 +68,8 @@ actions:
       expected: "off"
       timeout_seconds: 30
 
-  - id: home.kettle.turn_on
-    enabled: false
-    enablement: separate_production_write_approval_required
-    title: Turn on kettle
-    target: home-stack/remote-primary/kettle
-    authority: home-assistant
-    risk: medium
-    confirmation: confirm
-    cooldown_seconds: 10
-    parameters:
-      type: object
-      additionalProperties: false
-      properties: {}
-    executor:
-      type: home_assistant_registered_action
-      handler_ref: ha_kettle_turn_on
-      service: script.turn_on
-      entity_id: script.kettle_boil
-      note: Stable HA package script preserves the discovered water-heater flow.
-    verify:
-      type: home_assistant_entity
-      entity_id: water_heater.chainik
-      expected: "on"
-      timeout_seconds: 30
-
-  - id: home.kettle.turn_off
-    enabled: false
-    enablement: separate_production_write_approval_required
-    title: Turn off kettle
-    target: home-stack/remote-primary/kettle
-    authority: home-assistant
-    risk: low
-    confirmation: instant
-    cooldown_seconds: 3
-    parameters:
-      type: object
-      additionalProperties: false
-      properties: {}
-    executor:
-      type: home_assistant_registered_action
-      handler_ref: ha_kettle_turn_off
-      service: script.turn_on
-      entity_id: script.kettle_stop
-    verify:
-      type: home_assistant_entity
-      entity_id: water_heater.chainik
-      expected: "off"
-      timeout_seconds: 30
+  # Kettle actions are owned by the typed Panel Agent HA router.
+  # The browser sends only home.kettle.boil or home.kettle.set_tea_mode.
 
   - id: home.create_backup
     title: Create Home Assistant backup

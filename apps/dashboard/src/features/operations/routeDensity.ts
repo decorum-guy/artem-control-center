@@ -79,7 +79,7 @@ export function selectHomePrimaryDevices(services: readonly ServiceSnapshot[]): 
   const coffee = homeDevices.find((service) => resolveManifest(service).id === "home.coffee-machine") ?? null;
   const climate = homeDevices.find((service) => service.dataContract === "home.climate.v1") ?? null;
   const kettle = homeDevices.find((service) => resolveManifest(service).id === "home.kettle") ?? null;
-  const selected = new Set([coffee?.id, climate?.id, ...(climate ? [] : [kettle?.id])]);
+  const selected = new Set([coffee?.id, climate?.id, kettle?.id]);
   const fallback = !coffee && !climate && !kettle ? homeDevices[0] ?? null : null;
   if (fallback) selected.add(fallback.id);
 

@@ -79,12 +79,12 @@ describe("PR7 route density helpers", () => {
     expect(selectHomePrimaryDevices([lamp])).toMatchObject({ fallback: lamp, additional: [] });
   });
 
-  it("gives the climate contract the primary Home slot and keeps Kettle additional", () => {
+  it("keeps Coffee, Climate and Kettle as primary Home controls", () => {
     const coffee = service("coffee", { dataContract: "home.coffee-machine.v1", presentation: { category: "home-device", group: "Home infrastructure", overview: "primary", priority: 100 } });
     const climate = service("climate-main", { dataContract: "home.climate.v1", presentation: { category: "home-device", group: "Home infrastructure", overview: "quick-control", priority: 95 } });
     const kettle = service("kettle", { dataContract: "home.kettle.v1", presentation: { category: "home-device", group: "Home infrastructure", overview: "quick-control", priority: 70 } });
 
-    expect(selectHomePrimaryDevices([coffee, climate, kettle])).toMatchObject({ coffee, climate, kettle, additional: [kettle] });
+    expect(selectHomePrimaryDevices([coffee, climate, kettle])).toMatchObject({ coffee, climate, kettle, additional: [] });
   });
 
   it("classifies only trusted system contracts and explicit System categories", () => {

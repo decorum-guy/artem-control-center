@@ -14,6 +14,9 @@ from .access_policy import AccessPolicyStore
 from .home_assistant import (
     CLIMATE_ENTITY,
     CLIMATE_HVAC_MODES,
+    KETTLE_ENTITY,
+    KETTLE_MODES,
+    KETTLE_TEA_MODES,
     PSU_1_ENTITY,
     PSU_2_ENTITY,
     HomeAssistantAdapter,
@@ -37,6 +40,8 @@ PsuActionId = Literal[
     "system.rog_g703.psu.bp2.off",
 ]
 HomeAssistantActionId = Literal[
+    "home.kettle.boil",
+    "home.kettle.set_tea_mode",
     "home.climate.power_on",
     "home.climate.power_off",
     "home.climate.set_temperature",
@@ -51,6 +56,8 @@ HomeAssistantActionId = Literal[
 ]
 
 ALL_ACTION_IDS: tuple[str, ...] = (
+    "home.kettle.boil",
+    "home.kettle.set_tea_mode",
     "home.climate.power_on",
     "home.climate.power_off",
     "home.climate.set_temperature",
@@ -63,13 +70,15 @@ ALL_ACTION_IDS: tuple[str, ...] = (
     "system.rog_g703.psu.bp2.on",
     "system.rog_g703.psu.bp2.off",
 )
-CLIMATE_ACTION_IDS = frozenset(ALL_ACTION_IDS[:5])
-PSU_ACTION_IDS = frozenset(ALL_ACTION_IDS[5:])
+KETTLE_ACTION_IDS = frozenset(ALL_ACTION_IDS[:2])
+CLIMATE_ACTION_IDS = frozenset(ALL_ACTION_IDS[2:7])
+PSU_ACTION_IDS = frozenset(ALL_ACTION_IDS[7:])
 CLIMATE_ON_STATES = frozenset({"cool", "heat", "fan_only", "dry", "auto"})
 NO_VALUE_ACTIONS = frozenset(
     {
         "home.climate.power_on",
         "home.climate.power_off",
+        "home.kettle.boil",
         *PSU_ACTION_IDS,
     }
 )
@@ -79,6 +88,8 @@ class HomeAssistantActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     actionId: Literal[
+        "home.kettle.boil",
+        "home.kettle.set_tea_mode",
         "home.climate.power_on",
         "home.climate.power_off",
         "home.climate.set_temperature",
@@ -95,24 +106,28 @@ class HomeAssistantActionRequest(BaseModel):
     temperature: StrictInt | None = None
     mode: Literal["cool", "heat", "fan_only", "dry", "auto", "off"] | None = None
     fanMode: Literal["one", "two", "three", "four", "five"] | None = None
+    teaMode: Literal["white_tea", "green_tea", "red_tea", "herbal_tea", "flower_tea", "puerh_tea", "oolong_tea", "black_tea"] | None = None
 
     @model_validator(mode="after")
     def validate_action_shape(self) -> "HomeAssistantActionRequest":
-        values = (self.temperature, self.mode, self.fanMode)
+        values = (self.temperature, self.mode, self.fanMode, self.teaMode)
         if self.actionId in NO_VALUE_ACTIONS:
             if any(value is not None for value in values):
                 raise ValueError("action does not accept a value")
         elif self.actionId == "home.climate.set_temperature":
-            if self.temperature is None or self.mode is not None or self.fanMode is not None:
+            if self.temperature is None or self.mode is not None or self.fanMode is not None or self.teaMode is not None:
                 raise ValueError("temperature action requires only temperature")
             if not 16 <= self.temperature <= 32:
                 raise ValueError("temperature must be between 16 and 32")
         elif self.actionId == "home.climate.set_mode":
-            if self.mode is None or self.temperature is not None or self.fanMode is not None:
+            if self.mode is None or self.temperature is not None or self.fanMode is not None or self.teaMode is not None:
                 raise ValueError("mode action requires only mode")
         elif self.actionId == "home.climate.set_fan_mode":
-            if self.fanMode is None or self.temperature is not None or self.mode is not None:
+            if self.fanMode is None or self.temperature is not None or self.mode is not None or self.teaMode is not None:
                 raise ValueError("fan mode action requires only fanMode")
+        elif self.actionId == "home.kettle.set_tea_mode":
+            if self.teaMode is None or any(value is not None for value in (self.temperature, self.mode, self.fanMode)):
+                raise ValueError("tea mode action requires only teaMode")
         return self
 
 
@@ -152,10 +167,14 @@ class HomeAssistantActionExecutor:
         # create each independent lock lazily on the first async request so
         # production import and synchronous availability reads remain safe.
         self._climate_lock: asyncio.Lock | None = None
+        self._kettle_lock: asyncio.Lock | None = None
         self._psu_lock: asyncio.Lock | None = None
 
     def _gate_enabled(self, action_id: str) -> bool:
-        if action_id in CLIMATE_ACTION_IDS:
+        if action_id in KETTLE_ACTION_IDS:
+            capability_id = "kettle_actions"
+            configured = self.settings.kettle_actions_enabled
+        elif action_id in CLIMATE_ACTION_IDS:
             capability_id = "home_climate_actions"
             configured = self.settings.home_climate_actions_enabled
         else:
@@ -165,6 +184,10 @@ class HomeAssistantActionExecutor:
         return bool(self.settings.writes_enabled and effective)
 
     def _lock_for(self, action_id: str) -> asyncio.Lock:
+        if action_id in KETTLE_ACTION_IDS:
+            if self._kettle_lock is None:
+                self._kettle_lock = asyncio.Lock()
+            return self._kettle_lock
         if action_id in CLIMATE_ACTION_IDS:
             if self._climate_lock is None:
                 self._climate_lock = asyncio.Lock()
@@ -174,12 +197,14 @@ class HomeAssistantActionExecutor:
         return self._psu_lock
 
     def _busy_for(self, action_id: str) -> bool:
-        lock = self._climate_lock if action_id in CLIMATE_ACTION_IDS else self._psu_lock
+        lock = self._kettle_lock if action_id in KETTLE_ACTION_IDS else self._climate_lock if action_id in CLIMATE_ACTION_IDS else self._psu_lock
         return bool(lock and lock.locked())
 
     def _integration_available(self, action_id: str) -> bool:
         if not self.home_assistant.mutation_transport_available():
             return False
+        if action_id in KETTLE_ACTION_IDS:
+            return self.home_assistant.mutation_entity_current(KETTLE_ENTITY)
         if action_id in CLIMATE_ACTION_IDS:
             return self.home_assistant.mutation_entity_current(CLIMATE_ENTITY)
         if action_id.endswith(".bp1.on") or action_id.endswith(".bp1.off"):
@@ -294,6 +319,8 @@ class HomeAssistantActionExecutor:
             ) from None
 
     async def _execute_locked(self, request: HomeAssistantActionRequest) -> dict[str, Any]:
+        if request.actionId in KETTLE_ACTION_IDS:
+            return await self._execute_kettle(request)
         if request.actionId in CLIMATE_ACTION_IDS:
             return await self._execute_climate(request)
         return await self._execute_psu(request)
@@ -409,6 +436,64 @@ class HomeAssistantActionExecutor:
                 == request.fanMode,
             )
         return self._climate_result(request.requestId, request.actionId, confirmed)
+
+    async def _execute_kettle(self, request: HomeAssistantActionRequest) -> dict[str, Any]:
+        current = await self._fresh(KETTLE_ENTITY)
+        if current.get("state") not in KETTLE_MODES or current.get("attributes", {}).get("operation_mode") not in KETTLE_MODES:
+            raise HomeAssistantActionError("ha_invalid_state", 409)
+        attributes = current["attributes"]
+        if request.actionId == "home.kettle.boil":
+            if attributes.get("temperature") == 100 and attributes.get("operation_mode") == "on" and current.get("state") != "off":
+                return self._kettle_result(request.requestId, request.actionId, current)
+            await self._call_service(
+                "/api/services/water_heater/set_temperature",
+                {"entity_id": KETTLE_ENTITY, "temperature": 100},
+            )
+            await self._verify(KETTLE_ENTITY, lambda state: state.get("attributes", {}).get("temperature") == 100)
+            await self._call_service(
+                "/api/services/water_heater/set_operation_mode",
+                {"entity_id": KETTLE_ENTITY, "operation_mode": "on"},
+            )
+            confirmed = await self._verify(
+                KETTLE_ENTITY,
+                lambda state: state.get("attributes", {}).get("temperature") == 100
+                and state.get("attributes", {}).get("operation_mode") == "on"
+                and state.get("state") not in {"off", "unknown", "unavailable"},
+            )
+        else:
+            assert request.teaMode in KETTLE_TEA_MODES
+            if request.teaMode not in attributes.get("operation_list", []):
+                raise HomeAssistantActionError("ha_invalid_state", 409)
+            if attributes.get("operation_mode") == request.teaMode and current.get("state") != "off":
+                return self._kettle_result(request.requestId, request.actionId, current)
+            await self._call_service(
+                "/api/services/water_heater/set_operation_mode",
+                {"entity_id": KETTLE_ENTITY, "operation_mode": request.teaMode},
+            )
+            confirmed = await self._verify(
+                KETTLE_ENTITY,
+                lambda state: state.get("attributes", {}).get("operation_mode") == request.teaMode
+                and state.get("state") not in {"off", "unknown", "unavailable"},
+            )
+        return self._kettle_result(request.requestId, request.actionId, confirmed)
+
+    @staticmethod
+    def _kettle_result(request_id: UUID, action_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        attributes = state.get("attributes", {})
+        return {
+            "schemaVersion": 1,
+            "requestId": str(request_id),
+            "actionId": action_id,
+            "status": "confirmed",
+            "observedAt": datetime.now(timezone.utc).isoformat(),
+            "climate": None,
+            "psu": None,
+            "kettle": {
+                "operationMode": attributes.get("operation_mode"),
+                "currentTemperature": attributes.get("current_temperature"),
+                "targetTemperature": attributes.get("temperature"),
+            },
+        }
 
     async def _fresh_psu_pair(
         self,

@@ -218,18 +218,18 @@ projects:
             discovery:
               read_only_source: /Users/aartemida/Documents/Homeassistant
               exact_entity_ids_must_be_discovered: false
-              verified_entity_id: water_heater.chainik
+              verified_entity_id: water_heater.kukhnia_chainik
             capabilities:
               monitor:
                 adapter: home_assistant_device
                 base_url_env: HA_BASE_URL
                 token_env: HA_MONITORING_TOKEN
-                entity_id: water_heater.chainik
+                entity_id: water_heater.kukhnia_chainik
               actions:
-                - home.kettle.turn_on
-                - home.kettle.turn_off
+                - home.kettle.boil
+                - home.kettle.set_tea_mode
             presentation:
-              widget: core.generic-home-device
+              widget: home.kettle
 
           - id: alice-tg-bot
             repository: decorum-guy/AliceTG_Bot
