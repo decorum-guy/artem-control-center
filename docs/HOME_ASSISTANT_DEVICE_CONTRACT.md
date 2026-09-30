@@ -349,7 +349,19 @@ Failure after the first mutation is reported without retry or rollback.
 `home.kettle.set_tea_mode` accepts only the eight known tea IDs, requires the
 mode to be advertised by the current entity, calls the fixed
 `water_heater.set_operation_mode` service, and verifies fresh read-back. The
-kettle integration owns tea temperatures. Both actions require Standard access,
+kettle integration owns tea temperatures. For the verified Polaris PWK 1712CGLD
+through YandexStation 3.22.0, tea activation normalizes to `state: on` and
+`operation_mode: on`. The server-owned preset targets are white 65, green 80,
+red 90, herbal 90, flower 80, puerh 95, oolong 90, and black 100 °C. Confirmation
+requires both active fields and the requested preset's target through fresh
+REST. After mutation, timezone-aware `last_updated` must be newer than the
+pre-command observation and at or after command start; an unchanged
+`last_changed` alone cannot verify a target change. An already-active matching
+target returns confirmed without mutation. Presets sharing a target represent
+the same observable heating contract; no unique tea label is invented in the
+snapshot. Source and physical evidence are recorded in
+`docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md` under issue #315.
+Both actions require Standard access,
 `PANEL_WRITES_ENABLED=true`, a current HA mutation transport/entity, and the
 independent `PANEL_KETTLE_ACTIONS_ENABLED` gate, which defaults to false.
 The browser never supplies an entity, service, or temperature.

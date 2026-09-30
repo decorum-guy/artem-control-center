@@ -19,7 +19,7 @@ test.describe("Issue 293 · dedicated kettle control", () => {
     await page.route("**/api/v1/actions/home-assistant", async route => {
       if (route.request().method() !== "POST") return route.continue();
       posts.push(route.request().postDataJSON() as Record<string, unknown>);
-      await route.fulfill({ json: { schemaVersion: 1, requestId: posts.at(-1)?.requestId, actionId: posts.at(-1)?.actionId, status: "confirmed", observedAt: "2026-09-29T00:00:00Z", climate: null, psu: null, kettle: { operationMode: "green_tea", currentTemperature: 61, targetTemperature: 100 } } });
+      await route.fulfill({ json: { schemaVersion: 1, requestId: posts.at(-1)?.requestId, actionId: posts.at(-1)?.actionId, status: "confirmed", observedAt: "2026-09-30T18:15:56Z", climate: null, psu: null, kettle: { operationMode: "on", currentTemperature: 25, targetTemperature: 80 } } });
     });
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/home?scenario=home-climate-healthy");

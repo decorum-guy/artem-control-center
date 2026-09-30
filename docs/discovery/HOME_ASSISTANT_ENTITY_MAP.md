@@ -408,3 +408,78 @@ Control Center no longer subscribes to the historical panel-side support
 switches for keep-warm, light, or mute. Repository search found no other
 current Panel Agent feature consuming them. AliceTG_Bot was not changed.
 Physical action acceptance remains pending with the production gate disabled.
+
+## 2026-09-30 tea verification evidence (issue #315)
+
+Read-only requests through Samsung's existing private HA connection confirmed
+the integration as `yandex_station` **3.22.0** and the device as **Polaris PWK
+1712CGLD**. The owner authorized reading those specific provider metadata fields.
+No HA configuration, integration source, deployment or physical command was
+changed. The state/history diagnostic returned only `state`, `operation_mode`,
+`temperature`, `current_temperature`, `operation_list`, `last_changed`, and
+`last_updated`; credentials stayed in memory on Samsung.
+
+Today's entity-scoped history supplies the physical green-tea read-back:
+
+| UTC observation | state | operation_mode | target °C | current °C |
+| --- | --- | --- | --- | --- |
+| 2026-09-30 18:15:56.863521 | on | on | 80 | 25 |
+| 2026-09-30 18:19:23.679293 | off | off | 100 | 80 |
+
+The first observation is 21:15:56 Moscow time and agrees with the owner's
+green-tea reproduction. `last_changed` and `last_updated` both equal that
+activation timestamp. The later stop resets the target to 100; an off state's
+target is not proof of a running tea program. Recorder history omits
+`operation_list`; a separate current REST read advertised all eight reviewed
+tea IDs, plus on/off.
+
+Primary source evidence:
+
+- [YandexStation 3.22.0 water_heater.py](https://github.com/AlexxIT/YandexStation/blob/453a96b232aeb185e482461f842e047bbfca1cb2/custom_components/yandex_station/water_heater.py):
+  `internal_update` derives current operation exclusively from the on/off
+  capability, target temperature from the temperature capability, and current
+  temperature from the temperature property. `async_set_operation_mode` sends
+  symbolic tea IDs to the provider's `tea_mode` capability. It does not persist
+  those IDs as the current operation.
+- [Polaris integration preset definitions](https://github.com/samoswall/polaris-mqtt/blob/0db4fa1bb9c340e5e7fe4c36dd7a225d55ab1c83/custom_components/polaris/const.py#L3839)
+  and [preset execution](https://github.com/samoswall/polaris-mqtt/blob/0db4fa1bb9c340e5e7fe4c36dd7a225d55ab1c83/custom_components/polaris/select.py#L576)
+  define the physical target contract below for supported Polaris kettles,
+  including PWK 1712CGLD. This is source-derived evidence, not eight physical
+  tests. The green-tea target also matches the real HA history.
+- [Manufacturer's PWK 1712CGLD manual](https://e52e3ee2-628b-49a9-9e26-e5a61fd72b20.selcdn.net/upload/iblock/dea/jccm97vqjirep12xraom8pcw51cma5j9.pdf),
+  pages 21–23, describes drink presets as heating to the associated temperature.
+
+| Reviewed request tea ID | Provider target °C | Evidence |
+| --- | --- | --- |
+| white_tea | 65 | Polaris source |
+| green_tea | 80 | Polaris source + physical HA history |
+| red_tea | 90 | Polaris source |
+| herbal_tea | 90 | Polaris source |
+| flower_tea | 80 | Polaris source |
+| puerh_tea | 95 | Polaris source |
+| oolong_tea | 90 | Polaris source |
+| black_tea | 100 | Polaris source |
+
+These presets can share targets; HA does not expose a unique retained tea
+label. The confirmed contract is the provider's equivalent active heating
+target. No remembered tea label is published as device truth.
+
+The old false predicate was `operation_mode == requestedTeaMode AND state not
+in {off, unknown, unavailable}`. The new predicate is `state == on AND
+operation_mode == on AND temperature == serverPreset[requestedTeaMode]`, read
+through `_fresh(KETTLE_ENTITY)`. After a mutation it additionally requires a
+valid timezone-aware `last_updated` newer than the pre-command REST observation
+and at or after the command's UTC start. Missing/invalid timestamps fail closed.
+`last_changed` may remain unchanged when an already-on kettle changes target;
+`last_updated` must advance. Polling stays bounded to the existing 250 ms / 5 s.
+Timestamp checks assume HA and Panel Agent clocks are synchronized; a clock
+behind the command cannot produce success.
+
+An initial authoritative REST observation already matching the active target
+returns confirmed without another mutation. Tea commands still use only the
+advertised, allow-listed symbolic mode; browser temperatures are rejected.
+The boil-to-100 path is unchanged. Tests replace symbolic-mode persistence with
+normalized provider fixtures and cover incorrect targets, stale observations,
+delayed normalization, idempotency and truthful snapshots. Owner revalidation
+on Samsung remains required after the PR is reviewed; this change is not
+deployed by the implementation agent.
