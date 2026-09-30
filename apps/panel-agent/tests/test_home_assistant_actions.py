@@ -36,7 +36,6 @@ from panel_agent.settings import IntegrationSettings
 
 
 KETTLE_PROVIDER = json.loads((Path(__file__).parent / "fixtures/kettle_yandex_station.json").read_text())
-KETTLE_COMMAND_TIME = datetime(2026, 9, 30, 18, 15, 55, tzinfo=timezone.utc)
 
 
 def kettle_heating() -> dict:
@@ -218,7 +217,6 @@ def make_stack(
         verification_timeout=1.0,
         verification_interval=0.25,
         gate_provider=gate_provider,
-        utcnow=lambda: KETTLE_COMMAND_TIME,
     )
     return stub, adapter, access, executor
 
@@ -1152,6 +1150,33 @@ def test_green_tea_physical_readback_and_delayed_normalization(tmp_path: Path) -
     assert len(server.calls) == 1
 
 
+def test_kettle_fresh_ha_readback_confirms_despite_samsung_clock_skew(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    previous_update = "2026-09-30T18:15:54.500+00:00"
+    readback = kettle_heating()
+    readback["last_updated"] = "2026-09-30T18:15:56.000+00:00"
+    readback["last_changed"] = readback["last_updated"]
+    samsung_clock = datetime(2026, 9, 30, 18, 15, 57, tzinfo=timezone.utc)
+    assert datetime.fromisoformat(previous_update) < datetime.fromisoformat(readback["last_updated"]) < samsung_clock
+
+    class SamsungDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return samsung_clock.astimezone(tz) if tz is not None else samsung_clock.replace(tzinfo=None)
+
+    monkeypatch.setattr("panel_agent.home_assistant_actions.datetime", SamsungDatetime)
+    server = KettleReadbackStub([readback])
+    server.states[KETTLE_ENTITY]["last_updated"] = previous_update
+    _, _, _, executor = make_stack(tmp_path, server)
+    result = run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert result["status"] == "confirmed"
+    assert result["observedAt"] == samsung_clock.isoformat()
+    assert result["kettle"] == {"operationMode": "on", "currentTemperature": 25, "targetTemperature": 80}
+    assert server.readback_count == 1
+    assert server.calls == [("/api/services/water_heater/set_operation_mode", {"entity_id": KETTLE_ENTITY, "operation_mode": "green_tea"})]
+
+
 @pytest.mark.parametrize("state,mode,target", [
     ("on", "on", 100), ("on", "on", 65), ("on", "on", None),
     ("on", "green_tea", 80), ("green_tea", "green_tea", 80),
@@ -1171,13 +1196,14 @@ def test_kettle_active_or_symbolic_mode_alone_cannot_confirm(tmp_path: Path, sta
 
 
 @pytest.mark.parametrize("updated", [
-    "2026-09-08T09:59:00Z", "2026-09-08T10:00:00Z",
+    "2026-09-08T09:59:00Z", "2026-09-30T18:15:54.500Z",
     "2026-09-30T18:15:54Z", None, "bad", "2026-09-30T18:15:56",
 ])
 def test_kettle_stale_or_invalid_readback_timestamp_cannot_confirm(tmp_path: Path, updated: str | None) -> None:
     readback = kettle_heating()
     readback["last_updated"] = updated
     server = KettleReadbackStub([readback])
+    server.states[KETTLE_ENTITY]["last_updated"] = "2026-09-30T18:15:54.500Z"
     _, _, _, executor = make_stack(tmp_path, server)
     with pytest.raises(HTTPException) as timeout:
         run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))

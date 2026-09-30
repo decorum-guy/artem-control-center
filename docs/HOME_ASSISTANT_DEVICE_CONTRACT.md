@@ -355,8 +355,10 @@ through YandexStation 3.22.0, tea activation normalizes to `state: on` and
 red 90, herbal 90, flower 80, puerh 95, oolong 90, and black 100 °C. Confirmation
 requires both active fields and the requested preset's target through fresh
 REST. After mutation, timezone-aware `last_updated` must be newer than the
-pre-command observation and at or after command start; an unchanged
-`last_changed` alone cannot verify a target change. An already-active matching
+authoritative pre-command HA REST observation. Freshness uses only advancement
+of the HA entity's own timestamp, without comparing to Panel Agent wall-clock
+UTC or requiring synchronized host clocks. An unchanged `last_changed` alone
+cannot verify a target change. An already-active matching
 target returns confirmed without mutation. Presets sharing a target represent
 the same observable heating contract; no unique tea label is invented in the
 snapshot. Source and physical evidence are recorded in

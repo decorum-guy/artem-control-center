@@ -169,7 +169,6 @@ class HomeAssistantActionExecutor:
         verification_interval: float = 0.25,
         verification_timeout: float = 5.0,
         gate_provider: Callable[[str], bool] | None = None,
-        utcnow: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         self.settings = settings
         self.access = access
@@ -180,7 +179,6 @@ class HomeAssistantActionExecutor:
         self._verification_interval = verification_interval
         self._verification_timeout = verification_timeout
         self._gate_provider = gate_provider
-        self._utcnow = utcnow
         # Python 3.9 binds asyncio.Lock to the current loop at construction;
         # create each independent lock lazily on the first async request so
         # production import and synchronous availability reads remain safe.
@@ -487,7 +485,6 @@ class HomeAssistantActionExecutor:
             previous_update = self._kettle_updated_at(current)
             if previous_update is None:
                 raise HomeAssistantActionError("ha_invalid_state", 409)
-            command_started_at = self._utcnow()
             await self._call_service(
                 "/api/services/water_heater/set_operation_mode",
                 {"entity_id": KETTLE_ENTITY, "operation_mode": request.teaMode},
@@ -496,8 +493,7 @@ class HomeAssistantActionExecutor:
                 KETTLE_ENTITY,
                 lambda state: self._kettle_tea_active(state, request.teaMode)
                 and (updated_at := self._kettle_updated_at(state)) is not None
-                and updated_at > previous_update
-                and updated_at >= command_started_at,
+                and updated_at > previous_update,
             )
         return self._kettle_result(request.requestId, request.actionId, confirmed)
 

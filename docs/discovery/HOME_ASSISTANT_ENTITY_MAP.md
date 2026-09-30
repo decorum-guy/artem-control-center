@@ -468,12 +468,13 @@ The old false predicate was `operation_mode == requestedTeaMode AND state not
 in {off, unknown, unavailable}`. The new predicate is `state == on AND
 operation_mode == on AND temperature == serverPreset[requestedTeaMode]`, read
 through `_fresh(KETTLE_ENTITY)`. After a mutation it additionally requires a
-valid timezone-aware `last_updated` newer than the pre-command REST observation
-and at or after the command's UTC start. Missing/invalid timestamps fail closed.
+valid timezone-aware `last_updated` strictly newer than the authoritative
+pre-command HA REST observation. Freshness is proven by advancement of the HA
+entity's own `last_updated`; both timestamps are in the HA clock domain.
+Panel Agent/Samsung wall-clock UTC is not compared, so synchronized host clocks
+are not required. Missing/invalid timestamps fail closed.
 `last_changed` may remain unchanged when an already-on kettle changes target;
 `last_updated` must advance. Polling stays bounded to the existing 250 ms / 5 s.
-Timestamp checks assume HA and Panel Agent clocks are synchronized; a clock
-behind the command cannot produce success.
 
 An initial authoritative REST observation already matching the active target
 returns confirmed without another mutation. Tea commands still use only the
