@@ -27,6 +27,7 @@ import { InterfaceCopySettingsSheet } from "./InterfaceCopySettings";
 import { DeviceVisibilitySettingsSheet, deviceVisibilityStateLabel, deviceVisibilitySummary } from "./DeviceVisibilitySettings";
 import { ProjectSettingsSheet } from "./ProjectSettings";
 import { SystemControlsSettings } from "./SystemControlsSettings";
+import { SettingSwitchRow } from "./SettingSwitchRow";
 import { projectRegistryStateLabel, projectRegistrySummary } from "../../projectRegistryPresentation";
 import { useDeviceVisibility } from "../../DeviceVisibility";
 import { useInterfaceCopy } from "../../interfaceCopy";
@@ -35,7 +36,7 @@ import "./settingsV2.css";
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
-type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery" | "interface-copy" | "device-visibility" | "projects";
+type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery" | "interface-copy" | "device-visibility" | "projects" | "jarvis";
 
 const motionLabels: Record<MotionMode, string> = {
   full: "Полное",
@@ -56,6 +57,8 @@ export function SettingsV2Page({
   calendarSources,
   onThemeChange,
   onMotionChange,
+  jarvisVisible,
+  onJarvisVisibleChange,
   onRefreshCalendarMetadata,
   onNavigate
 }: {
@@ -64,6 +67,8 @@ export function SettingsV2Page({
   calendarSources: PlanningCalendarSource[];
   onThemeChange: (theme: Theme) => void;
   onMotionChange: (motion: MotionMode) => void;
+  jarvisVisible: boolean;
+  onJarvisVisibleChange: (visible: boolean) => void;
   onRefreshCalendarMetadata: () => Promise<boolean>;
   onNavigate: (target: ShellNavigationTarget) => void;
 }) {
@@ -213,6 +218,13 @@ export function SettingsV2Page({
             onClick={() => onNavigate({ path: "/overview", search: "overviewEdit=1" })}
           />
           <SettingsSummaryRow
+            title="Jarvis"
+            summary="Окно помощника поверх панели"
+            stateLabel={jarvisVisible ? "Вкл" : "Выкл"}
+            testId="settings-summary-jarvis"
+            onClick={() => setOpenSheet("jarvis")}
+          />
+          <SettingsSummaryRow
             title="Доступ"
             summary={accessSummary(accessStatus, accessAvailable)}
             stateLabel={accessStateLabel(accessStatus, accessAvailable)}
@@ -240,6 +252,8 @@ export function SettingsV2Page({
           ai={ai}
           reminderDelivery={reminderDelivery}
           projects={projects}
+          jarvisVisible={jarvisVisible}
+          onJarvisVisibleChange={onJarvisVisibleChange}
           onRefreshCalendarMetadata={onRefreshCalendarMetadata}
           onClose={() => setOpenSheet(null)}
         />
@@ -256,6 +270,8 @@ function SettingsSheet({
   ai,
   reminderDelivery,
   projects,
+  jarvisVisible,
+  onJarvisVisibleChange,
   onRefreshCalendarMetadata,
   onClose
 }: {
@@ -266,12 +282,35 @@ function SettingsSheet({
   ai: AIProviderSettingsController;
   reminderDelivery: ReminderDeliverySettingsController;
   projects: ProjectRegistryController;
+  jarvisVisible: boolean;
+  onJarvisVisibleChange: (visible: boolean) => void;
   onRefreshCalendarMetadata: () => Promise<boolean>;
   onClose: () => void;
 }) {
   if (kind === "interface-copy") return <InterfaceCopySettingsSheet onClose={onClose} />;
   if (kind === "device-visibility") return <DeviceVisibilitySettingsSheet onClose={onClose} />;
   if (kind === "projects") return <ProjectSettingsSheet onClose={onClose} controller={projects} />;
+  if (kind === "jarvis") {
+    return (
+      <Sheet
+        testId="settings-jarvis-sheet"
+        eyebrow="Интерфейс"
+        title="Jarvis"
+        description="Показывать или скрывать окно помощника поверх панели."
+        onClose={onClose}
+      >
+        <div className="settings-v2-sheet-content">
+          <SettingSwitchRow
+            label="Показывать окно Jarvis"
+            description="Настройка сохраняется только на этой панели."
+            checked={jarvisVisible}
+            onChange={onJarvisVisibleChange}
+            testId="settings-jarvis-visible"
+          />
+        </div>
+      </Sheet>
+    );
+  }
   if (kind === "calendars") {
     return (
       <CalendarSettingsSheet
