@@ -1,0 +1,23 @@
+{
+  "tea_targets": {
+    "white_tea": 65,
+    "green_tea": 80,
+    "red_tea": 90,
+    "herbal_tea": 90,
+    "flower_tea": 80,
+    "puerh_tea": 95,
+    "oolong_tea": 90,
+    "black_tea": 100
+  },
+  "green_tea_heating": {
+    "state": "on",
+    "attributes": {
+      "operation_mode": "on",
+      "temperature": 80,
+      "current_temperature": 25,
+      "operation_list": ["on", "off", "white_tea", "green_tea", "red_tea", "herbal_tea", "flower_tea", "puerh_tea", "oolong_tea", "black_tea"]
+    },
+    "last_changed": "2026-09-30T18:15:56.863521+00:00",
+    "last_updated": "2026-09-30T18:15:56.863521+00:00"
+  }
+}

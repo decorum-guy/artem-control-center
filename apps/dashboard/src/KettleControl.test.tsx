@@ -30,6 +30,9 @@ describe("KettleControl", () => {
     expect(markup(kettle({ currentTemperature: null, targetTemperature: 100 }))).toContain('>—°</div>');
     expect(markup(kettle({ stage: "on", operationMode: "green_tea" }))).toContain("Зелёный чай");
     expect(markup(kettle({ stage: "on", operationMode: "on" }))).toContain("Нагрев до 100°");
+    const physicalGreenTea = markup(kettle({ stage: "on", operationMode: "on", targetTemperature: 80 }));
+    expect(physicalGreenTea).toContain('role="status">Нагрев</p>');
+    expect(physicalGreenTea).not.toContain("Зелёный чай");
     expect(markup(kettle({ stage: "on", operationMode: "unknown" }))).toContain("Состояние неизвестно");
   });
   it("has exactly the eight bounded tea labels", () => {

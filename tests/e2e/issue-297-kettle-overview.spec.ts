@@ -47,7 +47,7 @@ async function installActions(page: Page) {
     posts.push(body);
     await route.fulfill({ json: { schemaVersion: 1, requestId: body.requestId, actionId: body.actionId,
       status: "confirmed", observedAt: "2026-09-29T00:00:00Z", climate: null, psu: null,
-      kettle: { operationMode: body.teaMode ?? "on", currentTemperature: 61, targetTemperature: 100 } } });
+      kettle: { operationMode: "on", currentTemperature: 61, targetTemperature: body.teaMode === "green_tea" ? 80 : 100 } } });
   });
   return posts;
 }

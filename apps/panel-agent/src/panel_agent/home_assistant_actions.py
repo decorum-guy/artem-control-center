@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timezone
+from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Literal
 from uuid import UUID
 
@@ -22,6 +23,21 @@ from .home_assistant import (
     HomeAssistantAdapter,
 )
 from .settings import IntegrationSettings
+
+
+# Polaris PWK 1712CGLD via YandexStation 3.22.0 reports on/off, not the
+# requested tea ID. Targets are provider-owned presets; see the bounded
+# source/history evidence in docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md.
+KETTLE_TEA_TEMPERATURES = MappingProxyType({
+    "white_tea": 65,
+    "green_tea": 80,
+    "red_tea": 90,
+    "herbal_tea": 90,
+    "flower_tea": 80,
+    "puerh_tea": 95,
+    "oolong_tea": 90,
+    "black_tea": 100,
+})
 
 
 ClimateActionId = Literal[
@@ -464,18 +480,42 @@ class HomeAssistantActionExecutor:
             assert request.teaMode in KETTLE_TEA_MODES
             if request.teaMode not in attributes.get("operation_list", []):
                 raise HomeAssistantActionError("ha_invalid_state", 409)
-            if attributes.get("operation_mode") == request.teaMode and current.get("state") != "off":
+            if self._kettle_tea_active(current, request.teaMode):
                 return self._kettle_result(request.requestId, request.actionId, current)
+            previous_update = self._kettle_updated_at(current)
+            if previous_update is None:
+                raise HomeAssistantActionError("ha_invalid_state", 409)
             await self._call_service(
                 "/api/services/water_heater/set_operation_mode",
                 {"entity_id": KETTLE_ENTITY, "operation_mode": request.teaMode},
             )
             confirmed = await self._verify(
                 KETTLE_ENTITY,
-                lambda state: state.get("attributes", {}).get("operation_mode") == request.teaMode
-                and state.get("state") not in {"off", "unknown", "unavailable"},
+                lambda state: self._kettle_tea_active(state, request.teaMode)
+                and (updated_at := self._kettle_updated_at(state)) is not None
+                and updated_at > previous_update,
             )
         return self._kettle_result(request.requestId, request.actionId, confirmed)
+
+    @staticmethod
+    def _kettle_tea_active(state: dict[str, Any], tea_mode: str) -> bool:
+        attributes = state.get("attributes", {})
+        return (
+            state.get("state") == "on"
+            and attributes.get("operation_mode") == "on"
+            and attributes.get("temperature") == KETTLE_TEA_TEMPERATURES[tea_mode]
+        )
+
+    @staticmethod
+    def _kettle_updated_at(state: dict[str, Any]) -> datetime | None:
+        value = state.get("last_updated")
+        if not isinstance(value, str):
+            return None
+        try:
+            updated_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return updated_at.astimezone(timezone.utc) if updated_at.tzinfo is not None else None
 
     @staticmethod
     def _kettle_result(request_id: UUID, action_id: str, state: dict[str, Any]) -> dict[str, Any]:

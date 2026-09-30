@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -26,11 +27,19 @@ from panel_agent.home_assistant import (
 )
 from panel_agent.home_assistant_actions import (
     ALL_ACTION_IDS,
+    KETTLE_TEA_TEMPERATURES,
     HomeAssistantActionExecutor,
     HomeAssistantActionRequest,
     build_home_assistant_action_router,
 )
 from panel_agent.settings import IntegrationSettings
+
+
+KETTLE_PROVIDER = json.loads((Path(__file__).parent / "fixtures/kettle_yandex_station.json").read_text())
+
+
+def kettle_heating() -> dict:
+    return {"entity_id": KETTLE_ENTITY, **copy.deepcopy(KETTLE_PROVIDER["green_tea_heating"])}
 
 
 def entity(entity_id: str, state: str, attributes: dict | None = None) -> dict:
@@ -134,8 +143,13 @@ class HomeAssistantStub:
         elif path.endswith("/water_heater/set_temperature"):
             state.setdefault("attributes", {})["temperature"] = body["temperature"]
         elif path.endswith("/water_heater/set_operation_mode"):
-            state.setdefault("attributes", {})["operation_mode"] = body["operation_mode"]
-            state["state"] = body["operation_mode"]
+            mode = body["operation_mode"]
+            if mode in KETTLE_PROVIDER["tea_targets"]:
+                state.setdefault("attributes", {})["temperature"] = KETTLE_PROVIDER["tea_targets"][mode]
+                mode = "on"
+            state.setdefault("attributes", {})["operation_mode"] = mode
+            state["state"] = mode
+            state["last_updated"] = "2026-09-30T18:15:56.863521+00:00"
         elif path.endswith("/switch/turn_on"):
             state["state"] = "on"
         elif path.endswith("/switch/turn_off"):
@@ -1008,14 +1022,14 @@ def test_kettle_entity_watchlist_and_snapshot_are_sanitized(tmp_path: Path) -> N
     assert KETTLE_ENTITY == "water_heater.kukhnia_chainik"
     assert "water_heater.chainik" not in WATCHED_ENTITIES
     assert not any(entity.startswith("switch.chainik_") for entity in WATCHED_ENTITIES)
-    raw = entity(KETTLE_ENTITY, "green_tea", {
-        "current_temperature": 61.5, "temperature": 75, "operation_mode": "green_tea",
+    raw = entity(KETTLE_ENTITY, "on", {
+        "current_temperature": 61.5, "temperature": 80, "operation_mode": "on",
         "operation_list": ["off", "black_tea", "green_tea", "unknown", "black_tea"],
         "token": "must-not-expose", "friendly_name": "Private",
     })
     sanitized = _sanitize_state(KETTLE_ENTITY, raw)
     assert sanitized["attributes"] == {
-        "current_temperature": 61.5, "temperature": 75, "operation_mode": "green_tea",
+        "current_temperature": 61.5, "temperature": 80, "operation_mode": "on",
         "operation_list": ["green_tea", "black_tea"],
     }
     states = base_states()
@@ -1024,8 +1038,8 @@ def test_kettle_entity_watchlist_and_snapshot_are_sanitized(tmp_path: Path) -> N
     kettle = next(service for service in adapter.services() if service.id == "kettle")
     assert kettle.data["stage"] == "on"
     assert kettle.data["currentTemperature"] == 61.5
-    assert kettle.data["targetTemperature"] == 75
-    assert kettle.data["operationMode"] == "green_tea"
+    assert kettle.data["targetTemperature"] == 80
+    assert kettle.data["operationMode"] == "on"
     assert kettle.data["availableTeaModes"] == ["green_tea", "black_tea"]
     assert "token" not in json.dumps(kettle.data)
     assert _sanitize_state(KETTLE_ENTITY, entity(KETTLE_ENTITY, "off", {"operation_mode": "off"}))["state"] == "off"
@@ -1041,6 +1055,9 @@ def test_kettle_request_contract_rejects_arbitrary_fields_and_modes() -> None:
             request("home.kettle.set_tea_mode", teaMode=mode)
     for mode in KETTLE_TEA_MODES:
         assert request("home.kettle.set_tea_mode", teaMode=mode).teaMode == mode
+    for field in ("temperature", "entity", "entity_id", "entityId", "service", "domain", "operation_mode", "mode", "payload", "command"):
+        with pytest.raises(ValidationError):
+            request("home.kettle.set_tea_mode", teaMode="green_tea", **{field: 80})
 
 
 def test_kettle_boil_sequence_readback_and_idempotence(tmp_path: Path) -> None:
@@ -1076,11 +1093,23 @@ def test_kettle_boil_partial_failure_and_readback_never_confirm(tmp_path: Path) 
     assert len(server2.calls) == 2
 
 
-def test_kettle_tea_mode_fixed_call_and_fresh_readback(tmp_path: Path) -> None:
-    server, _, _, executor = make_stack(tmp_path)
-    result = run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
-    assert result["kettle"]["operationMode"] == "green_tea"
-    assert server.calls == [("/api/services/water_heater/set_operation_mode", {"entity_id": KETTLE_ENTITY, "operation_mode": "green_tea"})]
+@pytest.mark.parametrize("tea_mode,target", KETTLE_PROVIDER["tea_targets"].items())
+def test_kettle_tea_mode_fixed_call_and_fresh_normalized_readback(tmp_path: Path, tea_mode: str, target: int) -> None:
+    assert set(KETTLE_TEA_TEMPERATURES) == set(KETTLE_TEA_MODES)
+    server, adapter, _, executor = make_stack(tmp_path)
+    result = run(executor.execute(request("home.kettle.set_tea_mode", teaMode=tea_mode)))
+    assert result["status"] == "confirmed"
+    assert result["kettle"]["operationMode"] == "on"
+    assert result["kettle"]["targetTemperature"] == target
+    assert server.calls == [("/api/services/water_heater/set_operation_mode", {"entity_id": KETTLE_ENTITY, "operation_mode": tea_mode})]
+    kettle = next(service for service in adapter.services() if service.id == "kettle")
+    assert kettle.data["operationMode"] == "on"
+    assert kettle.data["targetTemperature"] == target
+    assert run(executor.execute(request("home.kettle.set_tea_mode", teaMode=tea_mode)))["status"] == "confirmed"
+    assert len(server.calls) == 1
+
+
+def test_kettle_tea_mode_timeout_never_claims_success(tmp_path: Path) -> None:
     server2 = HomeAssistantStub(base_states(), mutate=False)
     _, _, _, executor2 = make_stack(tmp_path / "no-readback", server2)
     with pytest.raises(HTTPException) as timeout:
@@ -1090,6 +1119,133 @@ def test_kettle_tea_mode_fixed_call_and_fresh_readback(tmp_path: Path) -> None:
     with pytest.raises(ValidationError):
         request("home.kettle.set_tea_mode", teaMode="untrusted")
     assert len(server2.calls) == 1
+
+
+class KettleReadbackStub(HomeAssistantStub):
+    def __init__(self, readbacks: list[dict]) -> None:
+        super().__init__(base_states(), mutate=False)
+        self.readbacks = copy.deepcopy(readbacks)
+        self.readback_count = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if self.calls and request.method == "GET" and request.url.path == f"/api/states/{KETTLE_ENTITY}":
+            index = min(self.readback_count, len(self.readbacks) - 1)
+            self.states[KETTLE_ENTITY] = copy.deepcopy(self.readbacks[index])
+            self.readback_count += 1
+        return super().__call__(request)
+
+
+def test_green_tea_physical_readback_and_delayed_normalization(tmp_path: Path) -> None:
+    wrong_target = kettle_heating()
+    wrong_target["attributes"]["temperature"] = 100
+    transient = kettle_heating()
+    transient["state"] = "green_tea"
+    transient["attributes"]["operation_mode"] = "green_tea"
+    server = KettleReadbackStub([base_states()[KETTLE_ENTITY], wrong_target, transient, kettle_heating()])
+    _, _, _, executor = make_stack(tmp_path, server)
+    result = run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert result["status"] == "confirmed"
+    assert result["kettle"] == {"operationMode": "on", "currentTemperature": 25, "targetTemperature": 80}
+    assert server.readback_count == 4
+    assert len(server.calls) == 1
+
+
+def test_kettle_fresh_ha_readback_confirms_despite_samsung_clock_skew(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    previous_update = "2026-09-30T18:15:54.500+00:00"
+    readback = kettle_heating()
+    readback["last_updated"] = "2026-09-30T18:15:56.000+00:00"
+    readback["last_changed"] = readback["last_updated"]
+    samsung_clock = datetime(2026, 9, 30, 18, 15, 57, tzinfo=timezone.utc)
+    assert datetime.fromisoformat(previous_update) < datetime.fromisoformat(readback["last_updated"]) < samsung_clock
+
+    class SamsungDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return samsung_clock.astimezone(tz) if tz is not None else samsung_clock.replace(tzinfo=None)
+
+    monkeypatch.setattr("panel_agent.home_assistant_actions.datetime", SamsungDatetime)
+    server = KettleReadbackStub([readback])
+    server.states[KETTLE_ENTITY]["last_updated"] = previous_update
+    _, _, _, executor = make_stack(tmp_path, server)
+    result = run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert result["status"] == "confirmed"
+    assert result["observedAt"] == samsung_clock.isoformat()
+    assert result["kettle"] == {"operationMode": "on", "currentTemperature": 25, "targetTemperature": 80}
+    assert server.readback_count == 1
+    assert server.calls == [("/api/services/water_heater/set_operation_mode", {"entity_id": KETTLE_ENTITY, "operation_mode": "green_tea"})]
+
+
+@pytest.mark.parametrize("state,mode,target", [
+    ("on", "on", 100), ("on", "on", 65), ("on", "on", None),
+    ("on", "green_tea", 80), ("green_tea", "green_tea", 80),
+    ("on", "off", 80), ("off", "on", 80),
+    ("unknown", "on", 80), ("unavailable", "on", 80),
+])
+def test_kettle_active_or_symbolic_mode_alone_cannot_confirm(tmp_path: Path, state: str, mode: str, target: int | None) -> None:
+    readback = kettle_heating()
+    readback["state"] = state
+    readback["attributes"].update(operation_mode=mode, temperature=target)
+    server = KettleReadbackStub([readback])
+    _, _, _, executor = make_stack(tmp_path, server)
+    with pytest.raises(HTTPException) as timeout:
+        run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert timeout.value.detail == "ha_verification_timeout"
+    assert len(server.calls) == 1
+
+
+@pytest.mark.parametrize("updated", [
+    "2026-09-08T09:59:00Z", "2026-09-30T18:15:54.500Z",
+    "2026-09-30T18:15:54Z", None, "bad", "2026-09-30T18:15:56",
+])
+def test_kettle_stale_or_invalid_readback_timestamp_cannot_confirm(tmp_path: Path, updated: str | None) -> None:
+    readback = kettle_heating()
+    readback["last_updated"] = updated
+    server = KettleReadbackStub([readback])
+    server.states[KETTLE_ENTITY]["last_updated"] = "2026-09-30T18:15:54.500Z"
+    _, _, _, executor = make_stack(tmp_path, server)
+    with pytest.raises(HTTPException) as timeout:
+        run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert timeout.value.detail == "ha_verification_timeout"
+
+
+def test_kettle_attribute_update_confirms_without_last_changed_moving(tmp_path: Path) -> None:
+    states = base_states()
+    states[KETTLE_ENTITY].update(state="on", last_changed="2026-09-08T10:00:00Z")
+    states[KETTLE_ENTITY]["attributes"]["operation_mode"] = "on"
+    server = KettleReadbackStub([kettle_heating()])
+    server.states = states
+    server.readbacks[0]["last_changed"] = "2026-09-08T10:00:00Z"
+    _, _, _, executor = make_stack(tmp_path, server)
+    assert run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))["status"] == "confirmed"
+
+
+def test_kettle_readback_must_advance_precommand_timestamp(tmp_path: Path) -> None:
+    server = KettleReadbackStub([kettle_heating()])
+    server.states[KETTLE_ENTITY]["last_updated"] = "2026-09-30T18:15:56.863521+00:00"
+    _, _, _, executor = make_stack(tmp_path, server)
+    with pytest.raises(HTTPException) as timeout:
+        run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert timeout.value.detail == "ha_verification_timeout"
+
+
+def test_kettle_missing_precommand_timestamp_fails_before_mutation(tmp_path: Path) -> None:
+    states = base_states()
+    states[KETTLE_ENTITY]["last_updated"] = None
+    server = HomeAssistantStub(states)
+    _, _, _, executor = make_stack(tmp_path, server)
+    with pytest.raises(HTTPException) as failure:
+        run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))
+    assert failure.value.detail == "ha_invalid_state"
+    assert server.calls == []
+
+
+def test_kettle_cached_matching_program_does_not_replace_fresh_rest(tmp_path: Path) -> None:
+    server, adapter, _, executor = make_stack(tmp_path)
+    adapter._states[KETTLE_ENTITY] = _sanitize_state(KETTLE_ENTITY, kettle_heating())
+    assert run(executor.execute(request("home.kettle.set_tea_mode", teaMode="green_tea")))["status"] == "confirmed"
+    assert len(server.calls) == 1
 
 
 def test_kettle_gate_profile_and_lock_are_independent(tmp_path: Path) -> None:
