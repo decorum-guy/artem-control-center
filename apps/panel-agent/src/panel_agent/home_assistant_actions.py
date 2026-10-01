@@ -58,6 +58,7 @@ PsuActionId = Literal[
 HomeAssistantActionId = Literal[
     "home.kettle.boil",
     "home.kettle.set_tea_mode",
+    "home.kettle.stop",
     "home.climate.power_on",
     "home.climate.power_off",
     "home.climate.set_temperature",
@@ -74,6 +75,7 @@ HomeAssistantActionId = Literal[
 ALL_ACTION_IDS: tuple[str, ...] = (
     "home.kettle.boil",
     "home.kettle.set_tea_mode",
+    "home.kettle.stop",
     "home.climate.power_on",
     "home.climate.power_off",
     "home.climate.set_temperature",
@@ -86,15 +88,16 @@ ALL_ACTION_IDS: tuple[str, ...] = (
     "system.rog_g703.psu.bp2.on",
     "system.rog_g703.psu.bp2.off",
 )
-KETTLE_ACTION_IDS = frozenset(ALL_ACTION_IDS[:2])
-CLIMATE_ACTION_IDS = frozenset(ALL_ACTION_IDS[2:7])
-PSU_ACTION_IDS = frozenset(ALL_ACTION_IDS[7:])
+KETTLE_ACTION_IDS = frozenset(ALL_ACTION_IDS[:3])
+CLIMATE_ACTION_IDS = frozenset(ALL_ACTION_IDS[3:8])
+PSU_ACTION_IDS = frozenset(ALL_ACTION_IDS[8:])
 CLIMATE_ON_STATES = frozenset({"cool", "heat", "fan_only", "dry", "auto"})
 NO_VALUE_ACTIONS = frozenset(
     {
         "home.climate.power_on",
         "home.climate.power_off",
         "home.kettle.boil",
+        "home.kettle.stop",
         *PSU_ACTION_IDS,
     }
 )
@@ -106,6 +109,7 @@ class HomeAssistantActionRequest(BaseModel):
     actionId: Literal[
         "home.kettle.boil",
         "home.kettle.set_tea_mode",
+        "home.kettle.stop",
         "home.climate.power_on",
         "home.climate.power_off",
         "home.climate.set_temperature",
@@ -126,6 +130,8 @@ class HomeAssistantActionRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_action_shape(self) -> "HomeAssistantActionRequest":
+        if self.actionId == "home.kettle.stop" and self.model_fields_set != {"actionId", "requestId"}:
+            raise ValueError("stop accepts only actionId and requestId")
         values = (self.temperature, self.mode, self.fanMode, self.teaMode)
         if self.actionId in NO_VALUE_ACTIONS:
             if any(value is not None for value in values):
@@ -476,6 +482,22 @@ class HomeAssistantActionExecutor:
                 and state.get("attributes", {}).get("operation_mode") == "on"
                 and state.get("state") not in {"off", "unknown", "unavailable"},
             )
+        elif request.actionId == "home.kettle.stop":
+            if self._kettle_stopped(current):
+                return self._kettle_result(request.requestId, request.actionId, current)
+            previous_update = self._kettle_updated_at(current)
+            if previous_update is None:
+                raise HomeAssistantActionError("ha_invalid_state", 409)
+            await self._call_service(
+                "/api/services/water_heater/set_operation_mode",
+                {"entity_id": KETTLE_ENTITY, "operation_mode": "off"},
+            )
+            confirmed = await self._verify(
+                KETTLE_ENTITY,
+                lambda state: self._kettle_stopped(state)
+                and (updated_at := self._kettle_updated_at(state)) is not None
+                and updated_at > previous_update,
+            )
         else:
             assert request.teaMode in KETTLE_TEA_MODES
             if request.teaMode not in attributes.get("operation_list", []):
@@ -498,6 +520,10 @@ class HomeAssistantActionExecutor:
         return self._kettle_result(request.requestId, request.actionId, confirmed)
 
     @staticmethod
+    def _kettle_stopped(state: dict[str, Any]) -> bool:
+        return state.get("state") == "off" and state.get("attributes", {}).get("operation_mode") == "off"
+
+    @staticmethod
     def _kettle_tea_active(state: dict[str, Any], tea_mode: str) -> bool:
         attributes = state.get("attributes", {})
         return (
@@ -513,9 +539,11 @@ class HomeAssistantActionExecutor:
             return None
         try:
             updated_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
+            if updated_at.tzinfo is None or updated_at.utcoffset() is None:
+                return None
+            return updated_at.astimezone(timezone.utc)
+        except (ValueError, OverflowError):
             return None
-        return updated_at.astimezone(timezone.utc) if updated_at.tzinfo is not None else None
 
     @staticmethod
     def _kettle_result(request_id: UUID, action_id: str, state: dict[str, Any]) -> dict[str, Any]:
@@ -532,6 +560,8 @@ class HomeAssistantActionExecutor:
                 "operationMode": attributes.get("operation_mode"),
                 "currentTemperature": attributes.get("current_temperature"),
                 "targetTemperature": attributes.get("temperature"),
+                **({"state": state.get("state"), "lastUpdated": state.get("last_updated")}
+                   if action_id == "home.kettle.stop" else {}),
             },
         }
 

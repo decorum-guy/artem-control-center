@@ -97,6 +97,24 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run install:browsers
 
+      - name: "Run #317 kettle stop and existing kettle browser gates"
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          VITE_OVERVIEW_EDITOR_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+        run: npm run test:e2e -- tests/e2e/issue-293-kettle.spec.ts tests/e2e/issue-297-kettle-overview.spec.ts tests/e2e/issue-317-kettle-stop.spec.ts
+
+      - name: "Upload #317 kettle stop review screenshots"
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kettle-stop-317-${{ github.sha }}
+          path: artifacts/kettle-stop-317
+          if-no-files-found: error
+
       - name: "Run focused #173 Coffee visual-review parity gate"
         if: runner.os == 'Linux'
         env:

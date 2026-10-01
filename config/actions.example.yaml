@@ -69,7 +69,7 @@ actions:
       timeout_seconds: 30
 
   # Kettle actions are owned by the typed Panel Agent HA router.
-  # The browser sends only home.kettle.boil or home.kettle.set_tea_mode.
+  # The browser sends only home.kettle.boil, home.kettle.set_tea_mode or home.kettle.stop.
 
   - id: home.create_backup
     title: Create Home Assistant backup
