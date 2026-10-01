@@ -5,7 +5,7 @@ import { useInteractionLock } from "./InteractionLock";
 import { useNoticeCenter } from "./NoticeCenter";
 import {
   executeHomeAssistantAction, fetchHomeAssistantActionAvailability,
-  HOME_KETTLE_BOIL, HOME_KETTLE_SET_TEA_MODE, newHomeAssistantRequestId,
+  HOME_KETTLE_BOIL, HOME_KETTLE_SET_TEA_MODE, HOME_KETTLE_STOP, newHomeAssistantRequestId,
   type HomeAssistantActionAvailability, type KettleActionId, type KettleTeaMode
 } from "./homeAssistantControlApi";
 import "./KettleControl.css";
@@ -49,6 +49,7 @@ export function KettleControl({ service, variant = "home", interactive = true }:
   const wheelRef = useRef<HTMLDivElement>(null);
   const options = useMemo(() => teaOrder.filter((mode) => data.availableTeaModes?.includes(mode)), [data.availableTeaModes]);
   const live = service.health === "healthy" && data.available && !data.stale && data.stage !== "unavailable";
+  const primaryAction = data.stage === "on" ? HOME_KETTLE_STOP : HOME_KETTLE_BOIL;
   const currentTemperature = typeof data.currentTemperature === "number" && Number.isFinite(data.currentTemperature) ? `${data.currentTemperature}°` : "—°";
 
   const refresh = useCallback(async () => {
@@ -96,7 +97,10 @@ export function KettleControl({ service, variant = "home", interactive = true }:
       }
       if (!interactiveRef.current || !guardMutation()) return;
       showNotice({ id: "home.kettle.action", severity: "progress", title: "Чайник", detail: "Отправляем команду и ждём подтверждение…" });
-      await executeHomeAssistantAction({ actionId, requestId: newHomeAssistantRequestId(), ...(teaMode ? { teaMode } : {}) });
+      const requestId = newHomeAssistantRequestId();
+      await executeHomeAssistantAction(actionId === HOME_KETTLE_STOP
+        ? { actionId, requestId }
+        : { actionId, requestId, ...(teaMode ? { teaMode } : {}) });
       showNotice({ id: "home.kettle.action", severity: "success", title: "Чайник", detail: "Изменение подтверждено Home Assistant.", timeoutMs: 6_000 });
       setPickerOpen(false);
       await refresh();
@@ -125,7 +129,7 @@ export function KettleControl({ service, variant = "home", interactive = true }:
     <div className="kettle-control__temperature" data-testid="kettle-current-temperature" aria-label={`Текущая температура воды ${currentTemperature}`}>{currentTemperature}</div>
     <p className="kettle-control__status" role="status">{status(data, service)}</p>
     <div className="kettle-control__actions">
-      <button type="button" disabled={!canUse(HOME_KETTLE_BOIL)} onClick={() => void run(HOME_KETTLE_BOIL)}>Включить</button>
+      <button type="button" disabled={!canUse(primaryAction)} onClick={() => void run(primaryAction)}>{primaryAction === HOME_KETTLE_STOP ? "Остановить" : "Включить"}</button>
       <button type="button" disabled={!canUse(HOME_KETTLE_SET_TEA_MODE) || options.length === 0} onClick={openPicker}>Выбрать чай</button>
     </div>
     {!live && <p className="kettle-control__notice">Управление отключено до подтверждения свежего состояния.</p>}

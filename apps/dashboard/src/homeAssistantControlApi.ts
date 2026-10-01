@@ -5,8 +5,9 @@ export const HOME_CLIMATE_SET_MODE = "home.climate.set_mode" as const;
 export const HOME_CLIMATE_SET_FAN_MODE = "home.climate.set_fan_mode" as const;
 export const HOME_KETTLE_BOIL = "home.kettle.boil" as const;
 export const HOME_KETTLE_SET_TEA_MODE = "home.kettle.set_tea_mode" as const;
+export const HOME_KETTLE_STOP = "home.kettle.stop" as const;
 export type KettleTeaMode = "white_tea" | "green_tea" | "red_tea" | "herbal_tea" | "flower_tea" | "puerh_tea" | "oolong_tea" | "black_tea";
-export type KettleActionId = typeof HOME_KETTLE_BOIL | typeof HOME_KETTLE_SET_TEA_MODE;
+export type KettleActionId = typeof HOME_KETTLE_BOIL | typeof HOME_KETTLE_SET_TEA_MODE | typeof HOME_KETTLE_STOP;
 
 export const ROG_PSU_MODE_NORMAL = "system.rog_g703.psu.mode.normal" as const;
 export const ROG_PSU_MODE_FULL = "system.rog_g703.psu.mode.full" as const;
@@ -61,14 +62,21 @@ export interface HomeAssistantActionAvailability {
   actions: Record<HomeAssistantActionId, HomeAssistantCapabilityDecision>;
 }
 
-export interface HomeAssistantActionRequest {
-  actionId: HomeAssistantActionId;
+export type HomeAssistantActionRequest = {
+  actionId: typeof HOME_KETTLE_STOP;
+  requestId: string;
+  temperature?: never;
+  mode?: never;
+  fanMode?: never;
+  teaMode?: never;
+} | {
+  actionId: Exclude<HomeAssistantActionId, typeof HOME_KETTLE_STOP>;
   requestId: string;
   temperature?: number | null;
   mode?: ClimateHvacMode | null;
   fanMode?: ClimateFanMode | null;
   teaMode?: KettleTeaMode;
-}
+};
 
 export interface HomeAssistantActionResponse {
   schemaVersion: 1;
@@ -87,6 +95,8 @@ export interface HomeAssistantActionResponse {
     psu2State: "on" | "off" | "unavailable";
   } | null;
   kettle?: {
+    state?: "on" | "off";
+    lastUpdated?: string | null;
     operationMode: "on" | "off" | KettleTeaMode;
     currentTemperature: number | null;
     targetTemperature: number | null;
@@ -135,7 +145,7 @@ export async function fetchHomeAssistantActionAvailability(): Promise<HomeAssist
 export async function executeHomeAssistantAction(
   request: HomeAssistantActionRequest
 ): Promise<HomeAssistantActionResponse> {
-  const body = request.actionId === HOME_KETTLE_BOIL
+  const body = request.actionId === HOME_KETTLE_BOIL || request.actionId === HOME_KETTLE_STOP
     ? { actionId: request.actionId, requestId: request.requestId }
     : request.actionId === HOME_KETTLE_SET_TEA_MODE
     ? { actionId: request.actionId, requestId: request.requestId, teaMode: request.teaMode }

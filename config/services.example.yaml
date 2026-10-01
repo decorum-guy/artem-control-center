@@ -97,6 +97,7 @@ services:
     actions:
       - home.kettle.boil
       - home.kettle.set_tea_mode
+      - home.kettle.stop
     presentation:
       widget: home.kettle
 

@@ -363,7 +363,29 @@ target returns confirmed without mutation. Presets sharing a target represent
 the same observable heating contract; no unique tea label is invented in the
 snapshot. Source and physical evidence are recorded in
 `docs/discovery/HOME_ASSISTANT_ENTITY_MAP.md` under issue #315.
-Both actions require Standard access,
+`home.kettle.stop` accepts only `actionId` and the UUID `requestId`, including
+rejecting null value fields. Under the same kettle lock, it reads the fixed
+`KETTLE_ENTITY` fresh through HA REST. An initial `state: off` and
+`operation_mode: off` returns confirmed without a mutation. Otherwise a valid
+timezone-aware pre-command HA `last_updated` is required before calling
+`water_heater.set_operation_mode` once with `operation_mode: off`. The verifier
+polls fresh REST every 250 ms for up to 5 seconds and requires both `off` fields
+and a valid timezone-aware `last_updated` strictly newer than the pre-command
+HA timestamp. Missing, malformed, naive, identical or older timestamps cannot
+confirm. Target temperature is not part of stopped-state verification. No
+Panel Agent/Samsung wall-clock comparison or automatic mutation retry is used.
+The response includes the final observed kettle values, `state` and
+`lastUpdated`; the UI continues to render refreshed HA state.
+
+The stop path is supported by pinned
+[`AlexxIT/YandexStation@453a96b`](https://github.com/AlexxIT/YandexStation/blob/453a96b232aeb185e482461f842e047bbfca1cb2/custom_components/yandex_station/water_heater.py):
+`async_set_operation_mode("off")` dispatches `device_action("on", False)`.
+The active Home/Overview primary button becomes **Остановить**, using the
+existing two-button layout and at least 48 px touch targets. Stop is a low-risk
+action without an additional destructive-action confirmation.
+
+All three actions require Standard access,
 `PANEL_WRITES_ENABLED=true`, a current HA mutation transport/entity, and the
 independent `PANEL_KETTLE_ACTIONS_ENABLED` gate, which defaults to false.
-The browser never supplies an entity, service, or temperature.
+The browser never supplies an entity, service, or temperature. Existing boil
+and tea-mode execution/verification contracts are unchanged by stop (issue #317).

@@ -44,6 +44,7 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "home.climate.set_fan_mode": "standard",
     "home.kettle.boil": "standard",
     "home.kettle.set_tea_mode": "standard",
+    "home.kettle.stop": "standard",
     "media.alice.play": "standard",
     "media.alice.pause": "standard",
     "media.alice.volume_down": "standard",

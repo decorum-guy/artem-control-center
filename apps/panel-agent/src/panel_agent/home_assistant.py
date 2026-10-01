@@ -529,6 +529,7 @@ class HomeAssistantAdapter:
                 actions=[
                     ActionDescriptor(id="home.kettle.boil", title="Включить", enabled=self._kettle_action_descriptor_enabled(kettle_state != "unavailable"), risk="medium"),
                     ActionDescriptor(id="home.kettle.set_tea_mode", title="Выбрать чай", enabled=self._kettle_action_descriptor_enabled(kettle_state != "unavailable"), risk="medium"),
+                    ActionDescriptor(id="home.kettle.stop", title="Остановить", enabled=self._kettle_action_descriptor_enabled(kettle_state != "unavailable"), risk="low"),
                 ],
                 source=source,
                 presentation=ServicePresentation(
