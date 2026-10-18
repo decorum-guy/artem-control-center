@@ -1,0 +1,44 @@
+.light-strip { min-width: 0; display: grid; align-content: start; gap: 20px; padding: 22px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-zone, 22px); background: var(--cc-surface-1); color: var(--cc-text); }
+.light-strip__header, .light-strip__identity, .light-strip__favorites, .light-strip__dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.light-strip__identity { justify-content: flex-start; min-width: 0; }
+.light-strip__identity strong, .light-strip__dialog strong { display: block; font-size: 1.15rem; }
+.light-strip__identity small, .light-strip__dialog small { display: block; margin-top: 3px; color: var(--cc-text-muted); }
+.light-strip__lamp { flex: none; width: 44px; height: 44px; border: 1px solid rgb(255 255 255 / 25%); border-radius: 14px; box-shadow: 0 0 22px color-mix(in srgb, currentColor 12%, transparent); }
+.light-strip button { cursor: pointer; font: inherit; }
+.light-strip button:disabled { cursor: not-allowed; opacity: .5; }
+.light-strip button:focus-visible, .light-strip input:focus-visible, .light-strip__dialog button:focus-visible, .light-strip__dialog input:focus-visible { outline: 3px solid var(--cc-accent); outline-offset: 3px; }
+.light-strip__power, .light-strip__more, .light-strip__favorite-mode, .light-strip__custom button, .light-strip__temperature button { min-height: 48px; padding: 0 18px; border: 1px solid var(--cc-border-strong, var(--cc-border)); border-radius: 14px; background: var(--cc-surface-2); color: var(--cc-text); font-weight: 700; white-space: nowrap; }
+.light-strip__power[aria-pressed="true"] { border-color: var(--cc-accent); color: var(--cc-accent); }
+.light-strip__brightness label, .light-strip__temperature label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; font-weight: 650; }
+.light-strip__brightness output, .light-strip__temperature output { font-variant-numeric: tabular-nums; color: var(--cc-text-secondary); }
+.light-strip input[type="range"] { width: 100%; min-height: 36px; margin: 0; accent-color: var(--cc-accent); cursor: pointer; }
+.light-strip__favorites { align-items: flex-start; flex-wrap: wrap; }
+.light-strip__caption { width: 100%; color: var(--cc-text-secondary); font-size: .88rem; }
+.light-strip__swatches, .light-strip__palette { display: flex; flex-wrap: wrap; gap: 10px; }
+.light-strip__swatch { width: 50px; height: 50px; flex: 0 0 50px; border: 2px solid rgb(255 255 255 / 24%); border-radius: 14px; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%); }
+.light-strip__swatch.is-active { outline: 3px solid var(--cc-accent); outline-offset: 2px; }
+.light-strip__favorite-mode { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 5px; }
+.light-strip__empty { display: flex; min-height: 50px; align-items: center; color: var(--cc-text-muted); font-size: .85rem; }
+.light-strip__backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 16px; background: var(--cc-overlay, rgb(0 0 0 / 65%)); }
+.light-strip__dialog { width: min(100%, 780px); max-height: min(88vh, 760px); overflow: auto; padding: 24px; border: 1px solid var(--cc-border-strong, var(--cc-border)); border-radius: 24px; background: var(--cc-surface-1); color: var(--cc-text); box-shadow: var(--cc-shadow-overlay, 0 20px 60px rgb(0 0 0 / 40%)); }
+.light-strip__dialog header { padding-bottom: 18px; border-bottom: 1px solid var(--cc-border); }
+.light-strip__close { width: 48px; height: 48px; border: 1px solid var(--cc-border); border-radius: 14px; background: var(--cc-surface-2); color: var(--cc-text); font-size: 1.7rem !important; }
+.light-strip__dialog-body { display: grid; gap: 22px; padding-top: 16px; }
+.light-strip__dialog h3 { margin: 0 0 12px; font-size: .92rem; }
+.light-strip__choices { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.light-strip__choice-column { min-width: 0; }
+.light-strip__choice-column + .light-strip__choice-column { padding-left: 24px; border-left: 1px solid var(--cc-border); }
+.light-strip__palette { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; padding: 4px; }
+.light-strip__swatch--picker { width: 56px; height: 56px; flex-basis: 56px; }
+.light-strip__modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.light-strip__mode { display: flex; min-width: 0; min-height: 48px; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--cc-border); border-radius: 12px; background: var(--cc-surface-2); color: var(--cc-text); text-align: left; font-size: .85rem !important; }
+.light-strip__mode.is-active { border-color: var(--cc-accent); }
+.light-strip__mode-mark { display: inline-block; width: 34px; height: 34px; flex: 0 0 34px; border: 1px solid rgb(255 255 255 / 25%); border-radius: 9px; }
+.light-strip__custom, .light-strip__temperature { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.light-strip__custom label, .light-strip__temperature label { flex: 1 1 120px; }
+.light-strip__custom input[type="color"] { width: 58px; height: 48px; padding: 0; border: 1px solid var(--cc-border); border-radius: 12px; background: transparent; }
+.light-strip__temperature input { flex: 1 1 100%; }
+.light-strip--overview { height: 100%; padding: 18px; gap: 14px; }
+.light-strip--overview .light-strip__lamp { width: 38px; height: 38px; }
+@media (max-width: 650px) { .light-strip { padding: 16px; } .light-strip__dialog { padding: 16px; } .light-strip__choices { grid-template-columns: 1fr; gap: 16px; } .light-strip__choice-column + .light-strip__choice-column { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--cc-border); } .light-strip__palette { grid-template-columns: repeat(5, 50px); } .light-strip__swatch--picker { width: 50px; height: 50px; flex-basis: 50px; } }
+@media (prefers-reduced-motion: reduce) { .light-strip *, .light-strip__dialog * { scroll-behavior: auto; transition: none !important; } }

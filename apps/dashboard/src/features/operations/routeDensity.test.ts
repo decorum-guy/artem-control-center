@@ -87,6 +87,11 @@ describe("PR7 route density helpers", () => {
     expect(selectHomePrimaryDevices([coffee, climate, kettle])).toMatchObject({ coffee, climate, kettle, additional: [] });
   });
 
+  it("places the light strip once in Home's primary controls", () => {
+    const light = service("living-room-light-strip", { dataContract: "home.light-strip.v1", presentation: { category: "home-device", group: "Home infrastructure", overview: "quick-control", priority: 75 } });
+    expect(selectHomePrimaryDevices([light])).toMatchObject({ light, fallback: null, additional: [] });
+  });
+
   it("classifies only trusted system contracts and explicit System categories", () => {
     expect(classifySystemService(service("rog_g703gi", { dataContract: "system.rog-g703.v1" }))).toBe("rog");
     expect(classifySystemService(service("rog-g703-psu", { dataContract: "system.rog-g703-psu.v1" }))).toBe("rogPsu");

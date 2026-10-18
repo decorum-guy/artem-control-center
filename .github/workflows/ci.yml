@@ -558,6 +558,13 @@ jobs:
           path: artifacts/v2-full-access-touch-lock-review
           if-no-files-found: error
 
+      - name: Run RGB light strip Home and Overview gate
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_OVERVIEW_V2_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/light-strip.spec.ts
+
       - name: Build production profile for runtime smoke
         run: npm run build:production
 

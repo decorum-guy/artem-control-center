@@ -11,6 +11,7 @@ function purposeCopy(widgetType: string): string {
     case "home.coffee-machine": return "Состояние и управление кофемашиной";
     case "home.climate": return "Состояние и управление кондиционером";
     case "home.kettle": return "Текущая температура и управление чайником";
+    case "home.light-strip": return "Яркость, цвета и режимы ленты";
     case "home.station-mini-2": return "Фиксированные команды Станции Mini 2";
     case "system.rog-g703-operational": return "Операционное состояние компьютера";
     case "planning.summary": return "Ближайшие дела на сегодня";

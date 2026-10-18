@@ -31,6 +31,14 @@ export const widgetManifests: WidgetManifest[] = [
     defaultPriority: 70
   },
   {
+    id: "home.light-strip",
+    kind: "specialized",
+    supportedDataContracts: ["home.light-strip.v1"],
+    settingsSchema: {},
+    defaultSection: "home",
+    defaultPriority: 75
+  },
+  {
     id: "core.generic-service",
     kind: "generic",
     supportedDataContracts: ["*"],

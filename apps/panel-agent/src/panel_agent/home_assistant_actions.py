@@ -16,6 +16,7 @@ from .home_assistant import (
     CLIMATE_ENTITY,
     CLIMATE_HVAC_MODES,
     KETTLE_ENTITY,
+    LIGHT_STRIP_ENTITY,
     KETTLE_MODES,
     KETTLE_TEA_MODES,
     PSU_1_ENTITY,
@@ -55,6 +56,11 @@ PsuActionId = Literal[
     "system.rog_g703.psu.bp2.on",
     "system.rog_g703.psu.bp2.off",
 ]
+LIGHT_ACTION_IDS = frozenset({
+    "home.light_strip.power_on", "home.light_strip.power_off",
+    "home.light_strip.set_brightness", "home.light_strip.set_color",
+    "home.light_strip.set_temperature", "home.light_strip.set_effect",
+})
 HomeAssistantActionId = Literal[
     "home.kettle.boil",
     "home.kettle.set_tea_mode",
@@ -64,6 +70,12 @@ HomeAssistantActionId = Literal[
     "home.climate.set_temperature",
     "home.climate.set_mode",
     "home.climate.set_fan_mode",
+    "home.light_strip.power_on",
+    "home.light_strip.power_off",
+    "home.light_strip.set_brightness",
+    "home.light_strip.set_color",
+    "home.light_strip.set_temperature",
+    "home.light_strip.set_effect",
     "system.rog_g703.psu.mode.normal",
     "system.rog_g703.psu.mode.full",
     "system.rog_g703.psu.bp1.on",
@@ -81,6 +93,12 @@ ALL_ACTION_IDS: tuple[str, ...] = (
     "home.climate.set_temperature",
     "home.climate.set_mode",
     "home.climate.set_fan_mode",
+    "home.light_strip.power_on",
+    "home.light_strip.power_off",
+    "home.light_strip.set_brightness",
+    "home.light_strip.set_color",
+    "home.light_strip.set_temperature",
+    "home.light_strip.set_effect",
     "system.rog_g703.psu.mode.normal",
     "system.rog_g703.psu.mode.full",
     "system.rog_g703.psu.bp1.on",
@@ -88,9 +106,9 @@ ALL_ACTION_IDS: tuple[str, ...] = (
     "system.rog_g703.psu.bp2.on",
     "system.rog_g703.psu.bp2.off",
 )
-KETTLE_ACTION_IDS = frozenset(ALL_ACTION_IDS[:3])
-CLIMATE_ACTION_IDS = frozenset(ALL_ACTION_IDS[3:8])
-PSU_ACTION_IDS = frozenset(ALL_ACTION_IDS[8:])
+KETTLE_ACTION_IDS = frozenset(action for action in ALL_ACTION_IDS if action.startswith("home.kettle."))
+CLIMATE_ACTION_IDS = frozenset(action for action in ALL_ACTION_IDS if action.startswith("home.climate."))
+PSU_ACTION_IDS = frozenset(action for action in ALL_ACTION_IDS if action.startswith("system.rog_g703.psu."))
 CLIMATE_ON_STATES = frozenset({"cool", "heat", "fan_only", "dry", "auto"})
 NO_VALUE_ACTIONS = frozenset(
     {
@@ -98,6 +116,7 @@ NO_VALUE_ACTIONS = frozenset(
         "home.climate.power_off",
         "home.kettle.boil",
         "home.kettle.stop",
+        "home.light_strip.power_on", "home.light_strip.power_off",
         *PSU_ACTION_IDS,
     }
 )
@@ -115,6 +134,12 @@ class HomeAssistantActionRequest(BaseModel):
         "home.climate.set_temperature",
         "home.climate.set_mode",
         "home.climate.set_fan_mode",
+        "home.light_strip.power_on",
+        "home.light_strip.power_off",
+        "home.light_strip.set_brightness",
+        "home.light_strip.set_color",
+        "home.light_strip.set_temperature",
+        "home.light_strip.set_effect",
         "system.rog_g703.psu.mode.normal",
         "system.rog_g703.psu.mode.full",
         "system.rog_g703.psu.bp1.on",
@@ -127,12 +152,38 @@ class HomeAssistantActionRequest(BaseModel):
     mode: Literal["cool", "heat", "fan_only", "dry", "auto", "off"] | None = None
     fanMode: Literal["one", "two", "three", "four", "five"] | None = None
     teaMode: Literal["white_tea", "green_tea", "red_tea", "herbal_tea", "flower_tea", "puerh_tea", "oolong_tea", "black_tea"] | None = None
+    brightness: StrictInt | None = None
+    hsColor: tuple[StrictInt, StrictInt] | None = None
+    kelvin: StrictInt | None = None
+    effect: str | None = None
 
     @model_validator(mode="after")
     def validate_action_shape(self) -> "HomeAssistantActionRequest":
         if self.actionId == "home.kettle.stop" and self.model_fields_set != {"actionId", "requestId"}:
             raise ValueError("stop accepts only actionId and requestId")
-        values = (self.temperature, self.mode, self.fanMode, self.teaMode)
+        values = (self.temperature, self.mode, self.fanMode, self.teaMode, self.brightness, self.hsColor, self.kelvin, self.effect)
+        if self.actionId in LIGHT_ACTION_IDS:
+            expected = {
+                "home.light_strip.set_brightness": self.brightness,
+                "home.light_strip.set_color": self.hsColor,
+                "home.light_strip.set_temperature": self.kelvin,
+                "home.light_strip.set_effect": self.effect,
+            }.get(self.actionId)
+            if self.actionId not in NO_VALUE_ACTIONS and expected is None:
+                raise ValueError("light action requires a value")
+            if sum(value is not None for value in values) != (0 if self.actionId in NO_VALUE_ACTIONS else 1):
+                raise ValueError("light action accepts exactly its typed value")
+            if self.brightness is not None and not 1 <= self.brightness <= 255:
+                raise ValueError("brightness out of range")
+            if self.hsColor is not None and not (0 <= self.hsColor[0] <= 360 and 0 <= self.hsColor[1] <= 100):
+                raise ValueError("HS color out of range")
+            if self.kelvin is not None and not 2000 <= self.kelvin <= 10000:
+                raise ValueError("color temperature out of range")
+            if self.effect is not None and (not self.effect or len(self.effect) > 64):
+                raise ValueError("effect invalid")
+            return self
+        if any(value is not None for value in (self.brightness, self.hsColor, self.kelvin, self.effect)):
+            raise ValueError("non-light action cannot carry light values")
         if self.actionId in NO_VALUE_ACTIONS:
             if any(value is not None for value in values):
                 raise ValueError("action does not accept a value")
@@ -191,6 +242,7 @@ class HomeAssistantActionExecutor:
         self._climate_lock: asyncio.Lock | None = None
         self._kettle_lock: asyncio.Lock | None = None
         self._psu_lock: asyncio.Lock | None = None
+        self._light_lock: asyncio.Lock | None = None
 
     def _gate_enabled(self, action_id: str) -> bool:
         if action_id in KETTLE_ACTION_IDS:
@@ -199,6 +251,9 @@ class HomeAssistantActionExecutor:
         elif action_id in CLIMATE_ACTION_IDS:
             capability_id = "home_climate_actions"
             configured = self.settings.home_climate_actions_enabled
+        elif action_id in LIGHT_ACTION_IDS:
+            capability_id = "light_strip_actions"
+            configured = self.settings.light_strip_actions_enabled
         else:
             capability_id = "rog_g703_psu_actions"
             configured = self.settings.rog_g703_psu_actions_enabled
@@ -206,6 +261,10 @@ class HomeAssistantActionExecutor:
         return bool(self.settings.writes_enabled and effective)
 
     def _lock_for(self, action_id: str) -> asyncio.Lock:
+        if action_id in LIGHT_ACTION_IDS:
+            if self._light_lock is None:
+                self._light_lock = asyncio.Lock()
+            return self._light_lock
         if action_id in KETTLE_ACTION_IDS:
             if self._kettle_lock is None:
                 self._kettle_lock = asyncio.Lock()
@@ -219,7 +278,7 @@ class HomeAssistantActionExecutor:
         return self._psu_lock
 
     def _busy_for(self, action_id: str) -> bool:
-        lock = self._kettle_lock if action_id in KETTLE_ACTION_IDS else self._climate_lock if action_id in CLIMATE_ACTION_IDS else self._psu_lock
+        lock = self._kettle_lock if action_id in KETTLE_ACTION_IDS else self._climate_lock if action_id in CLIMATE_ACTION_IDS else self._light_lock if action_id in LIGHT_ACTION_IDS else self._psu_lock
         return bool(lock and lock.locked())
 
     def _integration_available(self, action_id: str) -> bool:
@@ -229,6 +288,8 @@ class HomeAssistantActionExecutor:
             return self.home_assistant.mutation_entity_current(KETTLE_ENTITY)
         if action_id in CLIMATE_ACTION_IDS:
             return self.home_assistant.mutation_entity_current(CLIMATE_ENTITY)
+        if action_id in LIGHT_ACTION_IDS:
+            return self.home_assistant.mutation_entity_current(LIGHT_STRIP_ENTITY)
         if action_id.endswith(".bp1.on") or action_id.endswith(".bp1.off"):
             return self.home_assistant.mutation_entity_current(PSU_1_ENTITY)
         if action_id.endswith(".bp2.on") or action_id.endswith(".bp2.off"):
@@ -345,6 +406,8 @@ class HomeAssistantActionExecutor:
             return await self._execute_kettle(request)
         if request.actionId in CLIMATE_ACTION_IDS:
             return await self._execute_climate(request)
+        if request.actionId in LIGHT_ACTION_IDS:
+            return await self._execute_light(request)
         return await self._execute_psu(request)
 
     async def _fresh(self, entity_id: str) -> dict[str, Any]:
@@ -386,6 +449,72 @@ class HomeAssistantActionExecutor:
             if self._clock() >= deadline:
                 raise HomeAssistantActionError("ha_verification_timeout", 504)
             await self._sleep(self._verification_interval)
+
+    async def _execute_light(self, request: HomeAssistantActionRequest) -> dict[str, Any]:
+        current = await self._fresh(LIGHT_STRIP_ENTITY)
+        if current.get("state") not in {"on", "off"}:
+            raise HomeAssistantActionError("ha_invalid_state", 409)
+        attributes = current.get("attributes", {})
+        body: dict[str, Any] = {"entity_id": LIGHT_STRIP_ENTITY}
+        action = request.actionId
+        if action == "home.light_strip.power_off":
+            if current["state"] == "off":
+                return self._light_result(request, current)
+            await self._call_service("/api/services/light/turn_off", body)
+            confirmed = await self._verify(LIGHT_STRIP_ENTITY, lambda state: state.get("state") == "off")
+        else:
+            if action == "home.light_strip.power_on" and current["state"] == "on":
+                return self._light_result(request, current)
+            if action != "home.light_strip.power_on" and current["state"] != "on":
+                raise HomeAssistantActionError("ha_invalid_state", 409)
+            if action == "home.light_strip.set_brightness":
+                if current["state"] != "on":
+                    raise HomeAssistantActionError("ha_invalid_state", 409)
+                body["brightness"] = request.brightness
+            elif action == "home.light_strip.set_color":
+                if "hs" not in attributes.get("supported_color_modes", []):
+                    raise HomeAssistantActionError("ha_invalid_state", 409)
+                body["hs_color"] = list(request.hsColor or ())
+            elif action == "home.light_strip.set_temperature":
+                minimum = attributes.get("min_color_temp_kelvin")
+                maximum = attributes.get("max_color_temp_kelvin")
+                if "color_temp" not in attributes.get("supported_color_modes", []) or not isinstance(minimum, int) or not isinstance(maximum, int) or not minimum <= (request.kelvin or 0) <= maximum:
+                    raise HomeAssistantActionError("ha_invalid_state", 409)
+                body["color_temp_kelvin"] = request.kelvin
+            elif action == "home.light_strip.set_effect":
+                if request.effect not in attributes.get("effect_list", []):
+                    raise HomeAssistantActionError("ha_invalid_state", 409)
+                body["effect"] = request.effect
+            await self._call_service("/api/services/light/turn_on", body)
+            if action == "home.light_strip.set_brightness":
+                confirmed = await self._verify(LIGHT_STRIP_ENTITY, lambda state: state.get("state") == "on" and isinstance(state.get("attributes", {}).get("brightness"), int) and abs(state["attributes"]["brightness"] - (request.brightness or 0)) <= 3)
+            elif action == "home.light_strip.set_color":
+                def color_matches(state: dict[str, Any]) -> bool:
+                    hs = state.get("attributes", {}).get("hs_color")
+                    target = request.hsColor
+                    return bool(state.get("state") == "on" and isinstance(hs, list) and target and min(abs(hs[0] - target[0]), 360 - abs(hs[0] - target[0])) <= 4 and abs(hs[1] - target[1]) <= 4)
+                confirmed = await self._verify(LIGHT_STRIP_ENTITY, color_matches)
+            elif action == "home.light_strip.set_temperature":
+                confirmed = await self._verify(LIGHT_STRIP_ENTITY, lambda state: state.get("state") == "on" and isinstance(state.get("attributes", {}).get("color_temp_kelvin"), int) and abs(state["attributes"]["color_temp_kelvin"] - (request.kelvin or 0)) <= 100)
+            elif action == "home.light_strip.set_effect":
+                confirmed = await self._verify(LIGHT_STRIP_ENTITY, lambda state: state.get("state") == "on" and state.get("attributes", {}).get("effect") == request.effect)
+            else:
+                confirmed = await self._verify(LIGHT_STRIP_ENTITY, lambda state: state.get("state") == "on")
+        return self._light_result(request, confirmed)
+
+    @staticmethod
+    def _light_result(request: HomeAssistantActionRequest, state: dict[str, Any]) -> dict[str, Any]:
+        attributes = state.get("attributes", {})
+        return {
+            "schemaVersion": 1, "requestId": str(request.requestId), "actionId": request.actionId,
+            "status": "confirmed", "observedAt": datetime.now(timezone.utc).isoformat(),
+            "climate": None, "psu": None, "kettle": None,
+            "light": {
+                "state": state.get("state"), "brightness": attributes.get("brightness"),
+                "hsColor": attributes.get("hs_color"), "colorTempKelvin": attributes.get("color_temp_kelvin"),
+                "effect": attributes.get("effect"),
+            },
+        }
 
     async def _execute_climate(self, request: HomeAssistantActionRequest) -> dict[str, Any]:
         current = await self._fresh(CLIMATE_ENTITY)

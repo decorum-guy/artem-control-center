@@ -27,6 +27,7 @@ IMMEDIATE_MUTABLE_IDS = frozenset({
     "calendar_display_colors",
     "overview_layout_editor",
     "home_climate_actions",
+    "light_strip_actions",
     "kettle_actions",
     "rog_g703_psu_actions",
 })
@@ -88,6 +89,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("coffee_notification_writes", "Запись уведомлений кофемашины", "Разрешение менять уведомления кофемашины.", "Системные действия", "PANEL_COFFEE_NOTIFICATION_WRITES_ENABLED", "immediate", "none"),
     CapabilityDefinition("coffee_actions", "Действия кофемашины", "Разрешение выполнять действия кофемашины.", "Системные действия", "PANEL_COFFEE_ACTIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("home_climate_actions", "Управление кондиционером", "Разрешение выполнять фиксированные действия кондиционера через Home Assistant.", "Дом", "PANEL_HOME_CLIMATE_ACTIONS_ENABLED", "immediate", "none", True),
+    CapabilityDefinition("light_strip_actions", "Управление RGB-лентой", "Разрешение управлять лентой в зале через Home Assistant.", "Дом", "PANEL_LIGHT_STRIP_ACTIONS_ENABLED", "immediate", "none", True),
     CapabilityDefinition("kettle_actions", "Управление чайником", "Разрешение выполнять фиксированные действия чайника через Home Assistant.", "Дом", "PANEL_KETTLE_ACTIONS_ENABLED", "immediate", "none", True),
     CapabilityDefinition("alice_station_actions", "Управление Станцией Mini 2", "Разрешение выполнять фиксированные команды станции через AliceTG_Bot.", "Дом", "PANEL_ALICE_STATION_ACTIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("rog_g703_psu_actions", "Управление блоками питания ASUS", "Разрешение выполнять фиксированные действия двух БП через Home Assistant.", "Дом", "PANEL_ROG_G703_PSU_ACTIONS_ENABLED", "immediate", "none", True),

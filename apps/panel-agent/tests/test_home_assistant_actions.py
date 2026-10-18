@@ -17,6 +17,7 @@ from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.home_assistant import (
     CLIMATE_ENTITY,
     KETTLE_ENTITY,
+    LIGHT_STRIP_ENTITY,
     KETTLE_TEA_MODES,
     WATCHED_ENTITIES,
     REQUIRED_ENTITIES,
@@ -154,6 +155,20 @@ class HomeAssistantStub:
             state["state"] = "on"
         elif path.endswith("/switch/turn_off"):
             state["state"] = "off"
+        elif path.endswith("/light/turn_on"):
+            state["state"] = "on"
+            attributes = state.setdefault("attributes", {})
+            for source, target in (("brightness", "brightness"), ("hs_color", "hs_color"), ("color_temp_kelvin", "color_temp_kelvin"), ("effect", "effect")):
+                if source in body:
+                    attributes[target] = body[source]
+            if "hs_color" in body or "color_temp_kelvin" in body:
+                attributes["effect"] = None
+            if "hs_color" in body:
+                attributes["color_temp_kelvin"] = None
+            if "color_temp_kelvin" in body:
+                attributes["hs_color"] = None
+        elif path.endswith("/light/turn_off"):
+            state["state"] = "off"
 
 
 class VerificationClock:
@@ -186,6 +201,7 @@ def make_stack(
     climate_gate: bool = True,
     psu_gate: bool = True,
     kettle_gate: bool = True,
+    light_gate: bool = True,
     writes: bool = True,
     profile: str = "standard",
     gate_provider=None,
@@ -199,6 +215,7 @@ def make_stack(
         writes_enabled=writes,
         home_climate_actions_enabled=climate_gate,
         kettle_actions_enabled=kettle_gate,
+        light_strip_actions_enabled=light_gate,
         rog_g703_psu_actions_enabled=psu_gate,
         ha_stale_after_seconds=90,
     )
@@ -233,12 +250,14 @@ def test_settings_action_gates_are_false_by_default(monkeypatch: pytest.MonkeyPa
     for key in (
         "PANEL_WRITES_ENABLED",
         "PANEL_HOME_CLIMATE_ACTIONS_ENABLED",
+        "PANEL_LIGHT_STRIP_ACTIONS_ENABLED",
         "PANEL_ROG_G703_PSU_ACTIONS_ENABLED",
     ):
         monkeypatch.delenv(key, raising=False)
     settings = IntegrationSettings.from_env()
     assert settings.writes_enabled is False
     assert settings.home_climate_actions_enabled is False
+    assert settings.light_strip_actions_enabled is False
     assert settings.rog_g703_psu_actions_enabled is False
 
 
@@ -661,6 +680,7 @@ def test_effective_owner_gate_provider_changes_climate_and_psu_availability_with
     gates = {
         "home_climate_actions": False,
         "kettle_actions": False,
+        "light_strip_actions": False,
         "rog_g703_psu_actions": False,
     }
     provider = lambda capability_id: gates[capability_id]
@@ -1277,4 +1297,60 @@ def test_unknown_kettle_physical_mode_fails_closed_before_service_call(tmp_path:
     with pytest.raises(HTTPException) as failure:
         run(executor.execute(request("home.kettle.boil")))
     assert failure.value.detail == "ha_integration_unavailable"
+    assert server.calls == []
+
+
+def test_light_strip_actions_use_allowlisted_entity_and_verify_state(tmp_path: Path) -> None:
+    states = base_states()
+    states[LIGHT_STRIP_ENTITY] = entity(LIGHT_STRIP_ENTITY, "on", {
+        "brightness": 255, "hs_color": [9, 67], "rgb_color": [255, 110, 84],
+        "color_temp_kelvin": None, "min_color_temp_kelvin": 2700,
+        "max_color_temp_kelvin": 6500, "supported_color_modes": ["hs", "color_temp"],
+        "effect": None, "effect_list": ["Красный", "Белый", "Рассвет"],
+        "private_key": "do-not-expose",
+    })
+    server = HomeAssistantStub(states)
+    _, adapter, _, executor = make_stack(tmp_path, server)
+    light = next(service for service in adapter.services() if service.id == "living-room-light-strip")
+    assert light.dataContract == "home.light-strip.v1"
+    assert light.data["effects"] == ["Красный", "Белый", "Рассвет"]
+    assert "private_key" not in json.dumps(light.model_dump())
+    assert executor.availability()["actions"]["home.light_strip.set_color"]["allowed"] is True
+
+    for action, values, expected in (
+        ("home.light_strip.set_brightness", {"brightness": 128}, "brightness"),
+        ("home.light_strip.set_color", {"hsColor": (240, 100)}, "hs_color"),
+        ("home.light_strip.set_temperature", {"kelvin": 4000}, "color_temp_kelvin"),
+        ("home.light_strip.set_effect", {"effect": "Рассвет"}, "effect"),
+    ):
+        result = run(executor.execute(request(action, **values)))
+        assert result["status"] == "confirmed"
+        assert server.calls[-1][0] == "/api/services/light/turn_on"
+        assert expected in server.calls[-1][1]
+        assert server.calls[-1][1]["entity_id"] == LIGHT_STRIP_ENTITY
+
+    result = run(executor.execute(request("home.light_strip.power_off")))
+    assert result["light"]["state"] == "off"
+    assert server.calls[-1][0] == "/api/services/light/turn_off"
+    with pytest.raises(HTTPException) as failure:
+        run(executor.execute(request("home.light_strip.set_color", hsColor=(10, 90))))
+    assert failure.value.detail == "ha_invalid_state"
+
+
+def test_light_strip_rejects_unadvertised_effect_and_invalid_values(tmp_path: Path) -> None:
+    states = base_states()
+    states[LIGHT_STRIP_ENTITY] = entity(LIGHT_STRIP_ENTITY, "on", {
+        "brightness": 200, "hs_color": [5, 80], "supported_color_modes": ["hs", "color_temp"],
+        "min_color_temp_kelvin": 2700, "max_color_temp_kelvin": 6500,
+        "effect_list": ["Красный"],
+    })
+    server = HomeAssistantStub(states)
+    _, _, _, executor = make_stack(tmp_path, server)
+    with pytest.raises(ValidationError):
+        request("home.light_strip.set_color", hsColor=(361, 100))
+    with pytest.raises(ValidationError):
+        request("home.light_strip.set_brightness", brightness=0)
+    with pytest.raises(HTTPException) as failure:
+        run(executor.execute(request("home.light_strip.set_effect", effect="Unknown")))
+    assert failure.value.detail == "ha_invalid_state"
     assert server.calls == []

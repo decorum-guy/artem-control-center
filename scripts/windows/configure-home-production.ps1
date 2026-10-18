@@ -271,6 +271,7 @@ try {
         PANEL_PLANNING_SECRET = $planningPanelSecret
         PANEL_WRITES_ENABLED = "false"
         PANEL_HOME_CLIMATE_ACTIONS_ENABLED = "false"
+        PANEL_LIGHT_STRIP_ACTIONS_ENABLED = "false"
         PANEL_KETTLE_ACTIONS_ENABLED = "false"
         PANEL_ROG_G703_PSU_ACTIONS_ENABLED = "false"
         PANEL_COFFEE_ACTIONS_ENABLED = "false"
@@ -293,6 +294,7 @@ try {
         foreach ($key in @(
             "PANEL_WRITES_ENABLED",
             "PANEL_HOME_CLIMATE_ACTIONS_ENABLED",
+            "PANEL_LIGHT_STRIP_ACTIONS_ENABLED",
             "PANEL_KETTLE_ACTIONS_ENABLED",
             "PANEL_ROG_G703_PSU_ACTIONS_ENABLED",
             "PANEL_COFFEE_ACTIONS_ENABLED",

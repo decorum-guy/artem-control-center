@@ -27,6 +27,7 @@ KETTLE_TEA_MODES = (
 )
 KETTLE_MODES = ("on", "off", *KETTLE_TEA_MODES)
 CLIMATE_ENTITY = "climate.konditsioner"
+LIGHT_STRIP_ENTITY = "light.zal_lenta"
 PSU_1_ENTITY = "switch.bp_1"
 PSU_2_ENTITY = "switch.bp_2"
 CLIMATE_HVAC_MODES = ("cool", "heat", "fan_only", "dry", "auto", "off")
@@ -42,6 +43,7 @@ WATCHED_ENTITIES = (
     *REQUIRED_ENTITIES,
     KETTLE_ENTITY,
     CLIMATE_ENTITY,
+    LIGHT_STRIP_ENTITY,
     PSU_1_ENTITY,
     PSU_2_ENTITY,
 )
@@ -66,6 +68,8 @@ class HomeAssistantAdapter:
         self._settings = settings
         self._transport = transport
         self._states: Dict[str, Dict[str, Any]] = {}
+        self._light_usage: Dict[str, Dict[str, Any]] = {}
+        self._light_selection_sequence = 0
         self._observed_at: Optional[datetime] = None
         self._last_successful_rest_at: Optional[datetime] = None
         self._last_transport_connected_at: Optional[datetime] = None
@@ -180,6 +184,7 @@ class HomeAssistantAdapter:
             raise ValueError("Home Assistant entity response must be an object")
 
         sanitized = _sanitize_state(entity_id, payload)
+        self._record_light_selection(self._states.get(entity_id), sanitized)
         self._states[entity_id] = sanitized
         self._save_cache()
         await self._notify_change()
@@ -250,6 +255,7 @@ class HomeAssistantAdapter:
         sanitized = _sanitize_state(entity_id, new_state)
         if self._states.get(entity_id) == sanitized and self._source == "live":
             return False
+        self._record_light_selection(self._states.get(entity_id), sanitized)
         self._states[entity_id] = sanitized
         self._observed_at = self._clock()
         if self._transport_is_live():
@@ -320,6 +326,29 @@ class HomeAssistantAdapter:
             if kettle_state == "unavailable"
             else "healthy"
         )
+
+        light = self._states.get(LIGHT_STRIP_ENTITY)
+        light_attributes = (light or {}).get("attributes", {})
+        light_state = (light or {}).get("state")
+        light_available = light_state in {"on", "off"}
+        light_health = "stale" if stale and light else "healthy" if light_available else "offline"
+        light_actions_enabled = bool(
+            self._settings.writes_enabled
+            and self._settings.light_strip_actions_enabled
+            and self.mutation_transport_available()
+            and light_available
+        )
+        light_actions = [
+            ActionDescriptor(id=action_id, title=title, enabled=light_actions_enabled, risk="low")
+            for action_id, title in (
+                ("home.light_strip.power_on", "Включить ленту"),
+                ("home.light_strip.power_off", "Выключить ленту"),
+                ("home.light_strip.set_brightness", "Изменить яркость"),
+                ("home.light_strip.set_color", "Выбрать цвет"),
+                ("home.light_strip.set_temperature", "Выбрать оттенок белого"),
+                ("home.light_strip.set_effect", "Выбрать режим"),
+            )
+        ]
 
         coffee_actions = [
             ActionDescriptor(
@@ -554,6 +583,37 @@ class HomeAssistantAdapter:
                 },
             ),
         ]
+        services.append(ServiceSnapshot(
+            id="living-room-light-strip",
+            title="Лента в зале",
+            enabled=light is not None,
+            health=light_health,
+            summary="Включена" if light_state == "on" else "Выключена" if light_state == "off" else "Недоступна",
+            dataContract="home.light-strip.v1",
+            actions=light_actions,
+            source=source,
+            presentation=ServicePresentation(
+                category="home-device", group="Home infrastructure", overview="quick-control",
+                priority=75, environment="home", freshnessLabel=freshness,
+            ),
+            data={
+                "entityId": LIGHT_STRIP_ENTITY,
+                "state": light_state if light_available else "unavailable",
+                "available": light_available and not stale,
+                "stale": stale,
+                "observedAt": observed.isoformat(),
+                "brightness": light_attributes.get("brightness"),
+                "hsColor": light_attributes.get("hs_color"),
+                "rgbColor": light_attributes.get("rgb_color"),
+                "colorTempKelvin": light_attributes.get("color_temp_kelvin"),
+                "minColorTempKelvin": light_attributes.get("min_color_temp_kelvin"),
+                "maxColorTempKelvin": light_attributes.get("max_color_temp_kelvin"),
+                "effect": light_attributes.get("effect"),
+                "effects": light_attributes.get("effect_list", []),
+                "supportedColorModes": light_attributes.get("supported_color_modes", []),
+                "favorites": sorted(self._light_usage.values(), key=lambda item: (-item["count"], -item.get("lastSelectionOrder", 0), -item["lastSelectedAt"]))[:4],
+            },
+        ))
         target_temperature = _climate_number(
             (climate or {}).get("attributes", {}).get("temperature")
         )
@@ -826,11 +886,13 @@ class HomeAssistantAdapter:
 
     def _replace_states(self, payload: Iterable[Any]) -> None:
         allowlist = set(WATCHED_ENTITIES)
-        self._states = {
+        next_states = {
             str(item["entity_id"]): _sanitize_state(str(item["entity_id"]), item)
             for item in payload
             if isinstance(item, dict) and item.get("entity_id") in allowlist
         }
+        self._record_light_selection(self._states.get(LIGHT_STRIP_ENTITY), next_states.get(LIGHT_STRIP_ENTITY))
+        self._states = next_states
         self._observed_at = self._clock()
         self._save_cache()
 
@@ -916,6 +978,16 @@ class HomeAssistantAdapter:
                 for entity, state in payload.get("states", {}).items()
                 if entity in WATCHED_ENTITIES and isinstance(state, dict)
             }
+            self._light_usage = {
+                key: value for key, value in payload.get("lightUsage", {}).items()
+                if isinstance(key, str) and isinstance(value, dict)
+                and isinstance(value.get("count"), int) and value["count"] > 0
+                and isinstance(value.get("lastSelectedAt"), (int, float))
+            }
+            self._light_selection_sequence = max(
+                (value.get("lastSelectionOrder", 0) for value in self._light_usage.values()
+                 if isinstance(value.get("lastSelectionOrder", 0), int)), default=0
+            )
             self._observed_at = datetime.fromisoformat(payload["observedAt"])
             self._source = "cached" if self._states else "unavailable"
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
@@ -933,12 +1005,29 @@ class HomeAssistantAdapter:
                 {
                     "observedAt": self._observed_at.isoformat(),
                     "states": self._states,
+                    "lightUsage": self._light_usage,
                 },
                 ensure_ascii=False,
             ),
             encoding="utf-8",
         )
         temporary.replace(path)
+
+    def _record_light_selection(self, old: Dict[str, Any] | None, new: Dict[str, Any] | None) -> None:
+        if not old or not new or new.get("state") != "on":
+            return
+        selected = _light_selection(new)
+        if selected is None or (old.get("state") == "on" and _light_selection(old) == selected):
+            return
+        key = selected["key"]
+        previous = self._light_usage.get(key, {})
+        self._light_selection_sequence += 1
+        self._light_usage[key] = {
+            **selected,
+            "count": previous.get("count", 0) + 1,
+            "lastSelectedAt": self._clock().timestamp(),
+            "lastSelectionOrder": self._light_selection_sequence,
+        }
 
 
 def _websocket_url(base_url: str) -> str:
@@ -953,6 +1042,35 @@ def _sanitize_state(entity_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(raw_attributes, dict):
         raw_attributes = {}
     raw_state = state.get("state")
+    if entity_id == LIGHT_STRIP_ENTITY:
+        hs = raw_attributes.get("hs_color")
+        rgb = raw_attributes.get("rgb_color")
+        effects = raw_attributes.get("effect_list")
+        modes = raw_attributes.get("supported_color_modes")
+        effect = raw_attributes.get("effect")
+        return {
+            "entity_id": entity_id,
+            "state": raw_state if raw_state in {"on", "off", "unknown", "unavailable"} else "unknown",
+            "last_changed": state.get("last_changed"),
+            "last_updated": state.get("last_updated"),
+            "attributes": {
+                "brightness": _bounded_int(raw_attributes.get("brightness"), 1, 255),
+                "hs_color": [round(float(hs[0])), round(float(hs[1]))]
+                if isinstance(hs, (list, tuple)) and len(hs) == 2
+                and all(isinstance(v, (int, float)) and math.isfinite(v) for v in hs)
+                and 0 <= hs[0] <= 360 and 0 <= hs[1] <= 100 else None,
+                "rgb_color": list(rgb) if isinstance(rgb, (list, tuple)) and len(rgb) == 3
+                and all(type(v) is int and 0 <= v <= 255 for v in rgb) else None,
+                "color_temp_kelvin": _bounded_int(raw_attributes.get("color_temp_kelvin"), 2000, 10000),
+                "min_color_temp_kelvin": _bounded_int(raw_attributes.get("min_color_temp_kelvin"), 2000, 10000),
+                "max_color_temp_kelvin": _bounded_int(raw_attributes.get("max_color_temp_kelvin"), 2000, 10000),
+                "effect": effect if isinstance(effect, str) and len(effect) <= 64 else None,
+                "effect_list": [item for item in effects[:64] if isinstance(item, str) and len(item) <= 64]
+                if isinstance(effects, list) else [],
+                "supported_color_modes": [item for item in modes if isinstance(item, str) and item in {"hs", "color_temp", "brightness", "onoff"}]
+                if isinstance(modes, list) else [],
+            },
+        }
     if entity_id == KETTLE_ENTITY:
         normalized_state = raw_state if raw_state in KETTLE_MODES or raw_state in {"unknown", "unavailable"} else "unknown"
         mode = raw_attributes.get("operation_mode")
@@ -1033,6 +1151,20 @@ def _sanitize_state(entity_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
         "last_updated": state.get("last_updated"),
         "attributes": attributes,
     }
+
+
+def _light_selection(state: Dict[str, Any]) -> Dict[str, Any] | None:
+    attributes = state.get("attributes", {})
+    effect = attributes.get("effect")
+    if effect:
+        return {"key": f"effect:{effect}", "effect": effect, "hsColor": None, "colorTempKelvin": None}
+    kelvin = attributes.get("color_temp_kelvin")
+    if isinstance(kelvin, int):
+        return {"key": f"temperature:{kelvin}", "effect": None, "hsColor": None, "colorTempKelvin": kelvin}
+    hs = attributes.get("hs_color")
+    if isinstance(hs, list) and len(hs) == 2:
+        return {"key": f"hs:{hs[0]}:{hs[1]}", "effect": None, "hsColor": hs, "colorTempKelvin": None}
+    return None
 
 
 def _climate_modes(value: Any, allowed: tuple[str, ...]) -> list[str]:

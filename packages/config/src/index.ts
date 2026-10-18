@@ -13,6 +13,7 @@ export const fixtureScenarios = [
   "home-climate-healthy",
   "home-climate-stale",
   "home-climate-unavailable",
+  "home-light-strip",
   "home-psu-full",
   "home-psu-normal",
   "home-psu-secondary-only",
