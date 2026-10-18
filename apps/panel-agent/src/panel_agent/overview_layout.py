@@ -58,6 +58,11 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
         "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (7, 5), "detail": (7, 3)},
         "default": "standard",
     },
+    "home.light-strip": {
+        "singleton": True,
+        "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (8, 6)},
+        "default": "standard",
+    },
     "home.station-mini-2": {
         "singleton": True,
         "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (7, 5)},

@@ -9,6 +9,7 @@ import { PlanningOverviewCard } from "../../PlanningOverviewCard";
 import { RogG703CompactControl, RogG703PsuCompactControl } from "../../RogG703Controls";
 import { ClimateControl } from "../../ClimateControl";
 import { KettleControl } from "../../KettleControl";
+import { LightStripControl } from "../../LightStripControl";
 import { StationMiniWidget } from "./StationMiniWidget";
 import type { OverviewRuntimeContext } from "./overviewRuntime";
 import { coffeeAppearanceConfig, planningDensityFor } from "./appearanceConfig";
@@ -136,6 +137,14 @@ function renderKettle(runtime: OverviewRuntimeContext): ReactNode {
   }
   return <WorkZone className="overview-v2-real-widget overview-kettle-widget" data-testid="overview-kettle-widget" data-widget-type="home.kettle">
     <KettleControl service={kettle} variant="overview" interactive={!runtime.editMode} />
+  </WorkZone>;
+}
+
+function renderLightStrip(runtime: OverviewRuntimeContext): ReactNode {
+  const light = runtime.snapshot.services.find((service) => service.enabled && service.dataContract === "home.light-strip.v1") ?? null;
+  if (!light) return <OverviewRuntimeUnavailable title="Лента в зале" detail="Данные Home Assistant пока недоступны." testId="overview-light-strip-unavailable" />;
+  return <WorkZone className="overview-v2-real-widget overview-light-strip-widget" data-testid="overview-light-strip-widget" data-widget-type="home.light-strip">
+    <LightStripControl service={light} variant="overview" interactive={!runtime.editMode} />
   </WorkZone>;
 }
 
@@ -293,6 +302,8 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
       return renderClimate(item, runtime);
     case "home.kettle":
       return renderKettle(runtime);
+    case "home.light-strip":
+      return renderLightStrip(runtime);
     case "home.station-mini-2":
       return <StationMiniWidget interactive={!runtime.editMode} />;
     case "planning.summary":

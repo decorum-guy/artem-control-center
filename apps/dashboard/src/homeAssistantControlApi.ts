@@ -6,6 +6,13 @@ export const HOME_CLIMATE_SET_FAN_MODE = "home.climate.set_fan_mode" as const;
 export const HOME_KETTLE_BOIL = "home.kettle.boil" as const;
 export const HOME_KETTLE_SET_TEA_MODE = "home.kettle.set_tea_mode" as const;
 export const HOME_KETTLE_STOP = "home.kettle.stop" as const;
+export const LIGHT_STRIP_POWER_ON = "home.light_strip.power_on" as const;
+export const LIGHT_STRIP_POWER_OFF = "home.light_strip.power_off" as const;
+export const LIGHT_STRIP_SET_BRIGHTNESS = "home.light_strip.set_brightness" as const;
+export const LIGHT_STRIP_SET_COLOR = "home.light_strip.set_color" as const;
+export const LIGHT_STRIP_SET_TEMPERATURE = "home.light_strip.set_temperature" as const;
+export const LIGHT_STRIP_SET_EFFECT = "home.light_strip.set_effect" as const;
+export type LightStripActionId = typeof LIGHT_STRIP_POWER_ON | typeof LIGHT_STRIP_POWER_OFF | typeof LIGHT_STRIP_SET_BRIGHTNESS | typeof LIGHT_STRIP_SET_COLOR | typeof LIGHT_STRIP_SET_TEMPERATURE | typeof LIGHT_STRIP_SET_EFFECT;
 export type KettleTeaMode = "white_tea" | "green_tea" | "red_tea" | "herbal_tea" | "flower_tea" | "puerh_tea" | "oolong_tea" | "black_tea";
 export type KettleActionId = typeof HOME_KETTLE_BOIL | typeof HOME_KETTLE_SET_TEA_MODE | typeof HOME_KETTLE_STOP;
 
@@ -31,7 +38,7 @@ export type RogPsuActionId =
   | typeof ROG_PSU_BP2_ON
   | typeof ROG_PSU_BP2_OFF;
 
-export type HomeAssistantActionId = ClimateActionId | RogPsuActionId | KettleActionId;
+export type HomeAssistantActionId = ClimateActionId | RogPsuActionId | KettleActionId | LightStripActionId;
 export type ClimateHvacMode = "cool" | "heat" | "fan_only" | "dry" | "auto" | "off";
 export type ClimateFanMode = "one" | "two" | "three" | "four" | "five";
 export type HomeAssistantAvailability =
@@ -69,6 +76,10 @@ export type HomeAssistantActionRequest = {
   mode?: never;
   fanMode?: never;
   teaMode?: never;
+  brightness?: never;
+  hsColor?: never;
+  kelvin?: never;
+  effect?: never;
 } | {
   actionId: Exclude<HomeAssistantActionId, typeof HOME_KETTLE_STOP>;
   requestId: string;
@@ -76,6 +87,10 @@ export type HomeAssistantActionRequest = {
   mode?: ClimateHvacMode | null;
   fanMode?: ClimateFanMode | null;
   teaMode?: KettleTeaMode;
+  brightness?: number;
+  hsColor?: [number, number];
+  kelvin?: number;
+  effect?: string;
 };
 
 export interface HomeAssistantActionResponse {
@@ -100,6 +115,13 @@ export interface HomeAssistantActionResponse {
     operationMode: "on" | "off" | KettleTeaMode;
     currentTemperature: number | null;
     targetTemperature: number | null;
+  } | null;
+  light?: {
+    state: "on" | "off";
+    brightness: number | null;
+    hsColor: [number, number] | null;
+    colorTempKelvin: number | null;
+    effect: string | null;
   } | null;
 }
 
@@ -149,6 +171,12 @@ export async function executeHomeAssistantAction(
     ? { actionId: request.actionId, requestId: request.requestId }
     : request.actionId === HOME_KETTLE_SET_TEA_MODE
     ? { actionId: request.actionId, requestId: request.requestId, teaMode: request.teaMode }
+    : request.actionId.startsWith("home.light_strip.")
+    ? {
+      actionId: request.actionId, requestId: request.requestId,
+      brightness: request.brightness ?? null, hsColor: request.hsColor ?? null,
+      kelvin: request.kelvin ?? null, effect: request.effect ?? null
+    }
     : {
       actionId: request.actionId,
       requestId: request.requestId,

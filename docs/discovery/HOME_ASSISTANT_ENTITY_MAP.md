@@ -1,5 +1,13 @@
 # Home Assistant Entity Map
 
+## 2026-10-19 — RGB лента в зале
+
+Read-only SSH inspection of `ha-vps` and a filtered local Home Assistant API read confirmed `light.zal_lenta`, provided by `yandex_station`, with state `on` at inspection. HA advertises brightness 1–255, `hs` and `color_temp` modes, white temperature 2700–6500 K, and 39 named effects. The named list includes 22 static palette colors and 17 scenes, from «Рассвет» through «Чтение». Current HS was `[9, 67]`, RGB `[255, 110, 84]`, brightness 255. These are observations, not widget defaults.
+
+The installed `yandex_station/light.py` implements `light.turn_on` with `brightness`, `hs_color`, `color_temp_kelvin`, or `effect`, plus `light.turn_off`. The panel uses the HA entity and its advertised capabilities; it does not call Yandex directly. Discovery did not send device commands, change HA configuration, or expose credentials.
+
+The panel's local usage counter starts when this version observes the light. It counts confirmed state transitions, not elapsed time. Existing HA history is not backfilled, and changes made while the panel is offline cannot be counted precisely.
+
 Discovery date: 2026-07-29  
 Sources: `/Users/aartemida/Documents/Homeassistant` and read-only SSH alias
 `ha-vps`  

@@ -962,6 +962,7 @@ export type OverviewWidgetType =
   | "home.coffee-machine"
   | "home.climate"
   | "home.kettle"
+  | "home.light-strip"
   | "home.station-mini-2"
   | "system.rog-g703-operational"
   | "planning.summary"

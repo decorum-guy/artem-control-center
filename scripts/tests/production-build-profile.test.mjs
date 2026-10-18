@@ -43,6 +43,7 @@ test("the persisted capability allow-list contains exactly the current mutable I
     "planning_calendar_route",
     "planning_reminders_route",
     "home_climate_actions",
+    "light_strip_actions",
     "kettle_actions",
     "rog_g703_psu_actions"
   ];

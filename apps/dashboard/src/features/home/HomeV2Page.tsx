@@ -6,6 +6,7 @@ import { RouteHeader, SectionHeader, StatusText } from "../../ShellPrimitives";
 import { CoffeeWidget } from "../../widgets";
 import { ClimateControl } from "../../ClimateControl";
 import { KettleControl } from "../../KettleControl";
+import { HomeWidgetRenderer } from "../../HomeWidgetRenderer";
 import { RogG703HomeControl } from "../../RogG703Controls";
 import { RogPsuControls } from "../../RogPsuControls";
 import { DeviceRow } from "../operations/DeviceRow";
@@ -88,12 +89,17 @@ export function HomeV2Page({
             <KettleControl service={selection.kettle} />
           </ErrorBoundary>
         )}
-        {!selection.coffee && !selection.climate && !selection.kettle && selection.fallback && (
+        {selection.light && (
+          <ErrorBoundary title={selection.light.title}>
+            <HomeWidgetRenderer service={selection.light} />
+          </ErrorBoundary>
+        )}
+        {!selection.coffee && !selection.climate && !selection.kettle && !selection.light && selection.fallback && (
           <ErrorBoundary title={selection.fallback.title}>
             <DeviceRow service={selection.fallback} primary />
           </ErrorBoundary>
         )}
-        {!selection.coffee && !selection.climate && !selection.kettle && !selection.fallback && (
+        {!selection.coffee && !selection.climate && !selection.kettle && !selection.light && !selection.fallback && (
           <div className="home-v2-empty" data-testid="home-no-devices">
             <Icon name="home" />
             <strong>Домашние устройства не зарегистрированы</strong>

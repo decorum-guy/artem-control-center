@@ -731,6 +731,7 @@ class CapabilityPatch(BaseModel):
         "calendar_display_colors",
         "overview_layout_editor",
         "home_climate_actions",
+        "light_strip_actions",
         "kettle_actions",
         "rog_g703_psu_actions",
         "planning_overview",

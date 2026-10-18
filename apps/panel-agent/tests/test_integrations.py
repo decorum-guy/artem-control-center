@@ -9,6 +9,7 @@ import pytest
 
 from panel_agent.home_assistant import (
     CLIMATE_ENTITY,
+    LIGHT_STRIP_ENTITY,
     COFFEE_ENTITY,
     HomeAssistantAdapter,
 )
@@ -160,6 +161,38 @@ def test_absent_kettle_does_not_degrade_home_assistant_aggregate(tmp_path):
     assert services["home-assistant"].health == "healthy"
     assert services["home-assistant"].data["missingEntities"] == []
     assert services["kettle"].health == "offline"
+
+
+def test_light_favorites_count_selections_not_dwell_or_brightness_and_survive_restart(tmp_path):
+    settings = IntegrationSettings(state_cache_path=str(tmp_path / "ha-cache.json"))
+    frozen_clock = lambda: datetime(2026, 10, 19, tzinfo=timezone.utc)
+    adapter = HomeAssistantAdapter(settings, clock=frozen_clock)
+
+    def light(state: str, effect: str, brightness: int = 255) -> dict:
+        return {
+            "entity_id": LIGHT_STRIP_ENTITY, "state": state,
+            "last_changed": "2026-10-19T00:00:00Z", "last_updated": "2026-10-19T00:00:00Z",
+            "attributes": {"effect": effect, "effect_list": ["Красный", "Синий", "Белый"],
+                           "brightness": brightness, "supported_color_modes": ["hs", "color_temp"]},
+        }
+
+    async def select() -> None:
+        await adapter.apply_state_changed(LIGHT_STRIP_ENTITY, light("off", "Красный"))
+        for color in ("Красный", "Синий", "Красный", "Белый"):
+            await adapter.apply_state_changed(LIGHT_STRIP_ENTITY, light("on", color))
+            await adapter.apply_state_changed(LIGHT_STRIP_ENTITY, light("on", color, 128))
+        await adapter.apply_state_changed(LIGHT_STRIP_ENTITY, light("off", "Белый"))
+    asyncio.run(select())
+
+    favorites = next(service for service in adapter.services() if service.id == "living-room-light-strip").data["favorites"]
+    assert [(item["effect"], item["count"]) for item in favorites] == [
+        ("Красный", 2), ("Белый", 1), ("Синий", 1)
+    ]
+    restarted = HomeAssistantAdapter(settings, clock=frozen_clock)
+    restored = next(service for service in restarted.services() if service.id == "living-room-light-strip").data["favorites"]
+    assert [(item["effect"], item["count"]) for item in restored] == [
+        ("Красный", 2), ("Белый", 1), ("Синий", 1)
+    ]
 
 
 def test_uninitialized_timing_and_unknown_activation_do_not_create_fake_progress(

@@ -153,6 +153,36 @@
       }
     },
     {
+      "id": "living-room-light-strip",
+      "title": "Лента в зале",
+      "enabled": false,
+      "dataContract": "home.light-strip.v1",
+      "health": "healthy",
+      "source": "fixture",
+      "summary": "Включена",
+      "actions": [
+        { "id": "home.light_strip.power_on", "title": "Включить", "enabled": false, "risk": "low" },
+        { "id": "home.light_strip.power_off", "title": "Выключить", "enabled": false, "risk": "low" },
+        { "id": "home.light_strip.set_brightness", "title": "Яркость", "enabled": false, "risk": "low" },
+        { "id": "home.light_strip.set_color", "title": "Цвет", "enabled": false, "risk": "low" },
+        { "id": "home.light_strip.set_temperature", "title": "Белый свет", "enabled": false, "risk": "low" },
+        { "id": "home.light_strip.set_effect", "title": "Режим", "enabled": false, "risk": "low" }
+      ],
+      "presentation": {
+        "category": "home-device", "group": "Home infrastructure", "overview": "quick-control",
+        "priority": 75, "environment": "home", "freshnessLabel": "только что"
+      },
+      "data": {
+        "entityId": "light.zal_lenta", "state": "on", "available": true, "stale": false,
+        "observedAt": "2026-10-19T00:00:00Z", "brightness": 204,
+        "hsColor": [9, 67], "rgbColor": [255, 110, 84], "colorTempKelvin": null,
+        "minColorTempKelvin": 2700, "maxColorTempKelvin": 6500,
+        "effect": null, "effects": ["Мягкий белый", "Теплый белый", "Белый", "Дневной белый", "Холодный белый", "Красный", "Коралловый", "Оранжевый", "Желтый", "Салатовый", "Зеленый", "Изумрудный", "Бирюзовый", "Голубой", "Синий", "Лунный", "Сиреневый", "Фиолетовый", "Пурпурный", "Розовый", "Малиновый", "Лиловый", "Рассвет", "Закат", "Циркадный", "Вечеринка", "Гирлянда", "Джунгли", "Неон", "Ночь", "Океан", "Отдых", "Романтика", "Свеча", "Сирена", "Тревога", "Ужин", "Фантазия", "Чтение"],
+        "supportedColorModes": ["hs", "color_temp"],
+        "favorites": [{ "key": "effect:Красный", "effect": "Красный", "hsColor": null, "colorTempKelvin": null, "count": 2, "lastSelectedAt": 1792363187 }, { "key": "effect:Белый", "effect": "Белый", "hsColor": null, "colorTempKelvin": null, "count": 1, "lastSelectedAt": 1792363186 }, { "key": "effect:Синий", "effect": "Синий", "hsColor": null, "colorTempKelvin": null, "count": 1, "lastSelectedAt": 1792363185 }, { "key": "effect:Чтение", "effect": "Чтение", "hsColor": null, "colorTempKelvin": null, "count": 1, "lastSelectedAt": 1792363184 }]
+      }
+    },
+    {
       "id": "rog-g703-psu",
       "title": "Питание ASUS ROG",
       "enabled": false,
@@ -370,6 +400,7 @@
   "scenarios": {
     "ha-healthy": {},
     "home-normal": {},
+    "home-light-strip": { "living-room-light-strip": { "enabled": true, "source": "live" } },
     "home-coffee-only": {
       "kettle": {
         "enabled": false
