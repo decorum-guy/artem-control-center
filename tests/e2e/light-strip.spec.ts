@@ -25,6 +25,15 @@ async function installActions(page: Page) {
   return posts;
 }
 
+async function expectSelectorInsideWidget(page: Page, testId: string) {
+  const bounds = await page.getByTestId(testId).evaluate((widget) => {
+    const button = widget.querySelector<HTMLButtonElement>(".light-strip__more");
+    if (!button) throw new Error("Missing color and mode selector");
+    return { widgetBottom: widget.getBoundingClientRect().bottom, buttonBottom: button.getBoundingClientRect().bottom };
+  });
+  expect(bounds.buttonBottom).toBeLessThanOrEqual(bounds.widgetBottom - 14);
+}
+
 test.describe("living room RGB strip", () => {
   test.skip(!enabled, "Requires the V2 shell.");
 
@@ -33,9 +42,11 @@ test.describe("living room RGB strip", () => {
     await page.goto("/home?scenario=home-light-strip");
     const light = page.getByTestId("light-strip-home");
     await expect(light).toBeVisible();
+    await expectSelectorInsideWidget(page, "light-strip-home");
     await expect(light.getByRole("button", { name: "Красный, выбран 2 раз" })).toBeVisible();
     await expect(light.getByRole("button", { name: "Белый, выбран 1 раз" })).toBeVisible();
     await expect(light.getByRole("button", { name: "Чтение, выбран 1 раз" })).toContainText("Чтение");
+    const scrollBeforePicker = await page.evaluate(() => window.scrollY);
     await light.getByRole("button", { name: "Открыть выбор цвета и режима" }).click();
     const dialog = page.getByRole("dialog", { name: "Цвета и режимы" });
     await expect(dialog).toBeVisible();
@@ -43,6 +54,7 @@ test.describe("living room RGB strip", () => {
     await expect(dialog.locator(".light-strip__mode")).toHaveCount(17);
     await expect(dialog.getByRole("button", { name: "Чтение" })).toBeVisible();
     await dialog.getByRole("button", { name: "Синий", exact: true }).click();
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforePicker);
     await expect.poll(() => posts.length).toBe(1);
     expect(posts[0]).toMatchObject({ actionId: "home.light_strip.set_effect", effect: "Синий" });
     expect(posts[0]).not.toHaveProperty("entity_id");
@@ -59,6 +71,15 @@ test.describe("living room RGB strip", () => {
     } }));
     await page.goto("/overview?scenario=home-light-strip");
     await expect(page.getByTestId("overview-light-strip-widget")).toBeVisible();
-    await expect(page.getByTestId("light-strip-overview")).toContainText("Лента в зале");
+    const light = page.getByTestId("light-strip-overview");
+    await expect(light).toContainText("Лента в зале");
+    await expectSelectorInsideWidget(page, "light-strip-overview");
+    const topBeforePicker = await light.evaluate((widget) => widget.getBoundingClientRect().top);
+    await light.getByRole("button", { name: "Открыть выбор цвета и режима" }).click();
+    const dialog = page.getByRole("dialog", { name: "Цвета и режимы" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Закрыть выбор цвета и режима" }).click();
+    await expect(dialog).toBeHidden();
+    expect(await light.evaluate((widget) => widget.getBoundingClientRect().top)).toBe(topBeforePicker);
   });
 });
