@@ -50,7 +50,7 @@
 }
 .home-v2-primary-grid > .kettle-control { grid-column: span 5; grid-row: span 3; }
 .home-v2-primary-grid > .kettle-control:has(.kettle-control__notice) { grid-row: span 4; }
-.home-v2-primary-grid > .light-strip--home { grid-column: span 6; grid-row: span 4; min-height: 0; height: 100%; }
+.home-v2-primary-grid > .light-strip--home { grid-column: span 6; grid-row: span 5; min-height: 0; height: 100%; }
 .home-v2-primary-grid > .coffee-panel--home-v2.coffee-panel--ready {
   border-left: 1px solid var(--cc-border);
 }

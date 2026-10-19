@@ -1,5 +1,5 @@
 .light-strip { min-width: 0; display: grid; align-content: start; gap: 20px; padding: 22px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-zone, 22px); background: var(--cc-surface-1); color: var(--cc-text); }
-.light-strip__header, .light-strip__identity, .light-strip__favorites, .light-strip__dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.light-strip__header, .light-strip__identity, .light-strip__dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .light-strip__identity { justify-content: flex-start; min-width: 0; }
 .light-strip__identity strong, .light-strip__dialog strong { display: block; font-size: 1.15rem; }
 .light-strip__identity small, .light-strip__dialog small { display: block; margin-top: 3px; color: var(--cc-text-muted); }
@@ -12,9 +12,11 @@
 .light-strip__brightness label, .light-strip__temperature label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; font-weight: 650; }
 .light-strip__brightness output, .light-strip__temperature output { font-variant-numeric: tabular-nums; color: var(--cc-text-secondary); }
 .light-strip input[type="range"] { width: 100%; min-height: 36px; margin: 0; accent-color: var(--cc-accent); cursor: pointer; }
-.light-strip__favorites { align-items: flex-start; flex-wrap: wrap; }
-.light-strip__caption { width: 100%; color: var(--cc-text-secondary); font-size: .88rem; }
+.light-strip__favorites { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 12px; min-width: 0; padding-bottom: 14px; }
+.light-strip__caption { grid-column: 1; color: var(--cc-text-secondary); font-size: .88rem; }
 .light-strip__swatches, .light-strip__palette { display: flex; flex-wrap: wrap; gap: 10px; }
+.light-strip__swatches { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+.light-strip__more { grid-column: 2; grid-row: 1; justify-self: end; }
 .light-strip__swatch { width: 50px; height: 50px; flex: 0 0 50px; border: 2px solid rgb(255 255 255 / 24%); border-radius: 14px; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%); }
 .light-strip__swatch.is-active { outline: 3px solid var(--cc-accent); outline-offset: 2px; }
 .light-strip__favorite-mode { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 5px; }
@@ -38,7 +40,11 @@
 .light-strip__custom label, .light-strip__temperature label { flex: 1 1 120px; }
 .light-strip__custom input[type="color"] { width: 58px; height: 48px; padding: 0; border: 1px solid var(--cc-border); border-radius: 12px; background: transparent; }
 .light-strip__temperature input { flex: 1 1 100%; }
-.light-strip--overview { height: 100%; padding: 18px; gap: 14px; }
+.light-strip--overview { height: 100%; padding: 12px 14px 14px; gap: 8px; overflow-y: auto; }
 .light-strip--overview .light-strip__lamp { width: 38px; height: 38px; }
+.light-strip--overview .light-strip__brightness label { margin-bottom: 4px; }
+.light-strip--overview input[type="range"] { min-height: 30px; }
+.light-strip--overview .light-strip__favorites { gap: 6px 8px; padding-bottom: 8px; }
+.light-strip--overview .light-strip__swatches { flex-wrap: nowrap; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
 @media (max-width: 650px) { .light-strip { padding: 16px; } .light-strip__dialog { padding: 16px; } .light-strip__choices { grid-template-columns: 1fr; gap: 16px; } .light-strip__choice-column + .light-strip__choice-column { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--cc-border); } .light-strip__palette { grid-template-columns: repeat(5, 50px); } .light-strip__swatch--picker { width: 50px; height: 50px; flex-basis: 50px; } }
 @media (prefers-reduced-motion: reduce) { .light-strip *, .light-strip__dialog * { scroll-behavior: auto; transition: none !important; } }
