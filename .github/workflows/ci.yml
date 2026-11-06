@@ -568,5 +568,21 @@ jobs:
       - name: Build production profile for runtime smoke
         run: npm run build:production
 
+      - name: Todoist runtime source and mutations at Samsung viewport
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+        run: npm run test:e2e -- tests/e2e/todoist-tasks.spec.ts
+
+      - name: Upload Todoist Samsung browser evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: todoist-tasks-${{ github.sha }}
+          path: test-results/todoist-tasks-*/
+          if-no-files-found: warn
+
       - name: Smoke-test production runtime
         run: npm run test:production-smoke

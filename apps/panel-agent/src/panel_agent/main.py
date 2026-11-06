@@ -48,6 +48,8 @@ from .fixtures import load_fixture_document, services_for_scenario
 from .diagnostics import DiagnosticsCollector
 from .integrations import IntegrationRuntime
 from .planning_api import build_planning_router
+from .todoist import TodoistAdapter
+from .todoist_api import build_todoist_router
 from .project_registry_api import build_project_registry_router
 from .project_registry_store import ProjectRegistryStore
 from .project_registry_migration import (
@@ -345,6 +347,8 @@ app.include_router(
     )
 )
 app.include_router(build_weather_router(weather_service))
+todoist_adapter = TodoistAdapter(SETTINGS)
+app.include_router(build_todoist_router(todoist_adapter, access_policy))
 app.include_router(build_jarvis_router(jarvis_turn_service))
 app.include_router(build_jarvis_voice_router(service=jarvis_turn_service, bridge=jarvis_voice_bridge))
 app.include_router(
@@ -1342,6 +1346,8 @@ def effective_immediate_capability_enabled(capability_id: str) -> bool:
 
 def _read_only_capability_enabled(capability_id: str) -> bool:
     return {
+        "todoist_enabled": todoist_adapter.enabled,
+        "todoist_writes_enabled": SETTINGS.todoist_writes_enabled,
         "alice_station_actions": SETTINGS.alice_station_actions_enabled,
         "planning_integration": SETTINGS.panel_planning_enabled,
         "ai_text": SETTINGS.ai_text_enabled,

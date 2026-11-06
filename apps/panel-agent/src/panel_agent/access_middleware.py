@@ -69,6 +69,12 @@ def _planning_capability(method: str, path: str) -> str | None:
 
 def capability_for_request(method: str, path: str) -> str | None:
     """Resolve the fixed access capability for a registered mutation route."""
+    if method == "POST" and path == "/api/v1/todoist/tasks":
+        return "todoist.tasks.write"
+    if method == "POST" and path.startswith("/api/v1/todoist/tasks/"):
+        segments = path.removeprefix("/api/v1/todoist/tasks/").split("/")
+        if (len(segments) == 1 and segments[0]) or (len(segments) == 2 and segments[0] and segments[1] in {"close", "move"}):
+            return "todoist.tasks.write"
     if method == "POST" and path.startswith("/api/v1/backups/") and path.endswith("/runs"):
         profile_id = path.removeprefix("/api/v1/backups/").removesuffix("/runs")
         if profile_id and "/" not in profile_id:
