@@ -61,6 +61,8 @@ class CapabilityDefinition:
 # Read-only entries are context, not an invitation to edit deployment,
 # infrastructure, or security configuration.
 CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
+    CapabilityDefinition("todoist_enabled", "Задачи Todoist", "Источник задач настраивается владельцем в Panel Agent.", "Планирование", "PANEL_TODOIST_ENABLED", "delayed", "restart"),
+    CapabilityDefinition("todoist_writes_enabled", "Изменение задач Todoist", "Отдельное разрешение на запись задач Todoist.", "Планирование", "PANEL_TODOIST_WRITES_ENABLED", "delayed", "restart"),
     CapabilityDefinition("calendar_display_colors", "Изменение цветов календарей", "Цвета действуют только внутри панели.", "Локальные возможности", "PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED", "immediate", "none", True),
     CapabilityDefinition("overview_layout_editor", "Редактирование главного экрана", "Позволяет менять расположение виджетов на главном экране.", "Локальные возможности", "PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED", "immediate", "none", True),
     CapabilityDefinition("planning_overview", "Обзор планирования", "Карточка планирования на главном экране.", "Планирование", "VITE_PLANNING_OVERVIEW_ENABLED", "delayed", "rebuild", True),

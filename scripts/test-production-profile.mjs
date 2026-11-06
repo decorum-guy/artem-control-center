@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { productionBuildEnvironment, productionBuildProfile } from "./production-build-profile.mjs";
+import { resolvePythonExecutable, resolveRevisionScopedVenvRoot, resolveVenvPython } from "./runtime-venv.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const npmCli = process.env.npm_execpath;
@@ -49,6 +50,9 @@ if (buildResult.error || buildResult.status !== 0) {
 
 const temporaryRoot = mkdtempSync(join(tmpdir(), "artem-production-profile-"));
 const runtimeRoot = join(temporaryRoot, "ArtemControlCenter");
+const revisionResult = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", windowsHide: true });
+const revision = revisionResult.status === 0 ? revisionResult.stdout.trim() : "";
+const profileVenv = resolveRevisionScopedVenvRoot(runtimeRoot, revision);
 const commandPath = join(runtimeRoot, "runtime-command.json");
 const accessPolicyPath = join(runtimeRoot, "access-policy.json");
 mkdirSync(runtimeRoot, { recursive: true });
@@ -64,6 +68,7 @@ writeFileSync(accessPolicyPath, `${JSON.stringify({
 const runtimeEnvironment = {
   ...profileEnvironment,
   LOCALAPPDATA: temporaryRoot,
+  PANEL_RUNTIME_VENV: profileVenv,
   PANEL_FIXTURE_WRITES_ENABLED: "true",
   PANEL_ACCESS_POLICY_PATH: accessPolicyPath,
   PANEL_ACCESS_AUDIT_DIR: join(runtimeRoot, "audit"),
@@ -72,6 +77,19 @@ const runtimeEnvironment = {
   PANEL_CALENDAR_DISPLAY_COLOR_WRITES_ENABLED: "true",
   PANEL_PLANNING_CACHE_PATH: join(runtimeRoot, "planning-cache.json")
 };
+// The supervisor requires an exact-revision venv. Reuse the configured project
+// interpreter, including setup-python on Windows, instead of the `py` default.
+// Provision directly so this temporary browser fixture creates no staging marker.
+for (const [executable, args] of [
+  [resolvePythonExecutable(root, process.env.PANEL_RUNTIME_VENV), ["-m", "venv", profileVenv]],
+  [resolveVenvPython(profileVenv), ["-m", "pip", "install", "-r", "apps/panel-agent/requirements-dev.txt"]]
+]) {
+  const result = spawnSync(executable, args, { cwd: root, env: runtimeEnvironment, stdio: "inherit", windowsHide: true });
+  if (result.error || result.status !== 0) {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    throw new Error("Unable to provision the production browser fixture venv");
+  }
+}
 const runtime = spawn(process.execPath, ["scripts/production-runtime.mjs"], {
   cwd: root,
   env: runtimeEnvironment,
@@ -82,6 +100,7 @@ const runtime = spawn(process.execPath, ["scripts/production-runtime.mjs"], {
 async function waitForReady() {
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
+    if (runtime.exitCode !== null) throw new Error(`Production-profile runtime exited before readiness (${runtime.exitCode})`);
     try {
       const response = await fetch("http://127.0.0.1:8787/health/ready");
       if (response.ok) return;

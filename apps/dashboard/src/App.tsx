@@ -11,6 +11,7 @@ import {
 } from "./pages";
 import { BackupsPage } from "./BackupsPage";
 import { CalendarPage, RemindersPage, TasksPage } from "./PlanningRoutes";
+import { TasksProviderBoundary } from "./TodoistTasks";
 import {
   planningRouteEnabled
 } from "./planningRouteConfig";
@@ -582,7 +583,7 @@ export function App() {
             )
           )}
           {route === "/system" && (v2VisualShellEnabled ? <SystemV2Page snapshot={snapshot} /> : <SystemPage snapshot={snapshot} />)}
-          {route === "/tasks" && (planningRouteEnabled("/tasks") ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />)}
+          {route === "/tasks" && <TasksProviderBoundary fallback={planningRouteEnabled("/tasks") ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />} />}
           {route === "/calendar" && (planningRouteEnabled("/calendar") ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
           {route === "/reminders" && planningRouteEnabled("/reminders") && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
           {!["/overview", "/weather", "/home", "/services", "/coffee-diary", "/backups", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (

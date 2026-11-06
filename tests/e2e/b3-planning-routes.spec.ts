@@ -191,6 +191,8 @@ test.describe("B3 Planning monitoring routes", () => {
       payload.sourceStatus = "degraded";
     });
     await page.goto("/tasks");
+    // Measure continuous observation after the runtime task source has loaded.
+    await expect(page.getByTestId("planning-task-list")).toBeVisible();
     await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-route-health")).toHaveAttribute("data-state", "degraded");
     await expect(page.getByTestId("planning-route-health")).toContainText("Есть проблемы");
@@ -200,6 +202,7 @@ test.describe("B3 Planning monitoring routes", () => {
       payload.sourceStatus = "stale";
     });
     await page.goto("/tasks");
+    await expect(page.getByTestId("planning-task-list")).toBeVisible();
     await page.clock.fastForward(3_600);
     await expect(page.getByTestId("planning-route-health")).toHaveAttribute("data-state", "stale");
     await expect(page.getByTestId("planning-route-health")).toContainText("Данные могут быть устаревшими");

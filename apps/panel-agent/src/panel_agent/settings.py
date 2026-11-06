@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import ipaddress
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -73,6 +73,9 @@ class IntegrationSettings:
     rog_g703_health_poll_seconds: float = 15.0
     rog_g703_response_limit_bytes: int = 16 * 1024
     writes_enabled: bool = False
+    todoist_api_token: str = field(default="", repr=False)
+    todoist_enabled: bool | None = None
+    todoist_writes_enabled: bool = False
     home_server_maintenance_enabled: bool = False
     home_server_ssh_host: str = ""
     home_server_ssh_user: str = ""
@@ -330,6 +333,12 @@ class IntegrationSettings:
                 max(1024, int(os.getenv("PANEL_ROG_G703_RESPONSE_LIMIT_BYTES", str(16 * 1024)))),
             ),
             writes_enabled=_bool_env("PANEL_WRITES_ENABLED", False),
+            todoist_api_token=os.getenv("PANEL_TODOIST_API_TOKEN", "").strip(),
+            todoist_enabled=(
+                _bool_env("PANEL_TODOIST_ENABLED", False)
+                if "PANEL_TODOIST_ENABLED" in os.environ else None
+            ),
+            todoist_writes_enabled=_bool_env("PANEL_TODOIST_WRITES_ENABLED", False),
             home_server_maintenance_enabled=_bool_env(
                 "PANEL_HOME_SERVER_MAINTENANCE_ENABLED",
                 False,

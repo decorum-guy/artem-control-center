@@ -85,7 +85,7 @@ def _declared_runtime_product_flags():
     hints = get_type_hints(IntegrationSettings)
     flags = set()
     for field in fields(IntegrationSettings):
-        if hints.get(field.name) is not bool:
+        if hints.get(field.name) not in (bool, bool | None):
             continue
         name = field.name.upper()
         flags.add(name if field.name.startswith("panel_") else f"PANEL_{name}")

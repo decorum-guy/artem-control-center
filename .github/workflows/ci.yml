@@ -15,6 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Cover both legacy py.exe and the current Python Install Manager in detached
+  # Windows setup/venv regression tests, not only the checkout-local bootstrap.
+  PY_PYTHON: "3.12"
+  PYTHON_MANAGER_DEFAULT: "3.12"
   PANEL_AGENT_MODE: read_only
   PANEL_WRITES_ENABLED: "false"
   PANEL_COFFEE_TIMING_WRITES_ENABLED: "false"
@@ -28,8 +32,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          # Playwright 1.55 supports Ubuntu 24.04, not the new 26.04 image.
+          # Keep check names stable for existing branch protection.
+          - os: ubuntu-latest
+            runner: ubuntu-24.04
+          - os: windows-latest
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
 
     steps:
@@ -50,7 +60,11 @@ jobs:
           cache-dependency-path: apps/panel-agent/requirements-dev.txt
 
       - name: Bootstrap project
-        run: npm run setup
+        # setup-python owns PATH; the Windows `py` launcher can select a newer,
+        # incompatible machine default instead of the configured Python 3.12.
+        run: |
+          python -m venv .venv
+          npm run setup
 
       - name: Validate Windows production scripts
         if: runner.os == 'Windows'
@@ -567,6 +581,22 @@ jobs:
 
       - name: Build production profile for runtime smoke
         run: npm run build:production
+
+      - name: Todoist runtime source and mutations at Samsung viewport
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+        run: npm run test:e2e -- tests/e2e/todoist-tasks.spec.ts
+
+      - name: Upload Todoist Samsung browser evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: todoist-tasks-${{ github.sha }}
+          path: test-results/todoist-tasks-*/
+          if-no-files-found: warn
 
       - name: Smoke-test production runtime
         run: npm run test:production-smoke
