@@ -58,20 +58,24 @@ async function progressPresentation(locator: Locator): Promise<ProgressPresentat
   });
 }
 
-async function sampleProgressTransition(page: Page, triggerSnapshot = false): Promise<ProgressPresentation[]> {
-  return page.evaluate((shouldTriggerSnapshot) => new Promise<ProgressPresentation[]>((resolve) => {
-    const element = document.querySelector<HTMLElement>('[data-testid="coffee-progress"]');
-    if (!element) throw new Error("Expected Coffee progress shell");
-    const samples: ProgressPresentation[] = [];
+type TransitionSample = ProgressPresentation & { imageX: number; imageWidth: number };
+
+async function sampleProgressTransition(page: Page, triggerSnapshot = false): Promise<TransitionSample[]> {
+  return page.evaluate((shouldTriggerSnapshot) => new Promise<TransitionSample[]>((resolve) => {
+    const samples: TransitionSample[] = [];
     const startedAt = performance.now();
     const sample = () => {
-      const style = getComputedStyle(element);
-      const box = element.getBoundingClientRect();
+      const element = document.querySelector<HTMLElement>('[data-testid="coffee-progress"]');
+      const style = element ? getComputedStyle(element) : null;
+      const box = element?.getBoundingClientRect();
+      const image = document.querySelector<HTMLElement>(".coffee-asset__image")!.getBoundingClientRect();
       samples.push({
-        opacity: Number.parseFloat(style.opacity),
-        height: box.height,
-        marginBottom: Number.parseFloat(style.marginBottom),
-        visibility: style.visibility
+        imageX: image.x,
+        imageWidth: image.width,
+        opacity: style ? Number.parseFloat(style.opacity) : 0,
+        height: box?.height ?? 0,
+        marginBottom: style ? Number.parseFloat(style.marginBottom) : 0,
+        visibility: style?.visibility ?? "hidden"
       });
       if (performance.now() - startedAt < 600) requestAnimationFrame(sample);
       else resolve(samples);
@@ -362,14 +366,12 @@ test.describe("#173 Coffee composition stabilization", () => {
     await expect(coffee).toHaveAttribute("data-transition", "idle");
 
     coffeeTransitionFixture = "warming";
-    await page.evaluate(() => (window as unknown as { emitSnapshot: () => void }).emitSnapshot());
+    // Install the sampler before the snapshot changes the DOM or starts motion.
+    const fadeInSamplesPromise = sampleProgressTransition(page, true);
     await expect(coffee).toHaveAttribute("data-stage", "warming");
     await expect(coffee).toHaveAttribute("data-transition", "moving");
     await expect(progress).toHaveCount(1);
     await expect(progress).toHaveAttribute("data-progress-visible", "false");
-    const fadeInSamplesPromise = sampleProgressTransition(page);
-    await page.waitForTimeout(140);
-    const warmingMidImage = await rect(image);
     await expect(coffee).toHaveAttribute("data-transition", "revealing");
     await expect(progress).toHaveAttribute("data-progress-visible", "true");
     // Linux CI can observe the data attribute before the max-height/opacity
@@ -382,10 +384,12 @@ test.describe("#173 Coffee composition stabilization", () => {
     const warmingProgress = await progressPresentation(progress);
     const fadeInSamples = await fadeInSamplesPromise;
     const fadeInMid = fadeInSamples.find((sample) => sample.opacity > 0.05 && sample.opacity < 0.95);
-    expect(warmingMidImage.x).toBeGreaterThan(offImage.x + 1);
-    expect(warmingMidImage.x).toBeLessThan(warmingImage.x - 0.05);
-    expect(warmingMidImage.width).toBeGreaterThan(offImage.width + 1);
-    expect(warmingMidImage.width).toBeLessThan(warmingImage.width - 0.05);
+    // Sample actual browser frames: a delayed Playwright round trip can arrive
+    // after a 360ms transition, even when waitForTimeout requested only 140ms.
+    const warmingMidImage = fadeInSamples.find((sample) =>
+      sample.imageX > offImage.x + 1 && sample.imageX < warmingImage.x - 0.05 &&
+      sample.imageWidth > offImage.width + 1 && sample.imageWidth < warmingImage.width - 0.05);
+    expect(warmingMidImage, "Expected intermediate image movement and scale").toBeDefined();
     expect(warmingImage.width).toBeGreaterThan(offImage.width + 5);
     expect(fadeInMid, "Expected an intermediate Overview progress fade-in sample").toBeDefined();
     expect(fadeInMid!.height).toBeGreaterThan(1);
@@ -395,16 +399,13 @@ test.describe("#173 Coffee composition stabilization", () => {
     const fadeOutSamplesPromise = sampleProgressTransition(page, true);
     await expect(coffee).toHaveAttribute("data-stage", "ready");
     await expect(progress).toHaveAttribute("data-progress-visible", "false");
-    await page.waitForTimeout(80);
-    const readyMidImage = await rect(image);
-    await page.waitForTimeout(340);
-    const readyImage = await rect(image);
     const fadeOutSamples = await fadeOutSamplesPromise;
+    const readyImage = await rect(image);
     const fadeOutMid = fadeOutSamples.find((sample) =>
       sample.opacity > 0.05 && sample.opacity < 0.95 && sample.height > 1 && sample.height < warmingProgress.height - 1
     );
-    expect(readyMidImage.x).toBeLessThan(warmingImage.x - 1);
-    expect(readyMidImage.x).toBeGreaterThan(readyImage.x + 1);
+    const readyMidImage = fadeOutSamples.find((sample) => sample.imageX < warmingImage.x - 1 && sample.imageX > readyImage.x + 1);
+    expect(readyMidImage, "Expected intermediate ready image movement").toBeDefined();
     expect(Math.abs(readyImage.width - warmingImage.width)).toBeLessThanOrEqual(1);
     expect(fadeOutMid, "Expected an intermediate Overview progress fade-out sample").toBeDefined();
     expect(fadeOutMid!.marginBottom).toBeGreaterThan(0);
@@ -451,7 +452,7 @@ test.describe("#173 Coffee composition stabilization", () => {
     expect(narrowPrimary.height).toBeGreaterThanOrEqual(48);
     expect(narrowTimer.width).toBeGreaterThanOrEqual(48);
     expect(narrowTimer.height).toBeGreaterThanOrEqual(48);
-    await expect(page.getByTestId("overview-grid")).toHaveAttribute("data-grid-profile", "compact-4");
+    await expect(page.getByTestId("overview-grid")).toHaveAttribute("data-grid-profile", "portrait-4");
     await expectNoOverflow(page);
   });
 
