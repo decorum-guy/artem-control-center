@@ -28,8 +28,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          # Playwright 1.55 supports Ubuntu 24.04, not the new 26.04 image.
+          # Keep check names stable for existing branch protection.
+          - os: ubuntu-latest
+            runner: ubuntu-24.04
+          - os: windows-latest
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
 
     steps:
@@ -50,7 +56,11 @@ jobs:
           cache-dependency-path: apps/panel-agent/requirements-dev.txt
 
       - name: Bootstrap project
-        run: npm run setup
+        # setup-python owns PATH; the Windows `py` launcher can select a newer,
+        # incompatible machine default instead of the configured Python 3.12.
+        run: |
+          python -m venv .venv
+          npm run setup
 
       - name: Validate Windows production scripts
         if: runner.os == 'Windows'

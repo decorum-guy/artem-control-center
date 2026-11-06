@@ -168,6 +168,11 @@ npm run test:e2e:production
 
 CI continues running canonical checks on Linux and Windows and adds a focused
 V2 Todoist browser gate on Linux. Browser fixtures never need a token.
+The first run exposed runner drift: Ubuntu 26.04 is unsupported by the pinned
+Playwright 1.55, and the Windows `py` launcher selected Python 3.15 instead of
+setup-python's 3.12, preventing Pillow installation. CI pins Ubuntu 24.04 while
+preserving check names, and creates its venv with setup-python's `python` before
+the normal setup command. Production setup/runtime behavior is unchanged.
 
 ## Physical Samsung acceptance (owner, after PR review)
 
