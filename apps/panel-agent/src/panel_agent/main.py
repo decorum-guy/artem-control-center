@@ -37,6 +37,7 @@ from .contracts import (
     DiagnosticsReport,
     OverviewLayoutPatch,
     OverviewLayoutResponse,
+    PortraitOverviewLayoutResponse,
     PanelMode,
     ReminderDeliveryPatch,
     ReminderDeliverySettings,
@@ -65,6 +66,7 @@ from .weather import WeatherService, build_weather_router
 from .jarvis_api import JarvisTurnService, build_jarvis_router
 from .jarvis_voice_api import VoiceBridgeState, build_jarvis_voice_router
 from .overview_layout import (
+    PortraitOverviewLayoutStore,
     MAX_REQUEST_BYTES,
     OverviewLayoutStore,
     OverviewLayoutValidationError,
@@ -205,6 +207,7 @@ overview_layout_store = OverviewLayoutStore(
     SETTINGS.overview_layout_path,
     writes_enabled=SETTINGS.overview_layout_writes_enabled and SETTINGS.writes_enabled,
 )
+portrait_overview_layout_store = PortraitOverviewLayoutStore(overview_layout_store)
 calendar_display_preferences_store = CalendarDisplayPreferencesStore(
     SETTINGS.calendar_display_color_path,
     writes_enabled=SETTINGS.calendar_display_color_writes_enabled and SETTINGS.writes_enabled,
@@ -551,6 +554,16 @@ async def diagnostics(
         if current is None:
             current = await snapshot_publisher.rebuild()
     return diagnostics_collector.report(current)
+
+
+@app.get("/api/v1/overview/layout/portrait", response_model=PortraitOverviewLayoutResponse)
+def get_portrait_overview_layout(response: Response) -> PortraitOverviewLayoutResponse:
+    layout = portrait_overview_layout_store.read()
+    allowed = _overview_write_allowed() and access_policy.authorize("overview.layout.edit").allowed
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = portrait_overview_layout_store.etag(layout.revision)
+    response.headers["X-Overview-Layout-Writes-Enabled"] = str(allowed).lower()
+    return PortraitOverviewLayoutResponse(layout=layout.model_copy(update={"writesEnabled": allowed}))
 
 
 @app.get("/api/v1/overview/layout", response_model=OverviewLayoutResponse)
@@ -1484,6 +1497,26 @@ def _parse_overview_layout_patch(raw_body: bytes) -> OverviewLayoutPatch:
         return OverviewLayoutPatch.model_validate(payload)
     except ValidationError:
         raise HTTPException(status_code=422, detail="invalid_overview_layout_patch")
+
+
+@app.patch("/api/v1/overview/layout/portrait", response_model=PortraitOverviewLayoutResponse)
+async def patch_portrait_overview_layout(request: Request, response: Response, if_match: str | None = Header(default=None, alias="If-Match")) -> PortraitOverviewLayoutResponse:
+    access_policy.require("overview.layout.edit")
+    _require_overview_write()
+    raw_body = await _read_bounded_overview_request_body(request)
+    revision = OverviewLayoutStore.parse_if_match(if_match)
+    if revision is None:
+        raise HTTPException(status_code=428, detail="if_match_required")
+    patch = _parse_overview_layout_patch(raw_body)
+    try:
+        saved = portrait_overview_layout_store.write(patch, revision)
+    except OverviewRevisionConflict:
+        raise HTTPException(status_code=412, detail="revision_conflict")
+    except OverviewLayoutValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["ETag"] = portrait_overview_layout_store.etag(saved.revision)
+    return PortraitOverviewLayoutResponse(layout=saved.model_copy(update={"writesEnabled": True}))
 
 
 @app.patch("/api/v1/overview/layout", response_model=OverviewLayoutResponse)

@@ -7,6 +7,7 @@ import type {
 import { defaultAppearanceConfig, normalizeLayoutItem, normalizeLayoutItems, stableSerialize, validateAppearanceConfig } from "./appearanceConfig";
 import {
   findFirstFit,
+  sortCanonicalLayoutItems,
   rectanglesOverlap,
   validateOverviewLayout
 } from "./layoutValidation";
@@ -31,6 +32,7 @@ export type OverviewEditorAction =
   | { type: "enter" }
   | { type: "select"; instanceId: string | null }
   | { type: "move"; instanceId: string; dx: number; dy: number }
+  | { type: "reorder"; instanceId: string; direction: number }
   | { type: "resize"; instanceId: string; sizeVariant: string }
   | { type: "add"; widgetType: string }
   | { type: "remove"; instanceId: string }
@@ -341,6 +343,23 @@ export function overviewEditorReducer(
       if (state.mode !== "editing") return state;
       const result = moveOverviewItem(state.draft, action.instanceId, action.dx, action.dy);
       return editingState(state, result.items, result.ok ? null : result.message ?? null);
+    }
+    case "reorder": {
+      if (state.mode !== "editing" || !action.direction) return state;
+      const ordered = [...sortCanonicalLayoutItems(state.draft)];
+      const index = ordered.findIndex((item) => item.instanceId === action.instanceId);
+      let next = index + Math.sign(action.direction);
+      while (next >= 0 && next < ordered.length && ordered[next].visibility === "hidden") next += Math.sign(action.direction);
+      if (index < 0 || next < 0 || next >= ordered.length) return state;
+      [ordered[index], ordered[next]] = [ordered[next], ordered[index]];
+      // Keep the shared logical canvas valid; only this profile's draft changes.
+      let row = 0;
+      const items = ordered.map((item) => {
+        const placement = { ...item.placement, x: 0, y: row };
+        row += item.placement.h;
+        return { ...item, placement };
+      });
+      return editingState(state, items, null);
     }
     case "resize": {
       if (state.mode !== "editing") return state;

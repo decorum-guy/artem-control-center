@@ -71,7 +71,7 @@ const canonicalCoffeeReviewLayout = {
 } as const;
 
 export async function installCanonicalCoffeeVisualReviewLayout(page: Page): Promise<void> {
-  await page.route("**/api/v1/overview/layout", async (route) => {
+  await page.route(/\/api\/v1\/overview\/layout(?:\/portrait)?$/, async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     await route.fulfill({
       status: 200,
@@ -80,7 +80,9 @@ export async function installCanonicalCoffeeVisualReviewLayout(page: Page): Prom
         ETag: '"173"',
         "X-Overview-Layout-Writes-Enabled": "false"
       },
-      body: JSON.stringify(canonicalCoffeeReviewLayout)
+      body: JSON.stringify(new URL(route.request().url()).pathname.endsWith("/portrait")
+        ? { schemaVersion: "overview.portrait.v1", profile: "portrait", layout: canonicalCoffeeReviewLayout }
+        : canonicalCoffeeReviewLayout)
     });
   });
 }

@@ -16,7 +16,7 @@ async function installKettle(page: Page, stage: "on" | "off") {
       available: live.health === "healthy", stale: live.health === "stale", targetTemperature: 80 };
     await route.fulfill({ response, json: snapshot });
   });
-  await page.route("**/api/v1/overview/layout*", route => route.fulfill({ json: {
+  await page.route(/\/api\/v1\/overview\/layout(?:\/portrait)?$/, route => { const layout = {
     schemaVersion: "overview.layout.v2", profileId: "samsung-control",
     presetId: "overview.default", presetVersion: 6, revision: 0,
     viewportClass: "landscape-12", updatedAt: "2026-10-01T00:00:00Z",
@@ -27,7 +27,7 @@ async function installKettle(page: Page, stage: "on" | "off") {
       { instanceId: "owner.coffee", widgetType: "home.coffee-machine", visibility: "visible",
         placement: { x: 5, y: 1, w: 7, h: 4 }, sizeVariant: "standard", config: {} },
     ]
-  } }));
+  }; return route.fulfill({ json: new URL(route.request().url()).pathname.endsWith("/portrait") ? { schemaVersion: "overview.portrait.v1", profile: "portrait", layout } : layout }); });
   await page.route("**/api/v1/actions/home-assistant/availability", route => route.fulfill({ json: {
     schemaVersion: 1, actions: Object.fromEntries(actionIds.map(capability => [capability, {
       capability, minimumProfile: "standard", effectiveProfile: "standard", allowed: live.allowed,

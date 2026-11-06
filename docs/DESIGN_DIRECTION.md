@@ -26,9 +26,12 @@ The product and development surfaces are intentionally separate:
   mutation, kiosk simulation, and motion/theme controls. It is disabled in a
   production build.
 
-The navigation shell uses one compact touch rail. At narrow widths the same
-rail becomes a horizontally scrollable primary navigation; it is not a second
-navigation system.
+The navigation shell uses one compact touch rail in landscape. At narrow
+landscape widths the same rail becomes a horizontally scrollable primary
+navigation. In portrait, a compact header opens the existing Sheet with all
+routes; content uses the full width and scrolls vertically. Only one navigation
+surface is visible at a time. See `docs/PORTRAIT_MODE.md` for the measured
+viewport policy and independent Overview profiles.
 
 ## Registry-driven presentation
 

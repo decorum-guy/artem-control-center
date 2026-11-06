@@ -926,3 +926,82 @@ def test_atomic_write_failure_preserves_previous_canonical_file(tmp_path, monkey
     with pytest.raises(OSError):
         store.write(patch, 1)
     assert path.read_bytes() == old_bytes
+
+
+def portrait_app(monkeypatch, path, **kwargs):
+    monkeypatch.setenv("PANEL_ACCESS_POLICY_PATH", str(path.parent / "access.json"))
+    monkeypatch.setenv("PANEL_ACCESS_AUDIT_DIR", str(path.parent / "audit"))
+    module = load_app(monkeypatch, path, **kwargs)
+    module.access_policy.set_profile("standard")
+    return module
+
+
+def test_portrait_seed_no_write_and_independent_restart_rollback(tmp_path, monkeypatch):
+    path = tmp_path / "layout.json"
+    module = portrait_app(monkeypatch, path)
+    from panel_agent.overview_layout import shipped_layout, OverviewLayoutStore
+    landscape = shipped_layout(revision=19)
+    landscape["items"][0]["config"] = {}
+    path.write_text(json.dumps(landscape))
+    original = path.read_bytes()
+    portrait_path = module.portrait_overview_layout_store.path
+    with TestClient(module.app) as client:
+        read = client.get("/api/v1/overview/layout/portrait")
+        assert read.status_code == 200
+        assert read.headers["cache-control"] == "no-store"
+        assert read.headers["etag"] == '\"0\"'
+        assert read.json()["schemaVersion"] == "overview.portrait.v1"
+        assert read.json()["profile"] == "portrait"
+        assert read.json()["layout"]["items"] == client.get("/api/v1/overview/layout").json()["items"]
+        assert not portrait_path.exists()
+        items = read.json()["layout"]["items"]
+        items[0]["visibility"] = "hidden"
+        saved = client.patch("/api/v1/overview/layout/portrait", headers={"If-Match": '\"0\"'}, json={"items": items})
+        assert saved.status_code == 200
+        assert saved.headers["etag"] == '\"1\"'
+        assert saved.json()["layout"]["items"][0]["visibility"] == "hidden"
+        assert client.patch("/api/v1/overview/layout/portrait", headers={"If-Match": '\"0\"'}, json={"items": items}).status_code == 412
+        assert client.get("/api/v1/overview/layout").json()["revision"] == 19
+    assert path.read_bytes() == original
+    stored = json.loads(portrait_path.read_text())
+    assert stored["schemaVersion"] == "overview.portrait.v1" and stored["profile"] == "portrait"
+    restarted = portrait_app(monkeypatch, path)
+    assert restarted.portrait_overview_layout_store.read().revision == 1
+    assert restarted.portrait_overview_layout_store.read().items[0].visibility == "hidden"
+    # An old release uses only the unchanged v2 resource; the sibling is inert.
+    assert OverviewLayoutStore(str(path)).read().revision == 19
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("writes,master,profile", [(False, True, "standard"), (True, False, "standard"), (True, True, "read_only")])
+def test_portrait_all_write_gates(tmp_path, monkeypatch, writes, master, profile):
+    module = portrait_app(monkeypatch, tmp_path / "layout.json", writes=writes, master_writes=master)
+    module.access_policy.set_profile(profile)
+    with TestClient(module.app) as client:
+        read = client.get("/api/v1/overview/layout/portrait")
+        assert read.json()["layout"]["writesEnabled"] is False
+        assert read.headers["x-overview-layout-writes-enabled"] == "false"
+        assert client.patch("/api/v1/overview/layout/portrait", headers={"If-Match": '\"0\"'}, json={"items": read.json()["layout"]["items"]}).status_code == 403
+    assert not module.portrait_overview_layout_store.path.exists()
+
+
+def test_portrait_strict_validation_corrupt_wrapper_and_atomic_failure(tmp_path, monkeypatch):
+    module = portrait_app(monkeypatch, tmp_path / "layout.json")
+    store = module.portrait_overview_layout_store
+    with TestClient(module.app, raise_server_exceptions=False) as client:
+        items = client.get("/api/v1/overview/layout/portrait").json()["layout"]["items"]
+        assert client.patch("/api/v1/overview/layout/portrait", json={"items": items}).status_code == 428
+        for payload in ({"items": items, "profile": "landscape"}, {"items": items * 2}, {"items": [{**items[0], "placement": {"x": -1, "y": 0, "w": 12, "h": 1}}]}):
+            assert client.patch("/api/v1/overview/layout/portrait", headers={"If-Match": '\"0\"'}, json=payload).status_code == 422
+        assert not store.path.exists()
+        store.path.write_text('{"schemaVersion":"future","layout":{}}')
+        original = store.path.read_bytes()
+        assert store.read().warnings
+        assert store.path.read_bytes() == original
+        import panel_agent.overview_layout as layout_module
+        def fail_replace(*args):
+            raise OSError("synthetic storage failure")
+        monkeypatch.setattr(layout_module.os, "replace", fail_replace)
+        assert client.patch("/api/v1/overview/layout/portrait", headers={"If-Match": '\"0\"'}, json={"items": items}).status_code == 500
+        assert store.path.read_bytes() == original
+        assert not list(tmp_path.glob("*.tmp"))
