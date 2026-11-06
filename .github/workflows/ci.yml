@@ -15,6 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Cover both legacy py.exe and the current Python Install Manager in detached
+  # Windows setup/venv regression tests, not only the checkout-local bootstrap.
+  PY_PYTHON: "3.12"
+  PYTHON_MANAGER_DEFAULT: "3.12"
   PANEL_AGENT_MODE: read_only
   PANEL_WRITES_ENABLED: "false"
   PANEL_COFFEE_TIMING_WRITES_ENABLED: "false"

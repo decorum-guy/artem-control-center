@@ -172,7 +172,9 @@ The first run exposed runner drift: Ubuntu 26.04 is unsupported by the pinned
 Playwright 1.55, and the Windows `py` launcher selected Python 3.15 instead of
 setup-python's 3.12, preventing Pillow installation. CI pins Ubuntu 24.04 while
 preserving check names, and creates its venv with setup-python's `python` before
-the normal setup command. Production setup/runtime behavior is unchanged.
+the normal setup command. Both Windows Python launcher defaults are pinned to
+3.12 in CI so detached venv regression tests use the same interpreter too.
+Production setup/runtime behavior is unchanged.
 The production browser harness now provisions its own disposable exact-revision
 venv, as required by the existing supervisor; it does not modify an installed
 runtime or create a production-update staging marker in the developer checkout.

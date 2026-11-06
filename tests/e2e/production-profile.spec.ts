@@ -31,7 +31,9 @@ test.describe("accepted-v2 production profile", () => {
     await page.goto("/overview?theme=night");
     await expect(page.getByTestId("v2-shell")).toBeVisible();
     await expect(page.getByTestId("route-overview-v2")).toBeVisible();
-    await expect(page.getByTestId("overview-configure")).toBeVisible();
+    // Overview editing now lives in Settings; the accepted page stays compact.
+    await expect(page.getByTestId("overview-toolbar")).toBeVisible();
+    await expect(page.getByTestId("overview-configure")).toHaveCount(0);
     await expect(page.locator(".v2-navigation-primary .v2-nav-group-label")).toHaveText("ПЛАНИРОВАНИЕ");
     await expect(page.locator(".v2-nav-link[data-nav-route='/reminders']")).toContainText("Напоминания");
     await expect(page.locator(".v2-nav-link[data-nav-route='/apps'], .v2-nav-link[data-nav-route='/backups']")).toHaveCount(0);
