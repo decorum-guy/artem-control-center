@@ -194,16 +194,21 @@ async function installCalendarRead(
   };
 }
 
-async function installTaskRead(page: Page, options: { delayView?: "overdue"; delaySecond?: boolean; hasMore?: boolean } = {}): Promise<{ requests: number; release: Deferred; getTemplate: () => Record<string, unknown> | null }> {
+async function installTaskRead(page: Page, options: { delayView?: "overdue"; delaySecond?: boolean; hasMore?: boolean } = {}): Promise<{ requests: number; release: Deferred; startBackground: () => void; backgroundReads: number; getTemplate: () => Record<string, unknown> | null }> {
   let requestCount = 0;
   let template: Record<string, unknown> | null = null;
   const release = deferred();
+  let backgroundMode = false;
+  let backgroundReads = 0;
   await page.route("**/api/v1/planning/tasks**", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     requestCount += 1;
     const url = new URL(route.request().url());
     const view = url.searchParams.get("view");
-    if ((options.delayView && view === options.delayView) || (options.delaySecond && requestCount === 3)) {
+    if (options.delaySecond && backgroundMode && backgroundReads === 0) {
+      backgroundReads += 1;
+      await release.promise;
+    } else if (options.delayView && view === options.delayView) {
       await release.promise;
     }
     const response = await route.fetch();
@@ -211,7 +216,7 @@ async function installTaskRead(page: Page, options: { delayView?: "overdue"; del
     template ??= listItems(payload)[0];
     const items = options.delayView && view === options.delayView
       ? ["Новая задача 1", "Новая задача 2"]
-      : requestCount <= 2 ? ["Старая задача 1", "Старая задача 2"] : ["Новая задача 1", "Новая задача 2"];
+      : (options.delaySecond ? !backgroundMode : requestCount <= 2) ? ["Старая задача 1", "Старая задача 2"] : ["Новая задача 1", "Новая задача 2"];
     payload.items = items.map((title, index) => ({
       ...template,
       id: `00000000-0000-4000-8000-${String(910 + index).padStart(12, "0")}`,
@@ -222,7 +227,7 @@ async function installTaskRead(page: Page, options: { delayView?: "overdue"; del
     payload.hasMore = options.hasMore ?? false;
     await route.fulfill({ response, body: JSON.stringify(payload) });
   });
-  return { get requests() { return requestCount; }, release, getTemplate: () => template };
+  return { get requests() { return requestCount; }, release, startBackground: () => { backgroundMode = true; }, get backgroundReads() { return backgroundReads; }, getTemplate: () => template };
 }
 
 async function installReminderRead(page: Page, options: { delayView?: "delivery"; delaySecond?: boolean; lateBackground?: boolean; hasMore?: boolean } = {}): Promise<{ requests: number; release: Deferred; startBackground: () => void; getTemplate: () => Record<string, unknown> | null }> {
@@ -411,9 +416,11 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await page.goto("/tasks");
     await expect(page.getByText("Старая задача 1")).toBeVisible();
 
+    // Observe the requested refresh, independent of StrictMode mount reads.
+    tasks.startBackground();
     setRevision(2);
     await emitRevision(page, 2);
-    await expect.poll(() => tasks.requests).toBe(3);
+    await expect.poll(() => tasks.backgroundReads).toBe(1);
     await expect(page.getByText("Старая задача 1")).toBeVisible();
     await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
     await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем…");
