@@ -22,15 +22,18 @@ async function fixtures(page: Page, options: { writes?: boolean; error?: string 
     if (options.error && options.error !== "outcome_uncertain" && path.endsWith("/tasks")) return route.fulfill({ status: 502, json: { detail: options.error } });
     return route.fulfill({ json: { provider: "todoist", activeSource: "todoist", generatedAt: "2026-11-06T10:00:00Z", lastSyncedAt: "2026-11-06T10:00:00Z", results: path.endsWith("/projects") ? [{ id: "6Project", name: "Личное" }, { id: "6Other", name: "Работа" }] : tasks, nextCursor: null } });
   });
-  await page.goto("/tasks"); await unlockTouchLockIfNeeded(page);
+  await page.goto("/tasks");
+  await expect(page.getByTestId("todoist-tasks")).toBeVisible();
+  await unlockTouchLockIfNeeded(page);
   return calls;
 }
 
 for (const theme of ["day", "night"]) {
   test(`Todoist touch geometry and mutations at 1280x720 ${theme}`, async ({ page }, testInfo) => {
     const calls = await fixtures(page);
-    await page.goto(`/tasks?theme=${theme}`); await unlockTouchLockIfNeeded(page);
+    await page.goto(`/tasks?theme=${theme}`);
     await expect(page.getByTestId("todoist-tasks")).toBeVisible();
+    await unlockTouchLockIfNeeded(page);
     await expect(page.getByText("Купить кофе", { exact: true })).toBeVisible();
     await expect(page.getByText(/P1 · Личное/)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
