@@ -36,6 +36,7 @@ PROFILE_RANK: dict[AccessProfile, int] = {
 }
 
 CAPABILITIES: dict[str, AccessProfile] = {
+    "overview.layout.edit": "standard",
     "todoist.tasks.write": "standard",
     "home.coffee.control": "standard",
     "home.climate.power_on": "standard",

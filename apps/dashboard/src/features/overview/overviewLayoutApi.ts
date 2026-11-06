@@ -22,6 +22,14 @@ export interface OverviewLayoutReadResult {
 }
 
 const OVERVIEW_SAVE_TIMEOUT_MS = 8_000;
+export type OverviewLayoutProfile = "landscape" | "portrait";
+const layoutPath = (profile: OverviewLayoutProfile) => profile === "portrait" ? "/api/v1/overview/layout/portrait" : "/api/v1/overview/layout";
+function profilePayload(payload: Record<string, unknown> | null, profile: OverviewLayoutProfile): Record<string, unknown> | null {
+  if (profile === "landscape") return payload;
+  if (payload?.schemaVersion !== "overview.portrait.v1" || payload.profile !== "portrait") return null;
+  const layout = payload.layout;
+  return layout && typeof layout === "object" && !Array.isArray(layout) ? layout as Record<string, unknown> : null;
+}
 
 function saveSignal(parent?: AbortSignal): { signal: AbortSignal; dispose: () => void } {
   const controller = new AbortController();
@@ -65,15 +73,15 @@ function documentFromPayload(payload: Record<string, unknown>, writesEnabled: bo
   }, writesEnabled);
 }
 
-export async function getOverviewLayout(signal?: AbortSignal): Promise<OverviewLayoutReadResult> {
+export async function getOverviewLayout(signal?: AbortSignal, profile: OverviewLayoutProfile = "landscape"): Promise<OverviewLayoutReadResult> {
   try {
-    const response = await fetch("/api/v1/overview/layout", {
+    const response = await fetch(layoutPath(profile), {
       method: "GET",
       cache: "no-store",
       headers: { accept: "application/json" },
       signal
     });
-    const payload = parseJson(await response.text());
+    const payload = profilePayload(parseJson(await response.text()), profile);
     if (!response.ok || !payload) {
       throw new OverviewLayoutApiError("Не удалось загрузить сохранённую панель.", response.status);
     }
@@ -95,12 +103,13 @@ export async function getOverviewLayout(signal?: AbortSignal): Promise<OverviewL
 export async function saveOverviewLayout(
   items: readonly OverviewLayoutItem[],
   expectedEtag: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  profile: OverviewLayoutProfile = "landscape"
 ): Promise<OverviewLayoutReadResult> {
   const timeoutSignal = saveSignal(signal);
   let response: Response;
   try {
-    response = await fetch("/api/v1/overview/layout", {
+    response = await fetch(layoutPath(profile), {
       method: "PATCH",
       cache: "no-store",
       headers: {
@@ -119,7 +128,7 @@ export async function saveOverviewLayout(
   } finally {
     timeoutSignal.dispose();
   }
-  const payload = parseJson(await response.text());
+  const payload = profilePayload(parseJson(await response.text()), profile);
   if (response.status === 409 || response.status === 412) {
     throw new OverviewLayoutApiError("Панель изменилась в другом окне.", response.status, { conflict: true });
   }
@@ -130,9 +139,9 @@ export async function saveOverviewLayout(
   return { document, etag: response.headers.get("ETag") ?? `"${document.revision}"`, available: true };
 }
 
-export async function readBackOverviewLayout(signal?: AbortSignal): Promise<OverviewLayoutReadResult> {
+export async function readBackOverviewLayout(signal?: AbortSignal, profile: OverviewLayoutProfile = "landscape"): Promise<OverviewLayoutReadResult> {
   try {
-    return await getOverviewLayout(signal);
+    return await getOverviewLayout(signal, profile);
   } catch (error) {
     if (error instanceof OverviewLayoutApiError) {
       throw new OverviewLayoutApiError("Не удалось проверить сохранённую панель.", error.status, { uncertain: true });

@@ -8,6 +8,8 @@ import {
   type OverviewProjectionItem
 } from "./layoutValidation";
 import { EditableWidgetFrame } from "./EditableWidgetFrame";
+import { usePortraitViewport } from "../../viewportLayout";
+import { resolveOverviewWidgetSize } from "./overviewRegistry";
 
 function useMeasuredWidth(elementRef: RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(1064);
@@ -82,7 +84,8 @@ export function DashboardGrid({
 }): ReactNode {
   const shellRef = useRef<HTMLElement | null>(null);
   const workspaceWidth = useMeasuredWidth(shellRef);
-  const projection = projectOverviewLayout(items, workspaceWidth);
+  const portrait = usePortraitViewport();
+  const projection = projectOverviewLayout(items, workspaceWidth, portrait);
   const profileStyle = {
     "--overview-grid-columns": String(projection.profile.columns),
     "--overview-grid-row-height": typeof projection.profile.rowHeight === "number"
@@ -104,7 +107,7 @@ export function DashboardGrid({
         {projection.items.map((item, index) => (
           <div
             className="overview-v2-grid-item"
-            key={`${item.item.instanceId}-${index}`}
+            key={projection.items.some((other, otherIndex) => otherIndex !== index && other.item.instanceId === item.item.instanceId) ? `${item.item.instanceId}-${index}` : item.item.instanceId}
             data-testid="overview-grid-item"
             data-instance-id={item.item.instanceId}
             data-widget-type={item.item.widgetType}
@@ -114,7 +117,7 @@ export function DashboardGrid({
             data-grid-y={item.placement.y}
             data-grid-w={item.placement.w}
             data-grid-h={item.placement.h}
-            style={gridItemStyle(item)}
+            style={{ ...gridItemStyle(item), ...(portrait ? { minHeight: `${Math.max(100, (item.definition ? resolveOverviewWidgetSize(item.definition, item.item.sizeVariant)?.h ?? 2 : 2) * 60 + 24)}px` } : {}) }}
           >
             {editMode && onSelect && onMove && onResize && onRemove && onOpenAppearance && onAnnounce ? (
               <EditableWidgetFrame
@@ -122,6 +125,7 @@ export function DashboardGrid({
                 selected={selectedInstanceId === item.item.instanceId}
                 hideEditorChrome={chromeHiddenInstanceId === item.item.instanceId}
                 disabled={editingDisabled}
+                flowMode={portrait}
                 onSelect={() => onSelect(item.item.instanceId)}
                 onMove={(dx, dy) => onMove(item.item.instanceId, dx, dy)}
                 onResize={(sizeVariant) => onResize(item.item.instanceId, sizeVariant)}

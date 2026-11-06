@@ -31,6 +31,7 @@ export function EditableWidgetFrame({
   selected,
   hideEditorChrome,
   disabled,
+  flowMode = false,
   onSelect,
   onMove,
   onResize,
@@ -43,6 +44,7 @@ export function EditableWidgetFrame({
   selected: boolean;
   hideEditorChrome?: boolean;
   disabled: boolean;
+  flowMode?: boolean;
   onSelect: () => void;
   onMove: (dx: number, dy: number) => void;
   onResize: (sizeVariant: string) => void;
@@ -62,6 +64,12 @@ export function EditableWidgetFrame({
     if (!selected || hideEditorChrome) setMenuOpen(false);
   }, [hideEditorChrome, selected]);
 
+  useEffect(() => {
+    const cancel = () => { sessionRef.current = null; setPreview(null); };
+    window.addEventListener("resize", cancel, { passive: true });
+    return () => window.removeEventListener("resize", cancel);
+  }, []);
+
   function unitSize(): { x: number; y: number } {
     const frame = frameRef.current?.closest(".overview-v2-grid") as HTMLElement | null;
     if (!frame) return { x: 80, y: 60 };
@@ -79,6 +87,7 @@ export function EditableWidgetFrame({
     event.preventDefault();
     event.stopPropagation();
     onSelect();
+    if (flowMode && kind === "resize") { setMenuOpen(true); onAnnounce("Выберите размер в меню виджета."); return; }
     event.currentTarget.setPointerCapture(event.pointerId);
     sessionRef.current = {
       kind,
@@ -97,13 +106,13 @@ export function EditableWidgetFrame({
     const session = sessionRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
     const units = unitSize();
-    const dx = Math.round((event.clientX - session.startX) / Math.max(1, units.x));
+    const dx = flowMode ? 0 : Math.round((event.clientX - session.startX) / Math.max(1, units.x));
     const dy = Math.round((event.clientY - session.startY) / Math.max(1, units.y));
     session.dx = dx;
     session.dy = dy;
     const width = session.kind === "resize" ? Math.max(1, session.originW + dx) : session.originW;
     const height = session.kind === "resize" ? Math.max(1, session.originH + dy) : session.originH;
-    const invalid = session.kind === "move"
+    const invalid = flowMode ? false : session.kind === "move"
       ? item.placement.x + dx < 0 || item.placement.x + dx + item.placement.w > 12 || item.placement.y + dy < 0
       : item.placement.x + width > 12 || height > 8;
     setPreview({ dx, dy, width, height, invalid });
@@ -116,7 +125,7 @@ export function EditableWidgetFrame({
     sessionRef.current = null;
     const currentPreview = preview;
     setPreview(null);
-    if (!currentPreview || currentPreview.invalid || (session.dx === 0 && session.dy === 0)) {
+    if (event.type === "pointercancel" || !currentPreview || currentPreview.invalid || (session.dx === 0 && session.dy === 0)) {
       if (currentPreview?.invalid) onAnnounce("Это положение или размер выходит за пределы сетки. Виджет возвращён на исходное место.");
       return;
     }
@@ -236,8 +245,8 @@ export function EditableWidgetFrame({
             <div className="overview-edit-frame__menu" role="menu" aria-label="Альтернативное управление виджетом">
               <button type="button" role="menuitem" onClick={() => { onMove(0, -1); setMenuOpen(false); }}>Вверх</button>
               <button type="button" role="menuitem" onClick={() => { onMove(0, 1); setMenuOpen(false); }}>Вниз</button>
-              <button type="button" role="menuitem" onClick={() => { onMove(-1, 0); setMenuOpen(false); }}>Влево</button>
-              <button type="button" role="menuitem" onClick={() => { onMove(1, 0); setMenuOpen(false); }}>Вправо</button>
+              {!flowMode && <button type="button" role="menuitem" onClick={() => { onMove(-1, 0); setMenuOpen(false); }}>Влево</button>}
+              {!flowMode && <button type="button" role="menuitem" onClick={() => { onMove(1, 0); setMenuOpen(false); }}>Вправо</button>}
               {sizes.map(([variant, size]) => (
                 <button key={variant} type="button" role="menuitem" onClick={() => { onResize(variant); setMenuOpen(false); }}>
                   Размер {size.w} × {size.h}

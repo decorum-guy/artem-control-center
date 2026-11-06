@@ -107,6 +107,7 @@ def test_missing_optional_state_is_truthful(tmp_path: Path):
     assert result["state"] == "success"
     assert result["includedSourceIds"] == ["overview.layout", "project.registry"]
     assert result["missingOptionalSourceIds"] == [
+        "overview.portrait",
         "calendar.display-colors",
         "device.visibility",
         "interface.copy",
@@ -800,3 +801,17 @@ def test_stage_maps_remote_return_codes(tmp_path: Path, returncode: int, error: 
         popen_factory=lambda *args, **kwargs: _FakeProcess(archive, metadata, returncode=returncode),
     )
     assert engine.run_sync()["errorCode"] == error
+
+
+def test_portrait_sibling_is_allowlisted_from_actual_landscape_path(tmp_path: Path):
+    landscape = tmp_path / "owner-layout.state"
+    source = PanelConfigSource({"overview.layout": landscape})
+    portrait = tmp_path / "owner-layout.portrait.v1.json"
+    assert source.path_for("overview.portrait") == portrait
+    portrait.write_text('{"schemaVersion":"overview.portrait.v1","profile":"portrait","layout":{}}')
+    # The source resolves the configured sibling with the fixed archive name.
+    item = next(item for item in PANEL_SOURCE_ITEMS if item.logical_id == "overview.portrait")
+    assert item.member_name == "panel-config/overview-layout.portrait.v1.json"
+    assert source.path_for(item.logical_id).read_bytes() == portrait.read_bytes()
+    with pytest.raises(BackupFailure):
+        source.path_for("../other.json")

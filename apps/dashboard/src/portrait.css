@@ -1,0 +1,88 @@
+/* Portrait is a CSS viewport mode, independent of physical pixels and DPR. */
+.portrait-navigation-toggle { display: none; }
+.portrait-navigation-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.portrait-navigation-list .v2-nav-link { min-width: 0; min-height: 56px; white-space: normal; }
+.portrait-navigation-list .v2-nav-link > span { overflow: visible; white-space: normal; }
+.overview-profile-label { margin: 0 0 12px; color: var(--cc-text-secondary); font-size: 13px; }
+
+@media (max-aspect-ratio: 1/1) {
+  .app.v2-shell-enabled { min-height: 100dvh; }
+  .v2-shell { display: block; height: 100dvh; min-height: 0; }
+  .v2-shell > .v2-navigation-rail { display: none; }
+  .v2-shell > .v2-workspace { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100dvh; min-height: 0; overflow: hidden; }
+  .v2-shell .v2-product-header { order: 0; grid-row: 1; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 52px auto; gap: 8px 16px; height: auto; min-height: 0; padding: 8px 16px 12px; overflow: visible; }
+  .v2-shell .v2-compact-brand { display: none; }
+  .portrait-navigation-toggle { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-control); background: var(--cc-interactive); color: var(--cc-text); font: inherit; font-weight: 700; }
+  .portrait-navigation-toggle > span { font-size: 24px; }
+  .v2-shell .v2-header-time { display: flex; justify-content: flex-end; gap: 12px; flex: initial; }
+  .v2-shell .v2-header-time > span { max-width: none; font-size: 13px; white-space: normal; }
+  .v2-shell .v2-header-actions { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(48px, 1fr) 48px 48px; align-items: stretch; gap: 8px; width: 100%; }
+  .v2-shell .v2-product-header :is(.weather-summary,.v2-header-system,.v2-header-access) { width: 100%; min-width: 0; max-width: 100%; min-height: 48px; height: auto; margin: 0; padding: 6px 8px; }
+  .v2-shell .v2-header-system { max-height: none; }
+  .v2-shell .v2-header-system .v2-status-text { min-width: 0; font-size: 12px; line-height: 16px; }
+  .v2-shell .v2-header-system .v2-status-text > span:last-child { white-space: normal; }
+  .v2-shell .v2-header-access { font-size: 12px; gap: 4px; }
+  .v2-shell .v2-header-actions > .temporary-access-chip { grid-column: 1 / -1; grid-row: 2; }
+  .v2-shell .v2-route-content.route-content { order: 1; grid-row: 2; width: 100%; height: auto; min-height: 0; padding: 16px 16px 28px; overflow-y: auto; overflow-x: clip; overscroll-behavior-y: contain; scroll-padding: 12px; }
+  .v2-shell .v2-route-header { flex-wrap: wrap; min-width: 0; }
+  .v2-shell .density-route-toolbar { display: flex; flex-wrap: wrap; gap: 12px; height: auto; }
+  .v2-shell .density-route-toolbar > * { min-width: 0; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-v2-grid-item > * { min-height: inherit; height: 100%; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-v2-real-widget { min-height: inherit; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .coffee-panel--overview .coffee-asset { max-height: 320px; align-self: center; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .coffee-panel--overview .coffee-asset__image { max-height: 280px; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame__drag-handle,
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame--selected .overview-edit-frame__drag-handle { top: 0; left: 0; transform: none; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame { padding-top: 48px; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame__actions { top: 0; right: 0; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame__menu-toggle { top: 0; right: 96px; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame__resize-handle { bottom: 0; right: 0; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame__menu { top: 48px; right: 0; max-width: 100%; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame__body { min-height: inherit; }
+  .overview-v2-toolbar { height: auto; min-height: 48px; }
+  .overview-v2-toolbar__copy { flex-wrap: wrap; gap: 4px 12px; }
+  .overview-v2-toolbar__copy p { white-space: normal; }
+}
+
+@media (max-aspect-ratio: 1/1) and (max-width: 600px) {
+  .v2-shell .v2-product-header { padding: 8px 12px; }
+  .v2-shell .v2-header-time > span { display: none; }
+  .v2-shell .v2-header-actions { grid-template-columns: minmax(0, 1fr) 48px 48px 48px; }
+  .v2-shell .v2-header-actions > .weather-summary { grid-column: 1 / 3; }
+  .v2-shell .v2-header-system { grid-column: 3 / 5; }
+  .v2-shell .v2-header-access { grid-column: 1 / 3; }
+  .v2-shell .v2-header-actions > .temporary-access-chip { grid-row: auto; }
+  .v2-shell .v2-route-content.route-content { padding: 12px 12px 24px; }
+}
+
+@media (max-aspect-ratio: 1/1) {
+  /* Full-width device controls; artwork has a bounded share of the card. */
+  .home-v2-primary-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+  .home-v2-primary-grid > :is(.coffee-panel--home-v2,.climate-control--home,.kettle-control,.light-strip--home,.device-row--primary) { grid-column: 1 / -1; grid-row: auto; width: 100%; max-width: none; height: auto; }
+  .home-v2-primary-grid > .coffee-panel--home-v2 { grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); grid-template-rows: auto; min-height: 300px; }
+  .home-v2-primary-grid .coffee-panel--home-v2 .coffee-asset { min-height: 240px; max-height: 320px; }
+  .home-v2-primary-grid .coffee-panel--home-v2 .coffee-asset__visual { min-height: 0; }
+  .home-v2-primary-grid .coffee-panel--home-v2 .coffee-action-row { grid-template-columns: minmax(0, 208px) 56px; }
+  .home-v2-asus-zone__grid { grid-template-columns: minmax(0, 1fr); }
+  .home-authority-line { grid-template-columns: 24px minmax(0, 1fr); }
+  .home-authority-line__freshness { grid-column: 2; text-align: left; }
+  .planning-calendar-header-controls, .calendar-month-layout, .calendar-month-layout--expanded { grid-template-columns: minmax(0, 1fr); }
+  .calendar-month-layout, .calendar-month-layout[data-rows] { height: auto; }
+  .calendar-selected-day { min-height: 280px; max-height: 430px; }
+  .calendar-month-cell { min-height: 68px; }
+  .v2-shell .v2-header-access .v2-status-text > span:last-child { white-space: normal; }
+  .overview-v2-toolbar--edit { flex-wrap: wrap; }
+  .overview-v2-toolbar__dirty { white-space: normal; }
+  .overview-v2-grid-shell[data-grid-profile^="portrait"] .overview-edit-frame--selected .overview-edit-frame__body { padding: 0; }
+  .planning-route-controls { flex-wrap: wrap; }
+  .planning-route-row__title { overflow-wrap: anywhere; }
+  .system-v2-zone-grid { grid-template-columns: minmax(0, 1fr); }
+  .system-v2-zone-grid > * { grid-column: 1 / -1; }
+  .system-rog-detail { flex-wrap: wrap; }
+  .system-rog-detail__actions { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .density-route-toolbar > span { white-space: normal; }
+}
+@media (max-aspect-ratio: 1/1) and (max-width: 600px) {
+  .home-v2-primary-grid > .coffee-panel--home-v2 { grid-template-columns: minmax(0, 1fr); }
+  .home-v2-primary-grid .coffee-panel--home-v2 .coffee-asset { min-height: 180px; max-height: 220px; }
+}

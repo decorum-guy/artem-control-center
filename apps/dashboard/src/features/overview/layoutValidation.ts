@@ -15,7 +15,7 @@ export const OVERVIEW_MAX_WIDGET_ROWS = 8;
 export const OVERVIEW_GENERIC_MIN_WIDTH = 3;
 export const OVERVIEW_GENERIC_MIN_HEIGHT = 1;
 
-export type OverviewGridProfileId = "landscape-12" | "medium-8" | "compact-4";
+export type OverviewGridProfileId = "landscape-12" | "medium-8" | "compact-4" | "portrait-4" | "portrait-8";
 
 export interface OverviewGridProfile {
   readonly id: OverviewGridProfileId;
@@ -456,8 +456,10 @@ function safeStartY(item: OverviewLayoutItem): number {
 
 export function projectOverviewLayout(
   canonicalItems: readonly OverviewLayoutItem[],
-  workspaceWidth: number
+  workspaceWidth: number,
+  portrait = false
 ): OverviewProjectionResult {
+  if (portrait) return projectPortraitLayout(canonicalItems, workspaceWidth);
   const profile = profileForWorkspaceWidth(workspaceWidth);
   const validation = validateOverviewLayout(canonicalItems);
   const projected: OverviewProjectionItem[] = [];
@@ -550,4 +552,28 @@ export function projectOverviewLayout(
   }
 
   return { profile, items: projected, issues };
+}
+
+/** Physical columns are independent of the persisted v2 logical canvas. */
+function projectPortraitLayout(items: readonly OverviewLayoutItem[], width: number): OverviewProjectionResult {
+  const columns = width >= 900 ? 8 : 4;
+  const profile: OverviewGridProfile = { id: columns === 8 ? "portrait-8" : "portrait-4", columns, rowHeight: "auto", gap: 12 };
+  const validation = validateOverviewLayout(items);
+  let x = 0;
+  let y = 0;
+  const projected: OverviewProjectionItem[] = [];
+  for (const record of sortCanonicalValidationRecords(validation.records)) {
+    if (record.item.visibility === "hidden") continue;
+    const size = record.definition ? resolveOverviewWidgetSize(record.definition, record.item.sizeVariant) : null;
+    const w = columns === 4 || !size || size.w > 4 ? columns : 4;
+    if (x + w > columns) { x = 0; y++; }
+    const placement = { x, y, w, h: 1 };
+    projected.push({ canonicalIndex: record.index, item: record.item, placement,
+      definition: record.definition, sizeVariant: size ? record.item.sizeVariant as OverviewWidgetSizeVariant : null,
+      state: record.valid && size ? "rendered" : "fallback",
+      ...(!record.valid || !size ? { fallbackReason: record.definition ? "invalid-layout" as const : "unknown" as const } : {}) });
+    x += w;
+    if (x >= columns) { x = 0; y++; }
+  }
+  return { profile, items: projected, issues: validation.issues };
 }
