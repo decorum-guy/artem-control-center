@@ -143,10 +143,10 @@ async function capture(page: Page, testInfo: TestInfo, name: string): Promise<vo
   await page.screenshot({ path: path.join(directory, name), animations: "disabled" });
 }
 
-async function installAccess(page: Page): Promise<void> {
+async function installAccess(page: Page, refreshAllowed = true): Promise<void> {
   await page.route("**/api/v1/access", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
-    const capabilities = ["planning.calendar.create", "planning.calendar.edit", "planning.calendar.delete"];
+    const capabilities = ["planning.calendar.create", "planning.calendar.edit", "planning.calendar.delete", "planning.calendar_sources.refresh"];
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -163,8 +163,8 @@ async function installAccess(page: Page): Promise<void> {
           capability,
           minimumProfile: "standard",
           effectiveProfile: "standard",
-          allowed: true,
-          availability: "allowed"
+          allowed: capability === "planning.calendar_sources.refresh" ? refreshAllowed : true,
+          availability: capability === "planning.calendar_sources.refresh" && !refreshAllowed ? "profile_blocked" : "allowed"
         }]))
       })
     });
@@ -175,13 +175,29 @@ type FixtureOptions = {
   sourceStatus?: "current" | "stale" | "error" | "disabled" | "not_configured";
   includeIcloudEvents?: boolean;
   mutation?: boolean;
+  refreshResult?: "success" | "failure";
+  refreshSourceStatus?: "current" | "stale" | "error";
+  sourceStatusReadAfterRefresh?: boolean;
+  refreshNetworkFailure?: boolean;
+  refreshDelayMs?: number;
+  readStatusAfterRefresh?: boolean;
+  partialRefresh?: boolean;
+  noConfirmedSync?: boolean;
 };
 
 async function installCalendarFixtures(page: Page, options: FixtureOptions = {}) {
   const sourceStatus = options.sourceStatus ?? "current";
-  const sources = [nativeSource, externalSource(sourceStatus)];
+  const sources = [structuredClone(nativeSource), externalSource(sourceStatus)];
+  if (options.noConfirmedSync) {
+    const external = sources.find((source) => source.kind === "external");
+    if (external) {
+      external.lastSyncedAt = null;
+      external.calendars.forEach((calendar) => { calendar.lastSyncedAt = null; });
+    }
+  }
   let currentLocal = { ...localEvent } as Record<string, unknown>;
   const requests: string[] = [];
+  const sourceRefreshRequests: string[] = [];
   const items = () => options.includeIcloudEvents === false
     ? [currentLocal]
     : [currentLocal, timedIcloudEvent, allDayIcloudEvent];
@@ -190,6 +206,18 @@ async function installCalendarFixtures(page: Page, options: FixtureOptions = {})
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() === "GET" && url.pathname.endsWith("/events")) {
+      if (options.readStatusAfterRefresh && sourceRefreshRequests.length > 0) {
+        const statusReadObservedAt = new Date(Date.parse(sources[1].observedAt ?? "2026-08-12T09:00:00Z") + 1_000).toISOString();
+        const refreshedSources = sources.map((source) => source.kind === "external"
+          ? {
+            ...source,
+            observedAt: statusReadObservedAt,
+            calendars: source.calendars.map((calendar) => ({ ...calendar, observedAt: statusReadObservedAt }))
+          }
+          : source);
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(listEnvelope(items(), refreshedSources)) });
+        return;
+      }
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(listEnvelope(items(), sources)) });
       return;
     }
@@ -208,6 +236,48 @@ async function installCalendarFixtures(page: Page, options: FixtureOptions = {})
       currentLocal = { ...currentLocal, title: body.title ?? currentLocal.title, version: 2, updatedAt: "2026-08-12T09:03:00Z" };
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(objectEnvelope(currentLocal, sources)) });
+  });
+
+  await page.route("**/api/v1/planning/calendar-sources/refresh", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    sourceRefreshRequests.push(route.request().method());
+    if (options.refreshNetworkFailure) {
+      await route.abort("failed");
+      return;
+    }
+    if (options.refreshDelayMs) await new Promise((resolve) => setTimeout(resolve, options.refreshDelayMs));
+    const observedAt = "2026-08-12T09:05:00Z";
+    const external = sources.find((source) => source.kind === "external");
+    if (external && options.readStatusAfterRefresh && options.sourceStatusReadAfterRefresh !== false) {
+      const verifiedStatus = options.partialRefresh
+        ? "current"
+        : options.refreshSourceStatus ?? (options.refreshResult === "failure" ? "stale" : "current");
+      external.status = verifiedStatus;
+      external.observedAt = observedAt;
+      external.lastSyncedAt = options.noConfirmedSync ? null : verifiedStatus === "current" ? observedAt : "2026-08-12T08:42:00Z";
+      external.calendars = external.calendars.map((calendar) => ({
+        ...calendar,
+        status: options.partialRefresh && calendar.id === homeCalendarId ? "error" : verifiedStatus,
+        observedAt,
+        lastSyncedAt: options.noConfirmedSync ? null : verifiedStatus === "current" ? observedAt : "2026-08-12T08:42:00Z"
+      }));
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: "planning.calendar-sources.refresh.v1",
+        kind: "calendar_sources_refresh",
+        result: options.refreshResult ?? "success",
+        status: options.partialRefresh ? "current" : options.refreshSourceStatus ?? (options.refreshResult === "failure" ? "stale" : "current"),
+        observedAt,
+        lastSuccessfulSyncAt: options.noConfirmedSync ? null : sourceStatus === "current" ? observedAt : "2026-08-12T08:42:00Z",
+        calendarsSeen: 2,
+        eventsSeen: items().length,
+        errorCode: options.refreshResult === "failure" ? "provider_timeout" : null,
+        correlation_id: "00000000-0000-4000-8000-000000000097"
+      })
+    });
   });
 
   if (options.mutation) {
@@ -240,7 +310,7 @@ async function installCalendarFixtures(page: Page, options: FixtureOptions = {})
       });
     });
   }
-  return { requests };
+  return { requests, sourceRefreshRequests };
 }
 
 test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
@@ -320,6 +390,109 @@ test.describe("Issue #22 read-only iCloud Calendar Phase B", () => {
     await page.reload();
     await expect(page.getByTestId("planning-source").filter({ hasText: "не настроен" })).toBeVisible();
     await expect(page.getByTestId("planning-route-error")).toHaveCount(0);
+  });
+
+  test("refresh confirms current sources only after source refresh and verified month read", async ({ page }) => {
+    await installAccess(page);
+    const fixture = await installCalendarFixtures(page, { sourceStatus: "current", refreshDelayMs: 300, readStatusAfterRefresh: true });
+    await page.goto("/calendar?theme=day");
+    const refresh = page.getByTestId("planning-calendar-refresh");
+    await refresh.tap();
+    await expect(page.getByTestId("planning-calendar-refresh-result")).toContainText("Обновляются источники календаря");
+    await expect.poll(() => fixture.sourceRefreshRequests).toContain("POST");
+    await expect(page.getByTestId("planning-calendar-refresh-result")).toContainText("Актуальные данные календаря подтверждены");
+    await expect(refresh).toBeEnabled();
+    expect(fixture.requests).toEqual([]);
+  });
+
+  test("refresh reports cached stale provider and last confirmed update", async ({ page }) => {
+    await installAccess(page);
+    await installCalendarFixtures(page, { sourceStatus: "stale", refreshSourceStatus: "stale", readStatusAfterRefresh: true });
+    await page.goto("/calendar?theme=day");
+    await page.getByTestId("planning-calendar-refresh").tap();
+    const outcome = page.getByTestId("planning-calendar-refresh-result");
+    await expect(outcome).toContainText("Данные получены из сохранённой копии");
+    await expect(outcome).toContainText("iCloud");
+    await expect(outcome).toContainText("Последнее подтверждённое обновление: 12 авг., 11:42");
+    await expect(page.getByTestId("planning-source").filter({ hasText: "сохранённая копия" })).toBeVisible();
+  });
+
+  test("refresh reports a partial calendar failure as a warning, not success", async ({ page }) => {
+    await installAccess(page);
+    const fixture = await installCalendarFixtures(page, { partialRefresh: true, readStatusAfterRefresh: true });
+    await page.goto("/calendar?theme=day");
+    await page.getByTestId("planning-calendar-refresh").tap();
+    const outcome = page.getByTestId("planning-calendar-refresh-result");
+    await expect(outcome).toContainText("Частичное обновление календаря");
+    await expect(outcome).toContainText("Ошибка:");
+    await expect(outcome).not.toContainText("Актуальные данные календаря подтверждены");
+    expect(fixture.requests).toEqual([]);
+  });
+
+  test("refresh without a confirmed sync timestamp does not substitute the current time", async ({ page }) => {
+    await installAccess(page);
+    const fixture = await installCalendarFixtures(page, {
+      sourceStatus: "stale",
+      refreshSourceStatus: "stale",
+      noConfirmedSync: true,
+      readStatusAfterRefresh: true
+    });
+    await page.goto("/calendar?theme=day");
+    await page.getByTestId("planning-calendar-refresh").tap();
+    const outcome = page.getByTestId("planning-calendar-refresh-result");
+    await expect(outcome).toContainText("Источник календаря остался устаревшим");
+    await expect(outcome).not.toContainText(/\b\d{1,2}:\d{2}\b/);
+    expect(fixture.requests).toEqual([]);
+  });
+
+  test("refresh reports provider sync failure without clearing stale source status", async ({ page }) => {
+    await installAccess(page);
+    await installCalendarFixtures(page, { sourceStatus: "stale", refreshResult: "failure", refreshSourceStatus: "stale", readStatusAfterRefresh: true });
+    await page.goto("/calendar?theme=day");
+    await page.getByTestId("planning-calendar-refresh").tap();
+    await expect(page.getByTestId("planning-calendar-refresh-result")).toContainText("Ошибка синхронизации календаря");
+    await expect(page.getByTestId("planning-source").filter({ hasText: "сохранённая копия" })).toBeVisible();
+  });
+
+  test("200 source-refresh response with an old provider observation cannot claim success", async ({ page }) => {
+    await installAccess(page);
+    await installCalendarFixtures(page, { sourceStatus: "current", sourceStatusReadAfterRefresh: false, readStatusAfterRefresh: true });
+    await page.goto("/calendar?theme=day");
+    await page.getByTestId("planning-calendar-refresh").tap();
+    const outcome = page.getByTestId("planning-calendar-refresh-result");
+    await expect(outcome).toContainText("Синхронизация запрошена, но новый статус источника не подтверждён");
+    await expect(outcome).not.toContainText("Актуальные данные календаря подтверждены");
+  });
+
+  test("network failure after starting provider refresh has a truthful outcome", async ({ page }) => {
+    await installAccess(page);
+    const fixture = await installCalendarFixtures(page, { sourceStatus: "stale", refreshNetworkFailure: true, readStatusAfterRefresh: true });
+    await page.goto("/calendar?theme=day");
+    await page.getByTestId("planning-calendar-refresh").tap();
+    await expect(page.getByTestId("planning-calendar-refresh-result")).toContainText("Ошибка синхронизации календаря");
+    expect(fixture.sourceRefreshRequests).toEqual(["POST"]);
+    await expect(page.getByTestId("planning-source").filter({ hasText: "сохранённая копия" })).toBeVisible();
+  });
+
+  test("repeated refresh taps issue one source refresh and keep the latest outcome", async ({ page }) => {
+    await installAccess(page);
+    const fixture = await installCalendarFixtures(page, { sourceStatus: "current", refreshDelayMs: 400, readStatusAfterRefresh: true });
+    await page.goto("/calendar?theme=day");
+    const refresh = page.getByTestId("planning-calendar-refresh");
+    await refresh.tap();
+    await refresh.tap({ force: true });
+    await expect(page.getByTestId("planning-calendar-refresh-result")).toContainText("Актуальные данные календаря подтверждены");
+    expect(fixture.sourceRefreshRequests).toEqual(["POST"]);
+  });
+
+  test("refresh does not call the sync endpoint when the access capability is denied", async ({ page }) => {
+    await installAccess(page, false);
+    const fixture = await installCalendarFixtures(page, { sourceStatus: "stale" });
+    await page.goto("/calendar?theme=day");
+    await page.getByTestId("planning-calendar-refresh").tap();
+    await expect(page.getByTestId("planning-calendar-refresh-result")).toContainText("Обновление источников не разрешено");
+    expect(fixture.sourceRefreshRequests).toEqual([]);
+    await expect(page.getByTestId("planning-source").filter({ hasText: "сохранённая копия" })).toBeVisible();
   });
 
   test("150 percent Samsung geometry has no horizontal overflow", async ({ page }, testInfo) => {
