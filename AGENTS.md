@@ -347,3 +347,16 @@ Mac success не является Windows hardware acceptance. Hardware-dependen
 - performance impact.
 
 Не добавлять крупную dependency без обоснования RAM, CPU, startup time, security и maintenance cost.
+
+## 17. Agent entrypoints and incident runbooks
+
+Этот `AGENTS.md` остаётся основным набором правил проекта. Новые агенты должны дополнительно прочесть:
+
+- [RULES.md](RULES.md) — обязательные operational/safety rules, truthfulness, protected production boundaries и PR-дисциплина.
+- [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md) — где лежат frontend, Panel Agent, provider adapters, contracts, Windows runtime и приватные tunnels.
+- [docs/AGENT_PLAYBOOK.md](docs/AGENT_PLAYBOOK.md) — onboarding sequence, Git preflight, тестирование, PR и отчёт.
+- [docs/PRODUCTION_DIAGNOSTICS.md](docs/PRODUCTION_DIAGNOSTICS.md) — read-only Samsung/VPS diagnostics, Calendar/Planning freshness, refresh UI semantics и portrait widget fallback.
+- [docs/TODOIST_TASKS.md](docs/TODOIST_TASKS.md) — отдельный Todoist task provider и защищённые write-gates; он не заменяет Planning «Дела»/Calendar.
+- [issue #322](https://github.com/decorum-guy/artem-control-center/issues/322) — portrait 9:16 acceptance и сохранение landscape layouts.
+
+Если пользователь разрешает SSH-доступ для диагностики, это не является разрешением менять `runtime.env`, networking, VPS, HA, Caddy или физическое состояние устройств. Сначала собрать sanitized evidence и установить root cause, затем создавать reviewable branch/PR без автоматического merge/deploy. В случае несовпадения этого документа с новым кодом или остальными требованиями, зафиксировать конфликт, а не незаметно выбирать удобное толкование.
