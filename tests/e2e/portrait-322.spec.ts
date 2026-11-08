@@ -117,6 +117,53 @@ for (const viewport of sizes) test(`all routes and navigation at CSS ${viewport.
   await testInfo.attach("viewport", { body: JSON.stringify(viewport), contentType: "application/json" });
 });
 
+for (const viewport of sizes.slice(0, 2)) {
+  test(`portrait menu closes from the same bottom-right position at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await access(page);
+    await open(page, "overview");
+
+    const topTrigger = page.getByRole("button", { name: "Разделы", exact: true });
+    const floatingTrigger = page.getByTestId("portrait-floating-navigation-toggle");
+    const floatingClose = page.getByTestId("portrait-floating-navigation-close");
+    const dialog = page.getByRole("dialog", { name: "Разделы" });
+
+    const triggerRect = await floatingTrigger.boundingBox();
+    expect(triggerRect).not.toBeNull();
+    await floatingTrigger.click();
+    await expect(dialog).toBeVisible();
+    await expect(floatingClose).toBeVisible();
+    await expect(floatingClose).toHaveAccessibleName("Свернуть разделы");
+    await expect(dialog.getByTestId("portrait-floating-navigation-close")).toHaveCount(1);
+    await expect(dialog.getByRole("button", { name: "Закрыть", exact: true })).toBeVisible();
+    await boundedControls(page, '[role=dialog] a, [role=dialog] button');
+
+    const closeRect = await floatingClose.boundingBox();
+    expect(closeRect).not.toBeNull();
+    expect(closeRect!.width).toBe(56);
+    expect(closeRect!.height).toBe(56);
+    expect(Math.abs(closeRect!.x - triggerRect!.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(closeRect!.y - triggerRect!.y)).toBeLessThanOrEqual(2);
+
+    const directory = `artifacts/issue-322/after/${viewport.width}x${viewport.height}`;
+    await mkdir(directory, { recursive: true });
+    await page.screenshot({ path: `${directory}/navigation-open-bottom-close.png`, animations: "disabled" });
+
+    await floatingClose.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(floatingTrigger).toBeFocused();
+
+    // Closing from the bottom must restore focus to whichever trigger opened
+    // the shared Sheet, including the existing upper "Разделы" button.
+    await topTrigger.click();
+    await expect(floatingClose).toBeVisible();
+    await floatingClose.focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(topTrigger).toBeFocused();
+  });
+}
+
 test("floating navigation stays fixed while Settings scrolls and clears the final action", async ({ page }) => {
   await page.setViewportSize(sizes[0]);
   await access(page);
