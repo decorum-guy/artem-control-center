@@ -37,6 +37,33 @@
   .portrait-floating-navigation-toggle:hover { background: var(--cc-hover); }
   .portrait-floating-navigation-toggle:active { background: var(--cc-pressed); transform: translateY(1px); }
   .portrait-floating-navigation-toggle:focus-visible { outline: 3px solid var(--cc-focus); outline-offset: 3px; }
+
+  /* The modal Sheet has a 12px backdrop inset and 1px border. Its footer
+     positions this close button over the 16px-inset opening trigger, without
+     placing an interactive element outside the modal's focus trap. */
+  .portrait-navigation-sheet .cc-overlay__footer {
+    min-height: 64px;
+    padding: 4px max(3px, calc(env(safe-area-inset-right, 0px) - 13px)) calc(3px + env(safe-area-inset-bottom, 0px)) 12px;
+  }
+  .portrait-floating-navigation-close {
+    display: grid;
+    flex: 0 0 56px;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 1px solid var(--cc-border);
+    border-radius: var(--cc-radius-control);
+    background: var(--cc-surface-1);
+    color: var(--cc-text);
+    box-shadow: var(--cc-shadow-overlay);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .portrait-floating-navigation-close > svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .portrait-floating-navigation-close:hover { background: var(--cc-hover); }
+  .portrait-floating-navigation-close:active { background: var(--cc-pressed); transform: translateY(1px); }
+  .portrait-floating-navigation-close:focus-visible { outline: 3px solid var(--cc-focus); outline-offset: 3px; }
   .v2-shell .v2-header-time { display: flex; justify-content: flex-end; gap: 12px; flex: initial; }
   .v2-shell .v2-header-time > span { max-width: none; font-size: 13px; white-space: normal; }
   .v2-shell .v2-header-actions { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(48px, 1fr) 48px 48px; align-items: stretch; gap: 8px; width: 100%; }
