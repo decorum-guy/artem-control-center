@@ -15,6 +15,9 @@ import { useInteractionLock } from "../../InteractionLock";
 import { useInterfaceCopy } from "../../interfaceCopy";
 import { coffeeEditorPreviewPresentation, type CoffeeEditorPreviewStage } from "../../coffee";
 import "./overviewEditor.css";
+import { usePortraitViewport } from "../../viewportLayout";
+import { useAccess } from "../../AccessControls";
+import type { OverviewLayoutProfile } from "./overviewLayoutApi";
 
 export function OverviewV2Page({
   snapshot,
@@ -37,6 +40,10 @@ export function OverviewV2Page({
   const fixtureMode = overviewFixtureModeFromLocation();
   const { showNotice } = useNoticeCenter();
   const { guardMutation } = useInteractionLock();
+  const portrait = usePortraitViewport();
+  const { status: accessStatus, available: accessAvailable } = useAccess();
+  const requestedProfile: OverviewLayoutProfile = portrait ? "portrait" : "landscape";
+  const [profile, setProfile] = useState<OverviewLayoutProfile>(requestedProfile);
   const [editor, dispatch] = useReducer(
     overviewEditorReducer,
     makeShippedOverviewDocument(false),
@@ -49,6 +56,10 @@ export function OverviewV2Page({
   const [editorPreview, setEditorPreview] = useState<{ instanceId: string; stage: CoffeeEditorPreviewStage } | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [capabilityRevision, setCapabilityRevision] = useState(0);
+  // Rotation never discards a draft or changes the destination of a pending save.
+  useEffect(() => {
+    if (editor.mode === "normal") setProfile(requestedProfile);
+  }, [requestedProfile, editor.mode]);
   const etagRef = useRef('"0"');
 
   useEffect(() => {
@@ -60,7 +71,7 @@ export function OverviewV2Page({
   useEffect(() => {
     const controller = new AbortController();
     setLayoutLoading(true);
-    void getOverviewLayout(controller.signal)
+    void getOverviewLayout(controller.signal, profile)
       .then((result) => {
         if (controller.signal.aborted) return;
         etagRef.current = result.etag;
@@ -80,13 +91,13 @@ export function OverviewV2Page({
         if (!controller.signal.aborted) setLayoutLoading(false);
       });
     return () => controller.abort();
-  }, [fixtureMode, capabilityRevision]);
+  }, [fixtureMode, capabilityRevision, profile]);
 
   const editMode = editor.mode !== "normal";
   const saving = editor.mode === "saving";
   const uncertain = editor.mode === "uncertain";
   const dirty = overviewEditorDirty(editor);
-  const canWrite = overviewV2Enabled && overviewEditorEnabled && layoutAvailable && editor.canonical.writesEnabled === true;
+  const canWrite = overviewV2Enabled && overviewEditorEnabled && layoutAvailable && editor.canonical.writesEnabled === true && (profile !== "portrait" || accessStatus?.capabilities["overview.layout.edit"]?.allowed === true);
   const canEnterEdit = canWrite && !layoutLoading;
   const visibleItems = editMode ? editor.draft : editor.canonical.items;
   const appearanceItem = appearanceInstanceId
@@ -130,6 +141,7 @@ export function OverviewV2Page({
 
   useEffect(() => {
     if (layoutLoading || editMode) return;
+    if (profile === "portrait" && !accessStatus && accessAvailable) return;
     const query = new URLSearchParams(window.location.search);
     if (query.get("overviewEdit") !== "1") return;
 
@@ -154,11 +166,11 @@ export function OverviewV2Page({
       detail,
       timeoutMs: 8_000
     });
-  }, [canEnterEdit, editMode, layoutAvailable, layoutLoading, showNotice]);
+  }, [canEnterEdit, editMode, layoutAvailable, layoutLoading, showNotice, profile, accessStatus, accessAvailable]);
 
   async function reconcileUncertain(candidate: OverviewLayoutDocument["items"]): Promise<void> {
     try {
-      const read = await readBackOverviewLayout();
+      const read = await readBackOverviewLayout(undefined, profile);
       if (!read.available) {
         dispatch({ type: "save-uncertain", message: "Не удалось проверить сохранение. Изменения остаются на экране; повторно сохранять их не нужно." });
         return;
@@ -207,7 +219,7 @@ export function OverviewV2Page({
         setAnnouncement(message);
         return;
       }
-      const result = await saveOverviewLayout(candidate, etagRef.current);
+      const result = await saveOverviewLayout(candidate, etagRef.current, undefined, profile);
       etagRef.current = result.etag;
       dispatch({ type: "save-succeeded", document: result.document });
       setAppearanceInstanceId(null);
@@ -238,7 +250,7 @@ export function OverviewV2Page({
 
   async function loadCurrentServer(): Promise<void> {
     try {
-      const result = await getOverviewLayout();
+      const result = await getOverviewLayout(undefined, profile);
       if (!result.available) {
         dispatch({ type: "message", message: "Текущая версия панели пока недоступна." });
         return;
@@ -303,8 +315,9 @@ export function OverviewV2Page({
   );
 
   return (
-    <div className={`overview-v2-page${editMode ? " overview-v2-page--editing" : ""}`} data-testid="route-overview-v2" data-snapshot-mode={snapshot.mode} data-editor-mode={editor.mode}>
+    <div className={`overview-v2-page${editMode ? " overview-v2-page--editing" : ""}`} data-testid="route-overview-v2" data-snapshot-mode={snapshot.mode} data-editor-mode={editor.mode} data-layout-profile={profile}>
       {toolbar}
+      {(portrait || editMode && profile === "portrait") && <p className="overview-profile-label" role="status">{profile === "portrait" ? "Портретная раскладка" : "Альбомная раскладка"}{editMode && profile !== requestedProfile ? " · Завершите редактирование этой раскладки перед переключением" : ""}</p>}
       {announcement && <p className="overview-edit-announcement" aria-live="polite">{announcement}</p>}
       {editor.canonical.warnings && editor.canonical.warnings.length > 0 && !editMode && (
         <p className="overview-v2-layout-warning" data-testid="overview-layout-warning">Показана восстановленная версия панели.</p>
@@ -326,7 +339,8 @@ export function OverviewV2Page({
         editingDisabled={saving || uncertain}
         onSelect={(instanceId) => dispatch({ type: "select", instanceId })}
         onMove={(instanceId, dx, dy) => {
-          dispatch({ type: "move", instanceId, dx, dy });
+          if (portrait) dispatch({ type: "reorder", instanceId, direction: Math.sign(dy || dx) });
+          else dispatch({ type: "move", instanceId, dx, dy });
           setAnnouncement("");
         }}
         onResize={(instanceId, sizeVariant) => {

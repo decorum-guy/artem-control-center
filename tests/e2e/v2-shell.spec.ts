@@ -25,7 +25,8 @@ async function expectNoDocumentOverflow(page: Page) {
 }
 
 async function expectMinimumTouchTargets(page: Page) {
-  const violations = await page.locator(".v2-nav-link, .v2-product-header button").evaluateAll((elements) => elements.flatMap((element) => {
+  // Responsive controls hidden by CSS are not active touch targets.
+  const violations = await page.locator(".v2-nav-link:visible, .v2-product-header button:visible").evaluateAll((elements) => elements.flatMap((element) => {
     const rect = element.getBoundingClientRect();
     return rect.width >= 48 && rect.height >= 48
       ? []

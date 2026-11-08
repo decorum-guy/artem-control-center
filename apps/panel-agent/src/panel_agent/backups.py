@@ -97,6 +97,7 @@ class SourceItem:
 
 PANEL_SOURCE_ITEMS: tuple[SourceItem, ...] = (
     SourceItem("overview.layout", "panel-config/overview-layout.json"),
+    SourceItem("overview.portrait", "panel-config/overview-layout.portrait.v1.json"),
     SourceItem("calendar.display-colors", "panel-config/calendar-display-colors.json", max_bytes=MAX_SMALL_SOURCE_BYTES),
     SourceItem("device.visibility", "panel-config/device-visibility.json", max_bytes=MAX_SMALL_SOURCE_BYTES),
     SourceItem("interface.copy", "panel-config/interface-copy-settings.json", max_bytes=MAX_SMALL_SOURCE_BYTES),
@@ -159,6 +160,9 @@ class PanelConfigSource:
 
     def path_for(self, logical_id: str) -> Path:
         path = self.paths.get(logical_id)
+        if path is None and logical_id == "overview.portrait" and "overview.layout" in self.paths:
+            landscape = self.paths["overview.layout"]
+            path = landscape.with_name(landscape.stem + ".portrait.v1.json")
         if path is None:
             raise BackupFailure("backup_source_not_allowed")
         return path

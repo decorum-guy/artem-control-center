@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { DashboardSnapshot } from "@artem/contracts";
 import { WeatherHeaderSummary } from "./Weather";
 import { TemporaryAccessIndicator, useAccess } from "./AccessControls";
@@ -12,6 +12,8 @@ import { problemTone } from "./problemModel";
 import { useInterfaceCopy } from "./interfaceCopy";
 import { diagnosticsProblems, useDiagnosticsReport } from "./diagnosticsClient";
 import type { InterfaceCopyField } from "@artem/contracts";
+import { Sheet } from "./Sheet";
+import { usePortraitViewport } from "./viewportLayout";
 
 export type RoutePath =
   | "/overview"
@@ -301,6 +303,19 @@ function V2ProductShell({
   children: ReactNode;
 }) {
   const { copy } = useInterfaceCopy();
+  const portrait = usePortraitViewport();
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (portrait && document.activeElement?.closest(".v2-navigation-rail")) menuRef.current?.focus();
+    if (!portrait && (navigationOpen || document.activeElement === menuRef.current)) {
+      setNavigationOpen(false);
+      requestAnimationFrame(() => {
+        const target = document.querySelector<HTMLElement>('.v2-navigation-rail [aria-current="page"]') ?? document.querySelector<HTMLElement>(".v2-route-content");
+        target?.focus();
+      });
+    }
+  }, [portrait, navigationOpen]);
   const [now, setNow] = useState(() => new Date());
   const diagnostics = useDiagnosticsReport({ revision: snapshot.revision, fixtureScenario: snapshot.fixtureScenario });
   const currentProblems = diagnosticsProblems(diagnostics, snapshot);
@@ -318,7 +333,7 @@ function V2ProductShell({
     : "Системы в норме";
 
   return (
-    <div className="v2-shell" data-testid="v2-shell">
+    <div className="v2-shell" data-testid="v2-shell" data-viewport-layout={portrait ? "portrait" : "landscape"}>
       <aside className="v2-navigation-rail" data-testid="v2-navigation-rail">
         <div className="v2-brand">
           <span className="v2-brand__mark" aria-hidden="true">ACC</span>
@@ -374,6 +389,7 @@ function V2ProductShell({
 
       <main className="v2-workspace">
         <header className="v2-product-header" data-testid="product-header">
+          <button ref={menuRef} className="portrait-navigation-toggle" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={() => setNavigationOpen(true)}><span aria-hidden="true">≡</span> Разделы</button>
           <div className="v2-compact-brand" aria-hidden="true">
             <span className="v2-brand__mark">ACC</span>
             <span>Control Center</span>
@@ -413,8 +429,13 @@ function V2ProductShell({
             <InteractionLockStatus />
           </div>
         </header>
-        <div key={route} className="route-content v2-route-content" data-route-transition="enter">{children}</div>
+        <div key={route} className="route-content v2-route-content" data-route-transition="enter" tabIndex={-1}>{children}</div>
       </main>
+      {navigationOpen && portrait && <Sheet title="Разделы" className="portrait-navigation-sheet" onClose={() => setNavigationOpen(false)} restoreFocusRef={menuRef}>
+        <nav className="portrait-navigation-list" aria-label="Все разделы панели">
+          {[...v2PrimaryNavigation, ...v2PlanningNavigation, { path: "/backups" as const, copyKey: "navigation.backups" as const, icon: "system" as const }, { path: "/apps" as const, copyKey: "navigation.apps" as const, icon: "services" as const }, ...v2SecondaryNavigation].map((item) => <V2NavigationLink key={item.path} path={item.path} label={copy(item.copyKey)} icon={item.icon} current={route} onNavigate={(target) => { setNavigationOpen(false); onNavigate(target); }} />)}
+        </nav>
+      </Sheet>}
     </div>
   );
 }

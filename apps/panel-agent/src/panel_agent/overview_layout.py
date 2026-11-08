@@ -1,6 +1,6 @@
 """Fixed, server-owned Overview layout persistence.
 
-This module deliberately knows one layout resource only.  It does not expose
+This module knows the fixed landscape and portrait layout resources. It does not expose
 generic file or JSON storage and it never executes data from a saved layout.
 Migration and recovery helpers are pure; filesystem work is confined to the
 storage class at the bottom of the module.
@@ -763,6 +763,33 @@ class OverviewLayoutStore:
         except ValueError:
             return None
         return parsed if parsed >= 0 else None
+
+
+class PortraitOverviewLayoutStore(OverviewLayoutStore):
+    """Additive profile envelope; the existing v2 logical 12-column canvas stays intact.
+
+    Reads never materialize a file. Until the first explicit portrait save, seed
+    from the owner's landscape layout. Old releases ignore this sibling file.
+    """
+
+    def __init__(self, landscape: OverviewLayoutStore) -> None:
+        self.landscape = landscape
+        super().__init__(str(landscape.path.with_name(landscape.path.stem + ".portrait.v1.json")), writes_enabled=landscape.writes_enabled)
+
+    def _read_raw(self) -> Optional[Mapping[str, Any]]:
+        raw = super()._read_raw()
+        if not raw or raw.get("schemaVersion") != "overview.portrait.v1" or raw.get("profile") != "portrait":
+            return None
+        layout = raw.get("layout")
+        return layout if isinstance(layout, dict) else None
+
+    def read(self) -> OverviewLayoutResponse:
+        if not self.path.exists():
+            return self.landscape.read().model_copy(deep=True, update={"revision": 0, "writesEnabled": self.writes_enabled})
+        return super().read()
+
+    def _atomic_write(self, document: Mapping[str, Any]) -> None:
+        super()._atomic_write({"schemaVersion": "overview.portrait.v1", "profile": "portrait", "layout": document})
 
 
 def layout_response_for_test(store: OverviewLayoutStore) -> Dict[str, Any]:

@@ -790,3 +790,10 @@ class OverviewLayoutResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     unplaced: List[OverviewUnplacedWidget] = Field(default_factory=list)
     writesEnabled: bool = False
+
+
+class PortraitOverviewLayoutResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schemaVersion: Literal["overview.portrait.v1"] = "overview.portrait.v1"
+    profile: Literal["portrait"] = "portrait"
+    layout: OverviewLayoutResponse

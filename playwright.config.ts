@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const viewport = process.env.PLAYWRIGHT_PORTRAIT === "true" ? { width: 720, height: 1280 } : { width: 1280, height: 720 };
+
 const planningOverviewFlag = process.env.B2_PLANNING_OVERVIEW_ENABLED === "true" ? "true" : "false";
 const planningTasksFlag = process.env.B3_PLANNING_TASKS_ROUTE_ENABLED === "true" ? "true" : "false";
 const planningCalendarFlag = process.env.B3_PLANNING_CALENDAR_ROUTE_ENABLED === "true" ? "true" : "false";
@@ -32,14 +34,14 @@ export default defineConfig({
   use: {
     baseURL: externalBaseUrl ?? "http://127.0.0.1:5173",
     trace: "retain-on-failure",
-    viewport: { width: 1280, height: 720 },
+    viewport,
     deviceScaleFactor: 1.5,
     hasTouch: true
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1.5, hasTouch: true }
+      use: { ...devices["Desktop Chrome"], viewport, deviceScaleFactor: 1.5, hasTouch: true }
     }
   ],
   webServer: useExternalServer ? undefined : {
