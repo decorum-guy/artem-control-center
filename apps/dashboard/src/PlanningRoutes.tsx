@@ -31,6 +31,7 @@ import {
   readPlanningProjects,
   readPlanningReminders,
   readPlanningTasks,
+  refreshPlanningCalendarSources,
   usePlanningRead,
   type TaskRouteView
 } from "./planningReadClient";
@@ -72,6 +73,7 @@ import {
 import { planningModuleForRoute } from "./planningModuleRegistry";
 import { calendarIdentityForEvent, calendarIdentityLabel } from "./planningIdentity";
 import { useNoticeCenter } from "./NoticeCenter";
+import { calendarSourceRefreshPresentation } from "./calendarRefreshPresentation";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { useInteractionLock } from "./InteractionLock";
@@ -1072,8 +1074,8 @@ function CalendarMonthControls({
         <button
           type="button"
           className={`planning-icon-button${refreshing ? " planning-icon-button--busy" : ""}`}
-          aria-label={refreshing ? "Обновление календаря" : "Обновить календарь"}
-          title="Обновить календарь"
+          aria-label={refreshing ? "Обновляются источники календаря" : "Обновить источники календаря"}
+          title="Обновить источники календаря"
           aria-busy={refreshing}
           data-testid="planning-calendar-refresh"
           disabled={refreshDisabled}
@@ -1142,8 +1144,30 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
   const calendarEventMarkerStyle = calendarDisplayPreferences?.eventMarkerStyle ?? "dots";
   const { confirmAction } = useActionConfirmation();
   const deletePendingRef = useRef(false);
-  const calendarRefreshStartedRef = useRef(false);
+  const calendarRefreshLockRef = useRef(false);
+  const calendarRefreshInFlightRef = useRef(false);
+  const calendarRefreshControllerRef = useRef<AbortController | null>(null);
+  const planningSourcesRef = useRef(snapshot.planning?.providerStatuses ?? []);
+  planningSourcesRef.current = snapshot.planning?.providerStatuses ?? planningSourcesRef.current;
+  const calendarRouteMountedRef = useRef(true);
   const { showNotice } = useNoticeCenter();
+  useEffect(() => {
+    calendarRouteMountedRef.current = true;
+    return () => {
+      calendarRouteMountedRef.current = false;
+      calendarRefreshControllerRef.current?.abort();
+      if (calendarRefreshInFlightRef.current) {
+        showNotice({
+          id: "planning.calendar.refresh.result",
+          severity: "warning",
+          title: "Обновление календаря не подтверждено",
+          detail: "Страница была закрыта до проверки результата. Последние подтверждённые данные сохранены.",
+          timeoutMs: 8_000,
+          testId: "planning-calendar-refresh-result"
+        });
+      }
+    };
+  }, [showNotice]);
   const visibleMonth = useMemo(() => calendarMonthParts(visibleMonthKey), [visibleMonthKey]);
   const monthGrid = useMemo(
     () => calendarMonthGrid(visibleMonth.year, visibleMonth.month, DEFAULT_PLANNING_TIME_ZONE),
@@ -1305,11 +1329,92 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     selectDate(today);
   }
 
-  function refreshCalendarData(): void {
-    if (calendarRefreshPending || routeRead.refreshing) return;
-    calendarRefreshStartedRef.current = false;
+  async function refreshCalendarData(): Promise<void> {
+    if (calendarRefreshLockRef.current || routeRead.refreshing) return;
+    calendarRefreshLockRef.current = true;
     setCalendarRefreshPending(true);
-    setRetry((value) => value + 1);
+    const controller = new AbortController();
+    calendarRefreshControllerRef.current = controller;
+    let timeout: number | null = null;
+    try {
+      if (!(await ensureCapability("planning.calendar_sources.refresh", "Обновить источники календаря"))) {
+        showNotice({
+          id: "planning.calendar.refresh.result",
+          severity: "warning",
+          title: "Обновление источников не разрешено",
+          detail: "Проверка доступа не разрешила запрос. Синхронизация не запускалась.",
+          timeoutMs: 10_000,
+          testId: "planning-calendar-refresh-result"
+        });
+        return;
+      }
+      if (controller.signal.aborted || !calendarRouteMountedRef.current) return;
+      calendarRefreshInFlightRef.current = true;
+      showNotice({
+        id: "planning.calendar.refresh.result",
+        severity: "progress",
+        title: "Обновляются источники календаря",
+        detail: "Запрашиваем синхронизацию, затем проверим полученные данные и статусы источников.",
+        testId: "planning-calendar-refresh-result"
+      });
+      // PIN/elevation time is not provider-sync time; start the bounded request
+      // deadline only after the access capability has been confirmed.
+      timeout = window.setTimeout(() => controller.abort(), 20_000);
+      const result = await refreshPlanningCalendarSources(controller.signal, 15_000);
+      let refreshedEvents;
+      try {
+        refreshedEvents = await readPlanningEventsForRange(
+          monthGrid.range.fromUtc,
+          monthGrid.range.toUtc,
+          controller.signal
+        );
+      } catch {
+        if (controller.signal.aborted || !calendarRouteMountedRef.current) return;
+        const fallbackPresentation = calendarSourceRefreshPresentation(result, null, planningSourcesRef.current);
+        showNotice({
+          id: "planning.calendar.refresh.result",
+          severity: fallbackPresentation.severity,
+          title: "Источники обновлены, но календарь не удалось перечитать",
+          detail: `${fallbackPresentation.detail} События месяца оставлены без изменений.`,
+          timeoutMs: 12_000,
+          testId: "planning-calendar-refresh-result"
+        });
+        return;
+      }
+      if (controller.signal.aborted || !calendarRouteMountedRef.current) return;
+      const presentation = calendarSourceRefreshPresentation(
+        result,
+        refreshedEvents.sources ?? null,
+        planningSourcesRef.current
+      );
+      showNotice({
+        id: "planning.calendar.refresh.result",
+        severity: presentation.severity,
+        title: presentation.title,
+        detail: presentation.detail,
+        timeoutMs: presentation.severity === "error" ? 12_000 : 10_000,
+        testId: "planning-calendar-refresh-result"
+      });
+      if (calendarRouteMountedRef.current) setRetry((value) => value + 1);
+    } catch {
+      if (!calendarRouteMountedRef.current) return;
+      const timedOut = controller.signal.aborted;
+      const fallbackPresentation = calendarSourceRefreshPresentation(null, null, planningSourcesRef.current);
+      showNotice({
+        id: "planning.calendar.refresh.result",
+        severity: fallbackPresentation.severity,
+        title: timedOut ? "Не удалось подтвердить обновление календаря вовремя" : fallbackPresentation.title,
+        detail: `${fallbackPresentation.detail}${timedOut ? " Запрос завершился по тайм-ауту." : ""}`,
+        timeoutMs: 12_000,
+        testId: "planning-calendar-refresh-result"
+      });
+    } finally {
+      if (timeout !== null) window.clearTimeout(timeout);
+      if (calendarRefreshControllerRef.current === controller) calendarRefreshControllerRef.current = null;
+      calendarRefreshLockRef.current = false;
+      calendarRefreshInFlightRef.current = false;
+      if (calendarRouteMountedRef.current) setCalendarRefreshPending(false);
+    }
   }
 
   async function ensureCalendarCapability(action: "create" | "edit" | "delete", title: string, provider = false): Promise<boolean> {
@@ -1576,17 +1681,6 @@ export function CalendarPage({ snapshot }: PlanningRouteProps) {
     const timer = window.setInterval(() => setLiveNow(new Date()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
-  useEffect(() => {
-    if (!calendarRefreshPending) return;
-    if (routeRead.refreshing || routeRead.loading) {
-      calendarRefreshStartedRef.current = true;
-      return;
-    }
-    if (calendarRefreshStartedRef.current) {
-      calendarRefreshStartedRef.current = false;
-      setCalendarRefreshPending(false);
-    }
-  }, [calendarRefreshPending, routeRead.loading, routeRead.refreshing]);
   return (
     <PlanningRouteFrame
       module={calendarModule}
