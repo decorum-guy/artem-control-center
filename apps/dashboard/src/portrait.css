@@ -1,5 +1,6 @@
 /* Portrait is a CSS viewport mode, independent of physical pixels and DPR. */
 .portrait-navigation-toggle { display: none; }
+.portrait-floating-navigation-toggle { display: none; }
 .portrait-navigation-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .portrait-navigation-list .v2-nav-link { min-width: 0; min-height: 56px; white-space: normal; }
 .portrait-navigation-list .v2-nav-link > span { overflow: visible; white-space: normal; }
@@ -14,6 +15,28 @@
   .v2-shell .v2-compact-brand { display: none; }
   .portrait-navigation-toggle { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 12px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-control); background: var(--cc-interactive); color: var(--cc-text); font: inherit; font-weight: 700; }
   .portrait-navigation-toggle > span { font-size: 24px; }
+  .portrait-floating-navigation-toggle {
+    position: fixed;
+    z-index: 170;
+    right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px) + var(--cc-viewport-bottom-inset, 0px));
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 1px solid var(--cc-border);
+    border-radius: var(--cc-radius-control);
+    background: var(--cc-surface-1);
+    color: var(--cc-text);
+    box-shadow: var(--cc-shadow-overlay);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .portrait-floating-navigation-toggle > svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .portrait-floating-navigation-toggle:hover { background: var(--cc-hover); }
+  .portrait-floating-navigation-toggle:active { background: var(--cc-pressed); transform: translateY(1px); }
+  .portrait-floating-navigation-toggle:focus-visible { outline: 3px solid var(--cc-focus); outline-offset: 3px; }
   .v2-shell .v2-header-time { display: flex; justify-content: flex-end; gap: 12px; flex: initial; }
   .v2-shell .v2-header-time > span { max-width: none; font-size: 13px; white-space: normal; }
   .v2-shell .v2-header-actions { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(48px, 1fr) 48px 48px; align-items: stretch; gap: 8px; width: 100%; }
@@ -23,7 +46,7 @@
   .v2-shell .v2-header-system .v2-status-text > span:last-child { white-space: normal; }
   .v2-shell .v2-header-access { font-size: 12px; gap: 4px; }
   .v2-shell .v2-header-actions > .temporary-access-chip { grid-column: 1 / -1; grid-row: 2; }
-  .v2-shell .v2-route-content.route-content { order: 1; grid-row: 2; width: 100%; height: auto; min-height: 0; padding: 16px 16px 28px; overflow-y: auto; overflow-x: clip; overscroll-behavior-y: contain; scroll-padding: 12px; }
+  .v2-shell .v2-route-content.route-content { order: 1; grid-row: 2; width: 100%; height: auto; min-height: 0; padding: 16px 16px calc(96px + env(safe-area-inset-bottom, 0px) + var(--cc-viewport-bottom-inset, 0px)); overflow-y: auto; overflow-x: clip; overscroll-behavior-y: contain; scroll-padding: 12px 12px calc(96px + env(safe-area-inset-bottom, 0px) + var(--cc-viewport-bottom-inset, 0px)); }
   .v2-shell .v2-route-header { flex-wrap: wrap; min-width: 0; }
   .v2-shell .density-route-toolbar { display: flex; flex-wrap: wrap; gap: 12px; height: auto; }
   .v2-shell .density-route-toolbar > * { min-width: 0; }
@@ -52,7 +75,12 @@
   .v2-shell .v2-header-system { grid-column: 3 / 5; }
   .v2-shell .v2-header-access { grid-column: 1 / 3; }
   .v2-shell .v2-header-actions > .temporary-access-chip { grid-row: auto; }
-  .v2-shell .v2-route-content.route-content { padding: 12px 12px 24px; }
+  .v2-shell .v2-route-content.route-content { padding: 12px 12px calc(96px + env(safe-area-inset-bottom, 0px) + var(--cc-viewport-bottom-inset, 0px)); scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px) + var(--cc-viewport-bottom-inset, 0px)); }
+}
+
+@media (max-aspect-ratio: 1/1) {
+  /* Keep the optional voice launcher clear of the primary bottom-corner menu. */
+  body:has(.v2-shell[data-viewport-layout="portrait"]) .jarvis-root { bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 }
 
 @media (max-aspect-ratio: 1/1) {
