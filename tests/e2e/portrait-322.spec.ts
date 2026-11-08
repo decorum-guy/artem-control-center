@@ -50,28 +50,127 @@ for (const viewport of sizes) test(`all routes and navigation at CSS ${viewport.
       await open(page, route);
       await expect(page.getByTestId("v2-shell")).toHaveAttribute("data-viewport-layout", portrait ? "portrait" : "landscape");
       await expect(page.getByTestId("product-header")).toBeInViewport();
+      const floatingNavigation = page.getByTestId("portrait-floating-navigation-toggle");
+      if (portrait) {
+        await expect(floatingNavigation).toBeVisible();
+        await expect(floatingNavigation).toHaveAccessibleName("Открыть разделы");
+        expect(await floatingNavigation.evaluate((element) => element.innerText.trim())).toBe("");
+        await expect(floatingNavigation.locator("svg path")).toHaveCount(1);
+        const geometry = await floatingNavigation.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, rightGap: innerWidth - rect.right, bottomGap: innerHeight - rect.bottom };
+        });
+        expect(geometry.width).toBe(56);
+        expect(geometry.height).toBe(56);
+        expect(geometry.rightGap).toBeGreaterThanOrEqual(15);
+        expect(geometry.rightGap).toBeLessThanOrEqual(17);
+        expect(geometry.bottomGap).toBeGreaterThanOrEqual(15);
+        expect(geometry.bottomGap).toBeLessThanOrEqual(17);
+        if (route === "overview" && viewport.width === 720 && viewport.height === 1280) {
+          await page.screenshot({ path: "artifacts/issue-322/after/720x1280/overview-floating-navigation.png", animations: "disabled" });
+        }
+        if (route === "overview" && viewport.width === 768 && viewport.height === 1366) {
+          await page.screenshot({ path: "artifacts/issue-322/after/768x1366/overview-floating-navigation.png", animations: "disabled" });
+        }
+      } else {
+        await expect(floatingNavigation).toBeHidden();
+      }
       await boundedControls(page);
       await page.screenshot({ path: `${directory}/${route}.png`, animations: "disabled" });
     });
   }
+  const floatingNavigation = page.getByTestId("portrait-floating-navigation-toggle");
   if (portrait) {
     await page.getByRole("button", { name: "Разделы", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Разделы" });
     await expect(dialog).toBeVisible();
+    await expect(page.locator(".cc-overlay-backdrop")).toHaveCount(1);
+    await expect(page.locator(".portrait-navigation-toggle")).toHaveAttribute("aria-expanded", "true");
+    await expect(floatingNavigation).toHaveAttribute("aria-expanded", "true");
     await expect(dialog.locator("a")).toHaveCount(routes.length);
     await boundedControls(page, '[role=dialog] a, [role=dialog] button');
+    const menuGeometry = await Promise.all([
+      floatingNavigation.evaluate((element) => Number(getComputedStyle(element).zIndex)),
+      page.locator(".cc-overlay-backdrop").evaluate((element) => Number(getComputedStyle(element).zIndex))
+    ]);
+    expect(menuGeometry[0]).toBeLessThan(menuGeometry[1]);
     await dialog.locator('a[href="/backups"]').click();
     await expect(page).toHaveURL(/\/backups/);
+    await floatingNavigation.click();
+    await expect(page.getByRole("dialog", { name: "Разделы" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(floatingNavigation).toBeFocused();
     await page.getByRole("button", { name: "Разделы", exact: true }).click();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Разделы", exact: true })).toBeFocused();
-    await page.getByRole("button", { name: "Разделы", exact: true }).click();
-    await page.setViewportSize(sizes[4]);
+    await floatingNavigation.click();
+    await page.locator(".cc-overlay-backdrop--sheet").click({ position: { x: 8, y: 8 } });
     await expect(page.getByRole("dialog", { name: "Разделы" })).toHaveCount(0);
-    await expect(page.locator(".v2-route-content")).toBeFocused();
-    await expect(page).toHaveURL(/\/backups/);
+    await expect(floatingNavigation).toBeFocused();
+    await page.getByRole("button", { name: "Разделы", exact: true }).click();
+    await dialog.locator('a[href="/settings"]').click();
+    await expect(page).toHaveURL(/\/settings/);
+    await expect(page.getByRole("dialog", { name: "Разделы" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Разделы", exact: true })).toBeFocused();
+
   }
   await testInfo.attach("viewport", { body: JSON.stringify(viewport), contentType: "application/json" });
+});
+
+test("floating navigation stays fixed while Settings scrolls and clears the final action", async ({ page }) => {
+  await page.setViewportSize(sizes[0]);
+  await access(page);
+  await open(page, "settings");
+  const floatingNavigation = page.getByTestId("portrait-floating-navigation-toggle");
+  const routeContent = page.locator(".v2-route-content");
+  const buttonBeforeScroll = await floatingNavigation.boundingBox();
+  await routeContent.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(() => routeContent.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(async () => {
+    const buttonAfterScroll = await floatingNavigation.boundingBox();
+    return buttonAfterScroll?.x === buttonBeforeScroll?.x && buttonAfterScroll?.y === buttonBeforeScroll?.y;
+  }).toBe(true);
+
+  const lastAction = page.getByTestId("route-settings").locator("button").last();
+  await lastAction.scrollIntoViewIfNeeded();
+  await expect(lastAction).toBeInViewport();
+  const controlsOverlap = await Promise.all([lastAction.boundingBox(), floatingNavigation.boundingBox()])
+    .then(([lastRect, menuRect]) => Boolean(lastRect && menuRect
+      && lastRect.x < menuRect.x + menuRect.width
+      && lastRect.x + lastRect.width > menuRect.x
+      && lastRect.y < menuRect.y + menuRect.height
+      && lastRect.y + lastRect.height > menuRect.y));
+  expect(controlsOverlap).toBe(false);
+
+  await floatingNavigation.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "Разделы" })).toBeVisible();
+  await page.setViewportSize(sizes[4]);
+  await expect(page.getByRole("dialog", { name: "Разделы" })).toHaveCount(0);
+  await expect(page.locator('.v2-navigation-rail [aria-current="page"]')).toBeFocused();
+  await expect(page).toHaveURL(/\/settings/);
+});
+
+test("floating navigation follows rotation without reloading or leaving the current route", async ({ page }) => {
+  await page.setViewportSize(sizes[0]);
+  await access(page);
+  await open(page, "settings");
+  const floatingNavigation = page.getByTestId("portrait-floating-navigation-toggle");
+  await expect(floatingNavigation).toBeVisible();
+  const timeOrigin = await page.evaluate(() => performance.timeOrigin);
+  const routeUrl = new URL(page.url());
+
+  await page.setViewportSize(sizes[4]);
+  await expect(floatingNavigation).toBeHidden();
+  await expect(page.getByTestId("route-settings")).toBeVisible();
+  await expect(page).toHaveURL(routeUrl.toString());
+
+  await page.setViewportSize(sizes[1]);
+  await expect(floatingNavigation).toBeVisible();
+  await expect(page.getByTestId("route-settings")).toBeVisible();
+  expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+  await expect(page).toHaveURL(routeUrl.toString());
+  await expect(page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).resolves.toBe(true);
 });
 
 async function layoutFixture(page: Page, variant?: string) {
@@ -141,6 +240,14 @@ test("portrait editor pointer, resize menu, picker, appearance, persisted profil
   await coffee.getByRole("button", { name: "Настройки виджета", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await boundedControls(page, '[role=dialog] button, [role=dialog] select, [role=dialog] input');
+  const floatingNavigation = page.getByTestId("portrait-floating-navigation-toggle");
+  const modalHitTest = await floatingNavigation.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return { hitIsFloatingButton: hit === element, floatingZ: Number(getComputedStyle(element).zIndex), overlayZ: Number(getComputedStyle(document.querySelector(".cc-overlay-backdrop")!).zIndex) };
+  });
+  expect(modalHitTest.floatingZ).toBeLessThan(modalHitTest.overlayZ);
+  expect(modalHitTest.hitIsFloatingButton).toBe(false);
   await page.screenshot({ path: "artifacts/issue-322/appearance.png", animations: "disabled" });
   await page.keyboard.press("Escape");
   await page.getByTestId("overview-add-widget").click();
@@ -184,9 +291,14 @@ test("task draft/focus survives rotation and keyboard viewport; pending command 
   for (const viewport of [sizes[0], sizes[4], sizes[0]]) { await page.setViewportSize(viewport); await expect(title).toBeFocused(); await expect(title).toHaveValue("Несохранённая задача"); await expect(page).toHaveURL(/\/tasks/); }
   expect(posts).toBe(0);
   await page.evaluate(() => {
-    Object.defineProperties(window.visualViewport!, { height: { configurable: true, value: 550 }, offsetTop: { configurable: true, value: 0 } });
+    const viewport = window.visualViewport!;
+    Object.defineProperties(viewport, { height: { configurable: true, value: 550 }, offsetTop: { configurable: true, value: 0 } });
     window.visualViewport!.dispatchEvent(new Event("resize"));
   });
+  await expect.poll(() => page.getByTestId("portrait-floating-navigation-toggle").evaluate((element) => {
+    const viewportBottom = window.visualViewport!.offsetTop + window.visualViewport!.height;
+    return element.getBoundingClientRect().bottom <= viewportBottom + 1;
+  })).toBe(true);
   await boundedControls(page, '[role=dialog] button, [role=dialog] input, [role=dialog] select, [role=dialog] textarea');
   await expect.poll(async () => (await page.getByRole("dialog").boundingBox())!.y + (await page.getByRole("dialog").boundingBox())!.height).toBeLessThanOrEqual(550);
   await expect(page.getByRole("button", { name: "Сохранить", exact: true })).toBeInViewport();

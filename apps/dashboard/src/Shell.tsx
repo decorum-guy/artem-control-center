@@ -14,6 +14,7 @@ import { diagnosticsProblems, useDiagnosticsReport } from "./diagnosticsClient";
 import type { InterfaceCopyField } from "@artem/contracts";
 import { Sheet } from "./Sheet";
 import { usePortraitViewport } from "./viewportLayout";
+import { useVisualViewport } from "./useVisualViewport";
 
 export type RoutePath =
   | "/overview"
@@ -304,11 +305,18 @@ function V2ProductShell({
 }) {
   const { copy } = useInterfaceCopy();
   const portrait = usePortraitViewport();
+  const visualViewport = useVisualViewport();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
+  const floatingMenuRef = useRef<HTMLButtonElement>(null);
+  const navigationOpenerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (portrait && document.activeElement?.closest(".v2-navigation-rail")) menuRef.current?.focus();
-    if (!portrait && (navigationOpen || document.activeElement === menuRef.current)) {
+    if (!portrait && (
+      navigationOpen
+      || document.activeElement === menuRef.current
+      || document.activeElement === floatingMenuRef.current
+    )) {
       setNavigationOpen(false);
       requestAnimationFrame(() => {
         const target = document.querySelector<HTMLElement>('.v2-navigation-rail [aria-current="page"]') ?? document.querySelector<HTMLElement>(".v2-route-content");
@@ -389,7 +397,7 @@ function V2ProductShell({
 
       <main className="v2-workspace">
         <header className="v2-product-header" data-testid="product-header">
-          <button ref={menuRef} className="portrait-navigation-toggle" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={() => setNavigationOpen(true)}><span aria-hidden="true">≡</span> Разделы</button>
+          <button ref={menuRef} className="portrait-navigation-toggle" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={(event) => { navigationOpenerRef.current = event.currentTarget; setNavigationOpen(true); }}><span aria-hidden="true">≡</span> Разделы</button>
           <div className="v2-compact-brand" aria-hidden="true">
             <span className="v2-brand__mark">ACC</span>
             <span>Control Center</span>
@@ -431,7 +439,22 @@ function V2ProductShell({
         </header>
         <div key={route} className="route-content v2-route-content" data-route-transition="enter" tabIndex={-1}>{children}</div>
       </main>
-      {navigationOpen && portrait && <Sheet title="Разделы" className="portrait-navigation-sheet" onClose={() => setNavigationOpen(false)} restoreFocusRef={menuRef}>
+      <button
+        ref={floatingMenuRef}
+        type="button"
+        className="portrait-floating-navigation-toggle"
+        data-testid="portrait-floating-navigation-toggle"
+        aria-label="Открыть разделы"
+        aria-haspopup="dialog"
+        aria-expanded={navigationOpen}
+        style={{ bottom: `calc(16px + env(safe-area-inset-bottom, 0px) + ${visualViewport.bottomInset}px)` }}
+        onClick={(event) => { navigationOpenerRef.current = event.currentTarget; setNavigationOpen(true); }}
+      >
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+      {navigationOpen && portrait && <Sheet title="Разделы" className="portrait-navigation-sheet" onClose={() => setNavigationOpen(false)} restoreFocusRef={navigationOpenerRef}>
         <nav className="portrait-navigation-list" aria-label="Все разделы панели">
           {[...v2PrimaryNavigation, ...v2PlanningNavigation, { path: "/backups" as const, copyKey: "navigation.backups" as const, icon: "system" as const }, { path: "/apps" as const, copyKey: "navigation.apps" as const, icon: "services" as const }, ...v2SecondaryNavigation].map((item) => <V2NavigationLink key={item.path} path={item.path} label={copy(item.copyKey)} icon={item.icon} current={route} onNavigate={(target) => { setNavigationOpen(false); onNavigate(target); }} />)}
         </nav>

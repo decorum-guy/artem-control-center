@@ -1,6 +1,8 @@
 # Portrait operating mode (#322)
 
-Status: implemented for browser review; physical Samsung acceptance is pending.
+Status: the owner confirmed the existing 9:16 portrait mode on Samsung. This
+floating-navigation follow-up is browser-validated but has not been deployed or
+physically accepted on Samsung.
 Base: `e210afcf6dd22d175aee4648c29d618ff744db8e` (origin/main inspected before branching).
 Branch: `agent/portrait-9-16`. No production settings, infrastructure or device state changed.
 
@@ -20,13 +22,18 @@ insets continue through the existing `useVisualViewport` / Sheet implementation.
 There are no writes, reloads or route changes on resize/rotation.
 
 In portrait the shell has a compact two-row header and a 48px “Разделы” control.
-The existing Sheet provides a focus-trapped navigation drawer containing all 12
-routes (including Apps and Backups). Its route buttons are at least 56px tall.
-Escape restores focus; rotating an open navigation sheet to landscape closes it
-and focuses the active desktop navigation link (or the current route surface for
-routes without a desktop rail link). Route content is the primary
-vertical scrolling surface; the header stays outside that surface. Sheets retain
-an independently scrollable body and visible header/footer for keyboard use.
+A fixed 56px hamburger at the lower-right offers a second trigger for the same
+focus-trapped navigation Sheet; it does not create another menu or route list.
+The Sheet contains all 12 routes (including Apps and Backups), with route buttons
+at least 56px tall. Escape/backdrop restore focus to the trigger that opened it.
+The floating trigger clears the Sheet, confirmations and notices in the overlay
+stack, respects safe-area/keyboard insets, and has matching scroll padding so the
+last page controls remain reachable. It is absent in landscape. Rotating with an
+open navigation Sheet to landscape closes it and focuses the active desktop
+navigation link (or the current route surface for routes without a desktop rail
+link). Route content is the primary vertical scrolling surface; the header stays
+outside that surface. Sheets retain an independently scrollable body and visible
+header/footer for keyboard use.
 
 Overview uses four physical columns below 900px of measured **workspace** width,
 eight above. On four columns cards occupy the full width; on eight columns small
@@ -99,11 +106,12 @@ Existing uncertain-write readback and conflict behavior remain in effect.
 ## Browser evidence and validation
 
 `tests/e2e/portrait-322.spec.ts` covers 720×1280, 768×1366, 1080×1920,
-540×960 (scaled CSS viewport) and canonical 1280×720; all 12 routes, nav/focus,
-critical target geometry, all supported widget variants, editor persistence and
-profile isolation, repeated rotation with a task draft/pending command, and
-visual-viewport keyboard simulation. API calls are local fixtures/mocks; no real
-Todoist, HA, Planning or other production mutations are used.
+540×960 (scaled CSS viewport) and canonical 1280×720; all 12 routes, both
+navigation triggers and focus restoration, floating-button geometry/scroll/stacking,
+live rotation without reload, critical target geometry, all supported widget
+variants, editor persistence and profile isolation, repeated rotation with a task
+draft/pending command, and visual-viewport keyboard simulation. API calls are local
+fixtures/mocks; no real Todoist, HA, Planning or other production mutations are used.
 
 Before screenshots were captured from the base on all 11 key routes at 720×1280
 and 1280×720. After screenshots cover those and Apps plus the additional sizes.
@@ -117,7 +125,7 @@ Planning route flags enabled, Calendar mutation build flag enabled, and touch lo
 enabled but initially unlocked (see `.github/workflows/ci.yml`). Run `npm run check`
 and the existing feature-specific browser gates with their documented CI flags.
 
-## Physical Samsung acceptance (owner; issue stays open)
+## Physical Samsung acceptance (owner; follow-up check remains)
 
 Read-only attempt `ssh -o BatchMode=yes -o ConnectTimeout=5 control-panel-pc hostname`
 failed because the alias did not resolve in this environment. No physical viewport
@@ -131,7 +139,9 @@ or display scale has been claimed, and Windows orientation has not been changed.
    `visualViewport.width/height` and DPR (these diagnostics contain no secrets).
    Rotate through Windows locally with the owner's approval; record actual CSS
    dimensions, including taskbar/kiosk effects.
-3. Visit all 12 routes in both themes. Verify nav, header/access/lock, notices,
+3. Visit all 12 routes in both themes. Verify the top and floating “Разделы”
+   triggers, safe-area/keyboard clearance, scrolling to final actions, nav,
+   header/access/lock, notices,
    diagnostics/logs, PIN and confirmation dialogs, and all actions remain readable
    and reachable with vertical scrolling, without sideways panning.
 4. Check coffee, kettle Stop, Station/music, AC/selectors and lighting. Use fixture
