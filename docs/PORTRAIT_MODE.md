@@ -24,6 +24,12 @@ There are no writes, reloads or route changes on resize/rotation.
 In portrait the shell has a compact two-row header and a 48px “Разделы” control.
 A fixed 56px hamburger at the lower-right offers a second trigger for the same
 focus-trapped navigation Sheet; it does not create another menu or route list.
+When the navigation Sheet is open, an additional 56px X/close button lives inside
+its fixed footer at the same bottom-right screen position as the hamburger.
+This avoids reaching to the top to dismiss the menu while preserving the existing
+upper close button, Escape/backdrop dismissal and focus restoration to the
+actual trigger. The footer remains accessible even when the navigation list
+scrolls and follows the same safe-area/keyboard inset as the opening button.
 The Sheet contains all 12 routes (including Apps and Backups), with route buttons
 at least 56px tall. Escape/backdrop restore focus to the trigger that opened it.
 The floating trigger clears the Sheet, confirmations and notices in the overlay

@@ -454,11 +454,33 @@ function V2ProductShell({
           <path d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
-      {navigationOpen && portrait && <Sheet title="Разделы" className="portrait-navigation-sheet" onClose={() => setNavigationOpen(false)} restoreFocusRef={navigationOpenerRef}>
-        <nav className="portrait-navigation-list" aria-label="Все разделы панели">
-          {[...v2PrimaryNavigation, ...v2PlanningNavigation, { path: "/backups" as const, copyKey: "navigation.backups" as const, icon: "system" as const }, { path: "/apps" as const, copyKey: "navigation.apps" as const, icon: "services" as const }, ...v2SecondaryNavigation].map((item) => <V2NavigationLink key={item.path} path={item.path} label={copy(item.copyKey)} icon={item.icon} current={route} onNavigate={(target) => { setNavigationOpen(false); onNavigate(target); }} />)}
-        </nav>
-      </Sheet>}
+      {navigationOpen && portrait && (
+        <Sheet
+          title="Разделы"
+          className="portrait-navigation-sheet"
+          onClose={() => setNavigationOpen(false)}
+          restoreFocusRef={navigationOpenerRef}
+          footer={
+            // Keep the close target inside the modal focus trap while placing it
+            // at the same bottom-right screen location as the opening trigger.
+            <button
+              type="button"
+              className="portrait-floating-navigation-close"
+              data-testid="portrait-floating-navigation-close"
+              aria-label="Свернуть разделы"
+              onClick={() => setNavigationOpen(false)}
+            >
+              <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          }
+        >
+          <nav className="portrait-navigation-list" aria-label="Все разделы панели">
+            {[...v2PrimaryNavigation, ...v2PlanningNavigation, { path: "/backups" as const, copyKey: "navigation.backups" as const, icon: "system" as const }, { path: "/apps" as const, copyKey: "navigation.apps" as const, icon: "services" as const }, ...v2SecondaryNavigation].map((item) => <V2NavigationLink key={item.path} path={item.path} label={copy(item.copyKey)} icon={item.icon} current={route} onNavigate={(target) => { setNavigationOpen(false); onNavigate(target); }} />)}
+          </nav>
+        </Sheet>
+      )}
     </div>
   );
 }
