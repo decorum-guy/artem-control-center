@@ -54,9 +54,23 @@ try {
       viewport: viewports[capture.view],
       deviceScaleFactor: 1.5,
       hasTouch: true,
+      locale: "ru-RU",
+      timezoneId: "Europe/Moscow",
       colorScheme: capture.theme === "day" ? "light" : "dark"
     });
     const page = await context.newPage();
+    // Pin the visible clock for comparisons; timers and fixture subscriptions still run.
+    await page.clock.setFixedTime(new Date("2026-11-17T18:42:00Z"));
+    // The fixture app omits the production access router. Mirror the standard
+    // read-only response from tests/e2e/access.spec.ts for every capture.
+    await page.route(/\/api\/v1\/access(?:\?.*)?$/, (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      return route.fulfill({ json: {
+        schemaVersion: 1, revision: 1, baseProfile: "standard", effectiveProfile: "standard",
+        temporaryFull: false, temporaryFullExpiresAt: null, pinConfigured: true,
+        lockoutUntil: null, capabilities: {}
+      } });
+    });
     const errors = [];
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text().slice(0, 300)); });
     page.on("pageerror", (error) => errors.push(String(error).slice(0, 300)));
@@ -65,6 +79,7 @@ try {
       await page.goto(`${baseUrl}${capture.path}`, { waitUntil: "domcontentloaded" });
       await page.locator('[data-testid^="route-"]').first().waitFor({ timeout: 20_000 });
       await page.waitForTimeout(settleMs);
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
       await page.screenshot({ path: resolve(outDir, `${capture.name}.png`), fullPage: false });
       const metrics = await page.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,
@@ -90,4 +105,5 @@ for (const entry of report) {
     console.log(`${entry.name}:${overflow}${failed ? " capture failed" : ""}`);
   }
 }
-console.log(`Saved ${report.length} screenshots to ${outDir} (${noted} failed/overflowing; console/HTTP errors are in report.json)`);
+console.log(`Reviewed ${report.length} captures in ${outDir} (${noted} failed/overflowing; console/HTTP errors are in report.json)`);
+if (noted) process.exitCode = 1;
