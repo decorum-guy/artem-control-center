@@ -84,10 +84,16 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
 Наблюдение (проверено): на каждом маршруте 6–8 ошибок консоли `404`. Это ответы Panel Agent
 в этой тестовой конфигурации на `GET /api/v1/access`, `/api/v1/actions/avalar/availability`,
 `/api/v1/actions/home-assistant/availability` и `/api/v1/actions/system/connectivity/availability`.
-Так было уже на `main` до любых изменений. Вероятное следствие: чип доступа в шапке
-показывает «Доступ недоступен», и на скриншотах «до» видно обрезание этой подписи. Причину
-404 (какие gate/env включают эти маршруты) не выясняли; это не часть редизайна, но для
-правдивых скриншотов шапки стоит проверить по коду Panel Agent и e2e-фикстурам. Кадр
+Так было уже на `main` до любых изменений. Причина (проверено по коду): роутеры access,
+действий AVALAR / connectivity / HA / станции / ROG и обновления системы подключаются
+только в production-приложении (`apps/panel-agent/src/panel_agent/production.py:68-75`),
+а не в dev/fixture-приложении `main.py`. E2e-тесты подменяют `/api/v1/access` через
+`page.route` (например, `tests/e2e/access.spec.ts:21`). Следствие на снимках: чип
+«Доступ недоступен» в шапке, «Проверка профиля доступа недоступна.» в Календаре,
+«Проверяем доступность управления…» у кондиционера. **Рекомендация:** добавить в
+`tools/capture-screens.mjs` опцию подмены `/api/v1/access` с ответом той же формы, что в
+`tests/e2e/access.spec.ts`, и снимать «до» (с `main`) и «после» в одинаковой конфигурации.
+Текущий набор «до» снят без подмены; это честный вид fixture-режима, но не production. Кадр
 `home-coffee-ready-night-1280x720`, который не снялся из-за `ERR_CONNECTION_RESET`,
 переснят.
 
