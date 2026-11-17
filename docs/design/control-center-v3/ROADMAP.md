@@ -238,6 +238,8 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
 
 ## 8. Как продолжить (передача дел)
 
+Готовый промпт для следующего исполнителя: [NEXT_SESSION_PROMPT.md](NEXT_SESSION_PROMPT.md).
+
 1. `git fetch origin && git switch redesign/v3-stage-0`, затем `npm run setup` (на Windows
    без `py`: сначала `python -m venv .venv`) и `npm run install:browsers`.
 2. Прочитать `TASK.md` целиком, этот файл и документы из раздела 1 задания.
