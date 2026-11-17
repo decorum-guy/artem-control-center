@@ -1,3 +1,4 @@
+import { EmptyState } from "./ui/States";
 import { v3VisualSkinEnabled } from "./visualShellConfig";
 import type {
   CoffeeDelayedStartRecord,
@@ -411,9 +412,13 @@ export function PlaceholderPage({
     <div className="placeholder-page" data-testid={`route-${route.slice(1)}`}>
       <PageHeading {...copy} copyKey={(v3VisualSkinEnabled ? route.slice(1) : route) as InterfaceCopyPageKey} />
       <WorkZone className="placeholder-surface">
-        <span className="placeholder-status">Подготовлено</span>
-        <h2>{copy.status}</h2>
-        <p>Раздел будет наполнен после подключения данных.</p>
+        {v3VisualSkinEnabled && route === "/apps" ? (
+          <EmptyState icon="apps" title={copy.status} detail="Раздел будет наполнен после подключения данных." />
+        ) : <>
+          <span className="placeholder-status">Подготовлено</span>
+          <h2>{copy.status}</h2>
+          <p>Раздел будет наполнен после подключения данных.</p>
+        </>}
       </WorkZone>
     </div>
   );

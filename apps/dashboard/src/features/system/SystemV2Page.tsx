@@ -1,3 +1,5 @@
+import { formatFreshnessLabel, formatPanelDate } from "../../panelDate";
+import { v3VisualSkinEnabled } from "../../visualShellConfig";
 import { useState } from "react";
 import type { DashboardSnapshot, DiagnosticsProblem, DiagnosticsReport, ServiceSnapshot } from "@artem/contracts";
 import { ConnectivityRecoverySurface } from "../../ConnectivityActions";
@@ -33,6 +35,10 @@ export function homeServerMaintenanceVisible(mode: string): boolean {
   return mode === "production";
 }
 
+function systemTimeLabel(label: string) {
+  return v3VisualSkinEnabled ? formatFreshnessLabel(label) : label;
+}
+
 function SystemFactRow({
   kind,
   label,
@@ -48,7 +54,7 @@ function SystemFactRow({
       <span className="system-fact-row__icon" aria-hidden="true"><Icon name="system" /></span>
       <div>
         <h3>{label}</h3>
-        <p>{service?.presentation?.freshnessLabel ?? service?.summary ?? "Источник не подключён"}</p>
+        <p>{systemTimeLabel(service?.presentation?.freshnessLabel ?? service?.summary ?? "Источник не подключён")}</p>
       </div>
       <StatusText
         label={service ? healthLabel(service.health) : "Источник не подключён"}
@@ -75,7 +81,7 @@ function SystemRuntimeSnapshot({ service }: { service: ServiceSnapshot }) {
         <p className="section-kicker">Текущее состояние</p>
         <h3>Панель</h3>
         <p>{summary}</p>
-        <span>{service.presentation?.freshnessLabel ?? "Свежесть не указана"}</span>
+        <span>{systemTimeLabel(service.presentation?.freshnessLabel ?? "Свежесть не указана")}</span>
       </div>
       <StatusText label={healthLabel(service.health)} tone={healthTone(service.health)} />
     </section>
@@ -97,7 +103,7 @@ function SystemDiagnosticRow({ service }: { service: ServiceSnapshot }) {
       </div>
       <div className="system-diagnostic-row__status">
         <StatusText label={healthLabel(service.health)} tone={healthTone(service.health)} />
-        <span>{service.presentation?.freshnessLabel ?? "Свежесть не указана"}</span>
+        <span>{systemTimeLabel(service.presentation?.freshnessLabel ?? "Свежесть не указана")}</span>
       </div>
     </div>
   );
@@ -115,7 +121,7 @@ function ProblemRow({ problem, onEvidence }: { problem: DiagnosticsProblem; onEv
       </div>
       <div className="system-problem-row__meta">
         <StatusText label={problemStateLabel(problem.state)} tone={problemTone(problem.state)} />
-        <span>{problem.freshness ?? `Наблюдалось ${problem.lastObservedAt}`}</span>
+        <span>{systemTimeLabel(problem.freshness ?? `Наблюдалось ${problem.lastObservedAt}`)}</span>
       </div>
       {problem.technicalEvidence && <button type="button" className="system-problem-evidence" onClick={() => onEvidence(problem)}>Показать сырую ошибку</button>}
     </article>
@@ -248,7 +254,7 @@ export function SystemV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
               <div className="system-problem-history__row" key={`${item.problemId}-${item.observedAt}-${index}`}>
                 <span>{item.subsystem}</span>
                 <StatusText label="Восстановлено" tone="success" />
-                <time dateTime={item.observedAt}>{item.observedAt}</time>
+                <time dateTime={item.observedAt}>{v3VisualSkinEnabled ? formatPanelDate(item.observedAt) : item.observedAt}</time>
               </div>
             ))}
           </div>
