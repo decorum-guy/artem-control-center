@@ -382,7 +382,7 @@ function parsePlanningSource(value: unknown, index: number): PlanningCalendarSou
     throw new PlanningReadError(`planning.sources[${index}].calendars is invalid`, "contract");
   }
   const kind = enumValue(source.kind, new Set<PlanningCalendarSource["kind"]>(["native", "external"]), `planning.sources[${index}].kind`);
-  const provider = enumValue(source.provider, new Set<PlanningCalendarSource["provider"]>(["local", "icloud"]), `planning.sources[${index}].provider`);
+  const provider = enumValue(source.provider, new Set<PlanningCalendarSource["provider"]>(["local", "icloud", "hse"]), `planning.sources[${index}].provider`);
   const parsed: PlanningCalendarSource = {
     id: canonicalIdentityValue(source.id, `planning.sources[${index}].id`),
     kind,
@@ -400,17 +400,22 @@ function parsePlanningSource(value: unknown, index: number): PlanningCalendarSou
   if (parsed.kind === "native" && (parsed.id !== "native-planning" || parsed.provider !== "local" || parsed.calendars.length > 0)) {
     throw new PlanningReadError(`planning.sources[${index}] native shape is invalid`, "contract");
   }
-  if (parsed.kind === "external" && parsed.provider !== "icloud") {
+  if (parsed.kind === "external" && parsed.provider === "local") {
     throw new PlanningReadError(`planning.sources[${index}] external provider is invalid`, "contract");
   }
   return parsed;
 }
 
 export function parsePlanningSources(value: unknown): PlanningCalendarSource[] {
-  if (!Array.isArray(value) || value.length > 4) {
+  if (!Array.isArray(value) || value.length > 5) {
     throw new PlanningReadError("planning.sources is invalid", "contract");
   }
-  return value.map((source, index) => parsePlanningSource(source, index));
+  const sources = value.map((source, index) => parsePlanningSource(source, index));
+  const subscriptions = sources.filter((source) => source.provider === "hse").length;
+  if (subscriptions > 1 || sources.length - subscriptions > 4) {
+    throw new PlanningReadError("planning.sources is invalid", "contract");
+  }
+  return sources;
 }
 
 function optionalPlanningSources(value: Record<string, unknown>, label: string): PlanningCalendarSource[] | undefined {

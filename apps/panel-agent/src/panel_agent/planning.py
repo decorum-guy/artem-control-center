@@ -1040,7 +1040,7 @@ class PlanningCalendarSourceCalendar(StrictPlanningModel):
 class PlanningCalendarSource(StrictPlanningModel):
     id: StrictStr = Field(min_length=1, max_length=128)
     kind: Literal["native", "external"]
-    provider: Literal["local", "icloud"]
+    provider: Literal["local", "icloud", "hse"]
     label: StrictStr = Field(min_length=1, max_length=128)
     status: PlanningProviderFreshnessStatus
     errorCode: StrictStr | None = Field(default=None, max_length=128)
@@ -1138,7 +1138,7 @@ class PlanningProjection(StrictPlanningModel):
     tasks: PlanningTaskLists
     calendar: PlanningCalendarLists
     capabilities: PlanningCapabilities
-    providerStatuses: list[PlanningCalendarSource] = Field(max_length=4)
+    providerStatuses: list[PlanningCalendarSource] = Field(max_length=5)
 
     _timestamps = _timestamp_fields("generatedAt", "lastSyncedAt", "staleAfter")
 
@@ -1156,7 +1156,7 @@ class PlanningStatusProjection(StrictPlanningModel):
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
     capabilities: PlanningCapabilities
-    providerStatuses: list[PlanningCalendarSource] = Field(max_length=4)
+    providerStatuses: list[PlanningCalendarSource] = Field(max_length=5)
 
     _timestamps = _timestamp_fields("generatedAt", "lastSyncedAt", "staleAfter")
 
@@ -1169,7 +1169,7 @@ class PlanningReadEnvelope(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
-    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=4)
+    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=5)
     items: list[
         ReminderProjection
         | TaskProjection
@@ -1194,7 +1194,7 @@ class PlanningObjectEnvelope(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
-    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=4)
+    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=5)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
 
@@ -1209,7 +1209,7 @@ class PlanningTaskObjectEnvelope(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
-    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=4)
+    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=5)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
 
@@ -1224,7 +1224,7 @@ class PlanningEventObjectEnvelope(StrictPlanningModel):
     sourceStatus: PlanningSourceStatus
     lastSyncedAt: StrictStr | None = None
     staleAfter: StrictStr | None = None
-    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=4)
+    sources: list[PlanningCalendarSource] | None = Field(default=None, max_length=5)
 
     _timestamps = _timestamp_fields("lastSyncedAt", "staleAfter")
 
