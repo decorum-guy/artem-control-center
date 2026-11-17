@@ -6,6 +6,8 @@
 
 Сначала определить, что пользователь попросил: диагностику, план, код/PR, production fix или physical acceptance. Не интерпретировать разрешение читать SSH как разрешение менять сервер/Windows.
 
+Включить связь с владельцем через Telegram — [RULES.md](../RULES.md) §0: `AGENT.md` из [agent-telegram](https://github.com/decorum-guy/agent-telegram). Нет ключа бота проекта на этом компьютере — попросить его в чате до остальной работы.
+
 Прочитай в таком порядке:
 
 1. `README.md`, `AGENTS.md`, `RULES.md`;
