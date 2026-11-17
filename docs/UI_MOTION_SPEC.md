@@ -260,3 +260,19 @@ A screen/widget is not complete until:
 - no fake progress;
 - fixtures/screenshots work on Mac;
 - hardware-specific behavior has Windows acceptance where required.
+
+## 15. V3 «Кабина» (флаг `VITE_V3_VISUAL_SKIN`)
+
+Решение владельца от 17.11.2026. Полные правила: `docs/design/control-center-v3/DESIGN_SPEC.md`, §8.
+
+- Только в `motion-full`: смена маршрута fade + подъём 8 px за 220 мс; каскад панелей при
+  первом появлении экрана с шагом 40 мс, не больше 6 шагов, один раз; нажатие 100 мс; Sheet
+  и Dialog: сдвиг и fade за 280 мс; смена состояния прибора (кольцо и цвет панели) 400 мс;
+  живая точка пульсирует с периодом 2.4 с только при выполняющемся действии; смена темы
+  300 мс без белой вспышки. Easing везде `cubic-bezier(.2,.8,.2,1)`. Предупреждения не мигают.
+- Бюджет: анимируются только `transform` и `opacity`; пульс свечения через `opacity`
+  псевдоэлемента с готовой тенью; `box-shadow`, `filter`, `background-position` и свойства
+  раскладки не анимируются. `backdrop-filter` не используется (исключение: подложка Sheet в
+  motion-full после замера на Samsung). Вне погоды не больше двух бесконечных анимаций на
+  экране. В reduced, low-performance, battery-saving и при `document.hidden` бесконечные
+  анимации остановлены, свечение статично, информация та же.

@@ -13,6 +13,11 @@ execution surfaces, or changes to canonical Planning semantics.
 
 ## A. Visual thesis
 
+> **Заменено V3 «Кабина»** (решение владельца от 17.11.2026) для вида с флагом
+> `VITE_V3_VISUAL_SKIN`: см. `../control-center-v3/DESIGN_SPEC.md`. Без флага этот раздел
+> остаётся в силе, пока владелец не включит V3 в production-профиль. Геометрия,
+> взаимодействие и хранение раскладки (разделы C–K) действуют и для V3.
+
 Artem Control Center V2 is a quiet instrument panel. Information is organized
 by operational subject, not by a grid of interchangeable cards. A work zone
 has one solid surface; related values and actions are separated by alignment
@@ -31,6 +36,10 @@ The product uses:
   unrelated ambient animation.
 
 ## B. Exact design tokens
+
+> **Заменено V3 «Кабина»** для вида с флагом `VITE_V3_VISUAL_SKIN`: токены, типографика,
+> форма и движение V3 описаны в `../control-center-v3/DESIGN_SPEC.md`. Без флага токены
+> ниже остаются действующими.
 
 ### B1. CSS variables
 
