@@ -16,7 +16,9 @@ function RingFace({ reading, tone, size }: Face & { size: number }) {
   const circle = { cx: center, cy: center, r: radius, fill: "none", strokeWidth: width, pathLength: 100 };
   const dashed = ["stale", "unavailable", "running_too_long"].includes(reading.kind);
   const count = reading.kind === "stages" ? Math.max(1, Math.min(32, Math.trunc(reading.count))) : 1;
-  return <g data-tone={reading.kind === "running_too_long" ? "warning" : tone} transform={`rotate(-90 ${center} ${center})`}>
+  const faceTone = reading.kind === "running_too_long" ? "warning"
+    : reading.kind === "stale" || reading.kind === "unavailable" ? "offline" : tone;
+  return <g data-tone={faceTone} transform={`rotate(-90 ${center} ${center})`}>
     <circle {...circle} className={`cc-gauge-track${dashed ? " cc-gauge-track--dashed" : ""}`}
       strokeDasharray={dashed ? "2 6" : reading.kind === "stages" ? `${80 / count} ${20 / count}` : undefined} />
     {reading.kind === "progress" && Number.isFinite(reading.fraction) && reading.fraction > 0 &&

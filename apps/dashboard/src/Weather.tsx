@@ -1,3 +1,5 @@
+import { Icon } from "./icons";
+import { PageHeader } from "./ui/PageHeader";
 import {
   createContext,
   useCallback,
@@ -26,7 +28,7 @@ import {
   type WeatherSearchResult
 } from "./weatherApi";
 import { Sheet } from "./Sheet";
-import { v2VisualShellEnabled } from "./visualShellConfig";
+import { v2VisualShellEnabled, v3VisualSkinEnabled } from "./visualShellConfig";
 import { composeWeather, phaseTransform, readWeatherPhase, type WeatherPhase } from "./weatherCompositor";
 import { useWeatherMotionState } from "./weatherMotion";
 import { applyWeatherFixture, readWeatherFixtureId } from "./weatherFixtures";
@@ -264,13 +266,17 @@ export function WeatherHeaderSummary({ onOpen }: { onOpen: () => void }) {
   const temperature = forecast && Number.isFinite(forecast.current.temperature)
     ? formatTemperature(forecast.current.temperature)
     : "—°";
+  const location = forecast?.location.title ?? "Погода";
+  const condition = forecast ? weatherLabel(forecast.current.weatherCode) : loading ? "Обновляем прогноз…" : error ?? "Добавьте место";
+  const detail = [location, temperature, condition].join(" · ");
   return (
-    <button className="weather-summary" type="button" onClick={onOpen} aria-label="Открыть погоду">
+    <button className="weather-summary" type="button" onClick={onOpen} aria-label="Открыть погоду" aria-description={v3VisualSkinEnabled ? detail : undefined} title={v3VisualSkinEnabled ? detail : undefined} data-long-label={v3VisualSkinEnabled && (location.length > 22 || condition.length > 28) || undefined}>
+      {v3VisualSkinEnabled && <Icon name="weather" className="cc-header-weather-icon" />}
       <span className="weather-summary__temperature">{temperature}</span>
       <span className="weather-summary__copy">
-        <span className="weather-summary__location">{forecast?.location.title ?? "Погода"}</span>
+        <span className="weather-summary__location">{location}</span>
         <span className="weather-summary__condition">
-          {forecast ? weatherLabel(forecast.current.weatherCode) : loading ? "Обновляем прогноз…" : error ?? "Добавьте место"}
+          {condition}
         </span>
       </span>
     </button>
@@ -789,7 +795,7 @@ function WeatherHeroV2({
     >
       <WeatherCompositorView model={model} phase={phase} />
       <div className="weather-hero__content">
-        <div className="weather-hero__location">
+        <PageHeader composition="div" className="weather-hero__location">
           <div>
             <p className="section-kicker">{preview ? "Предпросмотр · " : ""}{copy("page.weather.title")}</p>
             <h1 title={forecast.location.title}>{forecast.location.title}</h1>
@@ -800,7 +806,7 @@ function WeatherHeroV2({
             <span className={forecast.stale ? "weather-freshness--stale" : ""}>{stateLabel}</span>
             <small>{forecast.sourceMode === "fixture" ? "Локальный тестовый режим" : forecast.timezoneAbbreviation}</small>
           </div>
-        </div>
+        </PageHeader>
 
         <div className="weather-hero__primary">
           <div className="weather-temperature">

@@ -1,0 +1,1538 @@
+[
+  {
+    "name": "overview-night-1280x720",
+    "path": "/overview?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-night-720x1280",
+    "path": "/overview?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-day-1280x720",
+    "path": "/overview?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-day-720x1280",
+    "path": "/overview?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "weather-night-1280x720",
+    "path": "/weather?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "weather-night-720x1280",
+    "path": "/weather?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "weather-day-1280x720",
+    "path": "/weather?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "weather-day-720x1280",
+    "path": "/weather?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-night-1280x720",
+    "path": "/home?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-night-720x1280",
+    "path": "/home?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-day-1280x720",
+    "path": "/home?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-day-720x1280",
+    "path": "/home?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "services-night-1280x720",
+    "path": "/services?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "services-night-720x1280",
+    "path": "/services?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "services-day-1280x720",
+    "path": "/services?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "services-day-720x1280",
+    "path": "/services?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "coffee-diary-night-1280x720",
+    "path": "/coffee-diary?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "coffee-diary-night-720x1280",
+    "path": "/coffee-diary?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "coffee-diary-day-1280x720",
+    "path": "/coffee-diary?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "coffee-diary-day-720x1280",
+    "path": "/coffee-diary?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "calendar-night-1280x720",
+    "path": "/calendar?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "calendar-night-720x1280",
+    "path": "/calendar?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "calendar-day-1280x720",
+    "path": "/calendar?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "calendar-day-720x1280",
+    "path": "/calendar?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "tasks-night-1280x720",
+    "path": "/tasks?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "tasks-night-720x1280",
+    "path": "/tasks?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "tasks-day-1280x720",
+    "path": "/tasks?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "tasks-day-720x1280",
+    "path": "/tasks?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "reminders-night-1280x720",
+    "path": "/reminders?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "reminders-night-720x1280",
+    "path": "/reminders?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "reminders-day-1280x720",
+    "path": "/reminders?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "reminders-day-720x1280",
+    "path": "/reminders?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "backups-night-1280x720",
+    "path": "/backups?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "backups-night-720x1280",
+    "path": "/backups?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "backups-day-1280x720",
+    "path": "/backups?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "backups-day-720x1280",
+    "path": "/backups?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "apps-night-1280x720",
+    "path": "/apps?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "apps-night-720x1280",
+    "path": "/apps?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "apps-day-1280x720",
+    "path": "/apps?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "apps-day-720x1280",
+    "path": "/apps?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "system-night-1280x720",
+    "path": "/system?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/system/update/status",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/system/update/status",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "system-night-720x1280",
+    "path": "/system?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/system/update/status",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/system/update/status",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "system-day-1280x720",
+    "path": "/system?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/system/update/status",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/system/update/status",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "system-day-720x1280",
+    "path": "/system?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/system/update/status",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/system/update/status",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "settings-night-1280x720",
+    "path": "/settings?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "settings-night-720x1280",
+    "path": "/settings?theme=night",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "settings-day-1280x720",
+    "path": "/settings?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "settings-day-720x1280",
+    "path": "/settings?theme=day",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-warming-night-1280x720",
+    "path": "/overview?theme=night&scenario=coffee-warming",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-warming-night-720x1280",
+    "path": "/overview?theme=night&scenario=coffee-warming",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-warming-day-1280x720",
+    "path": "/overview?theme=day&scenario=coffee-warming",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-warming-day-720x1280",
+    "path": "/overview?theme=day&scenario=coffee-warming",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-warming-night-1280x720",
+    "path": "/home?theme=night&scenario=coffee-warming",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-warming-night-720x1280",
+    "path": "/home?theme=night&scenario=coffee-warming",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-warming-day-1280x720",
+    "path": "/home?theme=day&scenario=coffee-warming",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-warming-day-720x1280",
+    "path": "/home?theme=day&scenario=coffee-warming",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-ready-night-1280x720",
+    "path": "/overview?theme=night&scenario=coffee-ready",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-ready-night-720x1280",
+    "path": "/overview?theme=night&scenario=coffee-ready",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-ready-day-1280x720",
+    "path": "/overview?theme=day&scenario=coffee-ready",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-ready-day-720x1280",
+    "path": "/overview?theme=day&scenario=coffee-ready",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-ready-night-1280x720",
+    "path": "/home?theme=night&scenario=coffee-ready",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-ready-night-720x1280",
+    "path": "/home?theme=night&scenario=coffee-ready",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-ready-day-1280x720",
+    "path": "/home?theme=day&scenario=coffee-ready",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-ready-day-720x1280",
+    "path": "/home?theme=day&scenario=coffee-ready",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-running-too-long-night-1280x720",
+    "path": "/overview?theme=night&scenario=coffee-running-too-long",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-running-too-long-night-720x1280",
+    "path": "/overview?theme=night&scenario=coffee-running-too-long",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-running-too-long-day-1280x720",
+    "path": "/overview?theme=day&scenario=coffee-running-too-long",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-coffee-running-too-long-day-720x1280",
+    "path": "/overview?theme=day&scenario=coffee-running-too-long",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-running-too-long-night-1280x720",
+    "path": "/home?theme=night&scenario=coffee-running-too-long",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-running-too-long-night-720x1280",
+    "path": "/home?theme=night&scenario=coffee-running-too-long",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-running-too-long-day-1280x720",
+    "path": "/home?theme=day&scenario=coffee-running-too-long",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-coffee-running-too-long-day-720x1280",
+    "path": "/home?theme=day&scenario=coffee-running-too-long",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-ha-offline-night-1280x720",
+    "path": "/overview?theme=night&scenario=ha-offline",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-ha-offline-night-720x1280",
+    "path": "/overview?theme=night&scenario=ha-offline",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-ha-offline-day-1280x720",
+    "path": "/overview?theme=day&scenario=ha-offline",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "overview-ha-offline-day-720x1280",
+    "path": "/overview?theme=day&scenario=ha-offline",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-ha-offline-night-1280x720",
+    "path": "/home?theme=night&scenario=ha-offline",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-ha-offline-night-720x1280",
+    "path": "/home?theme=night&scenario=ha-offline",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  },
+  {
+    "name": "home-ha-offline-day-1280x720",
+    "path": "/home?theme=day&scenario=ha-offline",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 1280,
+    "clientWidth": 1280,
+    "skin": "v3"
+  },
+  {
+    "name": "home-ha-offline-day-720x1280",
+    "path": "/home?theme=day&scenario=ha-offline",
+    "errors": [
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/avalar/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/system/connectivity/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "HTTP 404 http://127.0.0.1:5173/api/v1/actions/home-assistant/availability",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ],
+    "scrollWidth": 720,
+    "clientWidth": 720,
+    "skin": "v3"
+  }
+]

@@ -1,6 +1,7 @@
 @import "./fonts.css";
 @import "./tokens.css";
 @import "./controls.css";
+@import "./shell.css";
 
 html[data-skin="v3"] { background: var(--cc-canvas); color: var(--cc-text); }
 .app.skin-v3 {

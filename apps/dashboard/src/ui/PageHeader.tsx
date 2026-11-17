@@ -1,4 +1,5 @@
 import type { HTMLAttributes, ReactNode } from "react";
+import { v3VisualSkinEnabled } from "../visualShellConfig";
 
 export type PageHeaderVariant = "default" | "compact";
 
@@ -10,7 +11,20 @@ export type PageHeaderProps = Omit<HTMLAttributes<HTMLElement>, "title"> & {
   variant?: PageHeaderVariant;
 };
 
-export function PageHeader({
+interface ComposedHeader extends HTMLAttributes<HTMLElement> {
+  composition: "header" | "div";
+  children: ReactNode;
+}
+
+export function PageHeader(props: PageHeaderProps | ComposedHeader) {
+  if ("composition" in props) {
+    const { composition: Tag, ...element } = props;
+    return <Tag {...element} data-page-header={v3VisualSkinEnabled ? "composed" : undefined} />;
+  }
+  return <StandardHeader {...props} />;
+}
+
+function StandardHeader({
   eyebrow,
   title,
   description,
@@ -28,6 +42,7 @@ export function PageHeader({
         "v2-route-header",
         className
       ].filter(Boolean).join(" ")}
+      data-page-header={v3VisualSkinEnabled ? variant : undefined}
       data-route-header-variant={variant}
     >
       {eyebrow && <p className="section-kicker">{eyebrow}</p>}

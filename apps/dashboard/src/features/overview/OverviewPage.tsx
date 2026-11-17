@@ -1,3 +1,4 @@
+import { PageHeader } from "../../ui/PageHeader";
 import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import type { CoffeeDelayedStartRecord, DashboardSnapshot, OverviewLayoutDocument, ServiceSnapshot } from "@artem/contracts";
 import type { ShellNavigationTarget } from "../../Shell";
@@ -306,12 +307,12 @@ export function OverviewV2Page({
       onLoadCurrent={() => void loadCurrentServer()}
     />
   ) : (
-    <header className="overview-v2-toolbar" data-testid="overview-toolbar">
+    <PageHeader composition="header" className="overview-v2-toolbar" data-testid="overview-toolbar">
       <div className="overview-v2-toolbar__copy">
         <h1>{copy("page.overview.title")}</h1>
         {copy("page.overview.subtitle") && <p>{copy("page.overview.subtitle")}</p>}
       </div>
-    </header>
+    </PageHeader>
   );
 
   return (
