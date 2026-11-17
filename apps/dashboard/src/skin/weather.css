@@ -1,0 +1,31 @@
+.skin-v3 .weather-page--v2 .weather-hero--v2 {
+  --sky-ink: var(--cc-accent);
+  border-color: color-mix(in srgb, var(--sky-ink) 35%, var(--cc-border));
+  border-radius: var(--cc-radius-zone);
+  box-shadow: inset 0 1px var(--cc-edge-light), var(--cc-panel-shadow);
+}
+.skin-v3 .weather-page--v2 .weather-hero--v2[data-weather-kind="clear"][data-weather-tone$="-day"] { --sky-ink: var(--cc-heat); }
+.skin-v3 .weather-page--v2 .weather-hero--v2:is([data-weather-kind="fog"],[data-weather-kind="cloudy"]) { --sky-ink: var(--cc-text-muted); }
+.skin-v3 .weather-page--v2 .weather-hero--v2[data-weather-kind="storm"] { --sky-ink: var(--cc-uncertain); }
+.skin-v3 .weather-page--v2 .weather-hero--v2[data-weather-kind="snow"] { --sky-ink: var(--cc-text-secondary); }
+.skin-v3 .weather-compositor__field {
+  background: radial-gradient(ellipse at 83% 38%, color-mix(in srgb,var(--sky-ink) 37%,var(--weather-field)), transparent 65%),
+    linear-gradient(108deg, var(--cc-surface-1) 6%, var(--weather-field) 90%);
+}
+.skin-v3 .weather-compositor__field::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-radial-gradient(ellipse at 81% 48%, transparent 0 34px, color-mix(in srgb, var(--sky-ink) 17%, transparent) 35px, transparent 36px 55px);
+}
+.skin-v3 .weather-compositor[data-weather-is-day="false"] .weather-compositor__field { background-color: var(--cc-canvas); }
+.skin-v3 .weather-compositor[data-weather-is-day="true"] .weather-static-layer--sun {
+  background: radial-gradient(circle at 38% 32%, color-mix(in srgb, var(--cc-heat) 68%, var(--cc-surface-1)), var(--cc-heat));
+  box-shadow: 0 0 36px color-mix(in srgb, var(--cc-heat) 20%, transparent);
+}
+.skin-v3 .weather-page--v2 .weather-hero--v2 .weather-temperature strong { font: 300 72px/1 var(--cc-font-family); letter-spacing: -.07em; }
+.skin-v3 .weather-page--v2 :is(.weather-hour time,.weather-metrics span,.weather-context-row span,.weather-day__temperatures,.weather-freshness small) { font-family: var(--cc-font-mono); }
+.skin-v3 .weather-glyph { display: inline-grid; place-items: center; }
+.skin-v3 .weather-glyph svg { width: 32px; height: 32px; }
+.skin-v3 .weather-page--v2 .weather-hero__condition-glyph .weather-glyph { color: var(--sky-ink); }
+.skin-v3 .weather-hour--now { border-radius: var(--cc-radius-control); box-shadow: inset 0 -2px var(--cc-accent); }
+.skin-v3 .weather-day--v2 { border-color: var(--cc-divider); }
+.skin-v3 .weather-rain-chance--active { color: var(--cc-accent); }

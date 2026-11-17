@@ -1,4 +1,4 @@
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { PageHeader } from "./ui/PageHeader";
 import {
   createContext,
@@ -32,7 +32,7 @@ import { v2VisualShellEnabled, v3VisualSkinEnabled } from "./visualShellConfig";
 import { composeWeather, phaseTransform, readWeatherPhase, type WeatherPhase } from "./weatherCompositor";
 import { useWeatherMotionState } from "./weatherMotion";
 import { applyWeatherFixture, readWeatherFixtureId } from "./weatherFixtures";
-import { resolveWeatherHourPhase, weatherKind, weatherLabel, type WeatherGlyphPhase } from "./weatherPresentation";
+import { resolveWeatherHourPhase, weatherKind, weatherLabel, type WeatherGlyphPhase, type WeatherKind } from "./weatherPresentation";
 import { useInterfaceCopy } from "./interfaceCopy";
 import { useInteractionLock } from "./InteractionLock";
 
@@ -54,6 +54,17 @@ interface WeatherContextValue {
 const WeatherContext = createContext<WeatherContextValue | null>(null);
 const ACTIVE_LOCATION_KEY = "artem.weather.active-location";
 
+const weatherIcons: Record<WeatherKind, IconName> = {
+  clear: "sky", partly: "cloud", cloudy: "cloud", fog: "fog", rain: "rain", snow: "snow", storm: "storm", unknown: "info"
+};
+
+function weatherIcon(code: number, phase: WeatherGlyphPhase): IconName {
+  const kind = weatherKind(code);
+  if (kind === "clear" && phase !== "neutral") return phase === "day" ? "sun" : "moon";
+  if (kind === "partly" && phase !== "neutral") return phase === "day" ? "partly-day" : "partly-night";
+  return weatherIcons[kind];
+}
+
 function WeatherGlyph({ code, compact = false, phase }: { code: number; compact?: boolean; phase: WeatherGlyphPhase }) {
   const kind = weatherKind(code);
   const glyph = {
@@ -66,7 +77,11 @@ function WeatherGlyph({ code, compact = false, phase }: { code: number; compact?
     storm: "ϟ",
     unknown: "·"
   }[kind];
-  return <span className={`weather-glyph weather-glyph--${kind} ${compact ? "weather-glyph--compact" : ""}`} data-weather-phase={phase} aria-hidden="true">{glyph}</span>;
+  const icon = v3VisualSkinEnabled ? weatherIcon(code, phase) : undefined;
+  return <span className={`weather-glyph weather-glyph--${kind} ${compact ? "weather-glyph--compact" : ""}`}
+    data-weather-phase={phase} data-condition-icon={icon} aria-hidden="true">
+    {icon ? <Icon name={icon} size={32} /> : glyph}
+  </span>;
 }
 
 function formatTemperature(value: number): string {

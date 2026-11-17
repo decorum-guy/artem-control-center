@@ -28,6 +28,7 @@ export type IconName =
   | "performance"
   | "menu" | "chevron-down" | "chevron-right" | "chevron-left"
   | "warning" | "info" | "signal" | "archive" | "apps" | "thermometer"
+  | "sun" | "moon" | "sky" | "partly-day" | "partly-night" | "cloud" | "fog" | "rain" | "snow" | "storm"
   | "volume" | "brightness" | "drop" | "bin" | "edit" | "backspace";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
@@ -36,7 +37,20 @@ type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   label?: string;
 };
 
+const cloudOutline = <path d="M6.2 18.3a4 4 0 0 1-.7-7.9 6.1 6.1 0 0 1 11.7-1.2 4.6 4.6 0 1 1 .4 9.1Z" />;
+const smallCloud = <path d="M8 19a3.5 3.5 0 0 1 .2-7 4.6 4.6 0 0 1 8.7-.6A3.8 3.8 0 1 1 18 19Z" />;
+
 const iconPaths: Record<IconName, ReactNode> = {
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2" /></>,
+  moon: <path d="M20.7 14.5A8.6 8.6 0 0 1 9.5 3.3a8.8 8.8 0 1 0 11.2 11.2Z" />,
+  sky: <><circle cx="12" cy="12" r="6"/><path d="M3 20h18" /></>,
+  "partly-day": <><path d="M4.2 12a4 4 0 0 1 6-5M4.2 4.2 3 3m4.6 1V2m5 4 1.5-1.5M2 9h1.6" />{smallCloud}</>,
+  "partly-night": <><path d="M7 13a5.6 5.6 0 0 1 .4-10 4.8 4.8 0 0 0 5.9 5.7" />{smallCloud}</>,
+  cloud: cloudOutline,
+  fog: <><path d="M3 10h10m3 0h5M6 6h12M3 14h5m3 0h10M6 18h12" /></>,
+  rain: <><g transform="translate(0 -4)">{smallCloud}</g><path d="m7 18-1 2m6-3-1 3m6-2-1 2" /></>,
+  snow: <><path d="M12 2v20M3.3 7l17.4 10m0-10L3.3 17M9.5 4.5 12 7l2.5-2.5m-5 15L12 17l2.5 2.5M4.2 10.1l3.5-1-.9-3.4m10.4 12.7-.9-3.5 3.5-1m-2.6-8.2-.9 3.4 3.5 1M4.2 13.9l3.5 1-.9 3.5" /></>,
+  storm: <><g transform="translate(0 -4)">{smallCloud}</g><path d="m13.5 13-4 5h3l-2 4 6-6h-4Z" /></>,
   menu: <path d="M3 6h18M3 12h13M3 18h18" />,
   "chevron-down": <path d="m6 9 6 6 6-6" />,
   "chevron-right": <path d="m9 5 7 7-7 7" />,
