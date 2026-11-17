@@ -3,6 +3,25 @@ import { expect, test } from "@playwright/test";
 test.skip(process.env.VITE_V2_VISUAL_SHELL !== "true" || process.env.VITE_V3_VISUAL_SKIN !== "true",
   "Jarvis artwork and image variants belong to the Cabin profile.");
 
+for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
+  test(`climate labels and availability fit the Overview tile at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.route("**/api/v1/actions/home-assistant/availability", route => route.fulfill({ status: 503, json: {} }));
+    await page.goto("/overview?scenario=coffee-ready&motion=reduced");
+    const climate = page.locator(".climate-control").first();
+    const note = climate.locator(".climate-control__api-note");
+    await expect(note).toBeVisible();
+    const selectors = climate.locator(".cc-select");
+    await expect(selectors).toHaveCount(2);
+    await expect(selectors.first()).toHaveAccessibleName(/Режим кондиционера/);
+    await expect.poll(() => climate.evaluate(tile => {
+      const fields = Array.from(tile.querySelectorAll(".cc-select"));
+      const noteTop = tile.querySelector(".climate-control__api-note")!.getBoundingClientRect().top;
+      return noteTop - Math.max(...fields.map(field => field.getBoundingClientRect().bottom));
+    })).toBeGreaterThanOrEqual(4);
+  });
+}
+
 test("Jarvis renders all states, stays quiet at rest and loads size-appropriate artwork", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("artem-control-center.jarvis-visible", "true"));
   await page.goto("/home?motion=reduced");

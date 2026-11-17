@@ -31,6 +31,9 @@ html[data-skin="v3"] .jarvis-icon-button, html[data-skin="v3"] .jarvis-voice-hud
 html[data-skin="v3"] .jarvis-panel__header > div:first-child { min-width: 0; }
 html[data-skin="v3"] .cc-orb-gallery { display: flex; flex-wrap: wrap; gap: 12px; }
 html[data-skin="v3"] .cc-orb-gallery * { animation: none !important; }
+/* The Cabin select carries its own visible label. Keep one label row so the
+   availability note has room in a compact Overview tile. */
+html[data-skin="v3"] .climate-control__select-label > span:first-child { display: none; }
 /* Device progress has a persistent label and gauge. A cluster of concurrent
    commands can acknowledge its start without keeping several layers spinning. */
 html[data-skin="v3"] :is(.coffee-activity i, .climate-control__pending-icon,

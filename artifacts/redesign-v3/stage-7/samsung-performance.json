@@ -51,16 +51,16 @@
     }
   },
   "preview": {
-    "input": "Stage 7 working tree on 542adce, VITE_V3_VISUAL_SKIN=true, npm run build:production, fixture backend via SSH loopback",
+    "input": "Stage 7 working tree on 829af00 with compact climate field correction, VITE_V3_VISUAL_SKIN=true, npm run build:production, fixture backend via SSH loopback",
     "measurement": {
       "edge": "157.0.4341.60",
-      "timeUTC": "2026-11-17T21:54:34.959369+00:00",
+      "timeUTC": "2026-11-17T22:26:27.691723+00:00",
       "routes": {
         "overview": {
           "skin": "v3",
           "frames": 120,
           "p50_ms": 16.7,
-          "p95_ms": 16.8,
+          "p95_ms": 16.7,
           "above33ms": 0,
           "activeInfinite": 0,
           "width": 1280,
@@ -70,7 +70,7 @@
           "skin": "v3",
           "frames": 120,
           "p50_ms": 16.7,
-          "p95_ms": 16.8,
+          "p95_ms": 16.7,
           "above33ms": 0,
           "activeInfinite": 1,
           "width": 1280,
@@ -80,7 +80,7 @@
           "skin": "v3",
           "frames": 120,
           "p50_ms": 16.7,
-          "p95_ms": 16.8,
+          "p95_ms": 16.7,
           "above33ms": 0,
           "activeInfinite": 0,
           "width": 1280,
@@ -90,7 +90,7 @@
           "skin": "v3",
           "frames": 120,
           "p50_ms": 16.7,
-          "p95_ms": 16.8,
+          "p95_ms": 16.7,
           "above33ms": 0,
           "activeInfinite": 0,
           "width": 1280,
