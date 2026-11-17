@@ -1,0 +1,108 @@
+html[data-skin="v3"] [data-tone="accent"] { --cc-tone: var(--cc-accent); }
+html[data-skin="v3"] [data-tone="success"] { --cc-tone: var(--cc-success); }
+html[data-skin="v3"] [data-tone="warning"] { --cc-tone: var(--cc-warning); }
+html[data-skin="v3"] [data-tone="heat"] { --cc-tone: var(--cc-heat); }
+html[data-skin="v3"] [data-tone="danger"] { --cc-tone: var(--cc-danger); }
+html[data-skin="v3"] [data-tone="stale"] { --cc-tone: var(--cc-stale); }
+html[data-skin="v3"] [data-tone="offline"] { --cc-tone: var(--cc-offline); }
+html[data-skin="v3"] [data-tone="unavailable"] { --cc-tone: var(--cc-unavailable); }
+html[data-skin="v3"] [data-tone="uncertain"] { --cc-tone: var(--cc-uncertain); }
+html[data-skin="v3"] [data-tone="neutral"] { --cc-tone: var(--cc-text-secondary); }
+
+html[data-skin="v3"] :is(.cc-button, .cc-select, .cc-switch, .cc-segmented button, .cc-select-options button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 20px;
+  border: 1px solid var(--cc-border-strong);
+  border-radius: var(--cc-radius-control);
+  background: var(--cc-interactive);
+  color: var(--cc-text);
+  font: 600 15px/20px var(--cc-font-family);
+  cursor: pointer;
+}
+html[data-skin="v3"] .cc-button { position: relative; }
+html[data-skin="v3"] .cc-button[data-size="56"] { min-height: 56px; padding-inline: 24px; }
+html[data-skin="v3"] .cc-button[data-variant="primary"] { background: var(--cc-accent); color: var(--cc-on-accent); box-shadow: var(--cc-glow-accent); border-color: transparent; }
+html[data-skin="v3"] .cc-button[data-variant="ghost"] { background: transparent; border-color: transparent; }
+html[data-skin="v3"] .cc-button[data-variant="danger"] { background: var(--cc-danger-bg); color: var(--cc-danger); border-color: var(--cc-danger-border); }
+html[data-skin="v3"] .cc-button:not(:disabled):hover { background: var(--cc-hover); }
+html[data-skin="v3"] .cc-button[data-variant="primary"]:not(:disabled):hover { background: var(--cc-accent-strong); }
+html[data-skin="v3"][data-motion="full"] .cc-button { transition: transform var(--cc-motion-press) var(--cc-motion-ease); }
+html[data-skin="v3"][data-motion="full"] .cc-button:not(:disabled):active { transform: scale(.98); }
+html[data-skin="v3"][data-motion="full"] .cc-button:not(:disabled):active::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; border: 1px solid var(--cc-focus); animation: cc-skin-flash 100ms var(--cc-motion-ease); }
+@keyframes cc-skin-flash { 0%, 100% { opacity: 0; } 50% { opacity: .35; } }
+html[data-skin="v3"] :is(.cc-button, .cc-select, .cc-switch, .cc-select-options button, .cc-segmented button):disabled,
+html[data-skin="v3"] .cc-slider[aria-disabled="true"] {
+  background-color: var(--cc-surface-2); color: var(--cc-text-disabled); box-shadow: none; opacity: 1; cursor: default;
+}
+html[data-skin="v3"] .cc-status-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 10px; font: 600 13px/18px var(--cc-font-family); color: var(--cc-tone); border: 1px solid color-mix(in srgb, var(--cc-tone) 35%, transparent); background: color-mix(in srgb, var(--cc-tone) 12%, var(--cc-surface-1)); }
+html[data-skin="v3"] :is(.cc-status-dot, .cc-live-dot) { position: relative; width: 8px; height: 8px; flex: none; border-radius: 50%; background: currentColor; }
+html[data-skin="v3"] .cc-status-chip:is([data-tone="accent"], [data-tone="success"]) .cc-status-dot { box-shadow: 0 0 8px currentColor; }
+html[data-skin="v3"][data-motion="full"] :is(.cc-live-dot, .cc-status-chip[data-running="true"] .cc-status-dot)::after {
+  content: ""; position: absolute; inset: -2px; border: 1px solid currentColor; border-radius: 50%; animation: cc-skin-pulse 2.4s ease-in-out infinite;
+}
+@keyframes cc-skin-pulse { 0%, 100% { opacity: .16; } 50% { opacity: .8; } }
+
+html[data-skin="v3"] .cc-select, html[data-skin="v3"] .cc-switch { width: 100%; min-height: 56px; justify-content: space-between; padding: 6px 14px; text-align: left; }
+html[data-skin="v3"] .cc-select[data-compact="true"] { min-height: 48px; }
+html[data-skin="v3"] .cc-select > span { display: grid; min-width: 0; }
+html[data-skin="v3"] .cc-select small { font-size: 12px; font-weight: 450; color: var(--cc-text-muted); }
+html[data-skin="v3"] .cc-select-options { display: grid; gap: 6px; padding: 3px; }
+html[data-skin="v3"] .cc-select-options button { min-height: 56px; justify-content: flex-start; text-align: left; }
+html[data-skin="v3"] .cc-select-options i { width: 18px; height: 18px; border: 1px solid currentColor; border-radius: 50%; }
+html[data-skin="v3"] .cc-select-options [aria-selected="true"] i { background: radial-gradient(circle, currentColor 4px, transparent 5px); }
+html[data-skin="v3"] .cc-select-options [aria-selected="true"], html[data-skin="v3"] .cc-segmented [aria-checked="true"] { color: var(--cc-accent); border-color: var(--cc-selected-border); background: var(--cc-selected-bg); }
+html[data-skin="v3"] .cc-segmented { display: flex; padding: 2px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-control); background: var(--cc-interactive); }
+html[data-skin="v3"] .cc-segmented button { flex: 1; padding-inline: 8px; background: transparent; border-color: transparent; }
+html[data-skin="v3"] .cc-switch i { display: flex; align-items: center; padding: 2px; width: 44px; height: 26px; border: 1px solid var(--cc-text-muted); border-radius: 13px; }
+html[data-skin="v3"] .cc-switch i::before { content: ""; width: 20px; height: 20px; background: var(--cc-text-secondary); border-radius: 50%; }
+html[data-skin="v3"] .cc-switch[aria-checked="true"] i { background: var(--cc-accent); border-color: var(--cc-accent); box-shadow: var(--cc-glow-accent); }
+html[data-skin="v3"] .cc-switch[aria-checked="true"] i::before { background: var(--cc-on-accent); transform: translateX(17px); }
+html[data-skin="v3"][data-motion="full"] .cc-switch i::before { transition: transform 160ms var(--cc-motion-ease); }
+html[data-skin="v3"] .cc-slider-field { min-width: 0; --cc-slider-color: var(--cc-accent); }
+html[data-skin="v3"] .cc-slider-field[data-heat="true"] { --cc-slider-color: var(--cc-heat); }
+html[data-skin="v3"] .cc-slider-copy { display: flex; justify-content: space-between; gap: 8px; }
+html[data-skin="v3"] .cc-slider-copy output { font-family: var(--cc-font-mono); color: var(--cc-slider-color); }
+html[data-skin="v3"] .cc-slider { display: flex; align-items: center; min-height: 48px; padding-inline: 12px; touch-action: none; cursor: pointer; border-radius: var(--cc-radius-control); }
+html[data-skin="v3"] .cc-slider-track { position: relative; width: 100%; height: 4px; border-radius: 4px; background: linear-gradient(to right, var(--cc-slider-color) var(--cc-fill), var(--cc-border-strong) var(--cc-fill)); }
+html[data-skin="v3"] .cc-slider-track i { position: absolute; left: var(--cc-fill); top: 50%; transform: translate(-50%,-50%); width: 24px; height: 24px; border: 4px solid var(--cc-slider-color); border-radius: 50%; background: var(--cc-surface-1); }
+html[data-skin="v3"] .cc-stepper { display: inline-flex; gap: 8px; align-items: center; }
+html[data-skin="v3"] .cc-stepper button { width: 48px; padding: 0; }
+html[data-skin="v3"] .cc-stepper output { font: 400 28px/32px var(--cc-font-family); font-variant-numeric: tabular-nums; min-width: 2.7em; text-align: center; }
+html[data-skin="v3"] .cc-stepper small { font: 13px var(--cc-font-mono); margin-inline-start: 3px; }
+
+html[data-skin="v3"] .cc-gauge { display: inline-grid; place-items: center; position: relative; }
+html[data-skin="v3"] .cc-gauge > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+html[data-skin="v3"] .cc-gauge-center { display: grid; justify-items: center; font-variant-numeric: tabular-nums; }
+html[data-skin="v3"] .cc-gauge-track { stroke: var(--cc-divider); }
+html[data-skin="v3"] .cc-gauge-track--dashed { stroke: var(--cc-tone); }
+html[data-skin="v3"] .cc-gauge-value { stroke: var(--cc-tone); }
+html[data-skin="v3"] .cc-gauge-old { opacity: 0; }
+html[data-skin="v3"][data-motion="full"] .cc-gauge-new { animation: cc-skin-appear 400ms var(--cc-motion-ease); }
+html[data-skin="v3"][data-motion="full"] .cc-gauge-old { animation: cc-skin-appear 400ms var(--cc-motion-ease) reverse; }
+@keyframes cc-skin-appear { from { opacity: 0; } to { opacity: 1; } }
+html[data-skin="v3"] .cc-empty-state { display: grid; align-content: center; justify-items: center; text-align: center; gap: 6px; padding: 16px; min-height: 160px; }
+html[data-skin="v3"] .cc-empty-state > svg, html[data-skin="v3"] .cc-empty-state small { color: var(--cc-text-muted); }
+html[data-skin="v3"] .cc-empty-state small { font: 11px/16px var(--cc-font-mono); text-transform: uppercase; letter-spacing: .12em; }
+html[data-skin="v3"] .cc-empty-state strong { font-size: 17px; line-height: 22px; }
+html[data-skin="v3"] .cc-empty-state p { margin: 0; }
+html[data-skin="v3"] .cc-error-state { border: 1px solid var(--cc-danger-border); border-radius: var(--cc-radius-surface); }
+html[data-skin="v3"] .cc-error-state svg { color: var(--cc-danger); }
+html[data-skin="v3"] .cc-skeleton { display: block; position: relative; overflow: hidden; min-height: 18px; border: 1px solid var(--cc-divider); border-radius: 6px; background: var(--cc-surface-2); }
+html[data-skin="v3"][data-motion="full"] .cc-skeleton::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--cc-edge-light), transparent); animation: cc-skin-shimmer 1.6s var(--cc-motion-ease) 2 both; }
+@keyframes cc-skin-shimmer { from { transform: translateX(-105%); } to { transform: translateX(105%); } }
+html[data-skin="v3"] .cc-emblem { color: var(--cc-accent); flex: none; }
+.skin-v3 .cc-boot { display: grid; min-height: 100dvh; grid-template: 64px 1fr / 176px 1fr; }
+.skin-v3 .cc-boot-rail { grid-area: 1/1/3/2; display: grid; align-content: start; gap: 16px; padding: 24px 12px; background: var(--cc-rail); }
+.skin-v3 .cc-boot-header { grid-area: 1/2; padding: 12px 20px; }
+.skin-v3 .cc-boot-header .cc-skeleton { height: 40px; }
+.skin-v3 .cc-boot-center { grid-area: 2/2; align-self: center; justify-self: center; display: grid; justify-items: center; gap: 12px; }
+.skin-v3 .cc-gallery .cc-boot { min-height: 220px; grid-template-columns: 52px 1fr; grid-template-rows: 28px 1fr; }
+@media (orientation: portrait) {
+  .skin-v3 .cc-boot { grid-template-columns: 0 1fr; }
+  .skin-v3 .cc-boot-rail { display: none; }
+}

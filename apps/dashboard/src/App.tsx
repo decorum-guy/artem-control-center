@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
 import type { CoffeeDelayedStartRecord, DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import {
@@ -27,7 +27,7 @@ import { useActionConfirmation } from "./ActionConfirmations";
 import { ConnectivityRecoverySurface } from "./ConnectivityActions";
 import { WeatherPage } from "./Weather";
 import { B0NoticeFixture, GlobalNoticeRegion, useNoticeCenter } from "./NoticeCenter";
-import { v2VisualShellEnabled } from "./visualShellConfig";
+import { v2VisualShellEnabled, v3VisualSkinEnabled } from "./visualShellConfig";
 import { overviewV2Enabled } from "./overviewConfig";
 import { OverviewV2Page } from "./features/overview/OverviewPage";
 import { HomeV2Page } from "./features/home/HomeV2Page";
@@ -39,6 +39,8 @@ import { CoffeeDiaryPage } from "./CoffeeDiaryPage";
 import { useDeviceVisibility } from "./DeviceVisibility";
 import { visiblePresentationSnapshot } from "./deviceVisibilityPresentation";
 import { JarvisOverlay } from "./JarvisOverlay";
+
+const SkinGallery = import.meta.env.DEV ? lazy(() => import("./ui/SkinGallery")) : null;
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -202,6 +204,20 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.motion = motion;
   }, [motion]);
+
+  useEffect(() => {
+    if (!v3VisualSkinEnabled) return;
+    const root = document.documentElement;
+    root.dataset.skin = "v3";
+    const visibility = () => { root.toggleAttribute("data-page-hidden", document.hidden); };
+    visibility();
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      root.removeAttribute("data-page-hidden");
+      delete root.dataset.skin;
+    };
+  }, []);
 
   const changeJarvisVisibility = useCallback((visible: boolean) => {
     setJarvisVisible(visible);
@@ -398,6 +414,7 @@ export function App() {
     `theme-${theme}`,
     `motion-${motion}`,
     v2VisualShellEnabled ? "v2-shell-enabled" : "",
+    v3VisualSkinEnabled ? "skin-v3" : "",
     kiosk ? "simulated-kiosk" : ""
   ].filter(Boolean).join(" ");
   const v2DensityRoute = v2VisualShellEnabled && ["/home", "/services", "/system"].includes(route);
@@ -454,6 +471,8 @@ export function App() {
             {snapshot?.mode ?? "loading"}
           </span>
         </nav>
+
+        {v3VisualSkinEnabled && SkinGallery && <Suspense fallback={null}><SkinGallery /></Suspense>}
 
         {devSettingsOpen && (
           <aside className="dev-settings" data-testid="settings-panel">
