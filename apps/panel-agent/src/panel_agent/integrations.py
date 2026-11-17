@@ -13,6 +13,7 @@ from .project_monitor import DeclarativeProjectMonitor
 from .project_registry import ProjectRegistry, load_project_registry
 from .project_registry_migration import CANONICAL_AVALAR_SERVICE_IDS
 from .planning import PlanningProjection
+from .hse_calendar import HseCalendar
 from .planning_adapter import PlanningAdapter
 from .planning_fixtures import PlanningFixtureTransport, fixture_reference_datetime
 from .rog_g703_power import RogG703Device
@@ -73,6 +74,8 @@ class IntegrationRuntime:
             settings,
             transport=planning_transport,
             wall_clock=planning_wall_clock,
+            subscription=HseCalendar(settings.panel_hse_calendar_feed_id)
+            if mode == "production" and settings.panel_hse_calendar_feed_id else None,
         )
 
     def set_snapshot_callback(

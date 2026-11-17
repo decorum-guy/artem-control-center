@@ -231,7 +231,7 @@ function PlanningHealthAction({
   const detail = planningHealthDetail(health);
   const problems = planning ? planningHealthProblems(planning) : [];
   const sourceCouldNotBeDetermined = Boolean(planning) && problems.length === 0;
-  const canOpenCalendar = problems.some((problem) => problem.provider === "calendar" || (problem.kind === "external" && problem.provider === "icloud"));
+  const canOpenCalendar = problems.some((problem) => problem.provider === "calendar" || problem.kind === "external");
   return (
     <>
       <button
