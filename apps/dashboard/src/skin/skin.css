@@ -5,6 +5,7 @@
 @import "./instruments.css";
 @import "./weather.css";
 @import "./operations.css";
+@import "./planning.css";
 
 html[data-skin="v3"] { background: var(--cc-canvas); color: var(--cc-text); }
 .app.skin-v3 {

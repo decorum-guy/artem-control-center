@@ -1,0 +1,34 @@
+.skin-v3 .calendar-month { isolation: isolate; }
+.skin-v3 .calendar-month-cell {
+  position: relative; border-radius: var(--cc-radius-control); border-color: var(--cc-divider);
+  background: linear-gradient(145deg,var(--cc-surface-2),var(--cc-surface-1));
+}
+.skin-v3 .calendar-month-cell[aria-selected="true"] {
+  border-color: var(--cc-accent); box-shadow: inset 0 -3px var(--cc-accent);
+  background: linear-gradient(150deg, var(--cc-selected-bg), var(--cc-surface-1));
+}
+.skin-v3 .calendar-month-cell__date { font: 500 15px/1.3 var(--cc-font-mono); }
+.skin-v3 .calendar-month-cell[data-current="true"] .calendar-month-cell__date { color: var(--cc-accent); }
+.skin-v3 .calendar-selected-day__heading { border-bottom: 1px solid var(--cc-divider); padding-bottom: 12px; }
+.skin-v3 .calendar-event-row__time, .skin-v3 .planning-route-row__eyebrow, .skin-v3 .calendar-detail__time,
+.skin-v3 .planning-priority, .skin-v3 .calendar-badge { font-family: var(--cc-font-mono); font-variant-numeric: tabular-nums; }
+.skin-v3 .calendar-event-row { border-inline-start: 3px solid var(--calendar-event-accent); }
+.skin-v3 .calendar-event-row[data-sync-state="stale"] { border-inline-start-style: dashed; }
+.skin-v3 :is(.planning-task-row,.planning-reminder-row) { background: linear-gradient(105deg,var(--cc-surface-2),var(--cc-surface-1)); border: 1px solid var(--cc-divider); border-radius: var(--cc-radius-control); }
+.skin-v3 .planning-route-row__main { min-width: 0; overflow-wrap: anywhere; }
+.skin-v3 .planning-segmented button[aria-pressed="true"] { background: var(--cc-selected-bg); box-shadow: inset 0 -2px var(--cc-accent); }
+.skin-v3 :is(.coffee-diary-empty,.coffee-diary-detail,.coffee-diary-list) {
+  border: 1px solid var(--cc-border); border-radius: var(--cc-radius-zone); background: var(--cc-glass);
+}
+.skin-v3 .coffee-diary-empty { max-width: 48rem; padding: clamp(24px, 4vw, 48px); }
+.skin-v3 .coffee-diary-empty__cup {
+  display: grid; place-items: center; width: 66px; height: 66px; margin-bottom: 14px; color: var(--cc-heat);
+  background: radial-gradient(circle at 30% 25%, color-mix(in srgb,var(--cc-heat) 16%,var(--cc-surface-1)),var(--cc-surface-1));
+  border: 1px solid color-mix(in srgb, var(--cc-heat) 35%, var(--cc-border)); border-radius: var(--cc-radius-surface);
+}
+.skin-v3 .coffee-diary-empty h2 { font: 500 28px/1.15 var(--cc-font-family); letter-spacing: -.03em; }
+.skin-v3 .settings-system-control-row > .cc-slider-field { grid-column: 1 / -1; width: 100%; }
+.skin-v3 .settings-system-control-row > small { color: var(--cc-text-secondary); }
+.skin-v3 .settings-v2-page :is(h2,h3) { letter-spacing: -.025em; }
+html[data-skin="v3"] .cc-overlay .cc-select { max-width: 100%; }
+html[data-skin="v3"] .cc-select strong { white-space: normal; overflow-wrap: anywhere; text-align: start; }
