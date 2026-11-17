@@ -67,7 +67,10 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
 
 Не сделано на этапе 0 (переходит к следующему исполнителю):
 
-- `docs/design/control-center-v3/DESIGN_SPEC.md` не написан.
+- `docs/design/control-center-v3/DESIGN_SPEC.md` — только черновик: готовы разделы 1–6 и 8
+  (характер, включение, токены с расчётом контраста, фон, поверхности, типографика,
+  движение и бюджет). Не дописаны §7 (точные размеры и состояния компонентов) и §9
+  (12 экранов × 1280×720 и 720×1280).
 - Не обновлены `docs/DESIGN_DIRECTION.md`, `docs/UI_MOTION_SPEC.md`, ссылка в `AGENTS.md`,
   пометки «заменено» в разделах A и B V2 `DESIGN_SPEC.md`.
 - Скриншоты «до» глазами не просмотрены. Наблюдение из `report.json`: на каждом маршруте
@@ -91,7 +94,8 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
   3 в `HomeAssistantMaintenance.css`. Маршрутов 12: overview, weather, home, services,
   coffee-diary, calendar, tasks, reminders, backups, apps, system, settings. Иконки уже есть
   в `apps/dashboard/src/icons.tsx` (`IconName`, `Icon`).
-- [ ] `DESIGN_SPEC.md`: нормативная спецификация. Развернуть раздел 3 задания до точных
+- [~] `DESIGN_SPEC.md`: черновик есть (§1–6, §8; контраст рассчитан `tools/contrast.mjs`).
+  Дописать §7 и §9, снять пометку «черновик». Полное требование: развернуть раздел 3 задания до точных
   токенов (ночь/день, color-mix для статусов, glow-формулы), расчёта контраста (текст ≥4.5:1,
   линии и иконки ≥3:1) с таблицей значений, типографики (Manrope / JetBrains Mono, размеры),
   поверхностей (3 уровня, радиусы, HUD-скобки), состояний каждого примитива из 3.5,
@@ -188,6 +192,13 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
    порядок фокуса). Различия вида (например, заголовок Календаря справа) выравниваются
    CSS-правилами под `skin-v3`, без перестановки DOM.
 
+7. Стартовые значения токенов, не прошедшие контраст, заменены ближайшими подходящими
+   (смешение к белому ночью и к чёрному днём до 4.6:1, `tools/contrast.mjs`). Ночь:
+   `text-muted` `#7385a0` → `#8494ab`, `unavailable` `#8e8698` → `#9790a0`. День:
+   `text-muted` → `#5b6b83`, `accent` → `#00719c`, `heat` → `#9b5900`, `success` →
+   `#0c7853`, `warning` → `#945e00`, `danger` → `#c13148`. Обоснование в DESIGN_SPEC §3–4.
+   Глазами на скриншотах ещё не проверено.
+
 ## 7. Открытые вопросы и решения, нужные от владельца
 
 1. Включение V3 в production-профиль `accepted-v2`: только после приёмки на Samsung.
@@ -214,4 +225,5 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
 ## 9. Журнал
 
 - 2026-11-17, сессия 1 (Windows, DESKTOP-GE7IVII): preflight, окружение, скриншоты «до»,
-  ROADMAP, TASK.md, инструменты. Остановлено по отсечке владельца 15:58. Кода нет.
+  ROADMAP, TASK.md, инструменты, расчёт контраста, черновик DESIGN_SPEC. Draft PR #331
+  (этап 0 → `main`). Остановлено по отсечке владельца 15:58. Продуктового кода нет.
