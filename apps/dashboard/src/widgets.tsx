@@ -1,3 +1,5 @@
+import { v3VisualSkinEnabled } from "./visualShellConfig";
+import { RingGauge, type RingReading } from "./ui/RingGauge";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type {
   CoffeeData,
@@ -240,6 +242,12 @@ export function CoffeeWidget({
   const presentationStage = editorPreview?.stage ?? view.stage;
   const presentationLabel = editorPreview?.label ?? view.label;
   const presentationProgress = editorPreview ? null : view.progress;
+  let coffeeReading: RingReading = { kind: "idle" };
+  if (presentationStage === "stale" || presentationStage === "unavailable" || presentationStage === "running_too_long") {
+    coffeeReading = { kind: presentationStage };
+  } else if (presentationProgress !== null && (presentationStage === "warming" || presentationStage === "ready")) {
+    coffeeReading = { kind: "progress", fraction: presentationProgress };
+  }
   const duration = formatDuration(view.runningSeconds);
   const remaining = formatDuration(view.remainingSeconds);
   const warming = presentationStage === "warming" && presentationProgress !== null;
@@ -450,6 +458,12 @@ export function CoffeeWidget({
       </div>
 
       <div className="coffee-asset" data-fit={manifest.visualAsset?.fit ?? "contain"} data-image-visible={appearance.showImage}>
+        {v3VisualSkinEnabled && appearance.showImage && (
+          <span className="cc-coffee-dial">
+            <RingGauge reading={coffeeReading} tone={presentationStage === "ready" ? "success" : "heat"}
+              size={148} label={presentationProgress !== null ? `${presentationLabel} · ${view.progressText}` : presentationLabel} />
+          </span>
+        )}
         {coffeeVisual}
         {coffeeActivity}
       </div>

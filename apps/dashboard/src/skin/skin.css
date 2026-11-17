@@ -2,6 +2,7 @@
 @import "./tokens.css";
 @import "./controls.css";
 @import "./shell.css";
+@import "./instruments.css";
 
 html[data-skin="v3"] { background: var(--cc-canvas); color: var(--cc-text); }
 .app.skin-v3 {
