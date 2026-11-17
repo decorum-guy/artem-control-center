@@ -43,6 +43,7 @@ When enabled, all connection values are server-side settings and are required:
 | `PANEL_PLANNING_MAX_BACKOFF_SECONDS` | `120` | bounded failure backoff |
 | `PANEL_PLANNING_CACHE_PATH` | `.cache/planning-snapshot.json` | server-only cache path |
 | `PANEL_PLANNING_RESPONSE_LIMIT_BYTES` | `262144` | hard upstream response cap |
+| `PANEL_HSE_CALENDAR_FEED_ID` | empty | optional private RUZ subscription identifier in protected production runtime.env. The panel reads the fixed HSE HTTPS endpoint every ten minutes. The subscription has its own freshness and read-only event identity. iCloud calendars use their existing Planning source. |
 | `PANEL_PLANNING_TIMEZONE` | `Europe/Moscow` | deterministic local-day query timezone |
 | `PANEL_PLANNING_FIXTURE_SCENARIO` | `healthy` | fixture-mode scenario only |
 
