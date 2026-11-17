@@ -1,3 +1,4 @@
+import { JarvisOrb, type OrbState } from "./JarvisOrb";
 import { useState } from "react";
 import { Icon } from "../icons";
 import { Button, Segmented, Select, Slider, StatusChip, Stepper, Switch, type Tone } from "./Controls";
@@ -5,6 +6,10 @@ import { PageHeader } from "./PageHeader";
 import { RingGauge, type RingReading } from "./RingGauge";
 import { BootScreen, EmptyState, ErrorState, Skeleton } from "./States";
 
+const orbStates: [OrbState, string][] = [
+  ["idle","Ожидает"], ["listening","Слушает"], ["transcribing","Распознаёт"], ["submitting","Отправляет"],
+  ["processing","Обрабатывает"], ["speaking","Говорит"], ["ready","Готово"], ["error","Ошибка"]
+];
 const themes = [{ value: "night", label: "Ночь" }, { value: "day", label: "День" }];
 const sourceOptions = [{ value: "auto", label: "Автоматически" }, { value: "quiet", label: "Тихий" }, { value: "manual", label: "Ручной" }];
 const statusLabels: [Tone, string][] = [
@@ -45,6 +50,8 @@ export default function SkinGallery() {
       <section><h2>Приборы</h2><div className="cc-gallery-row">{readings.map(([reading, label], i) =>
         <figure key={reading.kind}><RingGauge size={i === 0 ? 148 : i === 1 ? 96 : 64} tone="heat" reading={reading} label={label}>
           {reading.kind === "progress" ? "64 %" : <Icon name="coffee" />}</RingGauge><figcaption>{label}</figcaption></figure>)}</div></section>
+      <section><h2>Jarvis</h2><div className="cc-orb-gallery">{orbStates.map(([state, label]) =>
+        <figure key={state}><JarvisOrb state={state} /><figcaption>{label}</figcaption></figure>)}</div></section>
       <section><h2>Состояния</h2><EmptyState kicker="Календарь" title="Нет событий" />
         <ErrorState title="Данные недоступны" /><Skeleton />
         <Button onClick={() => setBoot(!boot)}>{boot ? "Скрыть загрузку" : "Показать загрузку"}</Button>

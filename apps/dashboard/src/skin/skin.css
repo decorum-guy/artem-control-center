@@ -6,6 +6,7 @@
 @import "./weather.css";
 @import "./operations.css";
 @import "./planning.css";
+@import "./polish.css";
 
 html[data-skin="v3"] { background: var(--cc-canvas); color: var(--cc-text); }
 .app.skin-v3 {
@@ -48,11 +49,10 @@ html[data-skin="v3"] .cc-overlay { font-family: var(--cc-font-family); }
     var(--cc-glass) padding-box, var(--cc-rim-gradient) border-box;
   box-shadow: inset 0 1px 0 var(--cc-edge-light), var(--cc-panel-shadow);
 }
-.skin-v3 .v2-shell .coffee-panel:is(.coffee-panel--warming, .coffee-panel--on, .coffee-panel--running) {
+.skin-v3 .v2-shell .coffee-panel:is([data-stage="warming"], [data-stage="running"]) {
   border-color: color-mix(in srgb, var(--cc-heat) 45%, transparent);
   box-shadow: inset 0 1px 0 var(--cc-edge-light), var(--cc-glow-heat);
 }
-.skin-v3 .v2-shell :is(.coffee-panel--warning, .coffee-panel--error) { border-color: var(--cc-warning); }
 html[data-skin="v3"] :is(button, a, input, select, [tabindex]):focus-visible {
   outline: 3px solid var(--cc-focus);
   outline-offset: 2px;

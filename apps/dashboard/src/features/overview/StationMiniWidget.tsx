@@ -8,7 +8,7 @@ import { addStationPreset, deleteStationPreset, executeStationPreset, fetchStati
   type StationPresetInventory } from "../../stationPresetsApi";
 import { resolveWidgetAsset } from "../../widgetAssets";
 
-const STATION_ARTWORK = resolveWidgetAsset("./assets/widgets/station-mini-2.png");
+const STATION_ARTWORK = resolveWidgetAsset("./assets/widgets/station-mini-2.png", v3VisualSkinEnabled);
 const STATION_GLOW_FEEDBACK_DURATION_MS = 1200;
 
 const LABELS: Record<StationActionId, string> = {
