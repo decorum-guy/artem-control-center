@@ -1,3 +1,4 @@
+import { BootScreen } from "./ui/States";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
 import type { CoffeeDelayedStartRecord, DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
@@ -517,7 +518,7 @@ export function App() {
   return (
     <div className={appClassName}>
       {error && <p className="global-error">{error}</p>}
-      {!snapshot && !error && <p className="loading">Загружаем данные…</p>}
+      {!snapshot && !error && (v3VisualSkinEnabled ? <BootScreen label="Загружаем данные…" /> : <p className="loading">Загружаем данные…</p>)}
       {snapshot && (
         <ProductShell route={route} snapshot={snapshot} onNavigate={navigate}>
           {!v2DensityRoute && ((route !== "/overview" || !overviewV2Enabled) && (route === "/overview" || route === "/home" || route === "/services")) && (

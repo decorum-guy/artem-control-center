@@ -1,3 +1,4 @@
+import { v3VisualSkinEnabled } from "./visualShellConfig";
 import type {
   CoffeeDelayedStartRecord,
   DashboardSnapshot,
@@ -408,7 +409,7 @@ export function PlaceholderPage({
   const copy = placeholderCopy[route];
   return (
     <div className="placeholder-page" data-testid={`route-${route.slice(1)}`}>
-      <PageHeading {...copy} copyKey={route as InterfaceCopyPageKey} />
+      <PageHeading {...copy} copyKey={(v3VisualSkinEnabled ? route.slice(1) : route) as InterfaceCopyPageKey} />
       <WorkZone className="placeholder-surface">
         <span className="placeholder-status">Подготовлено</span>
         <h2>{copy.status}</h2>

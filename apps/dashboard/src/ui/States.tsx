@@ -22,7 +22,7 @@ export function Emblem({ size = 40 }: { size?: number }) {
   return <svg className="cc-emblem" viewBox="0 0 64 64" aria-hidden="true" width={size} height={size}>
     <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" opacity=".22" />
     <circle cx="32" cy="32" r="24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeDasharray="96 7 31 17" transform="rotate(-110 32 32)" />
-    <path d="m17 40 10-20 10 20m-16-7h12m12-9a9 9 0 1 0 0 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M12 39l6-15 6 15m-9-5h6m14-8a7 7 0 1 0 0 12m13-12a7 7 0 1 0 0 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
   </svg>;
 }
 

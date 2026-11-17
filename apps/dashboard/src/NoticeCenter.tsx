@@ -1,3 +1,5 @@
+import { Icon } from "./icons";
+import { v3VisualSkinEnabled } from "./visualShellConfig";
 import { createPortal } from "react-dom";
 import {
   createContext,
@@ -249,7 +251,7 @@ function NoticeRegion({ notices, dismissNotice }: { notices: NoticeRecord[]; dis
                 <span className="global-notice__severity">{severityLabel[notice.severity]}</span>
                 <strong>{notice.title}</strong>
               </div>
-              <button type="button" className="global-notice__dismiss" onClick={() => dismissNotice(notice.id)} aria-label="Закрыть уведомление">×</button>
+              <button type="button" className="global-notice__dismiss" onClick={() => dismissNotice(notice.id)} aria-label="Закрыть уведомление">{v3VisualSkinEnabled ? <Icon name="close" /> : "×"}</button>
             </div>
             <p>{notice.detail}</p>
             {notice.action && (
