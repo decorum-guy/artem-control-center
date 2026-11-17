@@ -1,3 +1,4 @@
+import { SelectField } from "./ui/SelectField";
 import { EmptyState } from "./ui/States";
 import { v3VisualSkinEnabled } from "./visualShellConfig";
 import type {
@@ -474,12 +475,12 @@ export function SettingsPage({
           <h2>Движение</h2>
           <p>Уменьшенное движение, низкая производительность и экономия батареи сохраняют информацию без декоративной анимации.</p>
         </div>
-        <select value={motion} onChange={(event) => onMotionChange(event.target.value as typeof motion)}>
+        <SelectField label="Движение" value={motion} onValueChange={(nextValue) => onMotionChange(nextValue as typeof motion)}>
           <option value="full">Полное</option>
           <option value="reduced">Уменьшенное движение</option>
           <option value="low-performance">Низкая производительность</option>
           <option value="battery-saving">Экономия батареи</option>
-        </select>
+        </SelectField>
       </section>
       <RuntimeControls />
     </div>

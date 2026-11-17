@@ -73,8 +73,10 @@ function acquireDocumentLock(): () => void {
   };
 }
 
-function useBackgroundInert(): void {
-  useEffect(() => {
+let inertOverlayCount = 0;
+let restoreBackground: (() => void) | undefined;
+
+function makeBackgroundInert(): () => void {
     const appNodes = Array.from(document.querySelectorAll<HTMLElement>(".app"));
     const previous = appNodes.map((app) => ({
       app,
@@ -94,6 +96,19 @@ function useBackgroundInert(): void {
         if (ariaHidden === null) app.removeAttribute("aria-hidden");
         else app.setAttribute("aria-hidden", ariaHidden);
       });
+    };
+}
+
+function useBackgroundInert(): void {
+  useEffect(() => {
+    if (inertOverlayCount === 0) restoreBackground = makeBackgroundInert();
+    inertOverlayCount += 1;
+    return () => {
+      inertOverlayCount -= 1;
+      if (inertOverlayCount === 0) {
+        restoreBackground?.();
+        restoreBackground = undefined;
+      }
     };
   }, []);
 }
@@ -151,7 +166,9 @@ function OverlayFrame({
     );
     const surface = surfaceRef.current;
 
+    const ownsFocus = () => Array.from(document.querySelectorAll(".cc-overlay")).at(-1) === surface;
     const focusInitial = () => {
+      if (!ownsFocus()) return;
       const preferred = initialFocusRef?.current;
       const first = surface ? focusableElements(surface)[0] : null;
       (preferred ?? first ?? surface ?? closeRef.current)?.focus();
@@ -162,6 +179,7 @@ function OverlayFrame({
       if (!surface?.contains(document.activeElement)) focusInitial();
     });
     const onFocusIn = (event: FocusEvent) => {
+      if (!ownsFocus()) return;
       if (surface && event.target instanceof Node && !surface.contains(event.target)) {
         focusInitial();
       } else if (surface && bodyRef.current && event.target instanceof HTMLElement && bodyRef.current.contains(event.target)) {
@@ -201,6 +219,7 @@ function OverlayFrame({
   }, []);
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (event.target instanceof Element && event.target.closest(".cc-overlay") !== surfaceRef.current) return;
     if (event.key === "Escape") {
       if (!closeOnEscape) return;
       event.preventDefault();
