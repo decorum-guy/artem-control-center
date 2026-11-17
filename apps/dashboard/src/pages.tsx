@@ -1,3 +1,4 @@
+import { EmptyState } from "./ui/States";
 import { v3VisualSkinEnabled } from "./visualShellConfig";
 import type {
   CoffeeDelayedStartRecord,
@@ -354,7 +355,10 @@ export function SystemPage({ snapshot }: { snapshot: DashboardSnapshot }) {
         <RogG703Controls service={rogG703} />
       ) : (
         <section className="placeholder-surface" data-testid="rog-g703-disabled">
-          <span className="placeholder-status">ROG G703GI</span>
+          {v3VisualSkinEnabled && route === "/apps" ? (
+          <EmptyState icon="apps" title={copy.status} detail="Раздел будет наполнен после подключения данных." />
+        ) : <>
+        <span className="placeholder-status">ROG G703GI</span>
           <h2>Интеграция ASUS отключена</h2>
           <p>
             Управление появится после настройки интеграции. Секретные данные не отображаются на панели.
@@ -414,6 +418,7 @@ export function PlaceholderPage({
         <span className="placeholder-status">Подготовлено</span>
         <h2>{copy.status}</h2>
         <p>Раздел будет наполнен после подключения данных.</p>
+        </>}
       </WorkZone>
     </div>
   );

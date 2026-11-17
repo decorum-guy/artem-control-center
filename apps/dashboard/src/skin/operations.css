@@ -1,0 +1,42 @@
+.skin-v3 .home-authority-line, .skin-v3 .v2-shell .system-problem-surface,
+.skin-v3 .v2-shell .services-attention-zone { position: relative; isolation: isolate; }
+.skin-v3 .home-authority-line {
+  display: flex; gap: 12px; align-items: center; min-height: 48px; border-radius: var(--cc-radius-control);
+  padding-inline: 12px; border: 1px solid var(--cc-border);
+  background: linear-gradient(95deg, var(--cc-surface-2), transparent);
+}
+.skin-v3 .home-authority-line__icon, .skin-v3 .system-fact-row__icon, .skin-v3 .health-row__icon {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: none;
+  background: var(--cc-interactive); color: var(--cc-text-muted);
+  border: 1px solid var(--cc-border); border-radius: 10px;
+}
+.skin-v3 .home-authority-line--healthy .home-authority-line__icon { color: var(--cc-success); }
+.skin-v3 .v2-shell .services-attention-zone:has(.health-row--degraded),
+.skin-v3 .v2-shell .system-problem-surface:has(.system-problem-row) {
+  border-left: 3px solid var(--cc-warning);
+  background: linear-gradient(110deg, color-mix(in srgb,var(--cc-warning) 7%,var(--cc-surface-1)), var(--cc-surface-1) 52%);
+}
+.skin-v3 .health-row--degraded .health-row__icon { color: var(--cc-warning); }
+.skin-v3 .health-row--offline .health-row__icon { color: var(--cc-offline); }
+.skin-v3 .health-row__summary, .skin-v3 .system-diagnostic-row__status, .skin-v3 .home-authority-line__freshness {
+  font: 400 11px/1.5 var(--cc-font-mono);
+}
+.skin-v3 :is(.system-problem-row__copy,.system-problem-row__meta,.health-row__identity,.health-row__summary) { min-width: 0; overflow-wrap: anywhere; }
+.skin-v3 .system-problem-history__row {
+  border-bottom: 1px solid var(--cc-divider); gap: 12px; align-items: center;
+}
+.skin-v3 .system-problem-history time { font: 400 12px/1.5 var(--cc-font-mono); color: var(--cc-text-secondary); }
+.skin-v3 .backups-work-zone { max-width: 64rem; }
+.skin-v3 .backups-card__header h2 { font: 450 clamp(30px,4vw,48px)/1.1 var(--cc-font-family); letter-spacing: -.055em; }
+.skin-v3 .backups-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1px; background: var(--cc-divider); overflow: hidden; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-surface); }
+.skin-v3 .backups-summary > div { min-width: 0; background: var(--cc-surface-2); padding: 12px 16px; border: 0; border-radius: 0; }
+.skin-v3 .backups-summary > div > span { font: 500 11px/1.5 var(--cc-font-mono); text-transform: uppercase; letter-spacing: .08em; }
+.skin-v3 .backups-summary strong { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.skin-v3 .backups-run-status--active { border-inline-start: 3px solid var(--cc-accent); }
+.skin-v3 [data-testid="route-apps"] .placeholder-surface { padding: clamp(20px,3vw,36px); }
+.skin-v3 [data-testid="route-apps"] .cc-state { max-width: 32rem; }
+@media (max-aspect-ratio: 1/1) {
+  .skin-v3 .backups-summary { grid-template-columns: 1fr; }
+  .skin-v3 .backups-summary > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .skin-v3 .home-authority-line { flex-wrap: wrap; }
+}
