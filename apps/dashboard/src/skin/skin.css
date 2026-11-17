@@ -59,6 +59,11 @@ html[data-skin="v3"] :is(button, a, input, select, [tabindex]):focus-visible {
 .skin-v3 .cc-gallery-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .skin-v3 .cc-gallery figure { display: grid; justify-items: center; gap: 6px; margin: 0; }
 .skin-v3 .cc-gallery figcaption { font: 11px/16px var(--cc-font-mono); color: var(--cc-text-secondary); }
+.skin-v3 .dev-widget__header { flex-wrap: wrap; }
+.skin-v3 .dev-widget__header > div { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .skin-v3 .dev-widget-grid > :is(.dev-widget, .coffee-panel) { grid-column: 1 / -1; }
+}
 
 /* Portals inherit the same reduced modes as the mounted shell. Hidden tabs
    release compositor work even if the user selected full motion. */
