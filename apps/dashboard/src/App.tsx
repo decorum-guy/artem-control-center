@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import { SelectField } from "./ui/SelectField";
 import { BootScreen } from "./ui/States";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -220,6 +221,16 @@ export function App() {
       delete root.dataset.skin;
     };
   }, []);
+
+  function changeTheme(next: Theme) {
+    if (next === theme) return;
+    if (v3VisualSkinEnabled && motion === "full" && !document.hidden
+      && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && document.startViewTransition) {
+      document.startViewTransition(() => flushSync(() => setTheme(next)));
+    } else {
+      setTheme(next);
+    }
+  }
 
   const changeJarvisVisibility = useCallback((visible: boolean) => {
     setJarvisVisible(visible);
@@ -453,7 +464,7 @@ export function App() {
               ))}
             </SelectField>
           </label>
-          <button type="button" onClick={() => setTheme(theme === "night" ? "day" : "night")}>
+          <button type="button" onClick={() => changeTheme(theme === "night" ? "day" : "night")}>
             {theme === "night" ? "День" : "Ночь"}
           </button>
           <button
@@ -587,7 +598,7 @@ export function App() {
                 theme={theme}
                 motion={motion}
                 calendarSources={snapshot?.planning?.providerStatuses ?? []}
-                onThemeChange={setTheme}
+                onThemeChange={changeTheme}
                 onMotionChange={setMotion}
                 jarvisVisible={jarvisVisible}
                 onJarvisVisibleChange={changeJarvisVisibility}
@@ -598,7 +609,7 @@ export function App() {
               <SettingsPage
                 theme={theme}
                 motion={motion}
-                onThemeChange={setTheme}
+                onThemeChange={changeTheme}
                 onMotionChange={setMotion}
               />
             )

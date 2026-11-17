@@ -1,0 +1,102 @@
+{
+  "hardware": "Samsung Notebook 9 Pro, Windows, Microsoft Edge headless, independent profile",
+  "method": "1280x720, foreground page, four routes, 120 requestAnimationFrame intervals per route after fonts and 700 ms settle, read-only network. Long threshold 33.4 ms. The preview uses fixture data; compare production-to-production separately following deployment.",
+  "before": {
+    "input": "Samsung production 52f2072",
+    "measurement": {
+      "edge": "157.0.4341.60",
+      "timeUTC": "2026-11-17T21:40:49.095865+00:00",
+      "routes": {
+        "overview": {
+          "skin": "v2",
+          "frames": 120,
+          "p50_ms": 16.7,
+          "p95_ms": 16.7,
+          "above33ms": 0,
+          "activeInfinite": 0,
+          "width": 1280,
+          "viewport": 1280
+        },
+        "weather": {
+          "skin": "v2",
+          "frames": 120,
+          "p50_ms": 16.7,
+          "p95_ms": 16.7,
+          "above33ms": 0,
+          "activeInfinite": 0,
+          "width": 1280,
+          "viewport": 1280
+        },
+        "calendar": {
+          "skin": "v2",
+          "frames": 120,
+          "p50_ms": 16.7,
+          "p95_ms": 16.8,
+          "above33ms": 2,
+          "activeInfinite": 0,
+          "width": 1280,
+          "viewport": 1280
+        },
+        "settings": {
+          "skin": "v2",
+          "frames": 120,
+          "p50_ms": 16.7,
+          "p95_ms": 16.8,
+          "above33ms": 0,
+          "activeInfinite": 0,
+          "width": 1280,
+          "viewport": 1280
+        }
+      }
+    }
+  },
+  "preview": {
+    "input": "Stage 7 working tree on 542adce, VITE_V3_VISUAL_SKIN=true, npm run build:production, fixture backend via SSH loopback",
+    "measurement": {
+      "edge": "157.0.4341.60",
+      "timeUTC": "2026-11-17T21:54:34.959369+00:00",
+      "routes": {
+        "overview": {
+          "skin": "v3",
+          "frames": 120,
+          "p50_ms": 16.7,
+          "p95_ms": 16.8,
+          "above33ms": 0,
+          "activeInfinite": 0,
+          "width": 1280,
+          "viewport": 1280
+        },
+        "weather": {
+          "skin": "v3",
+          "frames": 120,
+          "p50_ms": 16.7,
+          "p95_ms": 16.8,
+          "above33ms": 0,
+          "activeInfinite": 1,
+          "width": 1280,
+          "viewport": 1280
+        },
+        "calendar": {
+          "skin": "v3",
+          "frames": 120,
+          "p50_ms": 16.7,
+          "p95_ms": 16.8,
+          "above33ms": 0,
+          "activeInfinite": 0,
+          "width": 1280,
+          "viewport": 1280
+        },
+        "settings": {
+          "skin": "v3",
+          "frames": 120,
+          "p50_ms": 16.7,
+          "p95_ms": 16.8,
+          "above33ms": 0,
+          "activeInfinite": 0,
+          "width": 1280,
+          "viewport": 1280
+        }
+      }
+    }
+  }
+}

@@ -76,7 +76,7 @@ function formatDelayedTarget(dueAt: string): string {
 
 function CoffeeAsset({ manifest }: { manifest: WidgetManifest }) {
   const asset = manifest.visualAsset;
-  const resolved = asset ? resolveWidgetAsset(asset.sourcePath) : null;
+  const resolved = asset ? resolveWidgetAsset(asset.sourcePath, v3VisualSkinEnabled) : null;
   const [failed, setFailed] = useState(false);
 
   useEffect(() => setFailed(false), [resolved]);
