@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from pydantic import ValidationError
 
+from .hse_calendar import HseCalendar, SOURCE_ID as HSE_SOURCE_ID, event_order
 from .planning import (
     CalendarEventProjection,
     EventListEnvelope,
@@ -1205,6 +1206,7 @@ class PlanningAdapter:
         transport: httpx.AsyncBaseTransport | None = None,
         client: PlanningClient | None = None,
         cache: PlanningProjectionCache | None = None,
+        subscription: HseCalendar | None = None,
         monotonic_clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], datetime] | None = None,
         random_fn: Callable[[], float] | None = None,
@@ -1213,6 +1215,7 @@ class PlanningAdapter:
     ) -> None:
         self._settings = settings
         self._enabled = bool(settings.panel_planning_enabled)
+        self._subscription = subscription
         self._clock = monotonic_clock
         self._wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
         self._random = random_fn or (lambda: 0.5)
@@ -1512,6 +1515,8 @@ class PlanningAdapter:
                 self._calendar_source_refresh_task = None
 
     async def _refresh_calendar_sources_once(self) -> PlanningCalendarSourcesRefresh:
+        if self._subscription is not None:
+            await self._subscription.refresh(force=True)
         try:
             result = await self._live_client().refresh_calendar_sources()
         except (PlanningReadUnavailable, PlanningUpstreamError):
@@ -1521,6 +1526,11 @@ class PlanningAdapter:
                 pass
             raise
         await self.refresh_status(force=True)
+        if self._subscription is not None and self._subscription.error and result.result == "success":
+            return result.model_copy(update={
+                "result": "failure", "status": self._subscription.status().status,
+                "errorCode": self._subscription.error, "lastSuccessfulSyncAt": self._subscription.last_success,
+            })
         return result
 
     async def refresh_domains(self) -> bool:
@@ -1533,6 +1543,8 @@ class PlanningAdapter:
         async with self._lock:
             now = self._wall_now()
             windows = self._windows(now)
+            if self._subscription is not None:
+                await self._subscription.refresh()
             results = await asyncio.gather(
                 self._client.reminders(
                     state="pending",
@@ -1766,6 +1778,15 @@ class PlanningAdapter:
         return self._task_object_readback(await self._live_client().get_task(task_id))
 
     async def read_event_by_id(self, *, event_id: str) -> PlanningEventObjectEnvelope:
+        if self._subscription is not None:
+            await self._subscription.refresh()
+            event = self._subscription.event(event_id)
+            if event is not None:
+                return PlanningEventObjectEnvelope(
+                    schemaVersion="planning.panel.v1", kind="object", domain="calendar_event",
+                    object=event, sourceStatus="stale" if self._subscription.error else "current",
+                    lastSyncedAt=self._subscription.last_success, sources=[self._subscription.status()],
+                )
         return self._event_object_readback(await self._live_client().get_event(event_id))
 
     async def create_task(
@@ -1846,6 +1867,8 @@ class PlanningAdapter:
         idempotency_key: str,
         body: Mapping[str, Any],
     ) -> PlanningEventObjectEnvelope:
+        if self._subscription is not None and self._subscription.event(event_id) is not None:
+            raise PlanningUpstreamError("provider_read_only")
         return self._event_object_readback(
             await self._live_client().edit_event(
                 event_id=event_id,
@@ -1862,6 +1885,8 @@ class PlanningAdapter:
         expected_version: int,
         idempotency_key: str,
     ) -> PlanningEventObjectEnvelope:
+        if self._subscription is not None and self._subscription.event(event_id) is not None:
+            raise PlanningUpstreamError("provider_read_only")
         return self._event_object_readback(
             await self._live_client().delete_event(
                 event_id=event_id,
@@ -2394,13 +2419,63 @@ class PlanningAdapter:
         offset: int,
     ) -> PlanningReadEnvelope:
         _validate_range(from_utc, to_utc)
-        envelope = await self._live_client().events(
-            from_utc=from_utc,
-            to_utc=to_utc,
-            limit=limit,
-            offset=offset,
-        )
-        return self._read_upstream_envelope(envelope)
+        client = self._live_client()
+        feed_events: list[CalendarEventProjection] = []
+        if self._subscription is not None:
+            await self._subscription.refresh()
+            feed_events = self._subscription_range(from_utc, to_utc)
+        if not feed_events:
+            envelope = await client.events(from_utc=from_utc, to_utc=to_utc, limit=limit, offset=offset)
+            return self._read_upstream_envelope(envelope)
+
+        try:
+            return await self._combined_calendar_page(from_utc, to_utc, limit, offset, feed_events)
+        except (PlanningUpstreamError, PlanningReadUnavailable):
+            # A separate provider can remain available during a Planning outage.
+            # The incomplete range carries an explicit degraded status.
+            items = sorted(feed_events, key=event_order)
+            page = items[offset:offset + limit]
+            return PlanningReadEnvelope(
+                schemaVersion="planning.panel.v1", kind="list", domain="calendar_event", generatedAt=self._now_text(),
+                sourceStatus="degraded", lastSyncedAt=self._subscription.last_success,
+                sources=[self._subscription.status()], items=page, limit=limit, offset=offset,
+                count=len(page), hasMore=offset + limit < len(items),
+            )
+
+    async def _combined_calendar_page(
+        self, from_utc: str, to_utc: str, limit: int, offset: int,
+        feed_events: list[CalendarEventProjection],
+    ) -> PlanningReadEnvelope:
+        # All-day first, then start time and ID, as in Planning. At most N feed
+        # events can shift a page by N positions in the upstream sequence.
+        start_offset = max(0, offset - len(feed_events))
+        skip = offset - start_offset
+        needed = skip + limit
+        upstream = []
+        while len(upstream) < needed:
+            position = start_offset + len(upstream)
+            batch_size = min(100, offset - position) if position < offset else limit
+            page = await self._live_client().events(from_utc=from_utc, to_utc=to_utc,
+                                                    limit=batch_size, offset=position)
+            result = self._read_upstream_envelope(page)
+            upstream.extend(result.items)
+            if not result.hasMore:
+                break
+            if not result.items:
+                raise PlanningReadUnavailable("planning_calendar_pagination_invalid")
+        combined = sorted([*upstream, *feed_events], key=event_order)
+        items = combined[skip:needed]
+        return result.model_copy(update={
+            "items": items, "limit": limit, "offset": offset, "count": len(items),
+            "hasMore": result.hasMore or len(combined) > needed,
+        })
+
+    def _subscription_range(self, from_utc: str, to_utc: str) -> list[CalendarEventProjection]:
+        if self._subscription is None:
+            return []
+        start, end = timestamp_datetime(from_utc), timestamp_datetime(to_utc)
+        return [event for event in self._subscription.events()
+                if _event_overlaps(event, start, end, self._settings.panel_planning_timezone)]
 
     async def read_projects(self, *, limit: int, offset: int) -> PlanningReadEnvelope:
         envelope = await self._live_client().projects(limit=limit, offset=offset)
@@ -2446,6 +2521,15 @@ class PlanningAdapter:
             return
         now = self._wall_now()
         age = max(0.0, (now - timestamp_datetime(cached.lastSyncedAt)).total_seconds()) if cached.lastSyncedAt else float("inf")
+        # A protected feed may have been removed or replaced while the app was
+        # stopped. Only the configured subscription can populate its own rows.
+        if any(source.provider == "hse" for source in cached.providerStatuses):
+            cached.providerStatuses = [source for source in cached.providerStatuses if source.provider != "hse"]
+            cached.calendar.today = [e for e in cached.calendar.today if e.calendarIdentity.providerId != HSE_SOURCE_ID]
+            cached.calendar.upcoming = [e for e in cached.calendar.upcoming if e.calendarIdentity.providerId != HSE_SOURCE_ID]
+            cached.calendar.conflicts = _event_conflicts(
+                [*cached.calendar.today, *cached.calendar.upcoming], timezone_name=self._settings.panel_planning_timezone,
+            )
         self._last_good = cached.model_copy(deep=True)
         self._cache_backed_domains = {
             domain for domain, _ in _PLANNING_REFRESH_DOMAIN_GROUPS
@@ -2504,6 +2588,7 @@ class PlanningAdapter:
         self,
         sources: list[UpstreamPlanningSource] | None,
     ) -> list[PlanningCalendarSource]:
+        subscription_sources = [self._subscription.status()] if self._subscription is not None else []
         if sources is None:
             self._latest_upstream_sources = None
             self._provider_destination_map = {}
@@ -2522,7 +2607,8 @@ class PlanningAdapter:
                     lastSyncedAt=None,
                     observedAt=observed,
                     calendars=[],
-                )
+                ),
+                *subscription_sources,
             ]
         self._latest_upstream_sources = [source.model_copy(deep=True) for source in sources]
         self._provider_destination_map = {}
@@ -2573,12 +2659,13 @@ class PlanningAdapter:
                     calendars=projected_calendars,
                 )
             )
-        return projected
+        return [*projected, *subscription_sources]
 
     def _failure_provider_statuses(
         self,
         previous: PlanningProjection | None,
     ) -> list[PlanningCalendarSource]:
+        subscription = [self._subscription.status()] if self._subscription is not None else []
         if previous is None:
             return [
                 PlanningCalendarSource(
@@ -2592,12 +2679,14 @@ class PlanningAdapter:
                     lastSyncedAt=None,
                     observedAt=self._now_text(self._wall_now()),
                     calendars=[],
-                )
+                ),
+                *subscription,
             ]
         # A failed fixed domain request is not proof that a configured calendar
         # provider failed. Keep provider metadata authoritative and carry the
         # known domain identity in health.issues instead.
-        return [source.model_copy(deep=True) for source in previous.providerStatuses]
+        known = [source.model_copy(deep=True) for source in previous.providerStatuses if source.provider != "hse"]
+        return [*known, *subscription]
 
     def _mapped_domains(
         self,
@@ -2629,6 +2718,17 @@ class PlanningAdapter:
         task_undated = self._map_tasks(results[task_index + 3], previous.tasks.undated)
         event_today = self._map_events(results[task_index + 4], previous.calendar.today, upstream_sources)
         event_upcoming = self._map_events(results[task_index + 5], previous.calendar.upcoming, upstream_sources)
+        if self._subscription is not None:
+            windows = self._windows(self._wall_now())
+
+            def with_subscription(items: list[CalendarEventProjection], window: str) -> list[CalendarEventProjection]:
+                # Cached upstream fallbacks can already contain a previous feed revision.
+                others = [event for event in items if event.calendarIdentity.providerId != HSE_SOURCE_ID]
+                feed = self._subscription_range(windows[window + "_from"], windows[window + "_to"])
+                return sorted([*others, *feed], key=event_order)[:PLANNING_PAGE_LIMIT]
+
+            event_today = with_subscription(event_today, "today")
+            event_upcoming = with_subscription(event_upcoming, "upcoming")
         projects = self._map_projects(results[task_index + 6], previous.tasks.projects)
         events = [*event_today, *event_upcoming]
         return {
@@ -3414,7 +3514,7 @@ def _provider_health_problem(status: StatusEnvelope) -> bool:
 
 
 def _provider_statuses_have_problem(provider_statuses: list[PlanningCalendarSource]) -> bool:
-    return any(source.status in {"stale", "error"} for source in provider_statuses)
+    return any(source.provider != "hse" and source.status in {"stale", "error"} for source in provider_statuses)
 
 
 def _bounded_unique(items: list[Any]) -> list[Any]:

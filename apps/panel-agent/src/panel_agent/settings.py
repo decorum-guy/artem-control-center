@@ -108,6 +108,7 @@ class IntegrationSettings:
     avalar_backup_timeout_seconds: int = 180
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
+    panel_hse_calendar_feed_id: str = field(default="", repr=False)
     panel_planning_enabled: bool = False
     panel_planning_reminder_mutations_enabled: bool = False
     panel_planning_task_mutations_enabled: bool = False
@@ -428,6 +429,7 @@ class IntegrationSettings:
                 5,
                 int(os.getenv("PANEL_SSE_HEARTBEAT_SECONDS", "20")),
             ),
+            panel_hse_calendar_feed_id=os.getenv("PANEL_HSE_CALENDAR_FEED_ID", "").strip(),
             panel_planning_enabled=_bool_env("PANEL_PLANNING_ENABLED", False),
             panel_planning_reminder_mutations_enabled=_bool_env(
                 "PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED",
