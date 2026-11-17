@@ -1,0 +1,443 @@
+{
+  "reference": "90e0c8fe8a1fed34475a758ab93c7942282eacf9",
+  "deduplicated": "1056f11",
+  "fullMotion": [
+    {
+      "screen": "apps-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "apps-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "apps-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "apps-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "backups-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "backups-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "backups-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "backups-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "calendar-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "calendar-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "calendar-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "calendar-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "coffee-diary-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "coffee-diary-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "coffee-diary-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "coffee-diary-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-ready-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-ready-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-ready-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-ready-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-running-too-long-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-running-too-long-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-running-too-long-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-running-too-long-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-warming-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-warming-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-warming-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-coffee-warming-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-ha-offline-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-ha-offline-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-ha-offline-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-ha-offline-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "home-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-ready-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-ready-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-ready-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-ready-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-running-too-long-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-running-too-long-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-running-too-long-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-running-too-long-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-warming-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-warming-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-warming-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-coffee-warming-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-ha-offline-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-ha-offline-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-ha-offline-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-ha-offline-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "overview-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "reminders-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "reminders-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "reminders-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "reminders-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "services-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "services-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "services-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "services-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "settings-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "settings-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "settings-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "settings-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "system-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "system-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "system-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "system-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "tasks-day-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "tasks-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "tasks-night-1280x720",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "tasks-night-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "weather-day-1280x720",
+      "changedPixels": 1105,
+      "bounds": [
+        944,
+        240,
+        1887,
+        441
+      ]
+    },
+    {
+      "screen": "weather-day-720x1280",
+      "changedPixels": 0,
+      "bounds": null
+    },
+    {
+      "screen": "weather-night-1280x720",
+      "changedPixels": 585,
+      "bounds": [
+        949,
+        240,
+        1887,
+        441
+      ]
+    },
+    {
+      "screen": "weather-night-720x1280",
+      "changedPixels": 125,
+      "bounds": [
+        440,
+        350,
+        1038,
+        550
+      ]
+    }
+  ],
+  "reducedMotionWeather": [
+    {
+      "view": "day-landscape",
+      "main": "3415a0ecd79190ed2a2c3da9d009969cd7cd1770753c8d3fc833b344bb15611d",
+      "flagOff": "3415a0ecd79190ed2a2c3da9d009969cd7cd1770753c8d3fc833b344bb15611d"
+    },
+    {
+      "view": "day-portrait",
+      "main": "33cbefc733e14a170ae80707961bbf48d70b884e393d025ddb2979eab25973b7",
+      "flagOff": "33cbefc733e14a170ae80707961bbf48d70b884e393d025ddb2979eab25973b7"
+    },
+    {
+      "view": "night-landscape",
+      "main": "557e9e025c2c5d19771fd9320fbd69ae90eca30059be0b42d557a9be1715ec78",
+      "flagOff": "557e9e025c2c5d19771fd9320fbd69ae90eca30059be0b42d557a9be1715ec78"
+    },
+    {
+      "view": "night-portrait",
+      "main": "0b7ed1af9926cc2cf01b57064a01e74d87dcaf0856e65e0647b964d35e59f670",
+      "flagOff": "0b7ed1af9926cc2cf01b57064a01e74d87dcaf0856e65e0647b964d35e59f670"
+    }
+  ]
+}

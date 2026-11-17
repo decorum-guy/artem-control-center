@@ -158,12 +158,17 @@ function OverlayFrame({
     };
 
     focusInitial();
-    const frame = window.requestAnimationFrame(focusInitial);
+    const frame = window.requestAnimationFrame(() => {
+      if (!surface?.contains(document.activeElement)) focusInitial();
+    });
     const onFocusIn = (event: FocusEvent) => {
       if (surface && event.target instanceof Node && !surface.contains(event.target)) {
         focusInitial();
       } else if (surface && bodyRef.current && event.target instanceof HTMLElement && bodyRef.current.contains(event.target)) {
-        window.requestAnimationFrame(() => scrollFocusedElementIntoSafeBodyArea(surface, bodyRef.current!));
+        const body = bodyRef.current;
+        window.requestAnimationFrame(() => {
+          if (body.isConnected) scrollFocusedElementIntoSafeBodyArea(surface, body);
+        });
       }
     };
     document.addEventListener("focusin", onFocusIn);
@@ -176,7 +181,9 @@ function OverlayFrame({
       openerRef.current = null;
       if (opener?.isConnected) {
         opener.focus();
-        window.requestAnimationFrame(() => opener.focus());
+        window.requestAnimationFrame(() => {
+          if (opener.isConnected && document.activeElement === document.body) opener.focus();
+        });
       }
     };
   }, [initialFocusRef, restoreFocusRef]);

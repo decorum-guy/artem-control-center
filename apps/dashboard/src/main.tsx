@@ -30,6 +30,7 @@ import "./features/home/homeV2.css";
 import "./features/services/servicesV2.css";
 import "./features/system/systemV2.css";
 import "./portrait.css";
+import "./skin/skin.css";
 
 const publicCoffeeUpload = window.location.pathname === "/coffee-upload";
 

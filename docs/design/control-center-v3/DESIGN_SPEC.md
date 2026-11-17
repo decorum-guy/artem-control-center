@@ -93,9 +93,7 @@ Chromium kiosk). Портрет: 720×1280 по `(max-aspect-ratio: 1/1)` (PORTR
 | `--cc-warning` | `#945e00` | старт `#9a6200`: 4.37 на interactive |
 | `--cc-danger` | `#c13148` | старт `#c7334a`: 4.40 на своём тинте |
 
-Не заданы в TASK.md, определить на этапе 1 и проверить скриптом: дневные `rail`, `hover`,
-`pressed`, `border-strong`, `divider`, `text-disabled`, `accent-strong`, `focus`, `stale`,
-`offline`, `unavailable`, `uncertain`.
+Проверенные дневные токены этапа 1: rail `#f4f7fb`, hover `#e9eff6`, pressed `#e8eef6`, border-strong и divider соответственно 32% и 9% `rgb(15 40 80)`, text-disabled `#77849a`, accent-strong `#00577b`, focus `#055f87`, stale `#795f36`, offline `#50637c`, unavailable `#685c70`, uncertain `#505ca0`. Браузерный тест сверяет фактические токены с семью поверхностями и 12%-ми тинтами.
 
 Свечения днём нет: `--cc-glow-*` = мягкая цветная тень `0 6px 20px` 18% цвета. Точечная
 сетка тёмная, 5%.

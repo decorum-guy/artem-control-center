@@ -48,6 +48,5 @@ export VITE_PLANNING_TASK_MUTATIONS_ENABLED=true
 export VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED=true
 export VITE_TOUCH_INPUT_LOCK_ENABLED=true
 export VITE_TOUCH_INPUT_LOCK_START_LOCKED=false
-# The V3 flag does not exist in code yet (stage 1 adds it); exporting it is harmless.
 export VITE_V3_VISUAL_SKIN="$SKIN"
 exec npm run dev:fixtures

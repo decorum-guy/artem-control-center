@@ -25,7 +25,10 @@ export type IconName =
   | "sleep"
   | "hibernate"
   | "economy"
-  | "performance";
+  | "performance"
+  | "menu" | "chevron-down" | "chevron-right" | "chevron-left"
+  | "warning" | "info" | "signal" | "archive" | "apps" | "thermometer"
+  | "volume" | "brightness" | "drop" | "bin" | "edit" | "backspace";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   name: IconName;
@@ -34,6 +37,22 @@ type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
 };
 
 const iconPaths: Record<IconName, ReactNode> = {
+  menu: <path d="M3 6h18M3 12h13M3 18h18" />,
+  "chevron-down": <path d="m6 9 6 6 6-6" />,
+  "chevron-right": <path d="m9 5 7 7-7 7" />,
+  "chevron-left": <path d="m15 5-7 7 7 7" />,
+  warning: <><path d="m12 3 10 17H2L12 3Z" /><path d="M12 9v5m0 2v1" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v1" /></>,
+  signal: <><path d="M3 16v4m5-8v8m5-12v12m5-16v16" /></>,
+  archive: <><rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v11h14V9m-10 4h6" /></>,
+  apps: <><rect x="3" y="3" width="7" height="7" rx="2" /><circle cx="17" cy="6.5" r="3.5" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
+  thermometer: <><path d="M10 14V5a2 2 0 1 1 4 0v9a4 4 0 1 1-4 0Zm2-7v10" /><path d="M16 6h3m-3 4h2" /></>,
+  volume: <><path d="M3 9h4l5-4v14l-5-4H3Zm13-1a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" /></>,
+  brightness: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2" /></>,
+  drop: <path d="M12 2c0 0-7 8-7 13a7 7 0 0 0 14 0c0-5-7-13-7-13Z" />,
+  bin: <><path d="M3 6h18M8 6V3h8v3M5 6l1 15h12l1-15M10 10v7m4-7v7" /></>,
+  edit: <path d="m4 16 12-12 4 4L8 20l-5 1 1-5Zm10-10 4 4" />,
+  backspace: <><path d="M3 12 9 5h12v14H9L3 12Z" /><path d="m11 9 6 6m0-6-6 6" /></>,
   overview: (
     <>
       <rect x="3" y="3" width="7" height="7" />
@@ -184,6 +203,7 @@ export function Icon({ name, size = 20, label, className, ...props }: IconProps)
     <svg
       {...props}
       className={className}
+      data-cc-icon=""
       width={size}
       height={size}
       viewBox="0 0 24 24"

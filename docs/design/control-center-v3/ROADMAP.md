@@ -45,7 +45,7 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
   (Git Bash), Playwright запускается с `PLAYWRIGHT_EXTERNAL_SERVER=true`.
 - Сервер на тестовых данных с флагами accepted-v2 и разблокированным touch lock:
   `bash docs/design/control-center-v3/tools/dev-fixtures-accepted-v2.sh` (с аргументом `v3`
-  дополнительно ставит `VITE_V3_VISUAL_SKIN=true`, когда флаг появится в коде).
+  дополнительно ставит `VITE_V3_VISUAL_SKIN=true`, при запуске с аргументом v3).
 - Снимки: `node docs/design/control-center-v3/tools/capture-screens.mjs <папка> [опции]`.
   Ждёт `domcontentloaded` и `[data-testid^="route-"]`, а не `networkidle` (SSE).
   Пишет `report.json`: ошибки консоли, HTTP ≥400, горизонтальный overflow, `data-skin`.
@@ -100,32 +100,32 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
   разделы C–K (геометрия, взаимодействие, хранение раскладки) остаются в силе.
 - [x] Обновить этот файл, push, draft PR в `main`.
 
-### Этап 1. Фундамент — `redesign/v3-stage-1` (от stage-0) → PR в stage-0 — [ ] НЕ НАЧАТ
+### Этап 1. Фундамент — `redesign/v3-stage-1` (от stage-0) → PR в stage-0 — [x] ЗАВЕРШЁН
 
-- [ ] Флаг `VITE_V3_VISUAL_SKIN`: при `true` класс `skin-v3` на `.app` и `data-skin="v3"`
+- [x] Флаг `VITE_V3_VISUAL_SKIN`: при `true` класс `skin-v3` на `.app` и `data-skin="v3"`
   на `html`. Проброс в `playwright.config.ts` (как остальные `VITE_*`). В
   `scripts/production-build-profile.mjs` НЕ добавлять.
-- [ ] `apps/dashboard/src/skin/tokens.css`: единственный источник токенов V3 под `.skin-v3`
+- [x] `apps/dashboard/src/skin/tokens.css`: единственный источник токенов V3 под `.skin-v3`
   (и `html[data-skin=v3]`), имена `--cc-*` сохранены и расширены, legacy-алиасы работают.
-- [ ] Отдельный коммит: убрать четырёхкратное объявление `--cc-*` в `styles.css`
+- [x] Отдельный коммит: убрать четырёхкратное объявление `--cc-*` в `styles.css`
   (`:root`, `html[data-theme=day]`, `.app`, `.app.theme-day`) без изменения вида V2;
   доказать скриншотами до/после без флага.
-- [ ] Шрифты Manrope Variable и JetBrains Mono Variable: woff2 с кириллицей, OFL (лицензии
+- [x] Шрифты Manrope Variable и JetBrains Mono Variable: woff2 с кириллицей, OFL (лицензии
   положить рядом), без CDN, `font-display: swap`, суммарно ≤250 КБ. Проверить кириллицу
   до подключения. Запасной стек — текущий системный. Подключать только под `skin-v3`.
-- [ ] Фон: один неподвижный слой (`position: fixed`, без анимации): холодное пятно слева
+- [x] Фон: один неподвижный слой (`position: fixed`, без анимации): холодное пятно слева
   сверху, тёплое справа снизу, точечная сетка 24 px, виньетка. Дневной вариант.
-- [ ] Иконки: расширить `icons.tsx` (линия 1.5, 22 px в навигации, 20 px в контролах),
+- [x] Иконки: расширить `icons.tsx` (линия 1.5, 22 px в навигации, 20 px в контролах),
   дорисовать недостающие, подготовить замену emoji и текстовых глифов.
-- [ ] Примитивы в `apps/dashboard/src/ui/`: PageHeader, Button, StatusChip, Select (опции в
+- [x] Примитивы в `apps/dashboard/src/ui/`: PageHeader, Button, StatusChip, Select (опции в
   общем Sheet, строки ≥56 px), Segmented, Switch, Slider, Stepper, RingGauge, EmptyState,
   Skeleton, BootScreen, ErrorState. Без новых runtime-зависимостей.
-- [ ] Страница примитивов и всех состояний в `/dev/widget-gallery`.
-- [ ] e2e-профиль `tests/e2e/v3-skin-*.spec.ts` с `VITE_V3_VISUAL_SKIN=true`: геометрия shell,
+- [x] Страница примитивов и всех состояний в `/dev/widget-gallery`.
+- [x] e2e-профиль `tests/e2e/v3-skin-*.spec.ts` с `VITE_V3_VISUAL_SKIN=true`: геометрия shell,
   цели ≥48 px, видимый фокус, нет горизонтальной прокрутки в 1280×720 и 720×1280, контраст
   токенов, остановка бесконечных анимаций в reduced / low-performance / battery-saving.
   Добавить job/шаг в `.github/workflows/ci.yml` по образцу существующих профилей.
-- [ ] Готовность этапа (§7 задания) и скриншоты в `artifacts/redesign-v3/stage-1/`.
+- [x] Готовность этапа (§7 задания) и скриншоты в `artifacts/redesign-v3/stage-1/`.
 
 ### Этап 2. Оболочка — `redesign/v3-stage-2` (от stage-1) → PR в stage-1 — [ ] НЕ НАЧАТ
 
@@ -218,3 +218,8 @@ docs/PROJECT_MAP.md и docs/PRODUCTION_FEATURE_GATE_INVENTORY.md.
   (этап 0 → `main`). Остановлено по отсечке владельца 15:58. Продуктового кода нет.
 
 - Сессия 2, этап 0: исправлен capture-screens, обновлены 80 WebP и разделы 7/9 DESIGN_SPEC. Полный npm run check пройден (520 frontend и 1197 Python тестов, runtime, профиль и сборка). V2 shell 9 passed, один тест другого профиля пропущен. Исходная сборка Vite без флага: JS 631.98 kB, CSS 322.22 kB.
+
+
+- Этап 1. V3 подключён за флагом. Локальные variable-шрифты и лицензии, стеклянные поверхности, общий PageHeader и галерея примитивов. 91 848 байт woff2, оси веса и русские глифы проверены. Оба набора токенов прошли браузерный расчёт контраста. Размер обычной сборки Vite: JS 633,72 kB (+1,74), CSS 336,16 kB (+13,94) к этапу 0. Локальный npm run check прошёл, V3 Playwright 5/5, профиль V2 Shell без флага 9 passed и один тест обратного профиля skipped. Просмотрены 80 снимков, переполнения по горизонтали нет.
+- Паритет V2. После отдельного коммита `1056f11` пиксели совпали в 77/80 парах с исходным main. Три отличия находятся в движущемся погодном фоне. Для всех четырёх вариантов погоды отдельно получены идентичные PNG в reduced-motion на main и текущей ветке без флага. Доказательства в `artifacts/redesign-v3/stage-1/v2-parity.json`. Linux CI выявил лишние 5 px у карточки галереи в портрете. Перенос шапки карточки и одноколоночная сетка устранены на ширинах 680, 705 и 720 px, браузерный профиль 5/5.
+- Отдельная функциональная работа. Актуальный HSE РУЗ опубликован как ICS-подписка; старый HSE в iCloud архивирован, HSE Custom синхронизируется отдельно. Исправление и сценарии чтения вынесены в [PR #332](https://github.com/decorum-guy/artem-control-center/pull/332). Владелец разрешил merge после проверок и штатное обновление Samsung по SSH. Во время разработки флаг V3 остаётся выключенным по умолчанию.
