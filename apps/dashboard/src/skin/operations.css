@@ -34,7 +34,7 @@
 .skin-v3 .backups-summary strong { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .skin-v3 .backups-run-status--active { border-inline-start: 3px solid var(--cc-accent); }
 .skin-v3 [data-testid="route-apps"] .placeholder-surface { padding: clamp(20px,3vw,36px); }
-.skin-v3 [data-testid="route-apps"] .cc-state { max-width: 32rem; }
+.skin-v3 [data-testid="route-apps"] .cc-empty-state { max-width: 32rem; }
 @media (max-aspect-ratio: 1/1) {
   .skin-v3 .backups-summary { grid-template-columns: 1fr; }
   .skin-v3 .backups-summary > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
