@@ -121,7 +121,7 @@ def _severity(state: str) -> str:
 
 
 def _provider_label(provider: str) -> str:
-    return "iCloud Calendar" if provider == "icloud" else "Local Planning"
+    return {"icloud": "iCloud Calendar", "hse": "HSE РУЗ"}.get(provider, "Local Planning")
 
 
 def _provider_id(value: object) -> str:
@@ -619,9 +619,9 @@ class DiagnosticsCollector:
     @staticmethod
     def _provider_summaries(providers: Iterable[object]) -> list[DiagnosticsProviderSummary]:
         result: list[DiagnosticsProviderSummary] = []
-        for provider in list(providers)[:4]:
+        for provider in list(providers)[:5]:
             provider_name = getattr(provider, "provider", None)
-            if provider_name not in {"local", "icloud"}:
+            if provider_name not in {"local", "icloud", "hse"}:
                 continue
             calendars = getattr(provider, "calendars", [])
             result.append(

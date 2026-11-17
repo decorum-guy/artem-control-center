@@ -407,7 +407,9 @@ function CalendarSettingsSheet({
   const [sourceRefreshNotice, setSourceRefreshNotice] = useState<string | null>(null);
   const [markerStylePending, setMarkerStylePending] = useState(false);
   const sourceRefreshPendingRef = useRef(false);
-  const calendars = sources.flatMap((source) => source.calendars.map((calendar) => ({ source, calendar })));
+  const entries = sources.flatMap((source) => source.calendars.map((calendar) => ({ source, calendar })));
+  const calendars = entries.filter(({ calendar }) => activeCalendar(calendar));
+  const archived = entries.filter(({ calendar }) => !activeCalendar(calendar));
 
   async function setMarkerStyle(markerStyle: CalendarEventMarkerStyle) {
     if (!guardMutation()) {
@@ -549,6 +551,12 @@ function CalendarSettingsSheet({
             </article>
           );
         })}
+        {archived.length > 0 && (
+          <details className="settings-calendar-archive">
+            <summary>Архив календарей · {archived.length}</summary>
+            <ul>{archived.map(({ source, calendar }) => <li key={source.id + calendar.id}>{calendar.label} · {source.label}</li>)}</ul>
+          </details>
+        )}
         {notice && <p className="settings-notice" role="status">{notice}</p>}
       </div>
     </Sheet>
@@ -568,8 +576,12 @@ function calendarSourceRefreshFailureMessage(errorCode: string | null): string {
   return "Не удалось обновить список календарей. Показаны последние подтверждённые данные.";
 }
 
+function activeCalendar(calendar: PlanningCalendarSource["calendars"][number]): boolean {
+  return calendar.enabled && calendar.status !== "disabled";
+}
+
 function calendarSummary(sources: PlanningCalendarSource[], loading: boolean, preferences: ReturnType<typeof useCalendarDisplayPreferences>["preferences"]): string {
-  const count = sources.reduce((total, source) => total + source.calendars.length, 0);
+  const count = sources.reduce((total, source) => total + source.calendars.filter(activeCalendar).length, 0);
   if (loading && !preferences) return "Проверяем цвета панели…";
   if (!preferences) return count ? `${count} календарей · цвета источника` : "Календари временно недоступны";
   return `${count} ${count === 1 ? "календарь" : "календарей"} · цвета панели`;
