@@ -1,3 +1,5 @@
+import { v3VisualSkinEnabled } from "../../visualShellConfig";
+import { Icon } from "../../icons";
 import { useEffect, useRef, useState } from "react";
 import { executeStationAction, fetchStationAvailability, STATION_ACTIONS,
   type StationActionAvailability, type StationActionId } from "../../stationActionsApi";
@@ -153,7 +155,7 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     }
   }
 
-  return <WorkZone className="overview-v2-real-widget station-mini-widget" data-testid="overview-station-mini-widget">
+  return <WorkZone className="overview-v2-real-widget station-mini-widget" data-testid="overview-station-mini-widget" data-instrument-active={v3VisualSkinEnabled ? glowActive : undefined}>
     <header className="station-mini-widget__header"><h2>Станция Mini 2</h2></header>
     <div className="station-mini-widget__art" data-testid="station-artwork-slot">
       <span key={glowPulse} className={`station-mini-widget__glow${glowActive ? " station-mini-widget__glow--active" : ""}`} aria-hidden="true" />
@@ -188,11 +190,11 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
             {inventory?.presets.map((preset) => <button key={preset.id} type="button"
               className="station-presets__row" disabled={pending || !availability?.actions["media.alice.play"]?.allowed}
               onClick={() => { void runPreset(preset.id); }}>
-              <span>{preset.title}</span><span aria-hidden="true">▶</span>
+              <span>{preset.title}</span><span aria-hidden="true">{v3VisualSkinEnabled ? <Icon name="chevron-right" /> : "▶"}</span>
             </button>)}
           </div>
           {availability?.actions["media.alice.play"]?.allowed && <button className="station-presets__secondary"
-            type="button" onClick={() => setSheet("manage")}>⚙ Настроить подборки</button>}
+            type="button" onClick={() => setSheet("manage")}>{v3VisualSkinEnabled ? <Icon name="settings" /> : "⚙"} Настроить подборки</button>}
         </>}
         {sheet === "manage" && <>
           <div className="station-presets__list">
@@ -206,8 +208,8 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
             <button type="button" disabled={pending} onClick={() => { void mutate("delete", deleteId); }}>Удалить</button>
             <button type="button" onClick={() => setDeleteId(null)}>Отмена</button>
           </div>}
-          <button type="button" className="station-presets__secondary" onClick={() => { setSheet("add"); setSheetMessage(""); }}>➕ Добавить</button>
-          <button type="button" className="station-presets__secondary" onClick={() => setSheet("music")}>← Назад</button>
+          <button type="button" className="station-presets__secondary" onClick={() => { setSheet("add"); setSheetMessage(""); }}>{v3VisualSkinEnabled ? <Icon name="plus" /> : "➕"} Добавить</button>
+          <button type="button" className="station-presets__secondary" onClick={() => setSheet("music")}>{v3VisualSkinEnabled ? <Icon name="chevron-left" /> : "←"} Назад</button>
         </>}
         {sheet === "add" && <form className="station-presets__form" onSubmit={(event) => { event.preventDefault(); void mutate("add"); }}>
           <label>Название кнопки<input value={title} maxLength={32} required onChange={(event) => setTitle(event.target.value)} /></label>

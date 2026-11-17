@@ -1,0 +1,62 @@
+/* The dial sits behind the manifest-owned artwork. Its reading and active rim
+   come from the device snapshot; the idle pedestal remains unlit. */
+.skin-v3 .v2-shell .coffee-panel {
+  --cc-instrument-ink: var(--cc-text-muted);
+  isolation: isolate;
+  position: relative;
+}
+.skin-v3 .coffee-panel[data-stage="warming"] { --cc-instrument-ink: var(--cc-heat); }
+.skin-v3 .coffee-panel[data-stage="ready"] { --cc-instrument-ink: var(--cc-success); }
+.skin-v3 .coffee-panel[data-stage="running_too_long"] { --cc-instrument-ink: var(--cc-warning); }
+.skin-v3 .v2-shell .coffee-panel[data-stage="ready"] { border-color: color-mix(in srgb, var(--cc-success) 45%, transparent); box-shadow: var(--cc-glow-success); }
+.skin-v3 .v2-shell .coffee-panel[data-stage="running_too_long"] { border-color: var(--cc-warning); }
+.skin-v3 .v2-shell .coffee-asset[data-image-visible="true"] {
+  isolation: isolate;
+  position: relative;
+  border: 1px solid var(--cc-divider);
+  border-radius: var(--cc-radius-surface);
+  background: radial-gradient(ellipse at 52% 74%, color-mix(in srgb, var(--cc-instrument-ink) 15%, transparent), transparent 59%),
+    linear-gradient(145deg, var(--cc-surface-2), var(--cc-canvas));
+}
+.skin-v3 .coffee-asset[data-image-visible="true"]::before {
+  content: "";
+  position: absolute;
+  inset: auto 14% 13%;
+  height: 12%;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--cc-instrument-ink) 40%, transparent);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--cc-instrument-ink) 25%, var(--cc-canvas)), var(--cc-surface-2) 64%);
+  box-shadow: 0 4px 0 var(--cc-canvas), 0 8px 12px rgb(0 0 0 / 18%);
+}
+.skin-v3 .cc-coffee-dial { position: absolute; display: grid; place-items: center; inset: 8% 5% 13%; pointer-events: none; }
+.skin-v3 .cc-coffee-dial .cc-gauge { max-width: 100%; max-height: 100%; }
+.skin-v3 .cc-coffee-dial .cc-gauge-track { stroke: color-mix(in srgb, var(--cc-text-muted) 32%, transparent); }
+.skin-v3 .cc-coffee-dial .cc-gauge-track--dashed { stroke: var(--cc-tone); }
+.skin-v3 .coffee-asset :is(.coffee-asset__motion,.coffee-asset__visual) { z-index: 1; }
+.skin-v3 .v2-shell .coffee-panel__state strong { font: 500 clamp(21px, 2.2vw, 28px)/1.14 var(--cc-font-family); letter-spacing: -.04em; }
+.skin-v3 .coffee-authority, .skin-v3 .coffee-panel__state > span, .skin-v3 .coffee-progress output { font-family: var(--cc-font-mono); }
+.skin-v3 .coffee-panel:is([data-stage="warming"],[data-stage="ready"]) .coffee-panel__state strong { color: var(--cc-instrument-ink); }
+.skin-v3 .v2-shell :is(.climate-control,.kettle-control,.light-strip,.station-mini-widget)[data-instrument-active="true"] {
+  border-color: color-mix(in srgb, var(--cc-accent) 44%, transparent);
+  box-shadow: var(--cc-glow-accent);
+}
+.skin-v3 .kettle-control__temperature, .skin-v3 .climate-control__target-value {
+  position: relative; isolation: isolate; display: inline-grid; place-items: center; justify-self: start;
+  width: 64px; min-height: 64px; color: var(--cc-text); font: 400 24px/1 var(--cc-font-family);
+}
+.skin-v3 .kettle-control__temperature > .cc-gauge, .skin-v3 .climate-control__target-value > .cc-gauge { position: absolute; inset: 0; z-index: -1; }
+.skin-v3 .light-strip__identity > .cc-gauge { flex: none; width: 36px !important; height: 36px !important; }
+.skin-v3 .station-mini-widget__art { border-radius: 50%; background: radial-gradient(ellipse at center, var(--cc-surface-2), transparent 71%); }
+.skin-v3 .station-presets__secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.skin-v3 .overview-health-widget__aggregate { font: 500 21px/1.24 var(--cc-font-family); }
+.skin-v3 .overview-rog-widget__freshness, .skin-v3 .planning-card time { font-family: var(--cc-font-mono); }
+.skin-v3 .overview-edit-frame--selected { outline: 2px solid var(--cc-accent); outline-offset: -2px; }
+.skin-v3 .overview-edit-frame--invalid { outline-color: var(--cc-danger); }
+@media (prefers-reduced-motion: no-preference) {
+  html[data-skin="v3"][data-motion="full"] .coffee-panel[data-stage="ready"] .cc-coffee-dial > .cc-gauge::after {
+    content: ""; position: absolute; inset: 2%; border-radius: 50%; pointer-events: none;
+    box-shadow: var(--cc-glow-success); opacity: 0; animation: cc-instrument-ready .4s var(--cc-motion-ease);
+  }
+}
+@keyframes cc-instrument-ready { 40% { opacity: .7; } }

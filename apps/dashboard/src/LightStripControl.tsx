@@ -1,3 +1,5 @@
+import { v3VisualSkinEnabled } from "./visualShellConfig";
+import { RingGauge } from "./ui/RingGauge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ServiceSnapshot } from "@artem/contracts";
@@ -200,9 +202,11 @@ export function LightStripControl({ service, variant = "home", interactive = tru
     : data.colorTempKelvin ? temperatureSwatch(data.colorTempKelvin) : "#879399";
   const status = !live ? (data.stale ? "Данные устарели" : "Недоступна") : data.state === "on" ? "Включена" : "Выключена";
 
-  return <section className={`light-strip light-strip--${variant}`} data-testid={`light-strip-${variant}`} aria-label="Лента в зале">
+  return <section className={`light-strip light-strip--${variant}`} data-testid={`light-strip-${variant}`} data-instrument-active={v3VisualSkinEnabled ? Boolean(live && data.state === "on") : undefined} aria-label="Лента в зале">
     <header className="light-strip__header">
-      <span className="light-strip__identity"><span className="light-strip__lamp" style={{ background: currentSwatch }} aria-hidden="true" /><span><strong>Лента в зале</strong><small>{status}</small></span></span>
+      <span className="light-strip__identity"><span className="light-strip__lamp" style={{ background: currentSwatch }} aria-hidden="true" />
+        {v3VisualSkinEnabled && <RingGauge size={64} tone="accent" label="Подтверждённая яркость ленты"
+          reading={live && data.state === "on" && typeof data.brightness === "number" ? { kind: "progress", fraction: data.brightness / 255 } : { kind: live ? "idle" : "unavailable" }} />}<span><strong>Лента в зале</strong><small>{status}</small></span></span>
       <button className="light-strip__power" type="button" aria-label={data.state === "on" ? "Выключить ленту" : "Включить ленту"} aria-pressed={data.state === "on"} disabled={!canUse(data.state === "on" ? LIGHT_STRIP_POWER_OFF : LIGHT_STRIP_POWER_ON)} onClick={() => void run(data.state === "on" ? LIGHT_STRIP_POWER_OFF : LIGHT_STRIP_POWER_ON)}>{data.state === "on" ? "Выкл" : "Вкл"}</button>
     </header>
     <div className="light-strip__brightness">

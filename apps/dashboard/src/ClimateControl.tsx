@@ -1,3 +1,5 @@
+import { v3VisualSkinEnabled } from "./visualShellConfig";
+import { RingGauge } from "./ui/RingGauge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
@@ -232,6 +234,7 @@ export function ClimateControl({
     <section
       className={`climate-control climate-control--${variant}${!climateLive ? " climate-control--unavailable" : ""}`}
       data-testid={`climate-control-${variant}`}
+      data-instrument-active={v3VisualSkinEnabled ? climateLive && state !== "off" : undefined}
       data-overview-size-variant={variant === "overview" ? overviewSizeVariant ?? "standard" : undefined}
       aria-labelledby={`climate-control-title-${variant}`}
     >
@@ -261,7 +264,11 @@ export function ClimateControl({
         </button>
 
         <div className="climate-control__temperature-control" aria-label="Целевая температура">
-          <span className="climate-control__target-value" data-testid={`climate-temperature-value-${variant}`}>{draftTarget ?? "—"}°</span>
+          <span className="climate-control__target-value" data-testid={`climate-temperature-value-${variant}`}>
+            {v3VisualSkinEnabled && <RingGauge size={64} tone="accent" label={`Целевая температура ${draftTarget ?? "—"}°`}
+              reading={climateLive && draftTarget !== null ? { kind: "progress", fraction: (draftTarget - minimumTemperature) / (maximumTemperature - minimumTemperature) } : { kind: "unavailable" }} />}
+            {draftTarget ?? "—"}°
+          </span>
           <button
             type="button"
             className="climate-control__stepper"
