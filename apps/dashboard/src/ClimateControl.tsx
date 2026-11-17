@@ -1,3 +1,4 @@
+import { SelectField } from "./ui/SelectField";
 import { v3VisualSkinEnabled } from "./visualShellConfig";
 import { RingGauge } from "./ui/RingGauge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -305,26 +306,26 @@ export function ClimateControl({
 
         <label className="climate-control__select-label climate-control__mode-label">
           <span>Режим</span>
-          <select
+          <SelectField
             value={selectedMode}
             disabled={!canUse(HOME_CLIMATE_SET_MODE) || !modes.length}
-            onChange={(event) => void run(HOME_CLIMATE_SET_MODE, { mode: event.target.value as ClimateHvacMode })}
+            onValueChange={(nextValue) => void run(HOME_CLIMATE_SET_MODE, { mode: nextValue as ClimateHvacMode })}
             aria-label="Режим кондиционера"
           >
             {modes.map((mode) => <option key={mode} value={mode}>{climateHvacLabels[mode]}</option>)}
-          </select>
+          </SelectField>
         </label>
 
         <label className="climate-control__select-label climate-control__fan-label">
           <span>Скорость вентилятора</span>
-          <select
+          <SelectField
             value={selectedFan}
             disabled={!canUse(HOME_CLIMATE_SET_FAN_MODE) || !fans.length}
-            onChange={(event) => void run(HOME_CLIMATE_SET_FAN_MODE, { fanMode: event.target.value as ClimateFanMode })}
+            onValueChange={(nextValue) => void run(HOME_CLIMATE_SET_FAN_MODE, { fanMode: nextValue as ClimateFanMode })}
             aria-label="Скорость вентилятора"
           >
             {fans.map((fan) => <option key={fan} value={fan}>Скорость {climateFanLabels[fan]}</option>)}
-          </select>
+          </SelectField>
         </label>
       </div>
       {!apiAvailable && interactive && <span className="climate-control__api-note">Проверяем доступность управления…</span>}

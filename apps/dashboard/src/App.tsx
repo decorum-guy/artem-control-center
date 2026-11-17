@@ -1,3 +1,4 @@
+import { SelectField } from "./ui/SelectField";
 import { BootScreen } from "./ui/States";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
@@ -446,11 +447,11 @@ export function App() {
         <nav className="dev-toolbar" aria-label="Development controls">
           <label>
             Fixture
-            <select value={scenario} onChange={(event) => setScenario(event.target.value)}>
+            <SelectField label="Сценарий" value={scenario} onValueChange={(nextValue) => setScenario(nextValue)}>
               {fixtureScenarios.map((fixture) => (
                 <option key={fixture} value={fixture}>{fixture}</option>
               ))}
-            </select>
+            </SelectField>
           </label>
           <button type="button" onClick={() => setTheme(theme === "night" ? "day" : "night")}>
             {theme === "night" ? "День" : "Ночь"}

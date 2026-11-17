@@ -57,6 +57,7 @@ export function Select({ label, options, value, onChange, disabled, compact, tes
   const initialOption = selected && !selected.disabled ? selected : options.find((option) => !option.disabled);
   return <>
     <button type="button" ref={trigger} className="cc-select" data-compact={Boolean(compact)} data-testid={testId}
+      aria-label={`${label} · ${selected?.label ?? "—"}`}
       aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? id : undefined}
       disabled={disabled || !initialOption} onClick={() => setOpen(true)}>
       <span><small>{label}</small><strong>{selected?.label ?? "—"}</strong></span><Icon name="chevron-down" />
@@ -107,8 +108,8 @@ function bounded(value: number, min: number, max: number, step: number): number 
   return Math.max(min, Math.min(max, rounded));
 }
 
-export function Slider({ label, value, min, max, step = 1, unit = "", disabled, onChange, onCommit, heat, testId }:
-  NumericControl & { heat?: boolean; onCommit?: (value: number) => void; testId?: string }) {
+export function Slider({ label, value, min, max, step = 1, unit = "", disabled, onChange, onCommit, onCancel, heat, testId, displayValue }:
+  NumericControl & { heat?: boolean; onCommit?: (value: number) => void; onCancel?: () => void; testId?: string; displayValue?: string }) {
   const id = useId();
   const drag = useRef<number | null>(null);
   const ratio = max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0;
@@ -118,9 +119,9 @@ export function Slider({ label, value, min, max, step = 1, unit = "", disabled, 
     return bounded(min + percent * (max - min), min, max, step);
   }
   return <div className="cc-slider-field" data-heat={heat || undefined}>
-    <div className="cc-slider-copy"><span id={id}>{label}</span><output>{value}{unit}</output></div>
+    <div className="cc-slider-copy"><span id={id}>{label}</span><output>{displayValue ?? `${value}${unit}`}</output></div>
     <div className="cc-slider" role="slider" aria-labelledby={id} aria-valuenow={value} aria-valuemin={min} aria-valuemax={max}
-      aria-valuetext={`${value}${unit}`} aria-disabled={Boolean(disabled)} tabIndex={disabled ? -1 : 0} data-testid={testId}
+      aria-valuetext={displayValue ?? `${value}${unit}`} aria-disabled={Boolean(disabled)} tabIndex={disabled ? -1 : 0} data-testid={testId}
       style={{ "--cc-fill": `${ratio * 100}%` } as CSSProperties}
       onPointerDown={(event) => {
         if (disabled || !event.isPrimary || event.button !== 0) return;
@@ -135,6 +136,7 @@ export function Slider({ label, value, min, max, step = 1, unit = "", disabled, 
         drag.current = null;
         if (!disabled) { const next = pointerValue(event); onChange(next); onCommit?.(next); }
       }}
+      onPointerCancel={() => { drag.current = null; onCancel?.(); }}
       onLostPointerCapture={() => { drag.current = null; }}
       onKeyDown={(event) => {
         if (disabled) return;

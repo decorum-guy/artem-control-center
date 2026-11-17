@@ -1,3 +1,5 @@
+import { v3VisualSkinEnabled } from "../../visualShellConfig";
+import { Slider } from "../../ui/Controls";
 import type { OverviewConfigValue, OverviewLayoutItem } from "@artem/contracts";
 import type { CoffeeEditorPreviewStage } from "../../coffee";
 import { Sheet } from "../../Sheet";
@@ -80,6 +82,9 @@ export function WidgetAppearanceSheet({
                 )}
                 {control.control === "integer_range" && (
                   <>
+                    {v3VisualSkinEnabled ? <Slider label={label} min={control.min} max={control.max} step={control.step}
+                      value={value as number} displayValue={valueLabel} disabled={unavailable}
+                      onChange={next => onChange(control.key, next)} /> : (
                     <input
                       id={controlId}
                       className="overview-appearance__range"
@@ -93,6 +98,7 @@ export function WidgetAppearanceSheet({
                       aria-label={label}
                       aria-valuetext={valueLabel}
                     />
+                    )}
                     {previewStage && (
                       <button
                         type="button"

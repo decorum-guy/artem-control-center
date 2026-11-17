@@ -1,3 +1,4 @@
+import { SelectField } from "./ui/SelectField";
 import { useEffect, useRef, useState } from "react";
 import type { PlanningCalendarEvent } from "@artem/contracts";
 import { addCalendarDays, DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
@@ -97,9 +98,9 @@ export function CalendarMutationSheet({ mode, event, selectedDate, destinations,
     <div className="calendar-editor">
       <div className="calendar-editor__destination">
         <span className="calendar-editor__field-label">Календарь</span>
-        {destinations.length > 1 ? <select aria-label="Календарь" disabled={mode === "edit"} value={form.destinationId} onChange={(change) => setForm({ ...form, destinationId: change.target.value })}>
+        {destinations.length > 1 ? <SelectField aria-label="Календарь" disabled={mode === "edit"} value={form.destinationId} onValueChange={(nextValue) => setForm({ ...form, destinationId: nextValue })}>
           {destinations.map((item) => <option value={item.id} disabled={!item.writable} key={item.id}>{item.label}</option>)}
-        </select> : <div className="calendar-editor__destination-value" data-testid="calendar-editor-destination">
+        </SelectField> : <div className="calendar-editor__destination-value" data-testid="calendar-editor-destination">
           <span className="calendar-editor__destination-dot" style={{ backgroundColor: destination?.color }} aria-hidden="true" />
           <strong>{destination?.label ?? "Календарь недоступен"}</strong>
           <span>{destination?.providerKind === "local" ? "Локальная запись" : destination?.writable ? "Доступен для записи" : "Только просмотр"}</span>

@@ -1,3 +1,6 @@
+import { v3VisualSkinEnabled } from "./visualShellConfig";
+import { Icon } from "./icons";
+import { SelectField } from "./ui/SelectField";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import type {
@@ -325,7 +328,7 @@ function BeanSheet({ bean, onClose, onSaved, onConflict }: { bean?: CoffeeDiaryB
         <div className="coffee-diary-form__grid coffee-diary-bean-core">
           <label className="coffee-diary-form__field"><span>Название</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} data-testid="coffee-diary-input-name" /></label>
           <label className="coffee-diary-form__field"><span>Помол / описание помола</span><input value={draft.grindDescription} onChange={(event) => setDraft({ ...draft, grindDescription: event.target.value })} data-testid="coffee-diary-input-grind" placeholder="Например, чуть мельче среднего" /></label>
-          <label className="coffee-diary-form__field"><span>Лучше подходит для</span><select value={draft.preferredDrink} onChange={(event) => setDraft({ ...draft, preferredDrink: event.target.value as BeanDraft["preferredDrink"] })} data-testid="coffee-diary-input-preferred-drink">{preferredDrinkOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label className="coffee-diary-form__field"><span>Лучше подходит для</span><SelectField label="Лучше подходит для" value={draft.preferredDrink} onValueChange={(nextValue) => setDraft({ ...draft, preferredDrink: nextValue as BeanDraft["preferredDrink"] })} data-testid="coffee-diary-input-preferred-drink">{preferredDrinkOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</SelectField></label>
           <label className="coffee-diary-form__field coffee-diary-form__field--wide"><span>Общий комментарий</span><textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} rows={3} data-testid="coffee-diary-input-notes" placeholder="Например, шоколад и ягоды" /></label>
         </div>
         {!bean && <section className="coffee-diary-photo-staging" aria-label="Фото упаковки">
@@ -600,7 +603,7 @@ export function CoffeeDiaryPage() {
       </div>
       {error && <p className="coffee-diary-notice" role="alert">{error}</p>}
       {loading && <p className="coffee-diary-state">Загружаем дневник…</p>}
-      {!loading && collection && collection.beans.length === 0 && <section className="coffee-diary-empty" data-testid="coffee-diary-empty"><div className="coffee-diary-empty__cup">☕</div><h2>Кофе пока не добавлен</h2><p>Добавьте зерно, чтобы сохранить помол и первый лучший рецепт.</p><button type="button" className="coffee-diary-primary-button" onClick={() => setSheet("add-bean")}>Добавить кофе</button></section>}
+      {!loading && collection && collection.beans.length === 0 && <section className="coffee-diary-empty" data-testid="coffee-diary-empty"><div className="coffee-diary-empty__cup" aria-hidden={v3VisualSkinEnabled || undefined}>{v3VisualSkinEnabled ? <Icon name="coffee" size={38} /> : "☕"}</div><h2>Кофе пока не добавлен</h2><p>Добавьте зерно, чтобы сохранить помол и первый лучший рецепт.</p><button type="button" className="coffee-diary-primary-button" onClick={() => setSheet("add-bean")}>Добавить кофе</button></section>}
       {!loading && collection && collection.beans.length > 0 && <div className="coffee-diary-layout">
         <section className="coffee-diary-bean-list" aria-label="Зёрна">
           <div className="coffee-diary-section-heading"><div><p className="section-kicker">Коллекция</p><h2>Зёрна</h2></div><span>{collection.beanCount}</span></div>
