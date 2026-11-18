@@ -34,7 +34,6 @@
   place-items: center;
   pointer-events: none;
 }
-.skin-v3 .cc-coffee-dial circle { vector-effect: non-scaling-stroke; }
 .skin-v3 .cc-coffee-dial .cc-gauge-track { stroke: color-mix(in srgb, var(--cc-text-muted) 32%, transparent); }
 .skin-v3 .cc-coffee-dial .cc-gauge-track--dashed { stroke: var(--cc-tone); }
 /* The dial belongs to the glass. The photo and its plinth share the user's

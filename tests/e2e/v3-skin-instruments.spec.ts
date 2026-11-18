@@ -20,5 +20,22 @@ for (const [scenario, kind] of [["coffee-off", "idle"], ["coffee-warming", "prog
       await expect(value).toHaveCount(0);
       await expect(dial.locator(".cc-gauge-track--dashed")).toHaveCount(kind === "dashed" ? 1 : 0);
     }
+    if (kind === "full" || kind === "progress") {
+      const { painted, requested } = await value.evaluate(element => {
+        const ring = element as SVGCircleElement;
+        const samples = 360;
+        let hits = 0;
+        for (let step = 0; step < samples; step++) {
+          const angle = 2 * Math.PI * step / samples;
+          const x = ring.cx.baseVal.value + ring.r.baseVal.value * Math.cos(angle);
+          const y = ring.cy.baseVal.value + ring.r.baseVal.value * Math.sin(angle);
+          if (ring.isPointInStroke(new DOMPoint(x, y))) hits++;
+        }
+        return { painted: hits / samples, requested: parseFloat(ring.getAttribute("stroke-dasharray")!) / 100 };
+      });
+      // Round caps extend a partial arc slightly beyond its nominal endpoints.
+      if (kind === "full") expect(painted).toBe(1);
+      else expect(Math.abs(painted - requested)).toBeLessThan(.035);
+    }
   });
 }
