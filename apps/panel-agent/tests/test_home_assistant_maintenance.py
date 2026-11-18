@@ -94,3 +94,30 @@ def test_duplicate_request_and_active_operation_are_bounded(tmp_path):
         _, first = await executor.submit(request); _, duplicate = await executor.submit(request)
         assert first and not duplicate
     asyncio.run(run())
+
+
+def test_ssh_completion_does_not_wait_for_windows_transport_eof():
+    from panel_agent.home_assistant_maintenance import _read_ssh_result
+
+    async def exercise():
+        class Channel:
+            stdout = asyncio.StreamReader()
+            stderr = asyncio.StreamReader()
+
+            async def wait(self):
+                await asyncio.Future()
+
+        channel = Channel()
+        channel.stdout.feed_data(b'{"schemaVersion":1,"ok":true,"operation":"status"}\n')
+        channel.stderr.feed_data(b"__ARTEM_HOME_RESULT__ status 0\n")
+        data, code = await asyncio.wait_for(_read_ssh_result(channel, "status", 512), .5)
+        assert code == 0 and b'"ok":true' in data
+        channel.stdout.feed_data(b'{"ok":true}\n')
+        channel.stderr.feed_data(b"__ARTEM_HOME_RESULT__ restart-bot 0\n")
+        try:
+            await _read_ssh_result(channel, "status", 512)
+        except HomeServerMaintenanceError as exc:
+            assert exc.code == "ssh_invalid_response"
+        else:
+            raise AssertionError("wrong operation acknowledged")
+    asyncio.run(exercise())

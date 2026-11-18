@@ -5,6 +5,12 @@
   padding-inline: 12px; border: 1px solid var(--cc-border);
   background: linear-gradient(95deg, var(--cc-surface-2), transparent);
 }
+.skin-v3 .health-row { grid-template-columns: max-content minmax(0, .9fr) minmax(0, 1.1fr) auto; column-gap: 14px; }
+.skin-v3 .system-fact-row { grid-template-columns: max-content minmax(0, 1fr) auto; column-gap: 14px; }
+@media (max-width: 760px) {
+  .skin-v3 .health-row { grid-template-columns: max-content minmax(0, 1fr) auto; column-gap: 12px; }
+  .skin-v3 .health-row__summary { grid-column: 2; }
+}
 .skin-v3 .home-authority-line__icon, .skin-v3 .system-fact-row__icon, .skin-v3 .health-row__icon {
   display: grid; place-items: center; width: 36px; height: 36px; flex: none;
   background: var(--cc-interactive); color: var(--cc-text-muted);

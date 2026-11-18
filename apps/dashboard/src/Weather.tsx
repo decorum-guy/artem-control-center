@@ -339,7 +339,9 @@ function WeatherHero({ forecast, preview }: { forecast: WeatherForecast; preview
             <span className={forecast.stale ? "weather-freshness--stale" : ""}>
               {forecast.stale ? "Данные устарели" : `Обновлено ${ageLabel(forecast.ageSeconds)}`}
             </span>
-            <small>{forecast.sourceMode === "fixture" ? "Локальный тестовый режим" : forecast.timezoneAbbreviation}</small>
+            <small>{forecast.sourceMode === "fixture" ? "Локальный тестовый режим" : forecast.timezoneAbbreviation}
+              {forecast.provider === "metno" && <> · <a href="https://www.met.no/en" target="_blank" rel="noreferrer">MET Norway</a></>}
+            </small>
           </div>
         </div>
 
@@ -840,7 +842,9 @@ function WeatherHeroV2({
           </div>
           <div className="weather-freshness">
             <span className={forecast.stale ? "weather-freshness--stale" : ""}>{stateLabel}</span>
-            <small>{forecast.sourceMode === "fixture" ? "Локальный тестовый режим" : forecast.timezoneAbbreviation}</small>
+            <small>{forecast.sourceMode === "fixture" ? "Локальный тестовый режим" : forecast.timezoneAbbreviation}
+              {forecast.provider === "metno" && <> · <a href="https://www.met.no/en" target="_blank" rel="noreferrer">MET Norway</a></>}
+            </small>
           </div>
         </PageHeader>
 
@@ -927,7 +931,6 @@ function WeatherContextZone({ forecast }: { forecast: WeatherForecast }) {
           <strong>{forecast.current.precipitation.toFixed(1)} мм</strong>
         </div>
       </div>
-      <WeatherCredit forecast={forecast} />
     </section>
   );
 }
@@ -1100,6 +1103,7 @@ function WeatherV2Page() {
             <WeatherContextZone forecast={visibleForecast} />
           </div>
           <DailyForecastV2 forecast={visibleForecast} />
+          <WeatherCredit forecast={visibleForecast} />
         </>
       )}
 

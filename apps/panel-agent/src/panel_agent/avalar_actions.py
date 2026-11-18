@@ -8,11 +8,11 @@ from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Literal, Protocol
 
-import httpx
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from .access_policy import AccessPolicyStore
+from .avalar_health import private_stage_status, probe_avalar_health
 from .contracts import ActionDescriptor
 from .settings import IntegrationSettings
 from .ssh_terminal import PREFIX, TerminalEnvelopeError, TerminalEnvelopeParser
@@ -351,8 +351,8 @@ class AvalarActionExecutor:
                         raise RuntimeError("backup_revision_mismatch")
                 result = await self.command_runner(descriptor["operation"])
                 self._update(correlation_id, "verifying")
-                await self._verify_public_health(descriptor["environment"])
                 await self.details_provider.refresh()
+                await self._verify_public_health(descriptor["environment"])
                 details_after = self.details_provider.details_for(descriptor["service_id"])
                 revision_after = details_after.get("deployment_revision") or details_after.get("commit")
                 if ".restart" in action_id and revision_before and revision_after != revision_before:
@@ -397,23 +397,16 @@ class AvalarActionExecutor:
         )
         if not base_url:
             raise RuntimeError("public_health_not_configured")
-        async with httpx.AsyncClient(
-            base_url=base_url,
-            timeout=self.settings.http_request_timeout_seconds,
-        ) as client:
-            live, ready, root = await asyncio.gather(
-                client.get("/health/live"),
-                client.get("/health/ready"),
-                client.get("/"),
-            )
-        live_payload = live.json()
-        ready_payload = ready.json()
-        if live.status_code != 200 or live_payload.get("status") != "live":
-            raise RuntimeError("live_verification_failed")
-        if ready.status_code != 200 or ready_payload.get("status") != "ready":
-            raise RuntimeError("ready_verification_failed")
-        if root.status_code >= 400:
+        probe = await probe_avalar_health(base_url, self.settings.http_request_timeout_seconds)
+        if probe.health == "healthy":
+            return
+        if environment == "stage" and self.settings.avalar_stage_private_health and probe.private_routes_forbidden:
+            details = self.details_provider.details_for("avalar-site-stage")
+            if private_stage_status(details, self.settings.avalar_ssh_refresh_seconds) == "ready":
+                return
+        if not probe.page_valid:
             raise RuntimeError("root_verification_failed")
+        raise RuntimeError("ready_verification_failed")
 
     async def _run_fixed_command(self, operation: str) -> dict[str, Any]:
         if operation not in {descriptor["operation"] for descriptor in _ACTIONS.values()}:

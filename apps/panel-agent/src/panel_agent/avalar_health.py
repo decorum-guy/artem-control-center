@@ -1,7 +1,7 @@
 """Shared, bounded AVALAR live/ready health semantics.
 
 The legacy HTTP integration and the declarative project bridge deliberately
-share this reader.  AVALAR's public health contract is two fixed JSON GETs;
+share this reader.  AVALAR's public health contract is two fixed JSON GETs and its rendered homepage;
 the project registry only selects the registered adapter and backend-owned
 environment variable, it never supplies a resolved URL to the browser.
 """
@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from html.parser import HTMLParser
 from time import monotonic
 from typing import Literal, Optional
 
@@ -35,6 +37,7 @@ AvalarHealthOutcome = Literal["live", "unavailable"]
 AVALAR_HEALTH_REASONS = {
     "avalar_health_forbidden": "Доступ к проверке приложения ограничен (HTTP 403)",
     "avalar_health_missing": "Маршрут проверки приложения отсутствует (HTTP 404)",
+    "avalar_page_failed": "Главная страница AVALAR не прошла проверку",
     "avalar_stage_not_ready": "Приложение закрытого Stage не прошло проверку готовности по SSH",
 }
 
@@ -49,7 +52,9 @@ class AvalarHealthProbeResult:
     latency_ms: int | None = None
     error_code: str | None = None
     http_status: int | None = None
-    both_forbidden: bool = False
+    private_routes_forbidden: bool = False
+    page_status: int | None = None
+    page_valid: bool = False
 
 
 def avalar_target_for_url_env(url_env: str) -> AvalarTarget | None:
@@ -73,6 +78,73 @@ def legacy_avalar_service_id(target: AvalarTarget) -> str:
     """Return the compatibility identity used by the pre-registry adapters."""
 
     return AVALAR_LEGACY_SERVICE_ID_BY_TARGET[target]
+
+
+class _HomepageParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_title = False
+        self.title = ""
+        self.site_header = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "title":
+            self.in_title = True
+        if tag == "header" and dict(attrs).get("id") == "mainHeader":
+            self.site_header = True
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self.in_title = False
+
+    def handle_data(self, data):
+        if self.in_title:
+            self.title += data
+
+    @property
+    def valid(self) -> bool:
+        return self.title.strip().upper().split(" ", 1)[0] == "AVALAR" and self.site_header
+
+
+async def _homepage(client: httpx.AsyncClient) -> tuple[int | None, bool]:
+    # Ignore redirects, hosting placeholders and status pages. Read only the
+    # opening markup and never retain the page or expose it in diagnostics.
+    try:
+        async with client.stream("GET", "/") as response:
+            if response.status_code != 200 or response.headers.get("content-type", "").split(";")[0].strip().lower() != "text/html":
+                return response.status_code, False
+            parser = _HomepageParser()
+            remaining = 64 * 1024
+            async for chunk in response.aiter_bytes(chunk_size=4096):
+                parser.feed(chunk[:remaining].decode("latin-1"))
+                if parser.valid:
+                    return 200, True
+                remaining -= len(chunk)
+                if remaining <= 0:
+                    break
+            return 200, False
+    except (httpx.HTTPError, ValueError):
+        return None, False
+
+
+def private_stage_status(details: dict, refresh_seconds: int) -> str | None:
+    if details.get("details_source") != "live" or details.get("environment") != "stage":
+        return None
+    for key in ("details_observed_at", "observed_at"):
+        try:
+            stamp = datetime.fromisoformat(details[key].replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - stamp).total_seconds()
+        except (KeyError, AttributeError, TypeError, ValueError):
+            return None
+        if not -30 <= age <= min(600, refresh_seconds * 2):
+            return None
+    if details.get("application_readiness") == "not_ready":
+        return "avalar_stage_not_ready"
+    if details.get("page_readiness") == "not_ready":
+        return "avalar_page_failed"
+    if details.get("application_readiness") == details.get("page_readiness") == "ready":
+        return "ready"
+    return None
 
 
 async def probe_avalar_health(
@@ -101,9 +173,10 @@ async def probe_avalar_health(
             transport=transport,
             follow_redirects=False,
         ) as client:
-            live_response, ready_response = await asyncio.gather(
+            live_response, ready_response, (page_status, page_valid) = await asyncio.gather(
                 client.get("/health/live"),
                 client.get("/health/ready"),
+                _homepage(client),
             )
         statuses = {live_response.status_code, ready_response.status_code}
         for status, reason in ((403, "avalar_health_forbidden"), (404, "avalar_health_missing")):
@@ -111,7 +184,8 @@ async def probe_avalar_health(
                 return AvalarHealthProbeResult(
                     "live", health="degraded", summary=AVALAR_HEALTH_REASONS[reason],
                     latency_ms=_bounded_latency_ms(started, clock), error_code=reason,
-                    http_status=status, both_forbidden=statuses == {403},
+                    http_status=status, private_routes_forbidden=statuses == {403} and page_status == 403,
+                    page_status=page_status, page_valid=page_valid,
                 )
         live_payload = _json_object(live_response)
         ready_payload = _json_object(ready_response)
@@ -126,11 +200,16 @@ async def probe_avalar_health(
         ready_response.status_code == 200
         and ready_payload.get("status") == "ready"
     )
-    health: Literal["healthy", "degraded"] = "healthy" if live and ready else "degraded"
+    health: Literal["healthy", "degraded"] = "healthy" if live and ready and page_valid else "degraded"
+    page_error = live and ready and not page_valid
     return AvalarHealthProbeResult(
         "live",
         health=health,
-        summary="Ready" if health == "healthy" else "Readiness check failed",
+        summary="Главная страница и приложение доступны" if health == "healthy" else (
+            AVALAR_HEALTH_REASONS["avalar_page_failed"] if page_error else "Readiness check failed"
+        ),
+        error_code="avalar_page_failed" if page_error else None,
+        page_status=page_status, page_valid=page_valid,
         latency_ms=_bounded_latency_ms(started, clock),
     )
 

@@ -141,7 +141,7 @@ production identity source. Unknown or unrelated service IDs are not rewritten.
 
 ## Monitoring a private Stage
 
-Configure the public Main and Stage base URLs and the existing status-only SSH identity. On a Stage protected by the hosting access policy, `PANEL_AVALAR_STAGE_PRIVATE_HEALTH=true` lets the agent combine HTTP 403 from both fixed probes with a recent application check from the Stage SSH adapter. The host runs its deployed PHP live and ready checks and returns a bounded result. The panel exposes the HTTP status and the source of the readiness observation. Missing routes, stale SSH data, mixed HTTP results and a failed application check remain visible. Main uses the public HTTPS contract.
+Configure the public Main and Stage base URLs and the existing status-only SSH identity. On a Stage protected by the hosting access policy, `PANEL_AVALAR_STAGE_PRIVATE_HEALTH=true` lets the agent combine HTTP 403 from both fixed probes with a recent application check from the Stage SSH adapter. The host runs its deployed PHP live and ready checks and returns a bounded result. The panel exposes the HTTP status and the source of the readiness observation. Missing routes, stale SSH data, mixed HTTP results and a failed application check remain visible. Main checks both public health routes and downloads the first 64 KiB of the real homepage. HTTP 200 alone is insufficient. Its HTML title and main header identify the deployed site. A private Stage must return the expected 403 on all three public routes and supply recent, independent checks for application readiness and the PHP-rendered homepage. Both the service sheet and action verification use this evidence.
 
 ## Backup boundary
 

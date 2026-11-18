@@ -33,7 +33,7 @@ export function maintenanceOperationActive(operation: MaintenanceOperation | nul
   return Boolean(operation && operation.status !== "success" && operation.status !== "failed");
 }
 
-export function HomeAssistantMaintenance() {
+export function HomeAssistantMaintenance({ target }: { target?: "homeAssistant" | "bot" } = {}) {
   const { ensureCapability } = useAccess();
   const { confirmAction } = useActionConfirmation();
   const { guardMutation } = useInteractionLock();
@@ -88,13 +88,15 @@ export function HomeAssistantMaintenance() {
   const ha = status?.services.homeAssistant;
   const caddy = status?.services.caddy;
   const bot = status?.services.bot;
-  const stateLabel = !status || !status.configured || !status.reachable ? "Недоступно" : ha?.healthy === false ? "Требует внимания" : "На связи";
+  const service = target === "bot" ? bot : ha;
+  const online = Boolean(status?.reachable && service?.running && service.healthy !== false);
+  const stateLabel = !status?.reachable || !service?.running ? "Недоступно" : service.healthy === false ? "Требует внимания" : service.healthy ? "На связи" : "Контейнер запущен";
   const operationMessage = operation ? (active ? maintenanceActionCopy(operation.actionId).progress : phaseCopy[operation.status]) : "Обслуживание доступно только через фиксированные системные действия.";
   return <section className="ha-maintenance" data-testid="home-assistant-maintenance" aria-labelledby="ha-maintenance-title">
-    <header><div><p className="section-kicker">Система · домашний сервер</p><h2 id="ha-maintenance-title">Home Assistant</h2><p>{operationMessage}</p></div><StatusText label={stateLabel} tone={status?.reachable ? "success" : "unavailable"} /></header>
-    <dl className="ha-maintenance__versions"><div><dt>Версия Home Assistant</dt><dd>{ha?.installedVersion ?? "—"}</dd></div><div><dt>Образ контейнера</dt><dd>{ha?.configuredImage ?? "—"}</dd></div></dl>
+    <header><div><p className="section-kicker">Система · домашний сервер</p><h2 id="ha-maintenance-title">{target === "bot" ? "Telegram-бот" : "Home Assistant"}</h2><p>{operationMessage}</p></div><StatusText label={stateLabel} tone={online ? "success" : "unavailable"} /></header>
+    {target !== "bot" && <dl className="ha-maintenance__versions"><div><dt>Версия Home Assistant</dt><dd>{ha?.installedVersion ?? "—"}</dd></div><div><dt>Образ контейнера</dt><dd>{ha?.configuredImage ?? "—"}</dd></div></dl>}
     {operation?.status === "failed" && <p className="ha-maintenance__notice" role="status">{errorCopy(operation.failureCode)}</p>}
-    <div className="ha-maintenance__actions"><button type="button" onClick={() => void run(HA_RESTART)} disabled={active || !restartDecision || (!restartDecision.allowed && restartDecision.availability !== "elevation_required")}>Перезапустить</button><button type="button" onClick={() => void run(HA_UPDATE_CORE)} disabled={active || !updateDecision || (!updateDecision.allowed && updateDecision.availability !== "elevation_required")}>Проверить и обновить</button></div>
-    <div className="ha-maintenance__service-actions"><span>Caddy · {caddy?.healthy ? "на связи" : "нет подтверждения"}</span><button type="button" onClick={() => void run(HOME_SERVER_CADDY_RESTART)} disabled={active || !status?.actions[HOME_SERVER_CADDY_RESTART] || (!status.actions[HOME_SERVER_CADDY_RESTART].allowed && status.actions[HOME_SERVER_CADDY_RESTART].availability !== "elevation_required")}>Перезапустить Caddy</button><span>Telegram Bot · {bot?.healthy ? "на связи" : "нет подтверждения"}</span><button type="button" onClick={() => void run(HOME_SERVER_BOT_RESTART)} disabled={active || !status?.actions[HOME_SERVER_BOT_RESTART] || (!status.actions[HOME_SERVER_BOT_RESTART].allowed && status.actions[HOME_SERVER_BOT_RESTART].availability !== "elevation_required")}>Перезапустить бота</button></div>
+    {target !== "bot" && <div className="ha-maintenance__actions"><button type="button" onClick={() => void run(HA_RESTART)} disabled={active || !restartDecision || (!restartDecision.allowed && restartDecision.availability !== "elevation_required")}>Перезапустить</button><button type="button" onClick={() => void run(HA_UPDATE_CORE)} disabled={active || !updateDecision || (!updateDecision.allowed && updateDecision.availability !== "elevation_required")}>Проверить и обновить</button></div>}
+    {target !== "homeAssistant" && <div className="ha-maintenance__service-actions">{!target && <><span>Caddy · {caddy?.healthy ? "на связи" : "нет подтверждения"}</span><button type="button" onClick={() => void run(HOME_SERVER_CADDY_RESTART)} disabled={active || !status?.actions[HOME_SERVER_CADDY_RESTART] || (!status.actions[HOME_SERVER_CADDY_RESTART].allowed && status.actions[HOME_SERVER_CADDY_RESTART].availability !== "elevation_required")}>Перезапустить Caddy</button></>}<span>Telegram Bot · {bot?.healthy ? "на связи" : "нет подтверждения"}</span><button type="button" onClick={() => void run(HOME_SERVER_BOT_RESTART)} disabled={active || !status?.actions[HOME_SERVER_BOT_RESTART] || (!status.actions[HOME_SERVER_BOT_RESTART].allowed && status.actions[HOME_SERVER_BOT_RESTART].availability !== "elevation_required")}>Перезапустить бота</button></div>}
   </section>;
 }

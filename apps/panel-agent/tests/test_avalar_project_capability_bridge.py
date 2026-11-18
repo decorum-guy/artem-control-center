@@ -134,6 +134,8 @@ class _AvalarTransport(httpx.AsyncBaseTransport):
             if state == "degraded":
                 return httpx.Response(503, json={"status": "down"}, request=request)
             return httpx.Response(200, json={"status": "ready"}, request=request)
+        if request.url.path == "/":
+            return httpx.Response(200, text='<title>AVALAR - Site</title><header id="mainHeader"></header>', headers={"content-type": "text/html"}, request=request)
         return httpx.Response(404, request=request)
 
 
@@ -267,7 +269,7 @@ def test_closed_stage_requires_current_host_readiness(monkeypatch, readiness, so
 
     class Details(_Details):
         def details_for_url_env(self, url_env):
-            return dict(super().details_for_url_env(url_env), application_readiness=readiness,
+            return dict(super().details_for_url_env(url_env), application_readiness=readiness, page_readiness="ready",
                         details_source=source, observed_at=observed, details_observed_at=observed)
 
     monitor = DeclarativeProjectMonitor(

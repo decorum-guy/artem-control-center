@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .avalar_actions import avalar_action_descriptor
-from .avalar_health import AVALAR_HEALTH_REASONS, probe_avalar_health
+from .avalar_health import AVALAR_HEALTH_REASONS, private_stage_status, probe_avalar_health
 from .contracts import ActionDescriptor, ServicePresentation, ServiceSnapshot
 from .project_registry import (
     ProjectDetailsConfig,
@@ -379,13 +379,13 @@ class DeclarativeProjectMonitor:
         health = probe.health or "degraded"
         summary, reason = probe.summary, probe.error_code
         checked_by_ssh = False
-        if target.environment_id == "stage" and self._settings.avalar_stage_private_health and probe.both_forbidden:
-            readiness = self._private_stage_readiness(details)
+        if target.environment_id == "stage" and self._settings.avalar_stage_private_health and probe.private_routes_forbidden:
+            readiness = private_stage_status(details, self._settings.avalar_ssh_refresh_seconds)
             if readiness == "ready":
-                health, summary, reason = "healthy", "Закрытый Stage готов · проверено по SSH", None
+                health, summary, reason = "healthy", "Главная страница и приложение Stage проверены на сервере", None
                 checked_by_ssh = True
-            elif readiness == "not_ready":
-                reason = "avalar_stage_not_ready"
+            elif readiness in ("avalar_stage_not_ready", "avalar_page_failed"):
+                reason = readiness
                 summary = AVALAR_HEALTH_REASONS[reason]
                 checked_by_ssh = True
         snapshot = self._avalar_snapshot(
@@ -395,27 +395,14 @@ class DeclarativeProjectMonitor:
             snapshot.data["lastError"] = reason
         if probe.http_status:
             snapshot.data["publicHealthHttpStatus"] = probe.http_status
+        snapshot.data["homepageCheckedAt"] = datetime.now(timezone.utc).isoformat()
+        snapshot.data["homepageHttpStatus"] = probe.page_status
+        snapshot.data["homepageCheck"] = "verified" if probe.page_valid else "failed"
         if checked_by_ssh:
             snapshot.data["healthCheckTransport"] = "ssh"
+            snapshot.data["homepageCheckedAt"] = details.get("observed_at")
+            snapshot.data["homepageCheck"] = "rendered" if details.get("page_readiness") == "ready" else "failed"
         return snapshot, True, True
-
-    def _private_stage_readiness(self, details: dict[str, object]) -> str | None:
-        if details.get("details_source") != "live":
-            return None
-        observed_at = details.get("details_observed_at")
-        remote_at = details.get("observed_at")
-        if not isinstance(observed_at, str) or not isinstance(remote_at, str):
-            return None
-        max_age = min(600, self._settings.avalar_ssh_refresh_seconds * 2)
-        for timestamp in (observed_at, remote_at):
-            try:
-                age = (datetime.now(timezone.utc) - datetime.fromisoformat(timestamp.replace("Z", "+00:00"))).total_seconds()
-            except (TypeError, ValueError):
-                return None
-            if not -30 <= age <= max_age:
-                return None
-        readiness = details.get("application_readiness")
-        return readiness if readiness in ("ready", "not_ready") else None
 
     def _with_last_known(
         self,
@@ -646,6 +633,8 @@ class DeclarativeProjectMonitor:
             clean["working_tree"] = working_tree
         if details.get("environment") == "stage" and details.get("application_readiness") in ("ready", "not_ready", "unavailable"):
             clean["application_readiness"] = details["application_readiness"]
+            if details.get("page_readiness") in ("ready", "not_ready"):
+                clean["page_readiness"] = details["page_readiness"]
             clean["environment"] = "stage"
         for key in ("deployed_at", "details_observed_at", "observed_at"):
             value = details.get(key)

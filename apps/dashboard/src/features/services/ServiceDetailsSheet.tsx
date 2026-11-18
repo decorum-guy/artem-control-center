@@ -1,6 +1,8 @@
 import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "../../AccessControls";
 import { titleForServiceAction, useAvalarActions } from "../../AvalarActions";
+import { formatPanelDate } from "../../panelDate";
+import { HomeAssistantMaintenance } from "../../HomeAssistantMaintenance";
 import { Icon } from "../../icons";
 import { Sheet } from "../../Sheet";
 import { StatusText } from "../../ShellPrimitives";
@@ -22,6 +24,9 @@ export function ServiceDetailsSheet({
 }) {
   const { explainAvailability } = useAccess();
   const avalar = useAvalarActions();
+  const maintenance = "maintenanceTarget" in service.data ? service.data.maintenanceTarget : undefined;
+  const checkedAt = "homepageCheckedAt" in service.data ? service.data.homepageCheckedAt : undefined;
+  const homepage = "homepageCheck" in service.data ? service.data.homepageCheck : undefined;
   const fixedActions = avalar.actionsFor(service);
 
   return (
@@ -38,6 +43,11 @@ export function ServiceDetailsSheet({
       </div>
 
       <dl className="service-details-sheet__facts">
+        {typeof homepage === "string" && <div>
+          <dt>Главная страница</dt>
+          <dd>{homepage === "verified" ? "Сайт открылся · HTML проверен" : homepage === "rendered" ? "HTML проверен на сервере · внешний доступ ограничен" : "Страница не прошла проверку"}</dd>
+        </div>}
+        {typeof checkedAt === "string" && <div><dt>Страницу проверили</dt><dd><time dateTime={checkedAt}>{formatPanelDate(checkedAt)}</time></dd></div>}
         <div><dt>Сводка</dt><dd>{service.summary}</dd></div>
         <div><dt>Источник</dt><dd>{sourceLabels[service.source]}</dd></div>
         <div><dt>Свежесть</dt><dd>{service.presentation?.freshnessLabel ?? "не указана"}</dd></div>
@@ -68,6 +78,8 @@ export function ServiceDetailsSheet({
               );
             })}
           </div>
+        ) : maintenance === "homeAssistant" || maintenance === "bot" ? (
+          <HomeAssistantMaintenance target={maintenance} />
         ) : service.actions.length ? (
           <>
             <p>Зарегистрированные возможности:</p>

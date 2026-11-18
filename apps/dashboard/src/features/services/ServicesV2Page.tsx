@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
+import type { DashboardSnapshot } from "@artem/contracts";
 import { ErrorBoundary } from "../../ErrorBoundary";
 import { OperationalStatusSummary, RouteHeader, SectionHeader, StatusText, WorkZone } from "../../ShellPrimitives";
 import { CollapsibleGroup } from "../operations/CollapsibleGroup";
@@ -19,7 +19,8 @@ import { useInterfaceCopy } from "../../interfaceCopy";
 
 export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const { copy } = useInterfaceCopy();
-  const [detailsService, setDetailsService] = useState<ServiceSnapshot | null>(null);
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+  const detailsService = snapshot.services.find(service => service.id === detailsId);
   const catalog = enabledServices(snapshot.services).filter((service) => !isHomeDevice(service));
   const counts = countHealth(catalog);
   const attention = servicesByAttention(catalog).filter((service) => service.health !== "healthy");
@@ -55,7 +56,7 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
         <div className="health-row-list">
           {attention.length ? attention.map((service) => (
             <ErrorBoundary key={service.id} title={service.title}>
-              <HealthRow service={service} onDetails={() => setDetailsService(service)} />
+              <HealthRow service={service} onDetails={() => setDetailsId(service.id)} />
             </ErrorBoundary>
           )) : (
             <div className="services-attention-empty" data-testid="services-all-healthy">
@@ -80,7 +81,7 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
               <div className="health-row-list health-row-list--healthy">
                 {services.map((service) => (
                   <ErrorBoundary key={service.id} title={service.title}>
-                    <HealthRow service={service} onDetails={() => setDetailsService(service)} />
+                    <HealthRow service={service} onDetails={() => setDetailsId(service.id)} />
                   </ErrorBoundary>
                 ))}
               </div>
@@ -90,7 +91,7 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
       </section>
 
       {detailsService && (
-        <ServiceDetailsSheet service={detailsService} onClose={() => setDetailsService(null)} />
+        <ServiceDetailsSheet service={detailsService} onClose={() => setDetailsId(null)} />
       )}
     </div>
   );

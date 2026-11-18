@@ -300,6 +300,8 @@ def _sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     clean = {key: payload.get(key) for key in _ALLOWED_FIELDS}
     if environment == "stage" and payload.get("application_readiness") in ("ready", "not_ready", "unavailable"):
         clean["application_readiness"] = payload["application_readiness"]
+        if payload.get("page_readiness") in ("ready", "not_ready"):
+            clean["page_readiness"] = payload["page_readiness"]
     clean["details_source"] = "live"
     clean["details_observed_at"] = datetime.now(timezone.utc).isoformat()
     return clean

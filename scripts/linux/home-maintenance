@@ -16,6 +16,9 @@ fail() { printf '{"schemaVersion":1,"ok":false,"error":"%s"}\n' "$1"; exit 1; }
 [[ $# -eq 0 ]] || fail invalid_operation
 operation=${SSH_ORIGINAL_COMMAND:-}
 case "$operation" in status|restart-ha|update-ha|restart-caddy|restart-bot) ;; *) fail invalid_operation ;; esac
+# Windows OpenSSH can hold a completed channel open. A terminal record on
+# stderr preserves the original stdout JSON and proves the fixed helper exited.
+trap 'printf "__ARTEM_HOME_RESULT__ %s %s\n" "$operation" "$?" >&2' EXIT
 [[ -r "$CONFIG" ]] || fail configuration_missing
 # shellcheck disable=SC1090
 source "$CONFIG"
@@ -23,10 +26,12 @@ for required in COMPOSE_PROJECT_DIR COMPOSE_FILE HA_SERVICE CADDY_SERVICE BOT_SE
   [[ -n "${!required:-}" ]] || fail configuration_missing
 done
 compose=(docker compose --project-directory "$COMPOSE_PROJECT_DIR" --file "$COMPOSE_FILE")
+if [[ -n "${COMPOSE_OVERLAY:-}" ]]; then compose+=(--file "$COMPOSE_OVERLAY"); fi
+if [[ "$operation" == restart-caddy && "${CADDY_MAINTENANCE_ENABLED:-yes}" != yes ]]; then fail maintenance_disabled; fi
 
 container_id() { "${compose[@]}" ps -q "$1" 2>/dev/null | head -n 1; }
 service_state() {
-  local id running health
+  local id running health url=${2:-}
   id=$(container_id "$1")
   [[ -n "$id" ]] || { printf 'false|null'; return; }
   running=$(docker inspect --format '{{.State.Running}}' "$id" 2>/dev/null || printf false)
@@ -35,6 +40,8 @@ service_state() {
     health=true
   elif [[ "$health" == unhealthy ]]; then
     health=false
+  elif [[ "$health" == none && -n "$url" && "$running" == true ]]; then
+    if curl --fail --silent --max-time 5 "$url" >/dev/null; then health=true; else health=false; fi
   else
     health=null
   fi
@@ -43,7 +50,7 @@ service_state() {
 ready() {
   local service=$1 url=${2:-} deadline=$((SECONDS + MAX_WAIT_SECONDS)) state running health
   while (( SECONDS < deadline )); do
-    state=$(service_state "$service"); running=${state%%|*}; health=${state##*|}
+    state=$(service_state "$service" "$url"); running=${state%%|*}; health=${state##*|}
     if [[ "$running" == true ]] && { [[ "$health" == true ]] || { [[ "$health" == null ]] && { [[ -z "$url" ]] || curl --fail --silent --max-time 5 "$url" >/dev/null; }; }; }; then return 0; fi
     sleep 2
   done
@@ -51,7 +58,7 @@ ready() {
 }
 json_status() {
   local ha caddy bot image version
-  ha=$(service_state "$HA_SERVICE"); caddy=$(service_state "$CADDY_SERVICE"); bot=$(service_state "$BOT_SERVICE")
+  ha=$(service_state "$HA_SERVICE" "${HA_READY_URL:-}"); caddy=$(service_state "$CADDY_SERVICE" "${CADDY_READY_URL:-}"); bot=$(service_state "$BOT_SERVICE" "${BOT_READY_URL:-}")
   image=$(docker inspect --format '{{.Config.Image}}' "$(container_id "$HA_SERVICE")" 2>/dev/null || printf '')
   version=$(docker exec "$(container_id "$HA_SERVICE")" python -c 'import homeassistant.const; print(homeassistant.const.__version__)' 2>/dev/null || printf '')
   [[ "$image" =~ ^[A-Za-z0-9._:/@+-]{0,160}$ ]] || image=''
@@ -80,14 +87,18 @@ case "$operation" in
     [[ -n "$running_id" ]] || fail update_failed
     before=$(docker inspect --format '{{.Image}}' "$running_id" 2>/dev/null || printf '')
     [[ "$before" =~ ^sha256:[A-Fa-f0-9]{64}$ ]] || fail update_failed
+    reference=$(docker inspect --format '{{.Config.Image}}' "$running_id") || fail update_failed
+    [[ "$reference" =~ ^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,200}$ ]] || fail update_failed
     "${compose[@]}" pull "$HA_SERVICE" >/dev/null || fail compose_failed
-    after=$("${compose[@]}" images -q "$HA_SERVICE" 2>/dev/null | head -n 1 || printf '')
+    after=$(docker image inspect --format '{{.Id}}' "$reference") || fail update_failed
     if [[ -n "$before" && "$before" == "$after" ]]; then
       printf '{"schemaVersion":1,"ok":true,"operation":"update-ha","status":"up_to_date"}\n'; exit 0
     fi
     [[ "$after" =~ ^sha256:[A-Fa-f0-9]{64}$ ]] || fail update_failed
     "${compose[@]}" up -d --no-deps --force-recreate "$HA_SERVICE" >/dev/null || fail compose_failed
     ready "$HA_SERVICE" "${HA_READY_URL:-}" || fail update_recovery_timeout
+    actual=$(docker inspect --format '{{.Image}}' "$(container_id "$HA_SERVICE")") || fail update_failed
+    [[ "$actual" == "$after" ]] || fail update_not_applied
     ;;
 esac
 printf '{"schemaVersion":1,"ok":true,"operation":"%s","status":"success"}\n' "$operation"
