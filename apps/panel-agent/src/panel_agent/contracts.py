@@ -272,6 +272,7 @@ class DashboardSnapshot(BaseModel):
     generatedAt: str
     mode: PanelMode
     fixtureScenario: Optional[str]
+    jarvisEnabled: bool = False
     services: List[ServiceSnapshot]
     planning: Optional[PlanningProjection] = None
 

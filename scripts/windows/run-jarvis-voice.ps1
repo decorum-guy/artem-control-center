@@ -2,6 +2,8 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
 
 $paths = Get-ArtemRuntimePaths
+$configuration = Get-ArtemJarvisVoiceConfiguration -Paths $paths
+if (-not $configuration.Enabled) { exit 0 }
 $voice = Get-ArtemJarvisVoicePaths -Paths $paths
 $python = Join-Path $voice.Venv "Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) {

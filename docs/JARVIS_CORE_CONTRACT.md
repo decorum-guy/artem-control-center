@@ -1,5 +1,7 @@
 # Jarvis A1 text-first core
 
+Jarvis is disabled by default. The Panel Agent registers its text and voice routes only when the local runtime sets `PANEL_JARVIS_ENABLED=true`. The optional Windows voice task also requires its separate voice configuration. A saved browser launcher preference applies only to an enabled runtime.
+
 Jarvis A1 has one private, deterministic turn boundary:
 
 ```text

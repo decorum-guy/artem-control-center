@@ -44,6 +44,7 @@ def test_time_is_server_owned_and_repeat_does_not_repeat_read_work():
 
 def test_turn_api_is_private_no_store_and_rejects_extra_or_oversized_schema(monkeypatch):
     monkeypatch.setenv("PANEL_AGENT_MODE", "fixtures")
+    monkeypatch.setenv("PANEL_JARVIS_ENABLED", "true")
     import panel_agent.main
     module = importlib.reload(panel_agent.main)
     client = TestClient(module.app)
@@ -58,6 +59,7 @@ def test_turn_api_is_private_no_store_and_rejects_extra_or_oversized_schema(monk
 
 def test_navigation_is_fixed_and_mutations_are_truthfully_unavailable(monkeypatch):
     monkeypatch.setenv("PANEL_AGENT_MODE", "fixtures")
+    monkeypatch.setenv("PANEL_JARVIS_ENABLED", "true")
     import panel_agent.main
     module = importlib.reload(panel_agent.main)
     client = TestClient(module.app)

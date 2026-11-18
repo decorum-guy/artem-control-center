@@ -66,7 +66,7 @@ function Get-ArtemJarvisVoicePaths {
 
 function Get-ArtemJarvisVoiceRuntimeKeys {
     return @(
-        "PANEL_JARVIS_VOICE_ENABLED", "PANEL_JARVIS_VOICE_BRIDGE_TOKEN",
+        "PANEL_JARVIS_ENABLED", "PANEL_JARVIS_VOICE_ENABLED", "PANEL_JARVIS_VOICE_BRIDGE_TOKEN",
         "PANEL_JARVIS_VOICE_PANEL_URL", "PANEL_JARVIS_VOICE_MODEL_ROOT",
         "PANEL_JARVIS_WAKE_MODEL", "PANEL_JARVIS_STT_MODEL",
         "PANEL_JARVIS_STT_PROFILE", "PANEL_JARVIS_WAKE_THRESHOLD",
@@ -146,7 +146,7 @@ function Get-ArtemJarvisVoiceConfiguration {
         $Environment = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $Paths
     }
     $value = { param([string]$Key) if ($Environment.Contains($Key)) { [string]$Environment[$Key] } else { "" } }
-    $enabled = (& $value "PANEL_JARVIS_VOICE_ENABLED") -eq "true"
+    $enabled = ((& $value "PANEL_JARVIS_ENABLED") -eq "true") -and ((& $value "PANEL_JARVIS_VOICE_ENABLED") -eq "true")
     $token = & $value "PANEL_JARVIS_VOICE_BRIDGE_TOKEN"
     $panelUrl = & $value "PANEL_JARVIS_VOICE_PANEL_URL"
     $modelRoot = & $value "PANEL_JARVIS_VOICE_MODEL_ROOT"

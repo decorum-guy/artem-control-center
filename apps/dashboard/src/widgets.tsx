@@ -18,7 +18,7 @@ import {
 } from "./coffee";
 import { resolveWidgetAsset } from "./widgetAssets";
 import type { CoffeeAppearanceConfig } from "./features/overview/appearanceConfig";
-import { sourceOwnedCoffeeScale } from "./features/overview/appearanceConfig";
+import { appearanceSchemaFor, sourceOwnedCoffeeScale } from "./features/overview/appearanceConfig";
 import { Icon } from "./icons";
 
 const healthLabels = {
@@ -319,6 +319,20 @@ export function CoffeeWidget({
         </span>
       )
     : null;
+  const phaseKey = presentationStage === "warming" || presentationStage === "turning_on" ? "stateWarmingXOffsetPx"
+    : presentationStage === "ready" ? "stateReadyXOffsetPx" : "stateOffXOffsetPx";
+  const phaseTrim = appearance[phaseKey] - Number(appearanceSchemaFor("home.coffee-machine").defaults[phaseKey]);
+  const cabinArtwork = v3VisualSkinEnabled && appearance.showImage && (
+    <div className="cc-coffee-position" style={{
+      "--cc-coffee-x": (appearance.imageXStep * 12 + phaseTrim) + "px",
+      "--cc-coffee-y": (appearance.imageYStep * 4) + "px",
+      "--cc-coffee-image-scale": imageScale / 100
+    } as CSSProperties}>
+      <div className="cc-coffee-zoom">
+        <div className="cc-coffee-motion" data-phase={presentationStage}>{coffeeImage}</div>
+      </div>
+    </div>
+  );
   const coffeeVisual = appearance.showImage
     ? variant === "overview"
       ? (
@@ -464,7 +478,7 @@ export function CoffeeWidget({
               size={148} label={presentationProgress !== null ? `${presentationLabel} · ${view.progressText}` : presentationLabel} />
           </span>
         )}
-        {coffeeVisual}
+        {v3VisualSkinEnabled ? cabinArtwork : coffeeVisual}
         {coffeeActivity}
       </div>
     </article>

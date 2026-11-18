@@ -19,10 +19,12 @@ class SnapshotPublisher:
         mode: PanelMode,
         services_builder: Callable[[], Iterable[ServiceSnapshot]],
         planning_builder: Callable[[], PlanningProjection | None] | None = None,
+        jarvis_enabled: bool = False,
         heartbeat_seconds: float = 20,
         on_snapshot: Callable[[DashboardSnapshot], None] | None = None,
     ) -> None:
         self._mode = mode
+        self._jarvis_enabled = jarvis_enabled
         self._services_builder = services_builder
         self._planning_builder = planning_builder
         self._heartbeat_seconds = max(0.01, heartbeat_seconds)
@@ -71,6 +73,7 @@ class SnapshotPublisher:
                 revision=self._revision,
                 generatedAt=_next_generated_at(previous_generated_at),
                 mode=self._mode,
+                jarvisEnabled=self._jarvis_enabled,
                 fixtureScenario=None,
                 services=services,
                 planning=planning,

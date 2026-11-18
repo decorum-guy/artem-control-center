@@ -53,10 +53,11 @@ html[data-skin="v3"], .app.skin-v3 {
   --cc-rim: rgb(196 223 255 / 28%);
   --cc-edge-light: rgb(213 235 255 / 8%);
   --cc-panel-shadow: 0 10px 26px -18px rgb(0 0 0 / 82%);
-  --cc-glass: linear-gradient(145deg, color-mix(in srgb, var(--cc-surface-2) 96%, transparent), color-mix(in srgb, var(--cc-surface-1) 92%, transparent) 60%);
-  --cc-rim-gradient: linear-gradient(155deg, var(--cc-rim), var(--cc-border) 34%, var(--cc-divider) 74%, var(--cc-border-strong));
+  --cc-glass: linear-gradient(148deg, color-mix(in srgb, var(--cc-accent) 5%, var(--cc-surface-2)),
+    var(--cc-surface-2) 36%, color-mix(in srgb, var(--cc-surface-1) 94%, transparent) 76%);
+  --cc-rim-gradient: linear-gradient(155deg, color-mix(in srgb, var(--cc-accent) 24%, var(--cc-rim)), var(--cc-border) 32%, var(--cc-divider) 66%, var(--cc-border-strong));
   --cc-vignette: rgb(0 0 0 / 18%);
-  --cc-sky-light: rgb(56 189 248 / 10%);
+  --cc-sky-light: color-mix(in srgb, var(--cc-accent) 11%, transparent);
   --cc-warm-light: rgb(245 166 35 / 6%);
 }
 
@@ -92,7 +93,7 @@ html[data-skin="v3"][data-theme="day"], .app.skin-v3.theme-day {
   --cc-edge-light: rgb(255 255 255 / 90%);
   --cc-panel-shadow: 0 8px 24px -16px rgb(26 65 101 / 36%);
   --cc-vignette: rgb(27 64 102 / 3%);
-  --cc-sky-light: rgb(60 161 218 / 8%);
+  --cc-sky-light: color-mix(in srgb, var(--cc-accent) 8%, transparent);
   --cc-warm-light: rgb(222 165 76 / 7%);
 }
 html[data-skin="v3"], .app.skin-v3 {
@@ -123,4 +124,41 @@ html[data-skin="v3"][data-theme="day"], .app.skin-v3.theme-day {
   --cc-glow-success: 0 6px 20px color-mix(in srgb, var(--cc-success) 18%, transparent);
   --cc-glow-warning: 0 6px 20px color-mix(in srgb, var(--cc-warning) 18%, transparent);
   --cc-glow-danger: 0 6px 20px color-mix(in srgb, var(--cc-danger) 18%, transparent);
+}
+
+html[data-skin="v3"][data-accent="iris"][data-theme="night"],
+html[data-skin="v3"][data-accent="iris"][data-theme="night"] .app.skin-v3 {
+  --cc-accent: #bcadff;
+  --cc-accent-strong: #d5cbff;
+  --cc-focus: #e2dcff;
+}
+html[data-skin="v3"][data-accent="iris"][data-theme="day"],
+html[data-skin="v3"][data-accent="iris"][data-theme="day"] .app.skin-v3 {
+  --cc-accent: #6444aa;
+  --cc-accent-strong: #4e328b;
+  --cc-focus: #543295;
+}
+html[data-skin="v3"][data-accent="lagoon"][data-theme="night"],
+html[data-skin="v3"][data-accent="lagoon"][data-theme="night"] .app.skin-v3 {
+  --cc-accent: #54dfcb;
+  --cc-accent-strong: #a0f0e1;
+  --cc-focus: #bbfff2;
+}
+html[data-skin="v3"][data-accent="lagoon"][data-theme="day"],
+html[data-skin="v3"][data-accent="lagoon"][data-theme="day"] .app.skin-v3 {
+  --cc-accent: #006f66;
+  --cc-accent-strong: #00564f;
+  --cc-focus: #005e56;
+}
+html[data-skin="v3"][data-accent="rose"][data-theme="night"],
+html[data-skin="v3"][data-accent="rose"][data-theme="night"] .app.skin-v3 {
+  --cc-accent: #ffabc7;
+  --cc-accent-strong: #ffcddd;
+  --cc-focus: #ffe0e9;
+}
+html[data-skin="v3"][data-accent="rose"][data-theme="day"],
+html[data-skin="v3"][data-accent="rose"][data-theme="day"] .app.skin-v3 {
+  --cc-accent: #a63768;
+  --cc-accent-strong: #87234f;
+  --cc-focus: #892652;
 }

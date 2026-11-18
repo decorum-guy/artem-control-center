@@ -57,34 +57,37 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
 }
 
 for (const theme of ["night", "day"]) {
-  test(`actual ${theme} text and tinted status tokens meet 4.5:1`, async ({ page }) => {
-    await openGallery(page, "?theme=" + theme);
-    const failed = await page.evaluate(() => {
-      const style = getComputedStyle(document.querySelector(".skin-v3")!);
-      const rgb = (token: string) => style.getPropertyValue("--cc-" + token).trim().slice(1).match(/../g)!.map((x) => parseInt(x, 16));
-      const luminance = (color: number[]) => color.reduce((sum, c, i) => {
-        const n = c / 255;
-        return sum + [0.2126, 0.7152, 0.0722][i] * (n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4);
-      }, 0);
-      const ratio = (a: number[], b: number[]) => {
-        const light = luminance(a), dark = luminance(b);
-        return (Math.max(light, dark) + .05) / (Math.min(light, dark) + .05);
-      };
-      const bad: string[] = [];
-      for (const name of ["text", "text-secondary", "text-muted", "accent", "heat", "success", "warning", "danger", "stale", "offline", "unavailable", "uncertain"]) {
-        const fg = rgb(name);
-        for (const surface of ["canvas", "rail", "surface-1", "surface-2", "interactive", "hover", "pressed"]) {
-          if (ratio(fg, rgb(surface)) < 4.5) bad.push(name + " on " + surface);
+  for (const accent of ["ice","iris","lagoon","rose"]) {
+    test(`actual ${theme} ${accent} text and tinted status tokens meet 4.5:1`, async ({ page }) => {
+      await page.addInitScript(value => localStorage.setItem("artem-control-center.accent", value), accent);
+      await openGallery(page, "?theme=" + theme);
+      const failed = await page.evaluate(() => {
+        const style = getComputedStyle(document.querySelector(".skin-v3")!);
+        const rgb = (token: string) => style.getPropertyValue("--cc-" + token).trim().slice(1).match(/../g)!.map((x) => parseInt(x, 16));
+        const luminance = (color: number[]) => color.reduce((sum, c, i) => {
+          const n = c / 255;
+          return sum + [0.2126, 0.7152, 0.0722][i] * (n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4);
+        }, 0);
+        const ratio = (a: number[], b: number[]) => {
+          const light = luminance(a), dark = luminance(b);
+          return (Math.max(light, dark) + .05) / (Math.min(light, dark) + .05);
+        };
+        const bad: string[] = [];
+        for (const name of ["text", "text-secondary", "text-muted", "accent", "heat", "success", "warning", "danger", "stale", "offline", "unavailable", "uncertain"]) {
+          const fg = rgb(name);
+          for (const surface of ["canvas", "rail", "surface-1", "surface-2", "interactive", "hover", "pressed"]) {
+            if (ratio(fg, rgb(surface)) < 4.5) bad.push(name + " on " + surface);
+          }
+          if (!name.startsWith("text") && ratio(fg, rgb("surface-1").map((v, i) => Math.round(v * .88 + fg[i] * .12))) < 4.5) bad.push(name + " tint");
         }
-        if (!name.startsWith("text") && ratio(fg, rgb("surface-1").map((v, i) => Math.round(v * .88 + fg[i] * .12))) < 4.5) bad.push(name + " tint");
-      }
-      if (ratio(rgb("on-accent"), rgb("accent")) < 4.5) bad.push("primary button");
-      return bad;
+        if (ratio(rgb("on-accent"), rgb("accent")) < 4.5) bad.push("primary button");
+        return bad;
+      });
+      expect(failed).toEqual([]);
+      expect(await page.evaluate(() => document.fonts.check('16px "Manrope Variable"', "Я")
+        && document.fonts.check('16px "JetBrains Mono Variable"', "Я"))).toBe(true);
     });
-    expect(failed).toEqual([]);
-    expect(await page.evaluate(() => document.fonts.check('16px "Manrope Variable"', "Я")
-      && document.fonts.check('16px "JetBrains Mono Variable"', "Я"))).toBe(true);
-  });
+  }
 }
 
 test("continuous motion stops in reduced, energy-saving and background modes", async ({ page }) => {

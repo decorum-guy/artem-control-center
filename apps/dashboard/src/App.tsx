@@ -1,5 +1,6 @@
 import { flushSync } from "react-dom";
 import { SelectField } from "./ui/SelectField";
+import { readAccent, persistAccent, readColorMode, persistColorMode, type Accent } from "./skin/accent";
 import { BootScreen } from "./ui/States";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
@@ -111,8 +112,9 @@ export function App() {
   );
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [accent, setAccent] = useState<Accent>(readAccent);
   const [theme, setTheme] = useState<Theme>(() =>
-    querySetting("theme", ["day", "night"] as const, "night")
+    querySetting("theme", ["day", "night"] as const, v3VisualSkinEnabled ? readColorMode() : "night")
   );
   const [motion, setMotion] = useState<MotionMode>(() =>
     querySetting(
@@ -121,6 +123,7 @@ export function App() {
       "full"
     )
   );
+  const jarvisEnabled = snapshot?.jarvisEnabled === true;
   const [jarvisVisible, setJarvisVisible] = useState(readStoredJarvisVisible);
   const [kiosk, setKiosk] = useState(false);
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
@@ -222,8 +225,20 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!v3VisualSkinEnabled) return;
+    document.documentElement.dataset.accent = accent;
+    return () => { delete document.documentElement.dataset.accent; };
+  }, [accent]);
+
+  function changeAccent(next: Accent) {
+    setAccent(next);
+    persistAccent(next);
+  }
+
   function changeTheme(next: Theme) {
     if (next === theme) return;
+    if (v3VisualSkinEnabled) persistColorMode(next);
     if (v3VisualSkinEnabled && motion === "full" && !document.hidden
       && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && document.startViewTransition) {
       document.startViewTransition(() => flushSync(() => setTheme(next)));
@@ -485,7 +500,7 @@ export function App() {
           </span>
         </nav>
 
-        {v3VisualSkinEnabled && SkinGallery && <Suspense fallback={null}><SkinGallery /></Suspense>}
+        {v3VisualSkinEnabled && SkinGallery && <Suspense fallback={null}><SkinGallery jarvisEnabled={jarvisEnabled} /></Suspense>}
 
         {devSettingsOpen && (
           <aside className="dev-settings" data-testid="settings-panel">
@@ -595,11 +610,14 @@ export function App() {
           {route === "/settings" && (
             v2VisualShellEnabled ? (
               <SettingsV2Page
+                accent={accent}
+                onAccentChange={changeAccent}
                 theme={theme}
                 motion={motion}
                 calendarSources={snapshot?.planning?.providerStatuses ?? []}
                 onThemeChange={changeTheme}
                 onMotionChange={setMotion}
+                jarvisEnabled={jarvisEnabled}
                 jarvisVisible={jarvisVisible}
                 onJarvisVisibleChange={changeJarvisVisibility}
                 onRefreshCalendarMetadata={reconcileSnapshotAfterAction}
@@ -634,7 +652,7 @@ export function App() {
           onClose={() => setCoffeeDelayedStartDialogOpen(false)}
         />
       )}
-      {jarvisVisible && <JarvisOverlay onNavigate={navigate} />}
+      {jarvisEnabled && jarvisVisible && <JarvisOverlay onNavigate={navigate} />}
       <GlobalNoticeRegion />
       <B0NoticeFixture />
     </div>

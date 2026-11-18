@@ -886,6 +886,7 @@ export interface DashboardSnapshot {
   generatedAt: string;
   mode: PanelMode;
   fixtureScenario: string | null;
+  jarvisEnabled?: boolean;
   services: ServiceSnapshot[];
   planning?: PlanningSnapshot | null;
 }

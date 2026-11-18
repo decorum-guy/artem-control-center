@@ -24,6 +24,7 @@ try {
     New-Item -ItemType Directory -Force -Path $runtime | Out-Null
     $runtimeEnvContents = @'
 # literal values: never execute this file
+PANEL_JARVIS_ENABLED=true
 PANEL_JARVIS_VOICE_ENABLED=true
 PANEL_JARVIS_VOICE_BRIDGE_TOKEN=bridge=token$literal
 PANEL_JARVIS_VOICE_PANEL_URL=http://127.0.0.1:8787

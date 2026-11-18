@@ -4,6 +4,11 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "runtime-common.ps1")
 
 $paths = Get-ArtemRuntimePaths
+$configuration = Get-ArtemJarvisVoiceConfiguration -Paths $paths
+if (-not $configuration.Enabled) {
+    Write-Host "Jarvis is disabled. Voice task registration skipped."
+    exit 0
+}
 $voice = Get-ArtemJarvisVoicePaths -Paths $paths
 foreach ($directory in @($voice.Root, $voice.Config, $voice.Models, $voice.State)) {
     New-Item -ItemType Directory -Force -Path $directory | Out-Null

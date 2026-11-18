@@ -250,6 +250,29 @@ try {
         throw "Post-update recovery must prove clean runtime/task handoff before a fresh Interactive task start"
     }
 
+    $testDesktop = Join-Path $rolloutRoot "desktop"
+    $testDocuments = Join-Path $rolloutRoot "documents"
+    New-Item -ItemType Directory -Force -Path $testDesktop,$testDocuments | Out-Null
+    $shell = New-Object -ComObject WScript.Shell
+    $openLink = Join-Path $testDesktop "Open Control Center.lnk"
+    $shortcut = $shell.CreateShortcut($openLink)
+    $shortcut.TargetPath = Join-Path $testDocuments "Open Control Center.cmd"
+    $shortcut.Description = "Owner description"
+    $shortcut.Save()
+    $sync = Join-Path $PSScriptRoot "sync-open-shortcut.ps1"
+    & $sync -Desktop $testDesktop -Documents $testDocuments
+    $shortcut = $shell.CreateShortcut($openLink)
+    if ($shortcut.TargetPath -ne (Join-Path $env:SystemRoot "System32\wscript.exe") -or
+        $shortcut.Arguments -ne ('//nologo "' + (Join-Path $PSScriptRoot 'open-panel.wsf') + '"') -or
+        $shortcut.Description -ne "Owner description") { throw "Owned Open shortcut migration failed" }
+    $stamp = (Get-Item -LiteralPath $openLink).LastWriteTimeUtc
+    & $sync -Desktop $testDesktop -Documents $testDocuments
+    if ((Get-Item -LiteralPath $openLink).LastWriteTimeUtc -ne $stamp) { throw "Open shortcut sync must be idempotent" }
+    $shortcut.TargetPath = Join-Path $env:SystemRoot "explorer.exe"
+    $shortcut.Save()
+    & $sync -Desktop $testDesktop -Documents $testDocuments
+    if ($shell.CreateShortcut($openLink).TargetPath -ne (Join-Path $env:SystemRoot "explorer.exe")) { throw "Custom shortcut was modified" }
+
     foreach ($helperText in @($installerText, $syncHelpersText)) {
         if ($helperText -notmatch 'set "exitCode=%ERRORLEVEL%"') {
             throw "Open Control Center.cmd must preserve the PowerShell exit code"
