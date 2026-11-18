@@ -14,3 +14,5 @@ artifacts/
 .env
 .env.*
 !.env.example
+# ключи агентов на всякий случай: они должны лежать вне репозитория (~/.agent-telegram/)
+.secrets/
