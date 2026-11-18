@@ -57,6 +57,39 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
 
 
 for (const width of [1280, 720]) {
+  test(`kettle reading is centered in the right half on both pages at ${width}px`, async ({ page, request }) => {
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 1280 });
+    const route = "/api/v1/overview/layout";
+    for (const suffix of ["", "/portrait"]) {
+      const data = await (await request.get(route + suffix)).json();
+      const layout = data.layout ?? data;
+      const coffee = layout.items.find((item: { widgetType: string }) => item.widgetType === "home.coffee-machine");
+      layout.items = [{ ...coffee, instanceId: "fixture.kettle", widgetType: "home.kettle", sizeVariant: "standard",
+        placement: { x: 0, y: 0, w: 5, h: 4 }, config: {} }];
+      await page.route("**" + route + suffix, response => response.fulfill({ json: data }));
+    }
+    for (const path of ["home", "overview"]) {
+      await page.goto(`/${path}?scenario=home-climate-healthy&motion=reduced`);
+      const card = page.getByTestId("kettle-control");
+      await expect(card).toBeVisible();
+      const geometry = await card.evaluate(el => {
+        const rect = el.getBoundingClientRect();
+        const dial = el.querySelector(".cc-gauge")!.getBoundingClientRect();
+        const buttons = Array.from(el.querySelectorAll(".kettle-control__actions button"), b => b.getBoundingClientRect());
+        return { size: dial.width, value: parseFloat(getComputedStyle(el.querySelector(".cc-gauge-center")!).fontSize),
+          center: (dial.left + dial.width / 2 - rect.left) / rect.width,
+          controlsFit: buttons.every(b => b.height >= 48 && b.width >= 48 && b.left >= rect.left && b.right <= rect.right && b.bottom <= rect.bottom + 1),
+          clipped: el.scrollHeight > el.clientHeight + 1 || dial.top < rect.top || dial.bottom > rect.bottom };
+      });
+      expect(geometry.size).toBeGreaterThanOrEqual(128);
+      expect(geometry.value).toBeGreaterThanOrEqual(40);
+      expect(geometry.center).toBeGreaterThan(.70);
+      expect(geometry.center).toBeLessThan(.78);
+      expect(geometry.controlsFit).toBe(true);
+      expect(geometry.clipped).toBe(false);
+    }
+  });
+
   test(`home kettle fits its contents when off or heating at ${width}px`, async ({ page, request }) => {
     await page.setViewportSize({ width, height: width === 1280 ? 720 : 1280 });
     const snapshot = await (await request.get("/api/v1/snapshot?scenario=ha-healthy")).json();

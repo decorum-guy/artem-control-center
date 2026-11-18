@@ -23,8 +23,11 @@ hardware acceptance is required after Orchestrator review and deployment.
 ## Shared music presets
 
 The widget keeps its seven fixed controls and adds one wide `🎵 Музыка` button.
-Its custom sheet reads AliceTG_Bot's canonical ordered inventory through Panel
-Agent. Rows are at least 48px high. The management sheet shows titles, adds a
+The shared centered dialog reads AliceTG_Bot's ordered inventory through Panel
+Agent. Its height stays stable during loading. The list scrolls inside the
+dialog while the heading and Close button remain visible. Closing the dialog
+restores focus to Music and preserves the Overview scroll position. Rows are
+at least 48px high. The management view shows titles, adds a
 preset with title and Alice command, and requires confirmation to delete one.
 Successful mutations refresh the inventory immediately; a stale revision
 refreshes it with a bounded conflict message. Telegram reads the same list on

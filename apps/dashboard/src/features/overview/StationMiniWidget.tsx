@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { executeStationAction, fetchStationAvailability, STATION_ACTIONS,
   type StationActionAvailability, type StationActionId } from "../../stationActionsApi";
 import { WorkZone } from "../../ShellPrimitives";
+import { DialogFrame } from "../../DialogFrame";
 import { addStationPreset, deleteStationPreset, executeStationPreset, fetchStationPresets,
   type StationPresetInventory } from "../../stationPresetsApi";
 import { resolveWidgetAsset } from "../../widgetAssets";
@@ -53,6 +54,7 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   const [command, setCommand] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [sheetMessage, setSheetMessage] = useState("");
+  const musicButton = useRef<HTMLButtonElement>(null);
   const glowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -174,17 +176,12 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
         <ActionIcon actionId={actionId} />
       </button>)}
     </div>
-    <button type="button" className="station-mini-widget__music" onClick={openMusic}
+    <button ref={musicButton} type="button" className="station-mini-widget__music" onClick={openMusic} aria-haspopup="dialog"
       disabled={!interactive}>🎵 Музыка <span aria-hidden="true">⌄</span></button>
     <p className="station-mini-widget__message" role="status">{message ?? (availability ? "" : "Управление недоступно")}</p>
-    {sheet !== "closed" && <div className="station-presets__backdrop" onClick={closeSheet}>
-      <section className="station-presets__sheet" role="dialog" aria-modal="true"
-        aria-label={sheet === "music" ? "Что включить?" : "Настроить подборки"}
-        onClick={(event) => event.stopPropagation()}>
-        <header className="station-presets__header">
-          <h2>{sheet === "music" ? "Что включить?" : sheet === "manage" ? "Настроить подборки" : "Добавить подборку"}</h2>
-          <button type="button" onClick={closeSheet} aria-label="Закрыть">×</button>
-        </header>
+    {sheet !== "closed" && <DialogFrame className="station-presets__sheet" testId="station-presets"
+      title={sheet === "music" ? "Что включить?" : sheet === "manage" ? "Настроить подборки" : "Добавить подборку"}
+      onClose={closeSheet} restoreFocusRef={musicButton}>
         {sheet === "music" && <>
           <div className="station-presets__list">
             {inventory?.presets.map((preset) => <button key={preset.id} type="button"
@@ -217,8 +214,9 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
           <button type="submit" disabled={pending || !title.trim() || !command.trim()}>Сохранить</button>
           <button type="button" onClick={() => { setTitle(""); setCommand(""); setSheet("manage"); }}>Отмена</button>
         </form>}
-        <p className="station-presets__message" role="status">{sheetMessage}</p>
-      </section>
-    </div>}
+        <p className="station-presets__message" role="status">
+          {sheetMessage || (sheet === "music" && !inventory ? "Загружаем подборки…" : "")}
+        </p>
+    </DialogFrame>}
   </WorkZone>;
 }

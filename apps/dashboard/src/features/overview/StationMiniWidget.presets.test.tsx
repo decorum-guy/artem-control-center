@@ -46,19 +46,22 @@ describe("Station preset sheets", () => {
     root = createRoot(host);
     await act(async () => { root?.render(<StationMiniWidget interactive />); await Promise.resolve(); });
     async function click(text: string) {
-      const button = [...(host?.querySelectorAll("button") ?? [])].find((item) => item.textContent?.includes(text));
+      const scope = document.querySelector('[role="dialog"]') ?? host!;
+      const button = [...scope.querySelectorAll("button")].find((item) => item.textContent?.includes(text));
       if (!button) throw new Error(`Missing ${text}`);
       await act(async () => { button.click(); await Promise.resolve(); await Promise.resolve(); });
     }
     await click("🎵 Музыка");
     expect(host.querySelectorAll(".station-mini-widget__glow")).toHaveLength(1);
     expect(host.querySelector(".station-mini-widget__glow--active")).toBeNull();
-    expect(host.querySelectorAll(".station-presets__row")).toHaveLength(1);
-    expect(host.querySelector("select")).toBeNull();
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(host.contains(dialog)).toBe(false);
+    expect(dialog.querySelectorAll(".station-presets__row")).toHaveLength(1);
+    expect(dialog.querySelector("select")).toBeNull();
     await click("Настроить подборки");
     await click("Добавить");
     expect(host.querySelector(".station-mini-widget__glow--active")).toBeNull();
-    const inputs = host.querySelectorAll<HTMLInputElement>(".station-presets__form input");
+    const inputs = dialog.querySelectorAll<HTMLInputElement>(".station-presets__form input");
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(inputs[0], "Новая");
       inputs[0].dispatchEvent(new Event("input", { bubbles: true }));
@@ -67,10 +70,10 @@ describe("Station preset sheets", () => {
     });
     await click("Сохранить");
     expect(host.querySelector(".station-mini-widget__glow--active")).toBeNull();
-    expect(host.textContent).toContain("Новая");
+    expect(dialog.textContent).toContain("Новая");
     await click("Удалить");
-    expect(host.textContent).toContain("Удалить «Избранное»?");
-    const confirm = host.querySelector<HTMLButtonElement>(".station-presets__confirm button");
+    expect(dialog.textContent).toContain("Удалить «Избранное»?");
+    const confirm = dialog.querySelector<HTMLButtonElement>(".station-presets__confirm button");
     if (!confirm) throw new Error("Confirmation missing");
     await act(async () => { confirm.click(); await Promise.resolve(); await Promise.resolve(); });
     expect(host.querySelector(".station-mini-widget__glow--active")).toBeNull();
@@ -109,7 +112,8 @@ describe("Station preset sheets", () => {
     if (!music) throw new Error("Music button missing");
     await click(music);
     expect(host.querySelector(".station-mini-widget__glow--active")).toBeNull();
-    const preset = host.querySelector<HTMLButtonElement>(".station-presets__row");
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const preset = dialog.querySelector<HTMLButtonElement>(".station-presets__row");
     if (!preset) throw new Error("Preset button missing");
     await click(preset);
 
@@ -119,7 +123,7 @@ describe("Station preset sheets", () => {
     expect(executeBody).toMatchObject({ presetId: "a1b2c3d4e5f6" });
     expect(executeBody?.requestId).toBeTruthy();
     expect(Object.keys(executeBody ?? {}).sort()).toEqual(["presetId", "requestId"]);
-    expect(host.querySelector(".station-presets__sheet")?.textContent).not.toContain("Команда отправлена");
+    expect(dialog.textContent).not.toContain("Команда отправлена");
 
     await act(async () => {
       resolveExecute?.(new Response(JSON.stringify({
