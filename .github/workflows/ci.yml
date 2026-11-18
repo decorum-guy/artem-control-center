@@ -381,7 +381,9 @@ jobs:
           PANEL_OVERVIEW_LAYOUT_WRITES_ENABLED: "true"
           PANEL_OVERVIEW_LAYOUT_PATH: .cache/overview-editor-e2e.json
           V2_OVERVIEW_EDITOR_ARTIFACT_DIR: artifacts/v2-overview-editor-review
-        run: npm run test:e2e -- tests/e2e/v2-overview-editor.spec.ts
+        run: |
+          npm run test:e2e -- tests/e2e/v2-overview-editor.spec.ts
+          npm run test:e2e -- tests/e2e/issue-207-179-ha-controls.spec.ts --grep "Issue 207 · Overview climate projection"
 
       - name: Upload PR5 Overview editor review screenshots
         if: always() && runner.os == 'Linux'
@@ -597,7 +599,12 @@ jobs:
         run: npm run test:e2e -- tests/e2e/light-strip.spec.ts
 
       - name: Build production profile for runtime smoke
+        if: runner.os != 'Linux'
         run: npm run build:production
+
+      - name: Build and verify the default production skin in Chromium
+        if: runner.os == 'Linux'
+        run: npm run test:e2e:production
 
       - name: Portrait route parity, widgets and rotation isolation
         if: runner.os == 'Linux'

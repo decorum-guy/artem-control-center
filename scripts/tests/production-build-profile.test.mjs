@@ -21,6 +21,7 @@ const root = resolve(import.meta.dirname, "../..");
 
 const expectedProfile = {
   VITE_V2_VISUAL_SHELL: "true",
+  VITE_V3_VISUAL_SKIN: "true",
   VITE_OVERVIEW_V2_ENABLED: "true",
   VITE_OVERVIEW_EDITOR_ENABLED: "true",
   VITE_PLANNING_OVERVIEW_ENABLED: "true",
@@ -52,7 +53,7 @@ test("the persisted capability allow-list contains exactly the current mutable I
   assert.deepEqual(new Set(PERSISTED_CAPABILITY_IDS), new Set(expectedIds));
 });
 
-test("the accepted-v2 profile is complete and cannot be overridden by inherited VITE values", () => {
+test("the accepted-v2 production profile enables Cabin and fixes the functional gates", () => {
   assert.equal(productionBuildProfileName, "accepted-v2");
   assert.deepEqual(productionBuildProfile, expectedProfile);
   const environment = productionBuildEnvironment({
@@ -65,6 +66,17 @@ test("the accepted-v2 profile is complete and cannot be overridden by inherited 
     expectedProfile
   );
   assert.equal(environment.PANEL_WRITES_ENABLED, "false");
+});
+
+test("only an explicit false selects the V2 skin in the production bundle and manifest", () => {
+  for (const [environment, expected] of [
+    [{}, true],
+    [{ VITE_V3_VISUAL_SKIN: "true" }, true],
+    [{ VITE_V3_VISUAL_SKIN: "false" }, false]
+  ]) {
+    assert.equal(productionBuildEnvironment(environment).VITE_V3_VISUAL_SKIN, String(expected));
+    assert.equal(productionBuildCapabilities({}, environment).flags.VITE_V3_VISUAL_SKIN, expected);
+  }
 });
 
 test("only the four explicitly allowlisted capability IDs overlay the accepted baseline", () => {

@@ -27,7 +27,7 @@
   box-shadow: inset 0 1px var(--cc-edge-light), inset 0 -1px var(--cc-divider);
 }
 .skin-v3 .cc-coffee-dial {
-  --cc-gauge-size: min(87cqw, 79cqh, 222px);
+  --cc-gauge-size: calc(1.1 * min(87cqw, 79cqh, 222px));
   position: absolute;
   inset: 0;
   display: grid;

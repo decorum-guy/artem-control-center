@@ -30,6 +30,7 @@ def _manifest(dist, *, active=None, baseline=None):
         },
         "flags": {
             "VITE_V2_VISUAL_SHELL": True,
+            "VITE_V3_VISUAL_SKIN": True,
             "VITE_OVERVIEW_V2_ENABLED": True,
             "VITE_OVERVIEW_EDITOR_ENABLED": True,
             "VITE_PLANNING_OVERVIEW_ENABLED": True,
@@ -183,6 +184,25 @@ def test_current_product_gate_set_has_explicit_registry_classification():
     assert classified == expected
     assert "PANEL_FIXTURE_WRITES_ENABLED" not in classified
     assert "PANEL_CAPABILITY_APPLY_ENABLED" not in classified
+
+
+def test_served_skin_is_read_only_and_older_manifests_keep_their_known_capabilities(tmp_path, monkeypatch):
+    module, _ = _load(monkeypatch, tmp_path)
+    path = tmp_path / "dist" / "dashboard-capabilities.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    with TestClient(module.app) as client:
+        for enabled in (True, False):
+            manifest["flags"]["VITE_V3_VISUAL_SKIN"] = enabled
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            skin = _entry(_get(client), "v3_visual_skin")
+            assert skin["activeEnabled"] is enabled
+            assert skin["mutable"] is False
+        del manifest["flags"]["VITE_V3_VISUAL_SKIN"]
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        legacy = _get(client)
+        assert legacy["available"]
+        assert _entry(legacy, "planning_calendar_route")["activeEnabled"]
+        assert "v3_visual_skin" not in {entry["id"] for entry in legacy["entries"]}
 
 
 def test_immediate_persists_reset_and_master_gate_stays_hard(tmp_path, monkeypatch):

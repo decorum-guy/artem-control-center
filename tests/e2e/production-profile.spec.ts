@@ -27,6 +27,14 @@ test.describe("accepted-v2 production profile", () => {
     await page.screenshot({ path: path.join(artifactDirectory, name), animations: "disabled" });
   }
 
+  test("uses the visual skin selected for the production build", async ({ page }) => {
+    await page.goto("/overview");
+    await expect(page.getByTestId("v2-shell")).toBeVisible();
+    const expected = process.env.VITE_V3_VISUAL_SKIN === "false" ? 0 : 1;
+    await expect(page.locator("html[data-skin='v3']")).toHaveCount(expected);
+    await expect(page.locator(".app.skin-v3")).toHaveCount(expected);
+  });
+
   test("exposes the accepted V2 shell, routes, and deliberate nav omissions", async ({ page }) => {
     await page.goto("/overview?theme=night");
     await expect(page.getByTestId("v2-shell")).toBeVisible();

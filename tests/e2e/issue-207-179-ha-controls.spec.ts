@@ -263,7 +263,8 @@ test.describe("Issue 207 · Overview climate projection", () => {
     await page.goto("/overview?scenario=home-climate-healthy");
     const item = page.locator('.overview-v2-grid-item[data-widget-type="home.climate"]');
     await expect(item).toBeVisible();
-    await expect(item).toHaveAttribute("data-grid-h", "4");
+    await expect(item).toHaveAttribute("data-grid-w", "7");
+    await expect(item).toHaveAttribute("data-grid-h", "3");
     const climate = item.getByTestId("climate-control-overview");
     await expect(climate).toBeVisible();
     await expect(climate).not.toContainText("В комнате");
@@ -319,7 +320,7 @@ test.describe("Issue 207 · Overview climate projection", () => {
       schemaVersion: "overview.layout.v2",
       profileId: "samsung-control",
       presetId: "overview.default",
-      presetVersion: 3,
+      presetVersion: 6,
       revision: 0,
       viewportClass: "landscape-12",
       updatedAt: "2026-09-09T00:00:00Z",
@@ -330,7 +331,7 @@ test.describe("Issue 207 · Overview climate projection", () => {
         { instanceId: "fixture.rog", widgetType: "system.rog-g703-operational", visibility: "visible", placement: { x: 0, y: 0, w: 12, h: 1 }, sizeVariant: "standard", config: {} },
         { instanceId: "fixture.coffee", widgetType: "home.coffee-machine", visibility: "visible", placement: { x: 0, y: 1, w: 7, h: 4 }, sizeVariant: "standard", config: {} },
         { instanceId: "fixture.planning", widgetType: "planning.summary", visibility: "visible", placement: { x: 7, y: 1, w: 5, h: 4 }, sizeVariant: "standard", config: {} },
-        { instanceId: "fixture.climate", widgetType: "home.climate", visibility: "visible", placement: { x: 0, y: 5, w: 7, h: 4 }, sizeVariant: "standard", config: {} },
+        { instanceId: "fixture.climate", widgetType: "home.climate", visibility: "visible", placement: { x: 0, y: 5, w: 7, h: 3 }, sizeVariant: "standard", config: {} },
         { instanceId: "fixture.health", widgetType: "system.health-summary", visibility: "visible", placement: { x: 7, y: 5, w: 5, h: 2 }, sizeVariant: "compact", config: {} }
       ]
     };
@@ -340,29 +341,42 @@ test.describe("Issue 207 · Overview climate projection", () => {
         await route.fulfill({ status: 200, contentType: "application/json", headers: { "cache-control": "no-store", etag: `"${revision}"`, "x-overview-layout-writes-enabled": "true" }, body: JSON.stringify({ ...layout, revision }) });
         return;
       }
+      expect(route.request().method()).toBe("PATCH");
       const body = route.request().postDataJSON() as { items: typeof layout.items };
       layout.items = body.items;
       revision += 1;
       await route.fulfill({ status: 200, contentType: "application/json", headers: { "cache-control": "no-store", etag: `"${revision}"` }, body: JSON.stringify({ ...layout, revision }) });
     });
-    await page.goto("/overview?scenario=home-climate-healthy");
-    await unlockTouchLockIfNeeded(page);
-    await page.getByTestId("overview-configure").click();
+    const openLayoutSettings = async () => {
+      await page.goto("/settings?scenario=home-climate-healthy");
+      await unlockTouchLockIfNeeded(page);
+      await page.getByTestId("settings-summary-overview").click();
+      await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "editing");
+    };
+    const climateTile = page.locator('.overview-v2-grid-item[data-widget-type="home.climate"]');
+    await openLayoutSettings();
     await page.locator('.overview-edit-frame[data-instance-id="fixture.climate"]').press("Enter");
     await page.getByRole("button", { name: "Убрать Кондиционер" }).click();
     await page.getByTestId("overview-save").click();
-    await expect(page.getByTestId("overview-edit-toolbar")).toHaveCount(0);
+    await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "normal");
+    await expect(climateTile).toHaveCount(0);
+    expect(revision).toBe(1);
 
-    await page.getByTestId("overview-configure").click();
+    await openLayoutSettings();
     await page.getByTestId("overview-add-widget").click();
-    const climateRow = page.locator('[data-widget-type="home.climate"]');
+    const picker = page.getByTestId("overview-widget-picker");
+    const climateRow = picker.locator('[data-widget-type="home.climate"]');
     await expect(climateRow).toContainText("Кондиционер");
     await expect(climateRow.getByRole("button")).toHaveText("Добавить");
     await climateRow.getByRole("button", { name: "Добавить" }).click();
     await expect(climateRow.getByRole("button")).toHaveText("Уже добавлен");
-    await page.getByTestId("overview-widget-picker").getByRole("button", { name: "Закрыть" }).click();
+    await expect(climateRow.getByRole("button")).toBeDisabled();
+    await picker.getByRole("button", { name: "Закрыть" }).click();
     await page.getByTestId("overview-save").click();
-    await expect(page.locator('.overview-v2-grid-item[data-widget-type="home.climate"]')).toHaveCount(1);
+    await expect(page.getByTestId("route-overview-v2")).toHaveAttribute("data-editor-mode", "normal");
+    expect(revision).toBe(2);
+    await page.reload();
+    await expect(climateTile).toHaveCount(1);
   });
 });
 

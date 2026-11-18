@@ -28,6 +28,10 @@ These build flags are forced to `"true"` by
 | `VITE_TOUCH_INPUT_LOCK_ENABLED` | #82 touch/keyboard interaction lock |
 | `VITE_TOUCH_INPUT_LOCK_START_LOCKED` | Reviewed kiosk start state: locked, with the existing one-second hold-to-unlock gesture |
 
+The production profile defaults to `VITE_V3_VISUAL_SKIN=true` for the Cabin
+appearance. An explicit `VITE_V3_VISUAL_SKIN=false` at build time selects the
+V2 appearance. The dashboard capability manifest records the selected skin.
+
 The accepted Weather, Home, Services, System, Settings, ROG and Coffee/HA
 surfaces do not have frontend V2 rollout flags beyond the shell/route flags
 above. Their provider availability and writes remain Panel Agent runtime

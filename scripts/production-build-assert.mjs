@@ -50,6 +50,7 @@ assert.equal(bundle.includes("import.meta.env"), false, "Vite environment expres
 assert.equal(bundle.includes("TickTick"), false, "Production bundle fabricated unfinished TickTick functionality");
 const capabilityManifest = JSON.parse(readFileSync(join(dist, "dashboard-capabilities.json"), "utf8"));
 assert.equal(capabilityManifest.schemaVersion, "dashboard-capabilities.v1", "Safe build capability manifest is missing");
+assert.equal(capabilityManifest.flags.VITE_V3_VISUAL_SKIN, process.env.VITE_V3_VISUAL_SKIN !== "false", "Unexpected production skin");
 for (const [id, enabled] of Object.entries(capabilityManifest.active)) {
   const variable = {
     planning_overview: "VITE_PLANNING_OVERVIEW_ENABLED",

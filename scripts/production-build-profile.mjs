@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 export const productionBuildProfile = Object.freeze({
   VITE_V2_VISUAL_SHELL: "true",
+  VITE_V3_VISUAL_SKIN: "true",
   VITE_OVERVIEW_V2_ENABLED: "true",
   VITE_OVERVIEW_EDITOR_ENABLED: "true",
   VITE_PLANNING_OVERVIEW_ENABLED: "true",
@@ -112,25 +113,29 @@ export function loadProductionCapabilityOverrides(environment = process.env) {
   }
 }
 
-export function productionBuildCapabilities(overrides = {}) {
+export function productionBuildCapabilities(overrides = {}, environment = {}) {
   const safe = safeDelayedCapabilityOverrides(overrides);
+  const flags = Object.fromEntries(
+    Object.entries(productionBuildProfile).map(([name, value]) => [name, value === "true"])
+  );
+  // Older installations could explicitly select the V2 skin when building.
+  if (environment.VITE_V3_VISUAL_SKIN === "false") flags.VITE_V3_VISUAL_SKIN = false;
   const baseline = Object.fromEntries(
     Object.entries(delayedBuildCapabilityVariables).map(([id, variable]) => [id, productionBuildProfile[variable] === "true"])
   );
   return {
     baseline,
     active: { ...baseline, ...safe },
-    flags: Object.fromEntries(
-      Object.entries(productionBuildProfile).map(([name, value]) => [name, value === "true"])
-    )
+    flags
   };
 }
 
 export function productionBuildEnvironment(baseEnvironment = process.env, overrides = {}) {
-  const capabilities = productionBuildCapabilities(overrides);
+  const capabilities = productionBuildCapabilities(overrides, baseEnvironment);
   return {
     ...baseEnvironment,
     ...productionBuildProfile,
+    VITE_V3_VISUAL_SKIN: String(capabilities.flags.VITE_V3_VISUAL_SKIN),
     ...Object.fromEntries(
       Object.entries(delayedBuildCapabilityVariables).map(([id, variable]) => [variable, String(capabilities.active[id])])
     )

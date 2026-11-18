@@ -19,7 +19,7 @@ if (!/^[0-9a-f]{40}$/.test(buildRevision)) {
 }
 
 const overrides = loadProductionCapabilityOverrides(process.env);
-const capabilities = productionBuildCapabilities(overrides);
+const capabilities = productionBuildCapabilities(overrides, process.env);
 const buildEnvironment = productionBuildEnvironment(process.env, overrides);
 for (const variable of Object.values(delayedBuildCapabilityVariables)) {
   process.env[variable] = buildEnvironment[variable];
