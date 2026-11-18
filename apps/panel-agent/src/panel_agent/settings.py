@@ -30,6 +30,7 @@ class IntegrationSettings:
     integration_unavailable_after_seconds: int = 300
     integration_max_backoff_seconds: int = 120
     avalar_ssh_enabled: bool = False
+    avalar_stage_private_health: bool = False
     avalar_ssh_host: str = "avalar-reg"
     avalar_ssh_remote_script: str = "~/control-center-avalar.sh"
     avalar_ssh_refresh_seconds: int = 180
@@ -155,6 +156,7 @@ class IntegrationSettings:
             ),
             avalar_main_url=os.getenv("PANEL_AVALAR_MAIN_URL", "").rstrip("/"),
             avalar_stage_url=os.getenv("PANEL_AVALAR_STAGE_URL", "").rstrip("/"),
+            avalar_stage_private_health=_bool_env("PANEL_AVALAR_STAGE_PRIVATE_HEALTH", False),
             http_refresh_seconds=max(
                 5,
                 int(os.getenv("PANEL_HTTP_REFRESH_SECONDS", "30")),

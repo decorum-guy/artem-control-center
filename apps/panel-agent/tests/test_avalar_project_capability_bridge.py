@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
@@ -253,6 +254,34 @@ def test_duplicate_registered_action_ids_are_rejected():
     project["environments"][0]["services"].append(duplicate_service)
     with pytest.raises(ValidationError, match="duplicate registered action"):
         _document([project])
+
+
+@pytest.mark.parametrize(("readiness", "source", "age", "http", "expected"), [
+    ("ready", "live", 0, 403, "healthy"), ("not_ready", "live", 0, 403, "degraded"),
+    ("ready", "stale", 0, 403, "degraded"), ("ready", "live", 1200, 403, "degraded"),
+    ("ready", "live", 0, 404, "degraded"), ("unavailable", "live", 0, 403, "degraded"),
+])
+def test_closed_stage_requires_current_host_readiness(monkeypatch, readiness, source, age, http, expected):
+    monkeypatch.setenv("PANEL_AVALAR_STAGE_URL", "https://stage.test")
+    observed = (datetime.now(timezone.utc) - timedelta(seconds=age)).isoformat()
+
+    class Details(_Details):
+        def details_for_url_env(self, url_env):
+            return dict(super().details_for_url_env(url_env), application_readiness=readiness,
+                        details_source=source, observed_at=observed, details_observed_at=observed)
+
+    monitor = DeclarativeProjectMonitor(
+        _registry(_avalar_project()), _settings(avalar_stage_private_health=True),
+        transport=httpx.MockTransport(lambda request: httpx.Response(http, text="private hosting page")),
+        details_provider=Details(),
+    )
+    asyncio.run(monitor.refresh())
+    service = next(item for item in monitor.services() if item.id == "avalar.stage.website")
+    assert service.health == expected and service.data["publicHealthHttpStatus"] == http
+    if expected == "healthy":
+        assert service.data["healthCheckTransport"] == "ssh" and "lastError" not in service.data
+    else:
+        assert service.data["lastError"].startswith("avalar_")
 
 
 def test_registry_avalar_health_and_details_are_sanitized(monkeypatch):

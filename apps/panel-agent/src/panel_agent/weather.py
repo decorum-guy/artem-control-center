@@ -14,11 +14,12 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .contracts import PanelMode
+from .weather_metno import MetNoProvider
 
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = "ArtemControlCenter/0.3 (personal weather dashboard)"
+USER_AGENT = "ArtemControlCenter/3.0 (+https://github.com/decorum-guy/artem-control-center)"
 
 
 class WeatherLocation(BaseModel):
@@ -65,7 +66,7 @@ class WeatherCurrent(BaseModel):
 
     time: str
     temperature: float
-    apparentTemperature: float
+    apparentTemperature: float | None
     precipitation: float
     weatherCode: int
     windSpeed: float
@@ -78,7 +79,7 @@ class WeatherHour(BaseModel):
 
     time: str
     temperature: float
-    precipitationProbability: int
+    precipitationProbability: int | None
     precipitation: float
     weatherCode: int
     windSpeed: float
@@ -91,9 +92,10 @@ class WeatherDay(BaseModel):
     weatherCode: int
     temperatureMax: float
     temperatureMin: float
-    precipitationProbabilityMax: int
-    sunrise: str
-    sunset: str
+    precipitationProbabilityMax: int | None
+    precipitationTotal: float | None = None
+    sunrise: str | None
+    sunset: str | None
 
 
 class WeatherForecast(BaseModel):
@@ -111,6 +113,7 @@ class WeatherForecast(BaseModel):
     hourly: list[WeatherHour]
     daily: list[WeatherDay]
     attribution: str = "Weather data by Open-Meteo"
+    provider: Literal["open-meteo", "metno"] = "open-meteo"
 
 
 class WeatherError(RuntimeError):
@@ -374,6 +377,8 @@ class WeatherService:
         self.refresh_seconds = max(60, int(os.getenv("PANEL_WEATHER_REFRESH_SECONDS", "900")))
         self.request_timeout_seconds = max(2, int(os.getenv("PANEL_WEATHER_TIMEOUT_SECONDS", "10")))
         self.forecast_url = os.getenv("PANEL_WEATHER_FORECAST_URL", OPEN_METEO_URL).strip()
+        self.provider = os.getenv("PANEL_WEATHER_PROVIDER", "open-meteo").strip().lower()
+        self._metno = MetNoProvider()
         self.geocode_url = os.getenv("PANEL_WEATHER_GEOCODE_URL", NOMINATIM_URL).strip()
         self._memory_cache: dict[str, WeatherForecast] = {}
         # Python 3.9 binds asyncio primitives to the current event loop at
@@ -448,7 +453,8 @@ class WeatherService:
             return fixture_forecast(location)
 
         cached = self._cached(location)
-        if cached is not None and not force and cached.ageSeconds < self.refresh_seconds:
+        if (cached is not None and self.provider == cached.provider == "open-meteo"
+                and not force and cached.ageSeconds < self.refresh_seconds):
             return cached.model_copy(update={"sourceMode": "cached", "stale": False})
 
         params = {
@@ -462,12 +468,24 @@ class WeatherService:
         }
         try:
             async with httpx.AsyncClient(timeout=self.request_timeout_seconds, headers={"User-Agent": USER_AGENT}) as client:
-                response = await client.get(self.forecast_url, params=params)
-                response.raise_for_status()
-                payload = response.json()
-            result = normalize_forecast(payload, location)
+                if self.provider == "metno":
+                    projection = await self._metno.forecast(
+                        client, location.latitude, location.longitude,
+                        self.cache_root if isinstance(location, WeatherLocation) else None,
+                        cached.timezone if cached else None,
+                    )
+                    result = WeatherForecast(location=location, **projection)
+                elif self.provider == "open-meteo":
+                    response = await client.get(self.forecast_url, params=params)
+                    response.raise_for_status()
+                    result = normalize_forecast(response.json(), location)
+                else:
+                    raise WeatherError("weather_provider_unknown")
             self._memory_cache[self._cache_key(location)] = result
-            if isinstance(location, WeatherLocation):
+            if isinstance(location, WeatherLocation) and (
+                cached is None or result.observedAt != cached.observedAt or result.current.time != cached.current.time
+                or result.provider != cached.provider
+            ):
                 self._persist_cache(location, result)
             return result
         except Exception as exc:

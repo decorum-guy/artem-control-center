@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .avalar_actions import avalar_action_descriptor
-from .avalar_health import probe_avalar_health
+from .avalar_health import AVALAR_HEALTH_REASONS, probe_avalar_health
 from .contracts import ActionDescriptor, ServicePresentation, ServiceSnapshot
 from .project_registry import (
     ProjectDetailsConfig,
@@ -93,6 +93,8 @@ async def probe_declarative_http_monitor(
         )
         if probe.outcome == "unavailable":
             return DeclarativeHttpProbeResult("unreachable")
+        if probe.error_code:
+            return DeclarativeHttpProbeResult("http_error", http_status=probe.http_status, latency_ms=probe.latency_ms)
         # The connection-test contract reports reachability.  The full
         # healthy/degraded mapping is materialized by DeclarativeProjectMonitor.
         return DeclarativeHttpProbeResult(
@@ -373,16 +375,47 @@ class DeclarativeProjectMonitor:
         )
         if probe.outcome == "unavailable":
             return self._failed(target), False, True
-        return (
-            self._avalar_snapshot(
-                target,
-                health=probe.health or "degraded",
-                summary=probe.summary,
-                latency_ms=probe.latency_ms or 0,
-            ),
-            True,
-            True,
+        details = self._details_for_target(target)
+        health = probe.health or "degraded"
+        summary, reason = probe.summary, probe.error_code
+        checked_by_ssh = False
+        if target.environment_id == "stage" and self._settings.avalar_stage_private_health and probe.both_forbidden:
+            readiness = self._private_stage_readiness(details)
+            if readiness == "ready":
+                health, summary, reason = "healthy", "Закрытый Stage готов · проверено по SSH", None
+                checked_by_ssh = True
+            elif readiness == "not_ready":
+                reason = "avalar_stage_not_ready"
+                summary = AVALAR_HEALTH_REASONS[reason]
+                checked_by_ssh = True
+        snapshot = self._avalar_snapshot(
+            target, health=health, summary=summary, latency_ms=probe.latency_ms, details=details,
         )
+        if reason:
+            snapshot.data["lastError"] = reason
+        if probe.http_status:
+            snapshot.data["publicHealthHttpStatus"] = probe.http_status
+        if checked_by_ssh:
+            snapshot.data["healthCheckTransport"] = "ssh"
+        return snapshot, True, True
+
+    def _private_stage_readiness(self, details: dict[str, object]) -> str | None:
+        if details.get("details_source") != "live":
+            return None
+        observed_at = details.get("details_observed_at")
+        remote_at = details.get("observed_at")
+        if not isinstance(observed_at, str) or not isinstance(remote_at, str):
+            return None
+        max_age = min(600, self._settings.avalar_ssh_refresh_seconds * 2)
+        for timestamp in (observed_at, remote_at):
+            try:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(timestamp.replace("Z", "+00:00"))).total_seconds()
+            except (TypeError, ValueError):
+                return None
+            if not -30 <= age <= max_age:
+                return None
+        readiness = details.get("application_readiness")
+        return readiness if readiness in ("ready", "not_ready") else None
 
     def _with_last_known(
         self,
@@ -611,7 +644,10 @@ class DeclarativeProjectMonitor:
         working_tree = details.get("working_tree")
         if working_tree in {"clean", "dirty"}:
             clean["working_tree"] = working_tree
-        for key in ("deployed_at", "details_observed_at"):
+        if details.get("environment") == "stage" and details.get("application_readiness") in ("ready", "not_ready", "unavailable"):
+            clean["application_readiness"] = details["application_readiness"]
+            clean["environment"] = "stage"
+        for key in ("deployed_at", "details_observed_at", "observed_at"):
             value = details.get(key)
             if isinstance(value, str) and _SAFE_TIMESTAMP_PATTERN.fullmatch(value):
                 clean[key] = value
