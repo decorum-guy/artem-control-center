@@ -202,6 +202,12 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
     });
     await page.goto("/home?scenario=home-climate-healthy&motion=full");
     const opener = page.getByRole("button", { name: "Выбрать чай" });
+    const scrollContainer = await opener.evaluateHandle(el => {
+      for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+        if (parent.scrollHeight > parent.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
+      }
+      return document.scrollingElement!;
+    });
     await opener.click();
     const dialog = page.getByRole("dialog", { name: "Выбрать чай" });
     await expect(dialog).toBeVisible();
@@ -209,12 +215,6 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
     const fixed = () => dialog.evaluate(el => ["h2", ".kettle-picker__actions"]
       .map(selector => Math.round(el.querySelector(selector)!.getBoundingClientRect().top)));
     const before = await fixed();
-    const scrollContainer = await opener.evaluateHandle(el => {
-      for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-        if (parent.scrollHeight > parent.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
-      }
-      return document.scrollingElement!;
-    });
     const backgroundTop = await scrollContainer.evaluate(el => el.scrollTop);
     const wheel = dialog.getByRole("group", { name: "Виды чая" });
     await wheel.hover();
