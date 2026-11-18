@@ -317,10 +317,14 @@ function V2ProductShell({
   const menuRef = useRef<HTMLButtonElement>(null);
   const floatingMenuRef = useRef<HTMLButtonElement>(null);
   const navigationOpenerRef = useRef<HTMLElement | null>(null);
+  const wasPortrait = useRef(portrait);
+  const Brand = v3VisualSkinEnabled ? "button" : "div";
   useEffect(() => {
+    const rotated = wasPortrait.current !== portrait;
+    wasPortrait.current = portrait;
     if (portrait && document.activeElement?.closest(".v2-navigation-rail")) menuRef.current?.focus();
     if (!portrait && (
-      navigationOpen
+      (navigationOpen && (rotated || !v3VisualSkinEnabled))
       || document.activeElement === menuRef.current
       || document.activeElement === floatingMenuRef.current
     )) {
@@ -353,13 +357,19 @@ function V2ProductShell({
   return (
     <div className="v2-shell" data-testid="v2-shell" data-viewport-layout={portrait ? "portrait" : "landscape"}>
       <aside className="v2-navigation-rail" data-testid="v2-navigation-rail">
-        <div className="v2-brand">
+        <Brand className="v2-brand" type={v3VisualSkinEnabled ? "button" : undefined}
+          aria-label={v3VisualSkinEnabled ? "Все разделы" : undefined}
+          title={v3VisualSkinEnabled ? "Все разделы" : undefined}
+          aria-haspopup={v3VisualSkinEnabled ? "dialog" : undefined}
+          aria-expanded={v3VisualSkinEnabled ? navigationOpen : undefined}
+          onClick={v3VisualSkinEnabled ? event => { navigationOpenerRef.current = event.currentTarget; setNavigationOpen(true); } : undefined}>
           <span className="v2-brand__mark" aria-hidden="true">{v3VisualSkinEnabled ? <Emblem /> : "ACC"}</span>
           <span className="v2-brand__copy">
             <strong>Artem</strong>
             <span>Control Center</span>
           </span>
-        </div>
+          {v3VisualSkinEnabled && <Icon name="chevron-down" size={14} />}
+        </Brand>
 
         <div className="v2-navigation-route-bar">
           <nav className="v2-navigation-primary" aria-label="Основные разделы">
@@ -465,7 +475,7 @@ function V2ProductShell({
           <path d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
-      {navigationOpen && portrait && (
+      {navigationOpen && (portrait || v3VisualSkinEnabled) && (
         <Sheet
           title="Разделы"
           className="portrait-navigation-sheet"

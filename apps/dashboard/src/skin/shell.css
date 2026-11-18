@@ -5,6 +5,9 @@
   box-shadow: inset -1px 0 var(--cc-edge-light);
 }
 .skin-v3 .v2-brand { gap: 9px; margin-bottom: 18px; padding-inline: 3px; }
+.skin-v3 button.v2-brand { min-height: 48px; width: 100%; border: 0; border-radius: var(--cc-radius-control); color: var(--cc-text); text-align: left; background: transparent; }
+.skin-v3 button.v2-brand:hover { background: var(--cc-selected-bg); }
+.skin-v3 button.v2-brand > svg { margin-inline-start: auto; flex: none; color: var(--cc-accent); }
 .skin-v3 .v2-brand__mark { width: 40px; height: 40px; flex-basis: 40px; border: 0; background: transparent; }
 .skin-v3 .v2-brand__copy strong { font-weight: 650; font-size: 16px; letter-spacing: -.025em; }
 .skin-v3 .v2-brand__copy > span { font: 10px/15px var(--cc-font-mono); }

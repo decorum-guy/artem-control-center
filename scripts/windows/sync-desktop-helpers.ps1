@@ -9,8 +9,9 @@ if ([string]::IsNullOrWhiteSpace($documents)) {
 }
 New-Item -ItemType Directory -Force -Path $documents | Out-Null
 
-# Keep the desktop clean. Only remove legacy/generated .cmd helpers; owner-created
-# .lnk shortcuts are deliberately left untouched.
+& (Join-Path $PSScriptRoot "sync-open-shortcut.ps1") -Desktop $desktop -Documents $documents
+
+# Remove obsolete generated command files from the desktop.
 $desktopGenerated = @(
     "Start Control Center.cmd",
     "Open Control Center.cmd",

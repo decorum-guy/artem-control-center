@@ -173,7 +173,7 @@ async function mockCoffeeSettings(
     channelHealth: {
       spoken: {
         alice: { status: "available", code: null },
-        jarvis: { status: "unavailable", code: "jarvis_runtime_unavailable" }
+        jarvis: { status: "unavailable", code: "jarvis_disabled" }
       },
       phone: {
         telegram: { status: "available", code: null },
@@ -268,8 +268,8 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(page.getByTestId("settings-summary-reminder-delivery")).toBeVisible();
     await expect(page.getByTestId("settings-summary-access")).toBeVisible();
     await expect(page.getByTestId("settings-summary-runtime")).toBeVisible();
-    await expect(page.getByTestId("settings-summary-jarvis")).toBeVisible();
-    await expect(page.getByTestId("settings-summary-jarvis")).toContainText("Выкл");
+    if (process.env.PANEL_JARVIS_ENABLED === "true") await expect(page.getByTestId("settings-summary-jarvis")).toContainText("Выкл");
+    else await expect(page.getByTestId("settings-summary-jarvis")).toHaveCount(0);
 
     const motionLabels = [
       ["full", "Полное"],
@@ -315,6 +315,7 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
   });
 
   test("Jarvis overlay defaults hidden and can be restored persistently from Settings", async ({ page }) => {
+    test.skip(process.env.PANEL_JARVIS_ENABLED !== "true", "Requires explicit assistant opt-in");
     await mockCoffeeSettings(page);
     await page.goto("/settings");
     await page.evaluate((storageKey) => window.localStorage.removeItem(storageKey), jarvisVisibilityStorageKey);
@@ -522,10 +523,11 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     const sheet = page.getByTestId("settings-reminder-delivery-sheet");
     await expect(sheet.getByRole("heading", { name: "Голос", exact: true })).toBeVisible();
     await expect(sheet.getByRole("heading", { name: "Телефон", exact: true })).toBeVisible();
-    await sheet.getByLabel("Jarvis").check();
+    await expect(sheet.getByLabel("Jarvis")).toHaveCount(0);
+    await expect(sheet.getByLabel("Alice")).toBeChecked();
     await sheet.getByLabel("Home Assistant").check();
     await sheet.getByRole("button", { name: "Сохранить", exact: true }).click();
-    await expect(sheet).toContainText("Выбранный речевой канал сейчас недоступен");
+    await expect(sheet.getByLabel("Alice")).toBeChecked();
     await expect(sheet.getByLabel("Telegram")).toBeChecked();
     await expect(sheet.getByLabel("Home Assistant")).toBeChecked();
   });

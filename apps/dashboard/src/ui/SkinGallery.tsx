@@ -24,7 +24,7 @@ const readings: [RingReading, string][] = [
   [{ kind: "running_too_long" }, "Дольше обычного"], [{ kind: "idle" }, "Ожидание"]
 ];
 
-export default function SkinGallery() {
+export default function SkinGallery({ jarvisEnabled }: { jarvisEnabled: boolean }) {
   const [mode, setMode] = useState("auto");
   const [theme, setTheme] = useState("night");
   const [on, setOn] = useState(true);
@@ -50,8 +50,8 @@ export default function SkinGallery() {
       <section><h2>Приборы</h2><div className="cc-gallery-row">{readings.map(([reading, label], i) =>
         <figure key={reading.kind}><RingGauge size={i === 0 ? 148 : i === 1 ? 96 : 64} tone="heat" reading={reading} label={label}>
           {reading.kind === "progress" ? "64 %" : <Icon name="coffee" />}</RingGauge><figcaption>{label}</figcaption></figure>)}</div></section>
-      <section><h2>Jarvis</h2><div className="cc-orb-gallery">{orbStates.map(([state, label]) =>
-        <figure key={state}><JarvisOrb state={state} /><figcaption>{label}</figcaption></figure>)}</div></section>
+      {jarvisEnabled && <section><h2>Jarvis</h2><div className="cc-orb-gallery">{orbStates.map(([state, label]) =>
+        <figure key={state}><JarvisOrb state={state} /><figcaption>{label}</figcaption></figure>)}</div></section>}
       <section><h2>Состояния</h2><EmptyState kicker="Календарь" title="Нет событий" />
         <ErrorState title="Данные недоступны" /><Skeleton />
         <Button onClick={() => setBoot(!boot)}>{boot ? "Скрыть загрузку" : "Показать загрузку"}</Button>

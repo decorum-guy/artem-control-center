@@ -188,6 +188,12 @@ jobs:
           B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
         run: npm run test:e2e -- tests/e2e/v2-shell.spec.ts
 
+      - name: Validate the explicitly enabled assistant
+        if: runner.os == 'Linux'
+        env:
+          PANEL_JARVIS_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/jarvis-text-core.spec.ts
+
       - name: Validate V3 skin in landscape and portrait
         if: runner.os == 'Linux'
         env:

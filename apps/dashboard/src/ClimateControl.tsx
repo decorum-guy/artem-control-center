@@ -1,6 +1,6 @@
 import { SelectField } from "./ui/SelectField";
 import { v3VisualSkinEnabled } from "./visualShellConfig";
-import { RingGauge } from "./ui/RingGauge";
+import { TemperatureGauge } from "./ui/RingGauge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
@@ -266,9 +266,8 @@ export function ClimateControl({
 
         <div className="climate-control__temperature-control" aria-label="Целевая температура">
           <span className="climate-control__target-value" data-testid={`climate-temperature-value-${variant}`}>
-            {v3VisualSkinEnabled && <RingGauge size={64} tone="accent" label={`Целевая температура ${draftTarget ?? "—"}°`}
-              reading={climateLive && draftTarget !== null ? { kind: "progress", fraction: (draftTarget - minimumTemperature) / (maximumTemperature - minimumTemperature) } : { kind: "unavailable" }} />}
-            {draftTarget ?? "—"}°
+            {v3VisualSkinEnabled ? <TemperatureGauge value={draftTarget} tone="accent" label="Целевая температура"
+              reading={climateLive && draftTarget !== null ? { kind: "progress", fraction: (draftTarget - minimumTemperature) / (maximumTemperature - minimumTemperature) } : { kind: "unavailable" }} /> : String(draftTarget ?? "—") + "°"}
           </span>
           <button
             type="button"

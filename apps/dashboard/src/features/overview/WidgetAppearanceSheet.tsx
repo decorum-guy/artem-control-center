@@ -69,8 +69,9 @@ export function WidgetAppearanceSheet({
             const value = config[control.key] ?? control.defaultValue;
             const unavailable = controlDisabled(item, control);
             const label = appearanceControlLabel(control);
-            const valueLabel = appearanceControlValueLabel(control, value);
             const previewStage = previewStageFor(control);
+            const origin = v3VisualSkinEnabled && previewStage && control.control === "integer_range" ? control.defaultValue : 0;
+            const valueLabel = appearanceControlValueLabel(control, origin ? Number(value) - origin : value);
             const controlId = `appearance-${item.instanceId}-${control.key}`;
             return (
               <div className={`overview-appearance__control${unavailable ? " overview-appearance__control--unavailable" : ""}`} key={control.key}>
@@ -82,9 +83,9 @@ export function WidgetAppearanceSheet({
                 )}
                 {control.control === "integer_range" && (
                   <>
-                    {v3VisualSkinEnabled ? <Slider label={label} min={control.min} max={control.max} step={control.step}
-                      value={value as number} displayValue={valueLabel} disabled={unavailable}
-                      onChange={next => onChange(control.key, next)} /> : (
+                    {v3VisualSkinEnabled ? <Slider label={label} min={control.min - origin} max={control.max - origin} step={control.step}
+                      value={Number(value) - origin} displayValue={valueLabel} disabled={unavailable}
+                      onChange={next => onChange(control.key, next + origin)} /> : (
                     <input
                       id={controlId}
                       className="overview-appearance__range"

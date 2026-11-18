@@ -177,26 +177,11 @@ SETTINGS = IntegrationSettings.from_env()
 runtime = IntegrationRuntime(SETTINGS, mode=MODE)
 project_registry_store = ProjectRegistryStore(SETTINGS.projects_config_path)
 weather_service = WeatherService(mode=MODE)
-jarvis_turn_service = JarvisTurnService(
-    planning=lambda: runtime.planning.projection,
-    weather=weather_service,
-    timezone_name=SETTINGS.panel_planning_timezone,
-)
-_jarvis_voice_enabled = os.getenv("PANEL_JARVIS_VOICE_ENABLED", "false").strip().lower() == "true"
-_jarvis_voice_token = os.getenv("PANEL_JARVIS_VOICE_BRIDGE_TOKEN")
-_jarvis_voice_configured = (
-    _jarvis_voice_enabled
-    and os.getenv("PANEL_JARVIS_VOICE_CONFIGURED", "false").strip().lower() == "true"
-    and bool(_jarvis_voice_token)
-)
-jarvis_voice_bridge = VoiceBridgeState(
-    enabled=_jarvis_voice_enabled,
-    configured=_jarvis_voice_configured,
-    token=_jarvis_voice_token,
-)
+JARVIS_ENABLED = os.getenv("PANEL_JARVIS_ENABLED", "false").strip().lower() == "true"
 diagnostics_collector = DiagnosticsCollector(SETTINGS)
 snapshot_publisher = SnapshotPublisher(
     mode=MODE,
+    jarvis_enabled=JARVIS_ENABLED,
     services_builder=runtime.services,
     planning_builder=runtime.planning_snapshot,
     heartbeat_seconds=SETTINGS.sse_heartbeat_seconds,
@@ -352,8 +337,26 @@ app.include_router(
 app.include_router(build_weather_router(weather_service))
 todoist_adapter = TodoistAdapter(SETTINGS)
 app.include_router(build_todoist_router(todoist_adapter, access_policy))
-app.include_router(build_jarvis_router(jarvis_turn_service))
-app.include_router(build_jarvis_voice_router(service=jarvis_turn_service, bridge=jarvis_voice_bridge))
+if JARVIS_ENABLED:
+    jarvis_turn_service = JarvisTurnService(
+        planning=lambda: runtime.planning.projection,
+        weather=weather_service,
+        timezone_name=SETTINGS.panel_planning_timezone,
+    )
+    _jarvis_voice_enabled = os.getenv("PANEL_JARVIS_VOICE_ENABLED", "false").strip().lower() == "true"
+    _jarvis_voice_token = os.getenv("PANEL_JARVIS_VOICE_BRIDGE_TOKEN")
+    _jarvis_voice_configured = (
+        _jarvis_voice_enabled
+        and os.getenv("PANEL_JARVIS_VOICE_CONFIGURED", "false").strip().lower() == "true"
+        and bool(_jarvis_voice_token)
+    )
+    jarvis_voice_bridge = VoiceBridgeState(
+        enabled=_jarvis_voice_enabled,
+        configured=_jarvis_voice_configured,
+        token=_jarvis_voice_token,
+    )
+    app.include_router(build_jarvis_router(jarvis_turn_service))
+    app.include_router(build_jarvis_voice_router(service=jarvis_turn_service, bridge=jarvis_voice_bridge))
 app.include_router(
     build_planning_router(
         runtime.planning,
@@ -518,6 +521,7 @@ def _fixture_snapshot_for_scenario(scenario: str) -> DashboardSnapshot:
         generatedAt=document["generatedAt"],
         mode=MODE,
         fixtureScenario=scenario,
+        jarvisEnabled=JARVIS_ENABLED,
         services=services,
         planning=runtime.planning_snapshot(),
     )
@@ -1828,6 +1832,13 @@ async def patch_coffee_notification_settings(
     )
 
 
+def _local_reminder_delivery(settings: ReminderDeliverySettings) -> ReminderDeliverySettings:
+    if not JARVIS_ENABLED:
+        settings.channelHealth.spoken.jarvis.status = "unavailable"
+        settings.channelHealth.spoken.jarvis.code = "jarvis_disabled"
+    return settings
+
+
 @app.get("/api/v1/settings/reminders/delivery", response_model=ReminderDeliverySettings)
 async def reminder_delivery_settings(response: Response) -> ReminderDeliverySettings:
     response.headers["Cache-Control"] = "no-store"
@@ -1838,11 +1849,11 @@ async def reminder_delivery_settings(response: Response) -> ReminderDeliverySett
             payload, source_mode = await runtime.alice_control.get_reminder_delivery()
         except AliceControlError as exc:
             _raise_alice_error(exc)
-    return ReminderDeliverySettings(
+    return _local_reminder_delivery(ReminderDeliverySettings(
         **payload,
         sourceMode=source_mode,
         writesEnabled=_write_allowed(True),
-    )
+    ))
 
 
 @app.patch("/api/v1/settings/reminders/delivery", response_model=ReminderDeliverySettings)
@@ -1851,6 +1862,13 @@ async def patch_reminder_delivery_settings(
     response: Response,
 ) -> ReminderDeliverySettings:
     _require_write(True)
+    if not JARVIS_ENABLED and patch.spokenEndpoint == "jarvis":
+        # A legacy selection may be retained when changing just the phone channels.
+        saved = await reminder_delivery_settings(response)
+        if saved.revision != patch.expectedRevision:
+            raise HTTPException(status_code=409, detail="revision_conflict")
+        if saved.spokenEndpoint != "jarvis":
+            raise HTTPException(status_code=409, detail="jarvis_disabled")
     payload = patch.model_dump()
     if MODE in {"fixtures", "integration_test"}:
         if patch.expectedRevision != fixture_reminder_delivery["revision"]:
@@ -1867,11 +1885,11 @@ async def patch_reminder_delivery_settings(
             _raise_alice_error(exc)
         source_mode = "live"
     response.headers["Cache-Control"] = "no-store"
-    return ReminderDeliverySettings(
+    return _local_reminder_delivery(ReminderDeliverySettings(
         **result,
         sourceMode=source_mode,
         writesEnabled=True,
-    )
+    ))
 
 
 @app.post("/api/v1/actions/home/coffee", response_model=CoffeeActionResponse)

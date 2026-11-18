@@ -13,6 +13,7 @@ def load_app(monkeypatch):
 
 
 def test_reminder_delivery_settings_exposes_safe_health_and_revision_guard(monkeypatch):
+    monkeypatch.setenv("PANEL_JARVIS_ENABLED", "true")
     module = load_app(monkeypatch)
     client = TestClient(module.app)
 
@@ -61,3 +62,24 @@ def test_reminder_delivery_settings_rejects_empty_or_unknown_phone_channels(monk
         "/api/v1/settings/reminders/delivery",
         json={"expectedRevision": 0, "spokenEndpoint": "alice", "phoneChannels": ["sms"]},
     ).status_code == 422
+
+def test_disabled_jarvis_cannot_start_or_be_selected_but_keeps_existing_phone_delivery(monkeypatch):
+    monkeypatch.delenv("PANEL_JARVIS_ENABLED", raising=False)
+    monkeypatch.setenv("PANEL_JARVIS_VOICE_ENABLED", "true")
+    module = load_app(monkeypatch)
+    client = TestClient(module.app)
+    assert client.get("/api/v1/snapshot").json()["jarvisEnabled"] is False
+    assert client.get("/api/v1/jarvis/voice/state").status_code == 404
+    assert client.post("/api/v1/jarvis/turn", json={"text": "Тест"}).status_code == 404
+    path = "/api/v1/settings/reminders/delivery"
+    saved = client.get(path).json()
+    assert saved["channelHealth"]["spoken"]["jarvis"]["code"] == "jarvis_disabled"
+    patch = {"expectedRevision": saved["revision"], "spokenEndpoint": "jarvis", "phoneChannels": ["home_assistant"]}
+    assert client.patch(path, json=patch).json()["detail"] == "jarvis_disabled"
+    assert client.get(path).json()["spokenEndpoint"] == "alice"
+    monkeypatch.setitem(module.fixture_reminder_delivery, "spokenEndpoint", "jarvis")
+    updated = client.patch(path, json=patch)
+    assert updated.status_code == 200
+    assert updated.json()["spokenEndpoint"] == "jarvis"
+    assert updated.json()["phoneChannels"] == ["home_assistant"]
+    assert updated.json()["channelHealth"]["spoken"]["jarvis"]["code"] == "jarvis_disabled"

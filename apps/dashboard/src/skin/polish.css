@@ -40,3 +40,32 @@ html[data-skin="v3"] :is(.coffee-activity i, .climate-control__pending-icon,
   .planning-icon-button--busy svg, .rog-psu-controls__pending-icon,
   .overview-rog-widget__pending-icon) { animation-iteration-count: 2; }
 html[data-skin="v3"]::view-transition-old(root), html[data-skin="v3"]::view-transition-new(root) { animation-duration: 300ms; animation-timing-function: var(--cc-motion-ease); }
+
+.skin-v3 .settings-v2-appearance { grid-template-columns: 1fr; align-items: start; gap: 14px; }
+@media (min-width: 1000px) {
+  .skin-v3 .settings-v2-appearance__controls {
+    grid-template-columns: minmax(144px,.7fr) minmax(234px,1fr) minmax(256px,1.35fr);
+    align-items: start; gap: 18px;
+  }
+}
+@media (max-width: 999px) {
+  .skin-v3 .settings-v2-appearance__controls { grid-template-columns: 1fr; gap: 14px; }
+}
+.skin-v3 .cc-accent-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.skin-v3 .cc-accent-options button {
+  display: inline-flex; align-items: center; gap: 9px; min-height: 48px; padding: 7px 14px;
+  font: inherit; color: var(--cc-text-secondary); border: 1px solid var(--cc-border-strong);
+  border-radius: 24px; background: var(--cc-glass); box-shadow: inset 0 1px var(--cc-edge-light);
+}
+.skin-v3 .cc-accent-options button[aria-pressed="true"] { border-color: var(--cc-accent); color: var(--cc-text); background: var(--cc-selected-bg); }
+.skin-v3 .cc-accent-options i { position: relative; flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--swatch);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 65%), inset 0 -2px 3px rgb(0 0 0 / 24%); }
+.skin-v3 [data-accent-swatch="ice"] { --swatch: #35d6ff; }
+.skin-v3 [data-accent-swatch="iris"] { --swatch: #bcadff; }
+.skin-v3 [data-accent-swatch="lagoon"] { --swatch: #54dfcb; }
+.skin-v3 [data-accent-swatch="rose"] { --swatch: #ffabc7; }
+
+.skin-v3 .cc-accent-options [aria-pressed="true"] i::after {
+  content: ""; position: absolute; width: 6px; height: 3px; top: 4px; left: 3px;
+  border-left: 2px solid #132034; border-bottom: 2px solid #132034; transform: rotate(-45deg);
+}

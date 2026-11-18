@@ -1,5 +1,5 @@
 import { v3VisualSkinEnabled } from "./visualShellConfig";
-import { RingGauge } from "./ui/RingGauge";
+import { TemperatureGauge } from "./ui/RingGauge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KettleData, ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
@@ -129,9 +129,8 @@ export function KettleControl({ service, variant = "home", interactive = true }:
     <h2>Чайник</h2>
     <p className="kettle-control__temperature-label" aria-hidden="true">Текущая температура:</p>
     <div className="kettle-control__temperature" data-testid="kettle-current-temperature" aria-label={`Текущая температура воды ${currentTemperature}`}>
-      {v3VisualSkinEnabled && <RingGauge size={64} tone="heat" label={`Температура воды ${currentTemperature}`}
-        reading={live && typeof data.currentTemperature === "number" ? { kind: "progress", fraction: data.currentTemperature / 100 } : { kind: "unavailable" }} />}
-      {currentTemperature}
+      {v3VisualSkinEnabled ? <TemperatureGauge value={data.currentTemperature} tone="heat" label="Температура воды"
+        reading={live && typeof data.currentTemperature === "number" ? { kind: "progress", fraction: data.currentTemperature / 100 } : { kind: "unavailable" }} /> : currentTemperature}
     </div>
     <p className="kettle-control__status" role="status">{status(data, service)}</p>
     <div className="kettle-control__actions">

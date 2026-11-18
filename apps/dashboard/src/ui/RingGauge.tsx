@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Tone } from "./Controls";
 
+const degrees = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
+
 export type RingReading =
   | { kind: "progress"; fraction: number }
   | { kind: "stages"; count: number; active: number }
@@ -47,6 +49,11 @@ export function RingGauge({ reading, tone, size = 96, label, children }: Props) 
       {previous && <g className="cc-gauge-old"><RingFace {...previous} size={size} /></g>}
       <g key={appearance} className={previous ? "cc-gauge-new" : undefined}><RingFace reading={reading} tone={tone} size={size} /></g>
     </svg>
-    {children && <span className="cc-gauge-center" aria-hidden="true">{children}</span>}
+    {children && <span className="cc-gauge-center" data-characters={typeof children === "string" ? children.length : undefined} aria-hidden="true">{children}</span>}
   </span>;
+}
+
+export function TemperatureGauge({ value, label, reading, tone }: Face & { value: number | null | undefined; label: string }) {
+  const text = (typeof value === "number" && Number.isFinite(value) ? degrees.format(value) : "—") + "°";
+  return <RingGauge size={64} label={label + " " + text} reading={reading} tone={tone}>{text}</RingGauge>;
 }
