@@ -55,21 +55,31 @@ export async function observeCoffeeCycle(page: Page, base: string, custom: boole
     ctx.drawImage(img, 0, 0);
     const data = ctx.getImageData(0, 0, c.width, c.height).data;
     let left = c.width, right = 0, top = c.height, bottom = 0;
+    let weight = 0, horizontalMoment = 0, verticalMoment = 0;
     for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) {
-      if (data[4 * (y * c.width + x) + 3] <= 28) continue;
+      const opacity = data[4 * (y * c.width + x) + 3];
+      if (opacity <= 28) continue;
+      weight += opacity;
+      horizontalMoment += (x + .5) * opacity;
+      verticalMoment += (y + .5) * opacity;
       left = Math.min(left, x); right = Math.max(right, x);
       top = Math.min(top, y); bottom = Math.max(bottom, y);
     }
-    return { x: (left + right + 1) / (2*c.width), y: (top + bottom + 1) / (2*c.height) };
+    return {
+      x: ((left + right + 1) / 2 + horizontalMoment / weight) / (2 * c.width),
+      y: ((top + bottom + 1) / 2 + verticalMoment / weight) / (2 * c.height),
+      left: left / c.width, right: (right + 1) / c.width, foot: (bottom + 1) / c.height
+    };
   });
   const readings = [];
   for (const next of ["turning_on", "warming", "ready", "turning_off", "off"] as const) {
     phase = next;
     const values = await tile.evaluate(async (element, { next, alpha }) => {
       const frame = element.querySelector(".coffee-asset")!;
-      const motion = element.querySelector(".cc-coffee-motion")!;
+      const motion = element.querySelector<HTMLElement>(".cc-coffee-motion")!;
       const picture = motion.querySelector("img")!;
-      const frames: { x: number; y: number; scale: number }[] = [];
+      const dial = frame.querySelector(".cc-gauge")!;
+      const frames: { x: number; y: number; scale: number; rimClearance: number; footOverlap: number }[] = [];
       window.dispatchEvent(new Event("cabin-test-refresh"));
       const start = performance.now();
       let arrived = 0;
@@ -78,11 +88,21 @@ export async function observeCoffeeCycle(page: Page, base: string, custom: boole
         if (performance.now() - start > 5000) throw new Error("Fixture phase did not arrive: " + next);
         if (!arrived && motion.getAttribute("data-phase") === next) arrived = performance.now();
         const f = frame.getBoundingClientRect(), p = picture.getBoundingClientRect();
+        const ring = dial.getBoundingClientRect(), assembly = motion.getBoundingClientRect();
+        const platform = getComputedStyle(motion, "::before");
+        const renderScale = assembly.height / motion.offsetHeight;
+        const platterCenter = assembly.top + parseFloat(platform.top) * renderScale;
+        const platterRadius = parseFloat(platform.height) * renderScale / 2;
+        const footOverlap = platterRadius - Math.abs(p.top + p.height * alpha.foot - platterCenter);
         frames.push({ x: p.left + p.width * alpha.x - f.left - f.width/2,
           y: p.top + p.height * alpha.y - f.top - f.height/2,
-          scale: new DOMMatrix(getComputedStyle(motion).transform).a });
+          scale: new DOMMatrix(getComputedStyle(motion).transform).a,
+          rimClearance: Math.min(p.left + p.width * alpha.left - ring.left, ring.right - (p.left + p.width * alpha.right)),
+          footOverlap });
       }
-      return { phase: next, frames: frames.length, firstScale: frames[0].scale, lastScale: frames.at(-1)!.scale,
+      return { phase: next, frames: frames.length,
+        rimClearance: Math.min(...frames.map(v => v.rimClearance)),
+        footOverlap: Math.min(...frames.map(v => v.footOverlap)), firstScale: frames[0].scale, lastScale: frames.at(-1)!.scale,
         minX: Math.min(...frames.map(v => v.x)), maxX: Math.max(...frames.map(v => v.x)),
         minY: Math.min(...frames.map(v => v.y)), maxY: Math.max(...frames.map(v => v.y)),
         scales: new Set(frames.map(v => v.scale.toFixed(4))).size };
