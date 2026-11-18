@@ -3,10 +3,16 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.home_assistant_maintenance import (
     HomeServerMaintenanceError, HomeServerMaintenanceExecutor, HomeServerSshTransport, _safe_helper_failure,
     RESTART_ACTION, RESTART_BOT_ACTION, RESTART_CADDY_ACTION, UPDATE_CORE_ACTION,
+    build_home_assistant_maintenance_router, _read_stable_version,
 )
 from panel_agent.settings import IntegrationSettings
 
@@ -58,6 +64,82 @@ def test_unknown_operation_is_rejected(tmp_path):
         except HomeServerMaintenanceError as error: assert error.code == "helper_failed"; return
         assert False
     asyncio.run(run())
+
+
+def http_app(executor):
+    app = FastAPI()
+    app.include_router(build_home_assistant_maintenance_router(executor))
+    return TestClient(app)
+
+
+def test_browser_json_reaches_each_fixed_action_and_replays_only_its_target(tmp_path):
+    transport = FakeTransport()
+    with http_app(make(tmp_path, transport=transport)) as client:
+        endpoint = "/api/v1/actions/home-assistant/maintenance"
+        for action, operation in [(UPDATE_CORE_ACTION, "update-ha"), (RESTART_ACTION, "restart-ha"),
+                                  (RESTART_BOT_ACTION, "restart-bot"), (RESTART_CADDY_ACTION, "restart-caddy")]:
+            body = {"actionId": action, "requestId": str(uuid4())}
+            assert client.post(endpoint, json=body).status_code == 202
+            assert client.post(endpoint, json=body).status_code == 200
+            assert transport.calls.count(operation) == 1
+            assert client.get(f"{endpoint}/{body['requestId']}").json()["status"] == "success"
+            other = RESTART_ACTION if action != RESTART_ACTION else UPDATE_CORE_ACTION
+            assert client.post(endpoint, json={**body, "actionId": other}).status_code == 409
+        for invalid in ({"requestId": "wrong"}, {"actionId": "invalid"}, {"command": "extra"}):
+            assert client.post(endpoint, json={**body, **invalid}).status_code == 422
+
+
+@pytest.mark.parametrize(("latest", "state"), [("2026.11.2", "available"), ("2026.9.3", "up_to_date"), ("2026.9.2", "ahead")])
+def test_check_reads_only_status_and_catalog_without_write_permission(tmp_path, latest, state):
+    async def release():
+        return latest
+    ha = {"running": True, "installedVersion": "2026.9.3", "configuredImage": "ghcr.io/home-assistant/home-assistant:stable"}
+    transport = FakeTransport({"status": {"schemaVersion": 1, "ok": True, "operation": "status", "services": {"homeAssistant": ha}}})
+    executor = HomeServerMaintenanceExecutor(IntegrationSettings(), AccessPolicyStore(tmp_path / "policy.json"),
+                                             transport=transport, stable_version=release)
+    endpoint = "/api/v1/actions/home-assistant/maintenance"
+    with http_app(executor) as client:
+        response = client.get(endpoint + "/update-check")
+        assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+        body = response.json()
+        assert body["state"] == state and body["installedVersion"] == "2026.9.3" and body["latestVersion"] == latest and body["checkedAt"]
+        assert transport.calls == ["status"] and not executor.executions
+        rejected = client.post(endpoint, json={"actionId": UPDATE_CORE_ACTION, "requestId": str(uuid4())})
+        assert rejected.status_code == 409 and rejected.json()["detail"] == "gate_disabled"
+        assert set(transport.calls) == {"status"}
+
+
+def test_check_does_not_advertise_other_images_or_an_unreadable_version(tmp_path):
+    async def unreachable():
+        raise HomeServerMaintenanceError("release_feed_unavailable")
+    ha = {"running": True, "installedVersion": "2026.9.3", "configuredImage": "custom:stable"}
+    transport = FakeTransport({"status": {"schemaVersion": 1, "ok": True, "operation": "status", "services": {"homeAssistant": ha}}})
+    executor = make(tmp_path, transport=transport)
+    executor.stable_version = unreachable
+    endpoint = "/api/v1/actions/home-assistant/maintenance/update-check"
+    with http_app(executor) as client:
+        assert client.get(endpoint).json()["detail"] == "unsupported_release_channel"
+        ha["configuredImage"] = "ghcr.io/home-assistant/home-assistant:stable"
+        assert client.get(endpoint).json()["detail"] == "release_feed_unavailable"
+        ha["installedVersion"] = ""
+        assert client.get(endpoint).json()["detail"] == "installed_version_unknown"
+        transport.results["status"] = HomeServerMaintenanceError("ssh_timeout")
+        assert client.get(endpoint).json()["detail"] == "ssh_timeout"
+    assert set(transport.calls) == {"status"} and not executor.executions
+
+
+def test_official_release_feed_falls_back_and_validates_bounded_json(monkeypatch):
+    original_client = httpx.AsyncClient
+    responses = [httpx.Response(403), httpx.Response(200, json={"channel": "stable", "homeassistant": {"default": "2026.11.2"}})]
+    def handler(request):
+        assert request.method == "GET" and request.url.host in {"version.home-assistant.io", "raw.githubusercontent.com"}
+        return responses.pop(0)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original_client(transport=httpx.MockTransport(handler), **kw))
+    assert asyncio.run(_read_stable_version()) == "2026.11.2"
+    responses.extend([httpx.Response(200, content=b" " * 34_000),
+                      httpx.Response(200, json={"channel": "beta", "homeassistant": {"default": "2026.11.2"}})])
+    with pytest.raises(HomeServerMaintenanceError, match="release_feed_unavailable"):
+        asyncio.run(_read_stable_version())
 
 
 def test_all_four_actions_dispatch_only_fixed_operations(tmp_path):
@@ -120,4 +202,14 @@ def test_ssh_completion_does_not_wait_for_windows_transport_eof():
             assert exc.code == "ssh_invalid_response"
         else:
             raise AssertionError("wrong operation acknowledged")
+    asyncio.run(exercise())
+
+
+def test_compose_pull_progress_does_not_consume_the_result_json_budget():
+    from panel_agent.home_assistant_maintenance import _terminal_status
+
+    async def exercise():
+        stderr = asyncio.StreamReader(limit=512)
+        stderr.feed_data(b"Pulling image layer\n" * 6000 + b"__ARTEM_HOME_RESULT__ update-ha 0\n")
+        assert await _terminal_status(stderr, "update-ha", 512) == 0
     asyncio.run(exercise())

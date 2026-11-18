@@ -100,6 +100,34 @@ html[data-skin="v3"] :is(.cc-overlay, .pin-modal, .action-confirmation, .global-
 }
 html[data-skin="v3"] .cc-sheet { border-radius: var(--cc-radius-sheet) 0 0 var(--cc-radius-sheet); }
 html[data-skin="v3"] :is(.cc-dialog, .pin-modal, .action-confirmation) { border-radius: var(--cc-radius-sheet); }
+html[data-skin="v3"][data-theme] .action-confirmation-backdrop {
+  --confirm-canvas: var(--cc-canvas);
+  --confirm-surface: var(--cc-surface-1);
+  --confirm-surface-secondary: var(--cc-surface-2);
+  --confirm-border: var(--cc-border-strong);
+  --confirm-border-soft: var(--cc-border);
+  --confirm-text: var(--cc-text);
+  --confirm-text-secondary: var(--cc-text-secondary);
+  --confirm-text-muted: var(--cc-text-muted);
+  --confirm-accent: var(--cc-accent);
+  --confirm-accent-soft: var(--cc-selected-bg);
+  --confirm-danger: var(--cc-danger);
+  --confirm-danger-soft: color-mix(in srgb, var(--cc-danger) 13%, var(--cc-surface-1));
+  --confirm-focus: var(--cc-focus);
+}
+html[data-skin="v3"] .action-confirmation__confirm { color: var(--cc-on-accent); }
+html[data-skin="v3"] .runtime-update-dialog {
+  --accent: var(--cc-accent);
+  --border: var(--cc-border-strong);
+  --surface-inline: var(--cc-surface-2);
+  --surface-hover: var(--cc-hover);
+  --text: var(--cc-text);
+  --text-muted: var(--cc-text-muted);
+}
+html[data-skin="v3"] .action-confirmation--production {
+  border-color: color-mix(in srgb, var(--cc-danger) 54%, var(--cc-border-strong));
+  box-shadow: inset 0 2px var(--cc-danger), var(--cc-shadow-overlay);
+}
 html[data-skin="v3"] .global-notice { --notice-tone: var(--cc-accent); border-inline-start: 3px solid var(--notice-tone); border-radius: var(--cc-radius-surface); }
 html[data-skin="v3"] .global-notice--success { --notice-tone: var(--cc-success); }
 html[data-skin="v3"] .global-notice--warning { --notice-tone: var(--cc-warning); }

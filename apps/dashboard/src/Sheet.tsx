@@ -166,7 +166,9 @@ function OverlayFrame({
     );
     const surface = surfaceRef.current;
 
-    const ownsFocus = () => Array.from(document.querySelectorAll(".cc-overlay")).at(-1) === surface;
+    // Confirmation and PIN dialogs can open above a service or settings sheet.
+    const ownsFocus = () => !document.querySelector(".action-confirmation-backdrop, .pin-modal-backdrop")
+      && Array.from(document.querySelectorAll(".cc-overlay")).at(-1) === surface;
     const focusInitial = () => {
       if (!ownsFocus()) return;
       const preferred = initialFocusRef?.current;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HA_RESTART, HA_UPDATE_CORE, fetchHomeAssistantMaintenance, startHomeAssistantMaintenance } from "./homeAssistantMaintenanceApi";
+import { HA_RESTART, HA_UPDATE_CORE, checkHomeAssistantUpdate, fetchHomeAssistantMaintenance, startHomeAssistantMaintenance } from "./homeAssistantMaintenanceApi";
 
 describe("Home Assistant maintenance API", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -17,5 +17,12 @@ describe("Home Assistant maintenance API", () => {
     await startHomeAssistantMaintenance(HA_UPDATE_CORE, "request");
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/actions/home-assistant/maintenance", expect.objectContaining({ method: "POST", body: JSON.stringify({ actionId: HA_UPDATE_CORE, requestId: "request" }) }));
     expect(HA_RESTART).toBe("system.home_assistant.restart");
+  });
+
+  it("checks for an update without submitting an action and preserves a failed check", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "release_feed_unavailable" }), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(checkHomeAssistantUpdate()).rejects.toThrow("release_feed_unavailable");
+    expect(fetchMock.mock.calls).toEqual([["/api/v1/actions/home-assistant/maintenance/update-check", { cache: "no-store" }]]);
   });
 });

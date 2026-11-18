@@ -239,6 +239,27 @@ updater, and hardware-discovery scope is unchanged.
 
 ## 8.2 Fixed Home Assistant maintenance
 
+«Проверить обновления» в «Системе» и в карточке сервиса выполняет
+`GET /api/v1/actions/home-assistant/maintenance/update-check`. Panel Agent
+читает версию работающего контейнера через фиксированную SSH-операцию
+`status` и сравнивает её с `homeassistant.default` официального канала
+stable для образа `ghcr.io/home-assistant/home-assistant:stable`. Основной
+источник — [каталог выпусков](https://version.home-assistant.io/stable.json),
+резервный — [тот же каталог в репозитории Home Assistant](https://raw.githubusercontent.com/home-assistant/version/master/stable.json).
+Ответ включает установленную и опубликованную версии, результат сравнения
+и время проверки. Проверка доступна в режиме чтения. Если канал или версия
+образа неизвестны либо каталог недоступен, интерфейс показывает причину.
+Для другого канала владелец может отдельно подтвердить обновление образа,
+заданного на сервере в Docker Compose.
+
+При наличии новой версии появляется «Установить обновление». Установка
+требует полного доступа, включённого обслуживания и отдельного подтверждения.
+Идентификатор запроса передаётся строкой UUID в JSON. Повтор того же запроса
+возвращает исходную операцию. Её состояние можно продолжить отслеживать
+после повторного открытия карточки.
+По умолчанию Panel Agent ждёт до 10 минут, включая загрузку образа и
+проверку готовности контейнера. Для обычного чтения статуса предел — 20 секунд.
+
 `PANEL_HOME_SERVER_MAINTENANCE_ENABLED=false` is the safe default. The deployed
 Home Assistant is a Docker/Compose container alongside Caddy and AliceTG; its
 lifecycle belongs to the host. With it and `PANEL_WRITES_ENABLED` enabled, the

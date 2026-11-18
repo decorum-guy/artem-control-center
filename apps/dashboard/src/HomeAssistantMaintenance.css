@@ -7,9 +7,13 @@
 .ha-maintenance__versions dt { color:var(--cc-text-muted, #aeb7c6); font-size:.78rem; }
 .ha-maintenance__versions dd { margin:4px 0 0; overflow-wrap:anywhere; }
 .ha-maintenance__notice { padding:10px; border-radius:10px; background:rgba(177,124,49,.16); }
-.ha-maintenance__actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-.ha-maintenance__actions button { min-height:48px; border-radius:12px; }
-.ha-maintenance__service-actions { display:grid; grid-template-columns:minmax(0,1fr) minmax(132px,auto); align-items:center; gap:10px; }
-.ha-maintenance__service-actions span { color:var(--cc-text-muted, #aeb7c6); }
-.ha-maintenance__service-actions button { min-height:48px; border-radius:12px; }
+.ha-maintenance__update, .ha-maintenance__action, .ha-maintenance__service { display:grid; gap:6px; min-width:0; }
+.ha-maintenance__actions { display:flex; align-items:start; flex-wrap:wrap; gap:10px; }
+.ha-maintenance button { min-height:48px; border-radius:12px; }
+.ha-maintenance__action { justify-items:start; }
+.ha-maintenance__action small, .ha-maintenance__check-result time { display:block; color:var(--cc-text-muted, #aeb7c6); font-size:.8rem; }
+.ha-maintenance__check-result:empty { display:none; }
+.ha-maintenance__check-result p + p { margin-block-start:8px; }
+.ha-maintenance__service { grid-template-columns:minmax(0,1fr) auto; align-items:center; }
+@media (max-width: 600px) { .ha-maintenance__service { grid-template-columns:1fr; } }
 @media (max-width: 700px) { .ha-maintenance header { display:grid; } }

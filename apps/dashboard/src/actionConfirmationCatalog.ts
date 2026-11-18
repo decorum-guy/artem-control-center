@@ -130,9 +130,9 @@ export const actionConfirmationCatalog: Record<ActionConfirmationId, ActionConfi
     tone: "standard",
     title: "Обновить Home Assistant?",
     target: "Home Assistant Core",
-    environment: "система",
+    environment: "домашний сервер",
     description: "Home Assistant станет временно недоступен во время обновления и перезапуска.",
-    confirmLabel: "Обновить",
+    confirmLabel: "Установить",
     alwaysConfirm: true
   },
   "system.home_server.caddy.restart": {
