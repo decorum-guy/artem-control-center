@@ -44,7 +44,8 @@ export function RingGauge({ reading, tone, size = 96, label, children }: Props) 
     const timer = window.setTimeout(() => setPrevious(null), 420);
     return () => window.clearTimeout(timer);
   }, [previous]);
-  return <span className="cc-gauge" role="img" aria-label={label} style={{ width: size, height: size }}>
+  const diameter = `var(--cc-gauge-size, ${size}px)`;
+  return <span className="cc-gauge" role="img" aria-label={label} style={{ width: diameter, height: diameter }}>
     <svg viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
       {previous && <g className="cc-gauge-old"><RingFace {...previous} size={size} /></g>}
       <g key={appearance} className={previous ? "cc-gauge-new" : undefined}><RingFace reading={reading} tone={tone} size={size} /></g>

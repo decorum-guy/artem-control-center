@@ -3,12 +3,13 @@ import { observeCoffeeCycle } from "./cabinCoffee";
 
 test.skip(process.env.VITE_V3_VISUAL_SKIN !== "true" || process.env.VITE_V2_VISUAL_SHELL !== "true", "Cabin profile");
 
-for (const width of [1280,720]) {
-  test("saved coffee placement and phase animation at width " + width, async ({ page, baseURL }) => {
+for (const [width, custom] of [[1280, false], [1280, true], [720, false], [720, true]] as const) {
+  test(`coffee glass, placement and phase animation at ${width} with ${custom ? "custom" : "centered"} artwork`, async ({ page, baseURL }) => {
     await page.setViewportSize({ width, height: width === 720 ? 1280 : 720 });
-    const custom = width === 720;
     const phases = await observeCoffeeCycle(page, baseURL!, custom);
     for (const phase of phases) {
+      expect(phase.rimClearance, phase.phase).toBeGreaterThan(8);
+      expect(phase.footOverlap, phase.phase).toBeGreaterThan(0);
       for (const x of [phase.minX, phase.maxX]) expect(Math.abs(x - (custom ? 12 : 0)), phase.phase).toBeLessThan(2);
       for (const y of [phase.minY, phase.maxY]) expect(Math.abs(y - (custom ? -4 : 0)), phase.phase).toBeLessThan(2);
     }

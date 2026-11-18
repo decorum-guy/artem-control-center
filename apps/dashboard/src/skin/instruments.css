@@ -11,55 +11,68 @@
 .skin-v3 .v2-shell .coffee-panel[data-stage="ready"] { border-color: color-mix(in srgb, var(--cc-success) 45%, transparent); box-shadow: var(--cc-glow-success); }
 .skin-v3 .v2-shell .coffee-panel[data-stage="running_too_long"] { border-color: var(--cc-warning); }
 .skin-v3 .v2-shell .coffee-asset[data-image-visible="true"] {
+  container-type: size;
   isolation: isolate;
   position: relative;
+  align-self: stretch;
+  min-height: 0;
+  padding: 0;
+  transform: none;
   border: 1px solid var(--cc-divider);
   border-radius: var(--cc-radius-surface);
-  background: radial-gradient(ellipse at 52% 74%, color-mix(in srgb, var(--cc-instrument-ink) 15%, transparent), transparent 59%),
-    linear-gradient(145deg, var(--cc-surface-2), var(--cc-canvas));
-}
-.skin-v3 .coffee-asset[data-image-visible="true"]::before {
-  content: "";
-  position: absolute;
-  inset: auto 14% 13%;
-  height: 12%;
-  pointer-events: none;
-  border: 1px solid color-mix(in srgb, var(--cc-instrument-ink) 40%, transparent);
-  border-radius: 50%;
-  background: radial-gradient(ellipse, color-mix(in srgb, var(--cc-instrument-ink) 25%, var(--cc-canvas)), var(--cc-surface-2) 64%);
-  box-shadow: 0 4px 0 var(--cc-canvas), 0 8px 12px rgb(0 0 0 / 18%);
-}
-.skin-v3 .cc-coffee-dial { position: absolute; display: grid; place-items: center; inset: 8% 5% 13%; pointer-events: none; }
-.skin-v3 .cc-coffee-dial .cc-gauge { max-width: 100%; max-height: 100%; }
-.skin-v3 .cc-coffee-dial .cc-gauge-track { stroke: color-mix(in srgb, var(--cc-text-muted) 32%, transparent); }
-.skin-v3 .cc-coffee-dial .cc-gauge-track--dashed { stroke: var(--cc-tone); }
-/* The frame, dial and pedestal never inherit a photo nudge. Its three layers own
-   placement, user zoom and phase motion independently, including in editor previews. */
-.skin-v3 .v2-shell .coffee-asset[data-image-visible="true"] {
-  container-type: size; align-self: stretch; min-height: 0; padding: 0; transform: none;
-  background: radial-gradient(ellipse at 50% 74%, color-mix(in srgb, var(--cc-instrument-ink) 19%, transparent), transparent 65%),
+  background:
+    linear-gradient(115deg, transparent 4%, color-mix(in srgb, var(--cc-instrument-ink) 12%, transparent) 13%, transparent 24% 68%, color-mix(in srgb, var(--cc-instrument-ink) 8%, transparent) 78%, transparent 92%),
+    radial-gradient(ellipse at 50% 74%, color-mix(in srgb, var(--cc-instrument-ink) 19%, transparent), transparent 65%),
     linear-gradient(147deg, var(--cc-surface-2), var(--cc-canvas));
   box-shadow: inset 0 1px var(--cc-edge-light), inset 0 -1px var(--cc-divider);
 }
-.skin-v3 .cc-coffee-dial { inset: 0; }
+.skin-v3 .cc-coffee-dial {
+  --cc-gauge-size: min(87cqw, 79cqh, 222px);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.skin-v3 .cc-coffee-dial circle { vector-effect: non-scaling-stroke; }
+.skin-v3 .cc-coffee-dial .cc-gauge-track { stroke: color-mix(in srgb, var(--cc-text-muted) 32%, transparent); }
+.skin-v3 .cc-coffee-dial .cc-gauge-track--dashed { stroke: var(--cc-tone); }
+/* The dial belongs to the glass. The photo and its plinth share the user's
+   placement and zoom, then animate together around their optical center. */
 .skin-v3 .cc-coffee-position {
-  --model-width: min(68cqw, 52cqh, 168px);
-  --travel-x: max(0px, calc(50cqw - var(--model-width) * var(--cc-coffee-image-scale) * .5 - 3px));
+  --model-width: min(61cqw, 44cqh, 155px);
+  --travel-x: max(0px, calc(50cqw - var(--model-width) * var(--cc-coffee-image-scale) * .55 - 3px));
   --travel-y: max(0px, calc(50cqh - var(--model-width) * var(--cc-coffee-image-scale) * .75 - 3px));
   position: absolute; inset: 0; z-index: 1; display: grid; place-items: center;
   transform: translate(clamp(calc(-1 * var(--travel-x)), var(--cc-coffee-x), var(--travel-x)),
     clamp(calc(-1 * var(--travel-y)), var(--cc-coffee-y), var(--travel-y)));
 }
 .skin-v3 .cc-coffee-zoom { width: var(--model-width); aspect-ratio: 2/3; transform: scale(var(--cc-coffee-image-scale)); }
-.skin-v3 .cc-coffee-motion { display: grid; place-items: center; width: 100%; height: 100%; transform: scale(.94); }
+.skin-v3 .cc-coffee-motion { position: relative; display: grid; place-items: center; width: 100%; height: 100%; transform: scale(.94); }
 .skin-v3 .cc-coffee-motion[data-phase="turning_on"] { transform: scale(.97); }
 .skin-v3 .cc-coffee-motion[data-phase="warming"] { transform: scale(1); }
 .skin-v3 .cc-coffee-motion[data-phase="ready"] { transform: scale(.98); }
 .skin-v3 .cc-coffee-motion[data-phase="turning_off"] { transform: scale(.955); }
-/* Compensate for the shared transparent margins in both manifest WebPs. */
+.skin-v3 .cc-coffee-motion::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 92%;
+  width: 108%;
+  height: 10%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--cc-instrument-ink) 43%, transparent);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--cc-instrument-ink) 22%, var(--cc-canvas)), var(--cc-surface-2) 68%);
+  box-shadow: 0 3px 0 var(--cc-canvas), 0 5px 7px rgb(0 0 0 / 18%);
+}
+/* Both WebPs share the same crop. Balance the silhouette bounds with the
+   alpha-weighted body so the projecting handle does not pull the center. */
 html[data-skin="v3"] .coffee-asset[data-image-visible="true"] .cc-coffee-motion > .coffee-asset__image {
   width: 100%; height: 100%; max-width: none; max-height: none; object-position: center;
-  transform: translate(-1%, 1.8%); transition: none;
+  position: relative; grid-area: 1 / 1;
+  transform: translate(.5%, 3.1%); transition: none;
 }
 @media (prefers-reduced-motion: no-preference) {
   html[data-skin="v3"][data-motion="full"]:not([data-page-hidden]) .cc-coffee-motion {
