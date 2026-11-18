@@ -66,7 +66,7 @@ function Get-ArtemJarvisVoicePaths {
 
 function Get-ArtemJarvisVoiceRuntimeKeys {
     return @(
-        "PANEL_JARVIS_ENABLED", "PANEL_JARVIS_VOICE_ENABLED", "PANEL_JARVIS_VOICE_BRIDGE_TOKEN",
+        "PANEL_JARVIS_VOICE_ENABLED", "PANEL_JARVIS_VOICE_BRIDGE_TOKEN",
         "PANEL_JARVIS_VOICE_PANEL_URL", "PANEL_JARVIS_VOICE_MODEL_ROOT",
         "PANEL_JARVIS_WAKE_MODEL", "PANEL_JARVIS_STT_MODEL",
         "PANEL_JARVIS_STT_PROFILE", "PANEL_JARVIS_WAKE_THRESHOLD",
@@ -77,13 +77,15 @@ function Get-ArtemJarvisVoiceRuntimeKeys {
 }
 
 function Get-ArtemJarvisVoiceRuntimeEnvironment {
-    param([Parameter(Mandatory)]$Paths)
+    param([Parameter(Mandatory)]$Paths, [switch]$IncludeAssistantSwitch)
 
     # This is intentionally not a generic runtime.env importer. Values are
     # data, never PowerShell expressions, and only the worker's fixed inputs
     # cross this process boundary.
     $allowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($key in (Get-ArtemJarvisVoiceRuntimeKeys)) { [void]$allowed.Add($key) }
+    # The parent owns the assistant switch. The audio worker only receives its own inputs.
+    if ($IncludeAssistantSwitch) { [void]$allowed.Add("PANEL_JARVIS_ENABLED") }
 
     $result = [ordered]@{}
     if (-not (Test-Path -LiteralPath $Paths.RuntimeEnv)) { return $result }
@@ -143,7 +145,7 @@ function Get-ArtemJarvisVoiceConfiguration {
     )
 
     if (-not $PSBoundParameters.ContainsKey('Environment')) {
-        $Environment = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $Paths
+        $Environment = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $Paths -IncludeAssistantSwitch
     }
     $value = { param([string]$Key) if ($Environment.Contains($Key)) { [string]$Environment[$Key] } else { "" } }
     $enabled = ((& $value "PANEL_JARVIS_ENABLED") -eq "true") -and ((& $value "PANEL_JARVIS_VOICE_ENABLED") -eq "true")
