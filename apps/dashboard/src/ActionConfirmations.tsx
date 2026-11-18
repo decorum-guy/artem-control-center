@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -75,6 +76,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
     const spec = actionConfirmationCatalog[actionId];
     if (!spec) return { confirmed: false };
 
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     activeRef.current = true;
     const currentStatus = await refresh();
     if (!guardMutation()) {
@@ -96,9 +98,7 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
     settlingRef.current = false;
     setPhrase("");
     setSettling(false);
-    previouslyFocusedRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    previouslyFocusedRef.current = opener;
 
     return new Promise<ActionConfirmationResult>((resolve) => {
       const next = { spec, title: options.title, revision: options.revision, target: options.target, description: options.description, resolve };
@@ -118,8 +118,19 @@ export function ActionConfirmationProvider({ children }: { children: ReactNode }
     setPhrase("");
     setSettling(false);
     resolve(result);
-    window.requestAnimationFrame(() => previouslyFocusedRef.current?.focus());
   }, [pending]);
+
+  useLayoutEffect(() => {
+    if (pending) return;
+    const opener = previouslyFocusedRef.current;
+    previouslyFocusedRef.current = null;
+    if (locked || !opener) return;
+    if (opener.isConnected) opener.focus();
+    // Save operations can disable or replace the control that opened the
+    // confirmation. Keep keyboard interaction inside the remaining dialog.
+    const parent = Array.from(document.querySelectorAll<HTMLElement>(".cc-overlay")).at(-1);
+    if (parent && !parent.contains(document.activeElement)) parent.focus();
+  }, [locked, pending]);
 
   useEffect(() => {
     if (!pending) return;
