@@ -74,7 +74,9 @@ export function reminderDeliverySummary(controller: ReminderDeliverySettingsCont
   if (controller.loading) return "Проверяем доставку напоминаний…";
   if (!controller.inventory) return "Доставка напоминаний временно недоступна";
   const phones = controller.inventory.phoneChannels.map((channel) => phoneLabels[channel]).join(", ");
-  return `${endpointLabels[controller.inventory.spokenEndpoint]} · ${phones}`;
+  const spoken = controller.inventory.spokenEndpoint === "jarvis" && controller.inventory.channelHealth.spoken.jarvis.code === "jarvis_disabled"
+    ? "Голос отключён" : endpointLabels[controller.inventory.spokenEndpoint];
+  return `${spoken} · ${phones}`;
 }
 
 export function reminderDeliveryStateLabel(controller: ReminderDeliverySettingsController): string {
@@ -165,13 +167,14 @@ export function ReminderDeliverySettingsSheet({
             <div className="reminder-delivery-settings__options" role="radiogroup" aria-label="Речевой канал">
               {(Object.keys(endpointLabels) as SpokenEndpoint[]).map((value) => {
                 const health = inventory.channelHealth.spoken[value];
+                if (value === "jarvis" && health.code === "jarvis_disabled") return null;
                 return <label className="reminder-delivery-option" key={value}>
                   <input type="radio" name="reminder-spoken-endpoint" value={value} checked={endpoint === value} disabled={busy || !inventory.writesEnabled} onChange={() => setEndpoint(value)} />
                   <span><strong>{endpointLabels[value]}</strong><small>{statusLabel(health.status)}</small></span>
                 </label>;
               })}
             </div>
-            {inventory.channelHealth.spoken[endpoint].status !== "available" && <p className="settings-notice" role="status">Выбранный речевой канал сейчас недоступен. Alice не будет использована вместо Jarvis автоматически.</p>}
+            {inventory.channelHealth.spoken[endpoint].status !== "available" && <p className="settings-notice" role="status">Выбранный речевой канал сейчас недоступен. Телефонные каналы работают независимо.</p>}
           </section>
           <section className="reminder-delivery-settings__section" aria-labelledby="reminder-phone-title">
             <div className="reminder-delivery-settings__heading"><h2 id="reminder-phone-title">Телефон</h2><span>Можно выбрать оба</span></div>

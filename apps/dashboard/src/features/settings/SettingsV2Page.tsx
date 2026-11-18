@@ -34,6 +34,9 @@ import { useInterfaceCopy } from "../../interfaceCopy";
 import { useProjectRegistry, type ProjectRegistryController } from "../../ProjectRegistry";
 import "./settingsV2.css";
 
+import { v3VisualSkinEnabled } from "../../visualShellConfig";
+import { accents, type Accent } from "../../skin/accent";
+
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
 type SettingsSheet = "coffee" | "notifications" | "access" | "runtime" | "calendars" | "capabilities" | "ai" | "reminder-delivery" | "interface-copy" | "device-visibility" | "projects" | "jarvis";
@@ -52,21 +55,27 @@ const accessLabels: Record<AccessStatus["effectiveProfile"], string> = {
 };
 
 export function SettingsV2Page({
+  accent,
+  onAccentChange,
   theme,
   motion,
   calendarSources,
   onThemeChange,
   onMotionChange,
+  jarvisEnabled,
   jarvisVisible,
   onJarvisVisibleChange,
   onRefreshCalendarMetadata,
   onNavigate
 }: {
+  accent: Accent;
+  onAccentChange: (accent: Accent) => void;
   theme: Theme;
   motion: MotionMode;
   calendarSources: PlanningCalendarSource[];
   onThemeChange: (theme: Theme) => void;
   onMotionChange: (motion: MotionMode) => void;
+  jarvisEnabled: boolean;
   jarvisVisible: boolean;
   onJarvisVisibleChange: (visible: boolean) => void;
   onRefreshCalendarMetadata: () => Promise<boolean>;
@@ -95,7 +104,7 @@ export function SettingsV2Page({
       <section className="settings-v2-appearance" aria-labelledby="settings-v2-appearance-title">
         <div className="settings-v2-appearance__copy">
           <h2 id="settings-v2-appearance-title">Внешний вид</h2>
-          <p>Спокойная тема и предсказуемое движение для этого экрана.</p>
+          {!v3VisualSkinEnabled && <p>Спокойная тема и предсказуемое движение для этого экрана.</p>}
         </div>
         <div className="settings-v2-appearance__controls">
           <div className="settings-v2-control" role="group" aria-label="Тема">
@@ -114,6 +123,17 @@ export function SettingsV2Page({
               ))}
             </div>
           </div>
+          {v3VisualSkinEnabled && <div className="settings-v2-control cc-accent-picker" role="group" aria-label="Акцентный цвет">
+            <span className="settings-v2-control__label">Акцентный цвет</span>
+            <div className="cc-accent-options">
+              {(Object.keys(accents) as Accent[]).map(value =>
+                <button key={value} type="button" data-accent-swatch={value}
+                  aria-pressed={accent === value} onClick={() => onAccentChange(value)}>
+                  <i aria-hidden="true" />{accents[value]}
+                </button>
+              )}
+            </div>
+          </div>}
           <div className="settings-v2-control" role="group" aria-label="Движение">
             <span className="settings-v2-control__label">Движение</span>
             <div className="settings-v2-motion-grid">
@@ -217,13 +237,13 @@ export function SettingsV2Page({
             testId="settings-summary-overview"
             onClick={() => onNavigate({ path: "/overview", search: "overviewEdit=1" })}
           />
-          <SettingsSummaryRow
+          {jarvisEnabled && <SettingsSummaryRow
             title="Jarvis"
             summary="Окно помощника поверх панели"
             stateLabel={jarvisVisible ? "Вкл" : "Выкл"}
             testId="settings-summary-jarvis"
             onClick={() => setOpenSheet("jarvis")}
-          />
+          />}
           <SettingsSummaryRow
             title="Доступ"
             summary={accessSummary(accessStatus, accessAvailable)}
@@ -252,6 +272,7 @@ export function SettingsV2Page({
           ai={ai}
           reminderDelivery={reminderDelivery}
           projects={projects}
+          jarvisEnabled={jarvisEnabled}
           jarvisVisible={jarvisVisible}
           onJarvisVisibleChange={onJarvisVisibleChange}
           onRefreshCalendarMetadata={onRefreshCalendarMetadata}
@@ -270,6 +291,7 @@ function SettingsSheet({
   ai,
   reminderDelivery,
   projects,
+  jarvisEnabled,
   jarvisVisible,
   onJarvisVisibleChange,
   onRefreshCalendarMetadata,
@@ -282,6 +304,7 @@ function SettingsSheet({
   ai: AIProviderSettingsController;
   reminderDelivery: ReminderDeliverySettingsController;
   projects: ProjectRegistryController;
+  jarvisEnabled: boolean;
   jarvisVisible: boolean;
   onJarvisVisibleChange: (visible: boolean) => void;
   onRefreshCalendarMetadata: () => Promise<boolean>;
@@ -291,6 +314,7 @@ function SettingsSheet({
   if (kind === "device-visibility") return <DeviceVisibilitySettingsSheet onClose={onClose} />;
   if (kind === "projects") return <ProjectSettingsSheet onClose={onClose} controller={projects} />;
   if (kind === "jarvis") {
+    if (!jarvisEnabled) return null;
     return (
       <Sheet
         testId="settings-jarvis-sheet"
@@ -407,7 +431,9 @@ function CalendarSettingsSheet({
   const [sourceRefreshNotice, setSourceRefreshNotice] = useState<string | null>(null);
   const [markerStylePending, setMarkerStylePending] = useState(false);
   const sourceRefreshPendingRef = useRef(false);
-  const calendars = sources.flatMap((source) => source.calendars.map((calendar) => ({ source, calendar })));
+  const entries = sources.flatMap((source) => source.calendars.map((calendar) => ({ source, calendar })));
+  const calendars = entries.filter(({ calendar }) => activeCalendar(calendar));
+  const archived = entries.filter(({ calendar }) => !activeCalendar(calendar));
 
   async function setMarkerStyle(markerStyle: CalendarEventMarkerStyle) {
     if (!guardMutation()) {
@@ -549,6 +575,12 @@ function CalendarSettingsSheet({
             </article>
           );
         })}
+        {archived.length > 0 && (
+          <details className="settings-calendar-archive">
+            <summary>Архив календарей · {archived.length}</summary>
+            <ul>{archived.map(({ source, calendar }) => <li key={source.id + calendar.id}>{calendar.label} · {source.label}</li>)}</ul>
+          </details>
+        )}
         {notice && <p className="settings-notice" role="status">{notice}</p>}
       </div>
     </Sheet>
@@ -568,8 +600,12 @@ function calendarSourceRefreshFailureMessage(errorCode: string | null): string {
   return "Не удалось обновить список календарей. Показаны последние подтверждённые данные.";
 }
 
+function activeCalendar(calendar: PlanningCalendarSource["calendars"][number]): boolean {
+  return calendar.enabled && calendar.status !== "disabled";
+}
+
 function calendarSummary(sources: PlanningCalendarSource[], loading: boolean, preferences: ReturnType<typeof useCalendarDisplayPreferences>["preferences"]): string {
-  const count = sources.reduce((total, source) => total + source.calendars.length, 0);
+  const count = sources.reduce((total, source) => total + source.calendars.filter(activeCalendar).length, 0);
   if (loading && !preferences) return "Проверяем цвета панели…";
   if (!preferences) return count ? `${count} календарей · цвета источника` : "Календари временно недоступны";
   return `${count} ${count === 1 ? "календарь" : "календарей"} · цвета панели`;

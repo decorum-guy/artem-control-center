@@ -130,7 +130,7 @@ class DiagnosticsTechnicalEvidence(BaseModel):
     kind: Literal["service", "planning-domain", "planning-provider", "planning-aggregate"]
     source: Optional[Literal["reminders", "tasks", "calendar", "projects", "planning-status"]] = None
     domain: Optional[Literal["reminders", "tasks", "calendar"]] = None
-    provider: Optional[Literal["local", "icloud"]] = None
+    provider: Optional[Literal["local", "icloud", "hse"]] = None
     providerId: Optional[str] = Field(default=None, max_length=128)
     status: Optional[str] = Field(default=None, max_length=32)
     errorCode: Optional[str] = Field(default=None, max_length=128)
@@ -186,7 +186,7 @@ class DiagnosticsProviderSummary(BaseModel):
 
     id: str = Field(min_length=1, max_length=128)
     kind: Literal["native", "external"]
-    provider: Literal["local", "icloud"]
+    provider: Literal["local", "icloud", "hse"]
     label: str = Field(min_length=1, max_length=128)
     status: str = Field(min_length=1, max_length=32)
     errorCode: Optional[str] = Field(default=None, max_length=120)
@@ -217,7 +217,7 @@ class DiagnosticsCalendarQuery(BaseModel):
     fallbackUsed: bool = False
     projectionStatus: Literal["current", "cached", "empty", "unavailable"]
     projectionScope: Optional[str] = Field(default=None, max_length=64)
-    providers: List[DiagnosticsProviderSummary] = Field(default_factory=list, max_length=4)
+    providers: List[DiagnosticsProviderSummary] = Field(default_factory=list, max_length=5)
 
 
 class DiagnosticsPlanningSummary(BaseModel):
@@ -272,6 +272,7 @@ class DashboardSnapshot(BaseModel):
     generatedAt: str
     mode: PanelMode
     fixtureScenario: Optional[str]
+    jarvisEnabled: bool = False
     services: List[ServiceSnapshot]
     planning: Optional[PlanningProjection] = None
 

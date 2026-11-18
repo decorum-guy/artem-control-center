@@ -1,3 +1,5 @@
+import { Emblem } from "./ui/States";
+import { StatusChip } from "./ui/Controls";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { DashboardSnapshot } from "@artem/contracts";
 import { WeatherHeaderSummary } from "./Weather";
@@ -5,7 +7,7 @@ import { TemporaryAccessIndicator, useAccess } from "./AccessControls";
 import type { AccessStatus } from "./accessApi";
 import { Icon, type IconName } from "./icons";
 import { StatusText } from "./ShellPrimitives";
-import { v2VisualShellEnabled } from "./visualShellConfig";
+import { v2VisualShellEnabled, v3VisualSkinEnabled } from "./visualShellConfig";
 import { planningModuleForRoute, planningNavigationModules } from "./planningModuleRegistry";
 import { InteractionLockControl, InteractionLockStatus } from "./InteractionLock";
 import { problemTone } from "./problemModel";
@@ -277,6 +279,8 @@ function V2AccessHeaderStatus({ onOpen }: { onOpen: () => void }) {
       ? "Проверяем доступ…"
       : "Доступ недоступен";
   const tone = status?.temporaryFull ? "warning" : "neutral";
+  const short = status ? { read_only: "Чтение", standard: "Обычный", full: "Полный" }[status.effectiveProfile]
+    : available ? "Проверка" : "Недоступен";
 
   return (
     <button
@@ -284,10 +288,13 @@ function V2AccessHeaderStatus({ onOpen }: { onOpen: () => void }) {
       className="v2-header-control v2-header-access"
       data-testid="v2-header-access"
       aria-label={`Открыть уровень доступа: ${label}`}
+      title={v3VisualSkinEnabled ? label : undefined}
       onClick={onOpen}
     >
-      <Icon name="shield" />
-      <StatusText label={label} tone={tone} showIndicator={false} />
+      {v3VisualSkinEnabled ? <>
+        <StatusChip icon="shield" label={label} tone={tone} />
+        <span className="cc-telemetry-short" aria-hidden="true"><Icon name="shield" size={16} />{short}</span>
+      </> : <><Icon name="shield" /><StatusText label={label} tone={tone} showIndicator={false} /></>}
     </button>
   );
 }
@@ -310,10 +317,14 @@ function V2ProductShell({
   const menuRef = useRef<HTMLButtonElement>(null);
   const floatingMenuRef = useRef<HTMLButtonElement>(null);
   const navigationOpenerRef = useRef<HTMLElement | null>(null);
+  const wasPortrait = useRef(portrait);
+  const Brand = v3VisualSkinEnabled ? "button" : "div";
   useEffect(() => {
+    const rotated = wasPortrait.current !== portrait;
+    wasPortrait.current = portrait;
     if (portrait && document.activeElement?.closest(".v2-navigation-rail")) menuRef.current?.focus();
     if (!portrait && (
-      navigationOpen
+      (navigationOpen && (rotated || !v3VisualSkinEnabled))
       || document.activeElement === menuRef.current
       || document.activeElement === floatingMenuRef.current
     )) {
@@ -340,16 +351,25 @@ function V2ProductShell({
     ? `${attentionCount} требуют внимания`
     : "Системы в норме";
 
+  const systemTone = diagnostics.status === "checking" ? "neutral" : attentionCount ? problemTone(currentProblems![0].state) : "success";
+  const shortSystem = diagnostics.status === "checking" ? "Проверка" : attentionCount ? `Внимание · ${attentionCount}` : "В норме";
+  const dateLabel = now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   return (
     <div className="v2-shell" data-testid="v2-shell" data-viewport-layout={portrait ? "portrait" : "landscape"}>
       <aside className="v2-navigation-rail" data-testid="v2-navigation-rail">
-        <div className="v2-brand">
-          <span className="v2-brand__mark" aria-hidden="true">ACC</span>
+        <Brand className="v2-brand" type={v3VisualSkinEnabled ? "button" : undefined}
+          aria-label={v3VisualSkinEnabled ? "Все разделы" : undefined}
+          title={v3VisualSkinEnabled ? "Все разделы" : undefined}
+          aria-haspopup={v3VisualSkinEnabled ? "dialog" : undefined}
+          aria-expanded={v3VisualSkinEnabled ? navigationOpen : undefined}
+          onClick={v3VisualSkinEnabled ? event => { navigationOpenerRef.current = event.currentTarget; setNavigationOpen(true); } : undefined}>
+          <span className="v2-brand__mark" aria-hidden="true">{v3VisualSkinEnabled ? <Emblem /> : "ACC"}</span>
           <span className="v2-brand__copy">
             <strong>Artem</strong>
             <span>Control Center</span>
           </span>
-        </div>
+          {v3VisualSkinEnabled && <Icon name="chevron-down" size={14} />}
+        </Brand>
 
         <div className="v2-navigation-route-bar">
           <nav className="v2-navigation-primary" aria-label="Основные разделы">
@@ -397,31 +417,32 @@ function V2ProductShell({
 
       <main className="v2-workspace">
         <header className="v2-product-header" data-testid="product-header">
-          <button ref={menuRef} className="portrait-navigation-toggle" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={(event) => { navigationOpenerRef.current = event.currentTarget; setNavigationOpen(true); }}><span aria-hidden="true">≡</span> Разделы</button>
+          <button ref={menuRef} className="portrait-navigation-toggle" aria-haspopup="dialog" aria-expanded={navigationOpen} onClick={(event) => { navigationOpenerRef.current = event.currentTarget; setNavigationOpen(true); }}>{v3VisualSkinEnabled ? <Icon name="menu" /> : <span aria-hidden="true">≡</span>} Разделы</button>
           <div className="v2-compact-brand" aria-hidden="true">
-            <span className="v2-brand__mark">ACC</span>
+            <span className="v2-brand__mark">{v3VisualSkinEnabled ? <Emblem size={32} /> : "ACC"}</span>
             <span>Control Center</span>
           </div>
           <div className="header-time v2-header-time">
             <time dateTime={now.toISOString()}>
               {now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
             </time>
-            <span>
-              {now.toLocaleDateString("ru-RU", {
-                weekday: "long",
-                day: "numeric",
-                month: "long"
-              })}
-            </span>
+            {v3VisualSkinEnabled ? <span className="cc-header-date" title={dateLabel} aria-label={dateLabel}>
+              <span>{dateLabel}</span><span aria-hidden="true">{now.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
+            </span> : <span>{dateLabel}</span>}
           </div>
           <div className="header-context v2-header-actions">
             <WeatherHeaderSummary onOpen={() => onNavigate("/weather")} />
             <button
               className={`system-summary v2-header-control v2-header-system ${attentionCount ? "system-summary--attention" : ""}`}
               type="button"
+              aria-label={v3VisualSkinEnabled ? systemLabel : undefined}
+              title={v3VisualSkinEnabled ? systemLabel : undefined}
               onClick={() => onNavigate("/system")}
             >
-              <StatusText label={systemLabel} tone={diagnostics.status === "checking" ? "neutral" : attentionCount ? problemTone(currentProblems![0].state) : "success"} />
+              {v3VisualSkinEnabled ? <>
+                <StatusChip label={systemLabel} tone={systemTone} icon="signal" />
+                <span className="cc-telemetry-short" aria-hidden="true"><Icon name="signal" size={16} />{shortSystem}</span>
+              </> : <StatusText label={systemLabel} tone={systemTone} />}
             </button>
             <V2AccessHeaderStatus onOpen={() => onNavigate("/settings")} />
             <button
@@ -454,7 +475,7 @@ function V2ProductShell({
           <path d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
-      {navigationOpen && portrait && (
+      {navigationOpen && (portrait || v3VisualSkinEnabled) && (
         <Sheet
           title="Разделы"
           className="portrait-navigation-sheet"

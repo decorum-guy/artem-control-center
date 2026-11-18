@@ -1,0 +1,108 @@
+/* The dial sits behind the manifest-owned artwork. Its reading and active rim
+   come from the device snapshot; the idle pedestal remains unlit. */
+.skin-v3 .v2-shell .coffee-panel {
+  --cc-instrument-ink: var(--cc-text-muted);
+  isolation: isolate;
+  position: relative;
+}
+.skin-v3 .coffee-panel[data-stage="warming"] { --cc-instrument-ink: var(--cc-heat); }
+.skin-v3 .coffee-panel[data-stage="ready"] { --cc-instrument-ink: var(--cc-success); }
+.skin-v3 .coffee-panel[data-stage="running_too_long"] { --cc-instrument-ink: var(--cc-warning); }
+.skin-v3 .v2-shell .coffee-panel[data-stage="ready"] { border-color: color-mix(in srgb, var(--cc-success) 45%, transparent); box-shadow: var(--cc-glow-success); }
+.skin-v3 .v2-shell .coffee-panel[data-stage="running_too_long"] { border-color: var(--cc-warning); }
+.skin-v3 .v2-shell .coffee-asset[data-image-visible="true"] {
+  isolation: isolate;
+  position: relative;
+  border: 1px solid var(--cc-divider);
+  border-radius: var(--cc-radius-surface);
+  background: radial-gradient(ellipse at 52% 74%, color-mix(in srgb, var(--cc-instrument-ink) 15%, transparent), transparent 59%),
+    linear-gradient(145deg, var(--cc-surface-2), var(--cc-canvas));
+}
+.skin-v3 .coffee-asset[data-image-visible="true"]::before {
+  content: "";
+  position: absolute;
+  inset: auto 14% 13%;
+  height: 12%;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--cc-instrument-ink) 40%, transparent);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--cc-instrument-ink) 25%, var(--cc-canvas)), var(--cc-surface-2) 64%);
+  box-shadow: 0 4px 0 var(--cc-canvas), 0 8px 12px rgb(0 0 0 / 18%);
+}
+.skin-v3 .cc-coffee-dial { position: absolute; display: grid; place-items: center; inset: 8% 5% 13%; pointer-events: none; }
+.skin-v3 .cc-coffee-dial .cc-gauge { max-width: 100%; max-height: 100%; }
+.skin-v3 .cc-coffee-dial .cc-gauge-track { stroke: color-mix(in srgb, var(--cc-text-muted) 32%, transparent); }
+.skin-v3 .cc-coffee-dial .cc-gauge-track--dashed { stroke: var(--cc-tone); }
+/* The frame, dial and pedestal never inherit a photo nudge. Its three layers own
+   placement, user zoom and phase motion independently, including in editor previews. */
+.skin-v3 .v2-shell .coffee-asset[data-image-visible="true"] {
+  container-type: size; align-self: stretch; min-height: 0; padding: 0; transform: none;
+  background: radial-gradient(ellipse at 50% 74%, color-mix(in srgb, var(--cc-instrument-ink) 19%, transparent), transparent 65%),
+    linear-gradient(147deg, var(--cc-surface-2), var(--cc-canvas));
+  box-shadow: inset 0 1px var(--cc-edge-light), inset 0 -1px var(--cc-divider);
+}
+.skin-v3 .cc-coffee-dial { inset: 0; }
+.skin-v3 .cc-coffee-position {
+  --model-width: min(68cqw, 52cqh, 168px);
+  --travel-x: max(0px, calc(50cqw - var(--model-width) * var(--cc-coffee-image-scale) * .5 - 3px));
+  --travel-y: max(0px, calc(50cqh - var(--model-width) * var(--cc-coffee-image-scale) * .75 - 3px));
+  position: absolute; inset: 0; z-index: 1; display: grid; place-items: center;
+  transform: translate(clamp(calc(-1 * var(--travel-x)), var(--cc-coffee-x), var(--travel-x)),
+    clamp(calc(-1 * var(--travel-y)), var(--cc-coffee-y), var(--travel-y)));
+}
+.skin-v3 .cc-coffee-zoom { width: var(--model-width); aspect-ratio: 2/3; transform: scale(var(--cc-coffee-image-scale)); }
+.skin-v3 .cc-coffee-motion { display: grid; place-items: center; width: 100%; height: 100%; transform: scale(.94); }
+.skin-v3 .cc-coffee-motion[data-phase="turning_on"] { transform: scale(.97); }
+.skin-v3 .cc-coffee-motion[data-phase="warming"] { transform: scale(1); }
+.skin-v3 .cc-coffee-motion[data-phase="ready"] { transform: scale(.98); }
+.skin-v3 .cc-coffee-motion[data-phase="turning_off"] { transform: scale(.955); }
+/* Compensate for the shared transparent margins in both manifest WebPs. */
+html[data-skin="v3"] .coffee-asset[data-image-visible="true"] .cc-coffee-motion > .coffee-asset__image {
+  width: 100%; height: 100%; max-width: none; max-height: none; object-position: center;
+  transform: translate(-1%, 1.8%); transition: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  html[data-skin="v3"][data-motion="full"]:not([data-page-hidden]) .cc-coffee-motion {
+    transition: transform 360ms var(--cc-motion-ease);
+  }
+}
+.skin-v3 .v2-shell .coffee-panel__state strong { font: 500 clamp(21px, 2.2vw, 28px)/1.14 var(--cc-font-family); letter-spacing: -.04em; }
+.skin-v3 .coffee-authority, .skin-v3 .coffee-panel__state > span, .skin-v3 .coffee-progress output { font-family: var(--cc-font-mono); }
+.skin-v3 .coffee-panel:is([data-stage="warming"],[data-stage="ready"]) .coffee-panel__state strong { color: var(--cc-instrument-ink); }
+.skin-v3 .v2-shell :is(.climate-control,.kettle-control,.light-strip,.station-mini-widget)[data-instrument-active="true"] {
+  border-color: color-mix(in srgb, var(--cc-accent) 44%, transparent);
+  box-shadow: var(--cc-glow-accent);
+}
+/* Text and track share a grid cell; inherited widget headline sizes cannot enter the dial. */
+.skin-v3 :is(.kettle-control__temperature,.climate-control__target-value) {
+  display: inline-grid; place-items: center; justify-self: start; line-height: 1;
+}
+.skin-v3 :is(.kettle-control__temperature,.climate-control__target-value) .cc-gauge-center {
+  color: var(--cc-text); font: 550 20px/1 var(--cc-font-family); letter-spacing: -.035em; white-space: nowrap;
+}
+.skin-v3 .cc-gauge-center:is([data-characters="4"],[data-characters="5"]) { font-size: 15px; }
+.skin-v3 .cc-gauge-center[data-characters="6"] { font-size: 12px; }
+.skin-v3 .light-strip__identity > .cc-gauge { flex: none; width: 36px !important; height: 36px !important; }
+.skin-v3 .station-mini-widget__art { border-radius: 50%; background: radial-gradient(ellipse at center, var(--cc-surface-2), transparent 71%); }
+.skin-v3 .station-presets__secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.skin-v3 .overview-health-widget__aggregate { font: 500 21px/1.24 var(--cc-font-family); }
+.skin-v3 .overview-rog-widget__freshness, .skin-v3 .planning-card time { font-family: var(--cc-font-mono); }
+.skin-v3 .overview-edit-frame--selected { outline: 2px solid var(--cc-accent); outline-offset: -2px; }
+.skin-v3 .overview-edit-frame--invalid { outline-color: var(--cc-danger); }
+@media (prefers-reduced-motion: no-preference) {
+  html[data-skin="v3"][data-motion="full"] .coffee-panel[data-stage="ready"] .cc-coffee-dial > .cc-gauge::after {
+    content: ""; position: absolute; inset: 2%; border-radius: 50%; pointer-events: none;
+    box-shadow: var(--cc-glow-success); opacity: 0; animation: cc-instrument-ready .4s var(--cc-motion-ease);
+  }
+}
+@keyframes cc-instrument-ready { 40% { opacity: .7; } }
+
+/* Home groups pair by DOM order. Each row takes the taller instrument's height. */
+@media (min-width: 901px) and (orientation: landscape) {
+  .skin-v3 .home-v2-primary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); grid-auto-rows: auto; }
+  .skin-v3 .home-v2-primary-grid > :is(.coffee-panel--home-v2,.climate-control--home,.kettle-control,.light-strip--home,.device-row--primary) {
+    grid-area: auto; width: 100%; max-width: none; height: auto; justify-self: stretch;
+  }
+  .skin-v3 .home-v2-primary-grid > .coffee-panel--home-v2 { min-height: 256px; }
+  .skin-v3 .home-v2-primary-grid > .kettle-control { align-content: center; }
+}

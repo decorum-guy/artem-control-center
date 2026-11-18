@@ -1,4 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { SelectField } from "./ui/SelectField";
+import { readAccent, persistAccent, readColorMode, persistColorMode, type Accent } from "./skin/accent";
+import { BootScreen } from "./ui/States";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
 import type { CoffeeDelayedStartRecord, DashboardSnapshot, ServiceSnapshot } from "@artem/contracts";
 import {
@@ -27,7 +31,7 @@ import { useActionConfirmation } from "./ActionConfirmations";
 import { ConnectivityRecoverySurface } from "./ConnectivityActions";
 import { WeatherPage } from "./Weather";
 import { B0NoticeFixture, GlobalNoticeRegion, useNoticeCenter } from "./NoticeCenter";
-import { v2VisualShellEnabled } from "./visualShellConfig";
+import { v2VisualShellEnabled, v3VisualSkinEnabled } from "./visualShellConfig";
 import { overviewV2Enabled } from "./overviewConfig";
 import { OverviewV2Page } from "./features/overview/OverviewPage";
 import { HomeV2Page } from "./features/home/HomeV2Page";
@@ -39,6 +43,8 @@ import { CoffeeDiaryPage } from "./CoffeeDiaryPage";
 import { useDeviceVisibility } from "./DeviceVisibility";
 import { visiblePresentationSnapshot } from "./deviceVisibilityPresentation";
 import { JarvisOverlay } from "./JarvisOverlay";
+
+const SkinGallery = import.meta.env.DEV ? lazy(() => import("./ui/SkinGallery")) : null;
 
 type Theme = "day" | "night";
 type MotionMode = "full" | "reduced" | "low-performance" | "battery-saving";
@@ -106,8 +112,9 @@ export function App() {
   );
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [accent, setAccent] = useState<Accent>(readAccent);
   const [theme, setTheme] = useState<Theme>(() =>
-    querySetting("theme", ["day", "night"] as const, "night")
+    querySetting("theme", ["day", "night"] as const, v3VisualSkinEnabled ? readColorMode() : "night")
   );
   const [motion, setMotion] = useState<MotionMode>(() =>
     querySetting(
@@ -116,6 +123,7 @@ export function App() {
       "full"
     )
   );
+  const jarvisEnabled = snapshot?.jarvisEnabled === true;
   const [jarvisVisible, setJarvisVisible] = useState(readStoredJarvisVisible);
   const [kiosk, setKiosk] = useState(false);
   const [devSettingsOpen, setDevSettingsOpen] = useState(false);
@@ -202,6 +210,42 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.motion = motion;
   }, [motion]);
+
+  useEffect(() => {
+    if (!v3VisualSkinEnabled) return;
+    const root = document.documentElement;
+    root.dataset.skin = "v3";
+    const visibility = () => { root.toggleAttribute("data-page-hidden", document.hidden); };
+    visibility();
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      document.removeEventListener("visibilitychange", visibility);
+      root.removeAttribute("data-page-hidden");
+      delete root.dataset.skin;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!v3VisualSkinEnabled) return;
+    document.documentElement.dataset.accent = accent;
+    return () => { delete document.documentElement.dataset.accent; };
+  }, [accent]);
+
+  function changeAccent(next: Accent) {
+    setAccent(next);
+    persistAccent(next);
+  }
+
+  function changeTheme(next: Theme) {
+    if (next === theme) return;
+    if (v3VisualSkinEnabled) persistColorMode(next);
+    if (v3VisualSkinEnabled && motion === "full" && !document.hidden
+      && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && document.startViewTransition) {
+      document.startViewTransition(() => flushSync(() => setTheme(next)));
+    } else {
+      setTheme(next);
+    }
+  }
 
   const changeJarvisVisibility = useCallback((visible: boolean) => {
     setJarvisVisible(visible);
@@ -398,6 +442,7 @@ export function App() {
     `theme-${theme}`,
     `motion-${motion}`,
     v2VisualShellEnabled ? "v2-shell-enabled" : "",
+    v3VisualSkinEnabled ? "skin-v3" : "",
     kiosk ? "simulated-kiosk" : ""
   ].filter(Boolean).join(" ");
   const v2DensityRoute = v2VisualShellEnabled && ["/home", "/services", "/system"].includes(route);
@@ -428,13 +473,13 @@ export function App() {
         <nav className="dev-toolbar" aria-label="Development controls">
           <label>
             Fixture
-            <select value={scenario} onChange={(event) => setScenario(event.target.value)}>
+            <SelectField label="Сценарий" value={scenario} onValueChange={(nextValue) => setScenario(nextValue)}>
               {fixtureScenarios.map((fixture) => (
                 <option key={fixture} value={fixture}>{fixture}</option>
               ))}
-            </select>
+            </SelectField>
           </label>
-          <button type="button" onClick={() => setTheme(theme === "night" ? "day" : "night")}>
+          <button type="button" onClick={() => changeTheme(theme === "night" ? "day" : "night")}>
             {theme === "night" ? "День" : "Ночь"}
           </button>
           <button
@@ -454,6 +499,8 @@ export function App() {
             {snapshot?.mode ?? "loading"}
           </span>
         </nav>
+
+        {v3VisualSkinEnabled && SkinGallery && <Suspense fallback={null}><SkinGallery jarvisEnabled={jarvisEnabled} /></Suspense>}
 
         {devSettingsOpen && (
           <aside className="dev-settings" data-testid="settings-panel">
@@ -498,7 +545,7 @@ export function App() {
   return (
     <div className={appClassName}>
       {error && <p className="global-error">{error}</p>}
-      {!snapshot && !error && <p className="loading">Загружаем данные…</p>}
+      {!snapshot && !error && (v3VisualSkinEnabled ? <BootScreen label="Загружаем данные…" /> : <p className="loading">Загружаем данные…</p>)}
       {snapshot && (
         <ProductShell route={route} snapshot={snapshot} onNavigate={navigate}>
           {!v2DensityRoute && ((route !== "/overview" || !overviewV2Enabled) && (route === "/overview" || route === "/home" || route === "/services")) && (
@@ -563,11 +610,14 @@ export function App() {
           {route === "/settings" && (
             v2VisualShellEnabled ? (
               <SettingsV2Page
+                accent={accent}
+                onAccentChange={changeAccent}
                 theme={theme}
                 motion={motion}
                 calendarSources={snapshot?.planning?.providerStatuses ?? []}
-                onThemeChange={setTheme}
+                onThemeChange={changeTheme}
                 onMotionChange={setMotion}
+                jarvisEnabled={jarvisEnabled}
                 jarvisVisible={jarvisVisible}
                 onJarvisVisibleChange={changeJarvisVisibility}
                 onRefreshCalendarMetadata={reconcileSnapshotAfterAction}
@@ -577,7 +627,7 @@ export function App() {
               <SettingsPage
                 theme={theme}
                 motion={motion}
-                onThemeChange={setTheme}
+                onThemeChange={changeTheme}
                 onMotionChange={setMotion}
               />
             )
@@ -602,7 +652,7 @@ export function App() {
           onClose={() => setCoffeeDelayedStartDialogOpen(false)}
         />
       )}
-      {jarvisVisible && <JarvisOverlay onNavigate={navigate} />}
+      {jarvisEnabled && jarvisVisible && <JarvisOverlay onNavigate={navigate} />}
       <GlobalNoticeRegion />
       <B0NoticeFixture />
     </div>

@@ -554,3 +554,9 @@ Panel Agent дополняет Kuma protected diagnostics, capability registry, 
 - server inventory/versioning approach for proxy configs/scripts;
 - active deployments among optional repositories;
 - selected cloud backup provider and external-drive filesystem/encryption policy.
+
+## Weather providers
+
+Panel Agent uses Open-Meteo by default. A panel which cannot reach that service can select MET Norway Locationforecast with `PANEL_WEATHER_PROVIDER=metno` in its protected runtime configuration and restart. The dashboard requests the forecast from the local agent.
+
+The agent retains the model's publication time and selects the current hour in the saved location's time zone. It reuses the model for at least three hours and honours the provider's expiry and conditional requests. A network failure or a model older than 16 hours is shown as stale. The dashboard displays precipitation in millimetres when the provider supplies an amount without a probability. Sunrise and sunset are calculated at the saved coordinates. [Locationforecast data](https://api.met.no/weatherapi/locationforecast/2.0/documentation) · [Licence](https://creativecommons.org/licenses/by/4.0/)

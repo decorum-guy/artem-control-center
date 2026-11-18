@@ -1,3 +1,6 @@
+import { SelectField } from "./ui/SelectField";
+import { v3VisualSkinEnabled } from "./visualShellConfig";
+import { TemperatureGauge } from "./ui/RingGauge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
@@ -232,6 +235,7 @@ export function ClimateControl({
     <section
       className={`climate-control climate-control--${variant}${!climateLive ? " climate-control--unavailable" : ""}`}
       data-testid={`climate-control-${variant}`}
+      data-instrument-active={v3VisualSkinEnabled ? climateLive && state !== "off" : undefined}
       data-overview-size-variant={variant === "overview" ? overviewSizeVariant ?? "standard" : undefined}
       aria-labelledby={`climate-control-title-${variant}`}
     >
@@ -261,7 +265,10 @@ export function ClimateControl({
         </button>
 
         <div className="climate-control__temperature-control" aria-label="Целевая температура">
-          <span className="climate-control__target-value" data-testid={`climate-temperature-value-${variant}`}>{draftTarget ?? "—"}°</span>
+          <span className="climate-control__target-value" data-testid={`climate-temperature-value-${variant}`}>
+            {v3VisualSkinEnabled ? <TemperatureGauge value={draftTarget} tone="accent" label="Целевая температура"
+              reading={climateLive && draftTarget !== null ? { kind: "progress", fraction: (draftTarget - minimumTemperature) / (maximumTemperature - minimumTemperature) } : { kind: "unavailable" }} /> : String(draftTarget ?? "—") + "°"}
+          </span>
           <button
             type="button"
             className="climate-control__stepper"
@@ -298,26 +305,26 @@ export function ClimateControl({
 
         <label className="climate-control__select-label climate-control__mode-label">
           <span>Режим</span>
-          <select
+          <SelectField
             value={selectedMode}
             disabled={!canUse(HOME_CLIMATE_SET_MODE) || !modes.length}
-            onChange={(event) => void run(HOME_CLIMATE_SET_MODE, { mode: event.target.value as ClimateHvacMode })}
+            onValueChange={(nextValue) => void run(HOME_CLIMATE_SET_MODE, { mode: nextValue as ClimateHvacMode })}
             aria-label="Режим кондиционера"
           >
             {modes.map((mode) => <option key={mode} value={mode}>{climateHvacLabels[mode]}</option>)}
-          </select>
+          </SelectField>
         </label>
 
         <label className="climate-control__select-label climate-control__fan-label">
           <span>Скорость вентилятора</span>
-          <select
+          <SelectField
             value={selectedFan}
             disabled={!canUse(HOME_CLIMATE_SET_FAN_MODE) || !fans.length}
-            onChange={(event) => void run(HOME_CLIMATE_SET_FAN_MODE, { fanMode: event.target.value as ClimateFanMode })}
+            onValueChange={(nextValue) => void run(HOME_CLIMATE_SET_FAN_MODE, { fanMode: nextValue as ClimateFanMode })}
             aria-label="Скорость вентилятора"
           >
             {fans.map((fan) => <option key={fan} value={fan}>Скорость {climateFanLabels[fan]}</option>)}
-          </select>
+          </SelectField>
         </label>
       </div>
       {!apiAvailable && interactive && <span className="climate-control__api-note">Проверяем доступность управления…</span>}

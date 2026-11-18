@@ -1,3 +1,6 @@
+import { SelectField } from "./ui/SelectField";
+import { EmptyState } from "./ui/States";
+import { v3VisualSkinEnabled } from "./visualShellConfig";
 import type {
   CoffeeDelayedStartRecord,
   DashboardSnapshot,
@@ -408,11 +411,15 @@ export function PlaceholderPage({
   const copy = placeholderCopy[route];
   return (
     <div className="placeholder-page" data-testid={`route-${route.slice(1)}`}>
-      <PageHeading {...copy} copyKey={route as InterfaceCopyPageKey} />
+      <PageHeading {...copy} copyKey={(v3VisualSkinEnabled ? route.slice(1) : route) as InterfaceCopyPageKey} />
       <WorkZone className="placeholder-surface">
-        <span className="placeholder-status">Подготовлено</span>
-        <h2>{copy.status}</h2>
-        <p>Раздел будет наполнен после подключения данных.</p>
+        {v3VisualSkinEnabled && route === "/apps" ? (
+          <EmptyState icon="apps" title={copy.status} detail="Раздел будет наполнен после подключения данных." />
+        ) : <>
+          <span className="placeholder-status">Подготовлено</span>
+          <h2>{copy.status}</h2>
+          <p>Раздел будет наполнен после подключения данных.</p>
+        </>}
       </WorkZone>
     </div>
   );
@@ -468,12 +475,12 @@ export function SettingsPage({
           <h2>Движение</h2>
           <p>Уменьшенное движение, низкая производительность и экономия батареи сохраняют информацию без декоративной анимации.</p>
         </div>
-        <select value={motion} onChange={(event) => onMotionChange(event.target.value as typeof motion)}>
+        <SelectField label="Движение" value={motion} onValueChange={(nextValue) => onMotionChange(nextValue as typeof motion)}>
           <option value="full">Полное</option>
           <option value="reduced">Уменьшенное движение</option>
           <option value="low-performance">Низкая производительность</option>
           <option value="battery-saving">Экономия батареи</option>
-        </select>
+        </SelectField>
       </section>
       <RuntimeControls />
     </div>

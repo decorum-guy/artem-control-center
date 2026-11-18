@@ -66,6 +66,7 @@ PANEL_COFFEE_ACTIONS_ENABLED=false
 # Jarvis A2 voice input is optional and disabled until its separate local
 # worker, model files, microphone selection, and physical acceptance are done.
 # The normal Panel Agent never imports voice ML/audio dependencies.
+PANEL_JARVIS_ENABLED=false
 PANEL_JARVIS_VOICE_ENABLED=false
 PANEL_JARVIS_VOICE_CONFIGURED=false
 # PANEL_JARVIS_VOICE_BRIDGE_TOKEN=<local secret, never commit>
@@ -151,8 +152,9 @@ if ([string]::IsNullOrWhiteSpace($documents)) {
 }
 New-Item -ItemType Directory -Force -Path $documents | Out-Null
 
-# Installation owns the helper .cmd files, but not any owner-created .lnk shortcuts.
-# Remove legacy/generated desktop CMD files so future installs keep the desktop clean.
+& (Join-Path $PSScriptRoot "sync-open-shortcut.ps1") -Desktop $desktop -Documents $documents
+
+# Remove obsolete generated command files from the desktop.
 $desktopGenerated = @(
     "Start Control Center.cmd",
     "Open Control Center.cmd",

@@ -1,3 +1,4 @@
+import { formatPanelDate } from "./panelDate";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RouteHeader, StatusText, WorkZone } from "./ShellPrimitives";
 import { useActionConfirmation } from "./ActionConfirmations";
@@ -25,12 +26,6 @@ function formatBytes(value: number | null): string {
   return `${(value / (1024 * 1024)).toFixed(1).replace(".", ",")} МБ`;
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" });
-}
 
 function failureCopy(code: string | null): string {
   switch (code) {
@@ -188,7 +183,7 @@ export function BackupsPage() {
             </div>
             <div>
               <span>Время</span>
-              <strong>{formatDate(latest?.completedAt ?? currentRun?.completedAt ?? null)}</strong>
+              <strong>{formatPanelDate(latest?.completedAt ?? currentRun?.completedAt ?? null)}</strong>
             </div>
             <div>
               <span>Размер</span>

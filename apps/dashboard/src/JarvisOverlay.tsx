@@ -1,3 +1,5 @@
+import { v3VisualSkinEnabled } from "./visualShellConfig";
+import { JarvisOrb, type OrbState } from "./ui/JarvisOrb";
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { useInteractionLock } from "./InteractionLock";
 import { Icon } from "./icons";
@@ -13,7 +15,7 @@ const IDLE_POLL_MS = 650;
 const ACTIVE_POLL_MS = 140;
 
 type Message = { role: "owner" | "jarvis"; text: string };
-type OverlayState = "idle" | "processing" | "listening" | "transcribing" | "submitting" | "speaking" | "ready" | "error";
+
 
 const VOICE_HUD_STATES = new Set<JarvisVoiceState>([
   "wake_detected", "listening", "transcribing", "submitting", "speaking", "ready", "error"
@@ -34,7 +36,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [state, setState] = useState<OverlayState>("idle");
+  const [state, setState] = useState<OrbState>("idle");
   const [voiceSnapshot, setVoiceSnapshot] = useState<JarvisVoiceSnapshot | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const voiceSequence = useRef(-1);
@@ -232,7 +234,7 @@ export function JarvisOverlay({ onNavigate }: { onNavigate: (route: JarvisNaviga
         disabled={locked}
         onClick={() => setOpen(true)}
       >
-        <span aria-hidden="true">J</span><span>Jarvis</span>
+        {v3VisualSkinEnabled ? <JarvisOrb state={state} /> : <span aria-hidden="true">J</span>}<span>Jarvis</span>
       </button>
 
       {open && (

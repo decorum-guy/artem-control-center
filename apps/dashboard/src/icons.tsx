@@ -25,7 +25,11 @@ export type IconName =
   | "sleep"
   | "hibernate"
   | "economy"
-  | "performance";
+  | "performance"
+  | "menu" | "chevron-down" | "chevron-right" | "chevron-left"
+  | "warning" | "info" | "signal" | "archive" | "apps" | "thermometer"
+  | "sun" | "moon" | "sky" | "partly-day" | "partly-night" | "cloud" | "fog" | "rain" | "snow" | "storm"
+  | "volume" | "brightness" | "drop" | "bin" | "edit" | "backspace";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   name: IconName;
@@ -33,7 +37,36 @@ type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   label?: string;
 };
 
+const cloudOutline = <path d="M6.2 18.3a4 4 0 0 1-.7-7.9 6.1 6.1 0 0 1 11.7-1.2 4.6 4.6 0 1 1 .4 9.1Z" />;
+const smallCloud = <path d="M8 19a3.5 3.5 0 0 1 .2-7 4.6 4.6 0 0 1 8.7-.6A3.8 3.8 0 1 1 18 19Z" />;
+
 const iconPaths: Record<IconName, ReactNode> = {
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2" /></>,
+  moon: <path d="M20.7 14.5A8.6 8.6 0 0 1 9.5 3.3a8.8 8.8 0 1 0 11.2 11.2Z" />,
+  sky: <><circle cx="12" cy="12" r="6"/><path d="M3 20h18" /></>,
+  "partly-day": <><path d="M4.2 12a4 4 0 0 1 6-5M4.2 4.2 3 3m4.6 1V2m5 4 1.5-1.5M2 9h1.6" />{smallCloud}</>,
+  "partly-night": <><path d="M7 13a5.6 5.6 0 0 1 .4-10 4.8 4.8 0 0 0 5.9 5.7" />{smallCloud}</>,
+  cloud: cloudOutline,
+  fog: <><path d="M3 10h10m3 0h5M6 6h12M3 14h5m3 0h10M6 18h12" /></>,
+  rain: <><g transform="translate(0 -4)">{smallCloud}</g><path d="m7 18-1 2m6-3-1 3m6-2-1 2" /></>,
+  snow: <><path d="M12 2v20M3.3 7l17.4 10m0-10L3.3 17M9.5 4.5 12 7l2.5-2.5m-5 15L12 17l2.5 2.5M4.2 10.1l3.5-1-.9-3.4m10.4 12.7-.9-3.5 3.5-1m-2.6-8.2-.9 3.4 3.5 1M4.2 13.9l3.5 1-.9 3.5" /></>,
+  storm: <><g transform="translate(0 -4)">{smallCloud}</g><path d="m13.5 13-4 5h3l-2 4 6-6h-4Z" /></>,
+  menu: <path d="M3 6h18M3 12h13M3 18h18" />,
+  "chevron-down": <path d="m6 9 6 6 6-6" />,
+  "chevron-right": <path d="m9 5 7 7-7 7" />,
+  "chevron-left": <path d="m15 5-7 7 7 7" />,
+  warning: <><path d="m12 3 10 17H2L12 3Z" /><path d="M12 9v5m0 2v1" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v1" /></>,
+  signal: <><path d="M3 16v4m5-8v8m5-12v12m5-16v16" /></>,
+  archive: <><rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v11h14V9m-10 4h6" /></>,
+  apps: <><rect x="3" y="3" width="7" height="7" rx="2" /><circle cx="17" cy="6.5" r="3.5" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
+  thermometer: <><path d="M10 14V5a2 2 0 1 1 4 0v9a4 4 0 1 1-4 0Zm2-7v10" /><path d="M16 6h3m-3 4h2" /></>,
+  volume: <><path d="M3 9h4l5-4v14l-5-4H3Zm13-1a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" /></>,
+  brightness: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2" /></>,
+  drop: <path d="M12 2c0 0-7 8-7 13a7 7 0 0 0 14 0c0-5-7-13-7-13Z" />,
+  bin: <><path d="M3 6h18M8 6V3h8v3M5 6l1 15h12l1-15M10 10v7m4-7v7" /></>,
+  edit: <path d="m4 16 12-12 4 4L8 20l-5 1 1-5Zm10-10 4 4" />,
+  backspace: <><path d="M3 12 9 5h12v14H9L3 12Z" /><path d="m11 9 6 6m0-6-6 6" /></>,
   overview: (
     <>
       <rect x="3" y="3" width="7" height="7" />
@@ -184,6 +217,7 @@ export function Icon({ name, size = 20, label, className, ...props }: IconProps)
     <svg
       {...props}
       className={className}
+      data-cc-icon=""
       width={size}
       height={size}
       viewBox="0 0 24 24"

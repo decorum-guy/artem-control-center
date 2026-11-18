@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<job><script language="JScript"><![CDATA[
+var shell = new ActiveXObject("WScript.Shell");
+var fs = new ActiveXObject("Scripting.FileSystemObject");
+var script = fs.BuildPath(fs.GetParentFolderName(WScript.ScriptFullName), "open-kiosk.ps1");
+var ps = shell.ExpandEnvironmentStrings("%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+var result = shell.Run('"' + ps + '" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + script + '"', 0, true);
+if (result !== 0) shell.Popup("Control Center could not open. Check the panel runtime logs.", 0, "Artem Control Center", 48);
+WScript.Quit(result);
+]]></script></job>

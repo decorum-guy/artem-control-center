@@ -33,6 +33,7 @@ const CONDITION_LABELS: Readonly<Record<number, string>> = {
   65: "Дождь",
   66: "Дождь",
   67: "Дождь",
+  68: "Мокрый снег",
   71: "Снег",
   73: "Снег",
   75: "Снег",
@@ -57,7 +58,7 @@ export function weatherKind(code: number): WeatherKind {
   if (code === 3) return "cloudy";
   if (code === 45 || code === 48) return "fog";
   if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "rain";
-  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
+  if (code === 68 || (code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
   if (code >= 95 && code <= 99) return "storm";
   return "unknown";
 }
@@ -69,8 +70,8 @@ export function weatherLabel(code: number): string {
 
 export interface WeatherDaylightWindow {
   date: string;
-  sunrise: string;
-  sunset: string;
+  sunrise: string | null;
+  sunset: string | null;
 }
 
 function parseTrustedWeatherTimestamp(value: string, timeZone: string): Date | null {
@@ -118,7 +119,7 @@ export function resolveWeatherHourPhase(
   }
 
   const window = daylight.find((candidate) => candidate.date === localDate);
-  if (!window) return "neutral";
+  if (!window?.sunrise || !window.sunset) return "neutral";
 
   const sunrise = parseTrustedWeatherTimestamp(window.sunrise, timeZone);
   const sunset = parseTrustedWeatherTimestamp(window.sunset, timeZone);

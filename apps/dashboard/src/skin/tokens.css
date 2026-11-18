@@ -1,0 +1,164 @@
+/* Both roots are intentional. Sheets and dialogs render outside .app. */
+html[data-skin="v3"], .app.skin-v3 {
+  --cc-canvas: #05070c;
+  --cc-rail: #0a0e16;
+  --cc-surface-1: #0d121c;
+  --cc-surface-2: #121927;
+  --cc-interactive: #182132;
+  --cc-hover: #1e2a3f;
+  --cc-pressed: #141c2b;
+  --cc-border: rgb(148 184 255 / 14%);
+  --cc-border-strong: rgb(148 184 255 / 28%);
+  --cc-divider: rgb(148 184 255 / 8%);
+  --cc-text: #eaf2ff;
+  --cc-text-secondary: #a9b8d0;
+  --cc-text-muted: #8494ab;
+  --cc-text-disabled: #4d5b73;
+  --cc-accent: #35d6ff;
+  --cc-accent-strong: #7ae7ff;
+  --cc-on-accent: #031018;
+  --cc-focus: #9bedff;
+  --cc-heat: #ffb454;
+  --cc-success: #3ee6a5;
+  --cc-warning: #ffc15a;
+  --cc-danger: #ff6b7a;
+  --cc-stale: #c9a878;
+  --cc-offline: #8794aa;
+  --cc-unavailable: #9790a0;
+  --cc-uncertain: #9aa9ff;
+  --cc-selected-bg: color-mix(in srgb, var(--cc-accent) 12%, var(--cc-surface-1));
+  --cc-selected-border: color-mix(in srgb, var(--cc-accent) 45%, transparent);
+  --cc-radius-control: 10px;
+  --cc-radius-surface: 14px;
+  --cc-radius-zone: 16px;
+  --cc-radius-sheet: 22px;
+  --cc-font-family: "Manrope Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --cc-font-mono: "JetBrains Mono Variable", Consolas, monospace;
+  --cc-type-time-size: 40px;
+  --cc-type-time-line: 44px;
+  --cc-type-time-weight: 300;
+  --cc-type-weather-size: 72px;
+  --cc-type-weather-line: 72px;
+  --cc-type-weather-weight: 300;
+  --cc-type-primary-state-size: 28px;
+  --cc-type-primary-state-line: 32px;
+  --cc-type-primary-state-weight: 500;
+  --cc-type-page-title-weight: 600;
+  --cc-type-short-label-size: 11px;
+  --cc-type-short-label-weight: 500;
+  --cc-motion-route: 220ms;
+  --cc-motion-sheet: 280ms;
+  --cc-overlay: rgb(2 4 8 / 70%);
+  --cc-grid-dot: rgb(223 239 255 / 7%);
+  --cc-rim: rgb(196 223 255 / 28%);
+  --cc-edge-light: rgb(213 235 255 / 8%);
+  --cc-panel-shadow: 0 10px 26px -18px rgb(0 0 0 / 82%);
+  --cc-glass: linear-gradient(148deg, color-mix(in srgb, var(--cc-accent) 5%, var(--cc-surface-2)),
+    var(--cc-surface-2) 36%, color-mix(in srgb, var(--cc-surface-1) 94%, transparent) 76%);
+  --cc-rim-gradient: linear-gradient(155deg, color-mix(in srgb, var(--cc-accent) 24%, var(--cc-rim)), var(--cc-border) 32%, var(--cc-divider) 66%, var(--cc-border-strong));
+  --cc-vignette: rgb(0 0 0 / 18%);
+  --cc-sky-light: color-mix(in srgb, var(--cc-accent) 11%, transparent);
+  --cc-warm-light: rgb(245 166 35 / 6%);
+}
+
+html[data-skin="v3"][data-theme="day"], .app.skin-v3.theme-day {
+  --cc-canvas: #eef2f7;
+  --cc-rail: #f4f7fb;
+  --cc-surface-1: #ffffff;
+  --cc-surface-2: #f5f8fc;
+  --cc-interactive: #e8eef6;
+  --cc-hover: #e9eff6;
+  --cc-pressed: #e8eef6;
+  --cc-border: rgb(15 40 80 / 14%);
+  --cc-border-strong: rgb(15 40 80 / 32%);
+  --cc-divider: rgb(15 40 80 / 9%);
+  --cc-text: #0c1626;
+  --cc-text-secondary: #42526b;
+  --cc-text-muted: #5b6b83;
+  --cc-text-disabled: #77849a;
+  --cc-accent: #00719c;
+  --cc-accent-strong: #00577b;
+  --cc-on-accent: #ffffff;
+  --cc-focus: #055f87;
+  --cc-heat: #9b5900;
+  --cc-success: #0c7853;
+  --cc-warning: #945e00;
+  --cc-danger: #c13148;
+  --cc-stale: #795f36;
+  --cc-offline: #50637c;
+  --cc-unavailable: #685c70;
+  --cc-uncertain: #505ca0;
+  --cc-grid-dot: rgb(15 40 80 / 5%);
+  --cc-rim: rgb(255 255 255 / 96%);
+  --cc-edge-light: rgb(255 255 255 / 90%);
+  --cc-panel-shadow: 0 8px 24px -16px rgb(26 65 101 / 36%);
+  --cc-vignette: rgb(27 64 102 / 3%);
+  --cc-sky-light: color-mix(in srgb, var(--cc-accent) 8%, transparent);
+  --cc-warm-light: rgb(222 165 76 / 7%);
+}
+html[data-skin="v3"], .app.skin-v3 {
+  --cc-success-bg: color-mix(in srgb, var(--cc-success) 12%, var(--cc-surface-1));
+  --cc-success-border: color-mix(in srgb, var(--cc-success) 35%, transparent);
+  --cc-warning-bg: color-mix(in srgb, var(--cc-warning) 12%, var(--cc-surface-1));
+  --cc-warning-border: color-mix(in srgb, var(--cc-warning) 35%, transparent);
+  --cc-danger-bg: color-mix(in srgb, var(--cc-danger) 12%, var(--cc-surface-1));
+  --cc-danger-border: color-mix(in srgb, var(--cc-danger) 35%, transparent);
+  --cc-stale-bg: color-mix(in srgb, var(--cc-stale) 12%, var(--cc-surface-1));
+  --cc-stale-border: color-mix(in srgb, var(--cc-stale) 35%, transparent);
+  --cc-offline-bg: color-mix(in srgb, var(--cc-offline) 12%, var(--cc-surface-1));
+  --cc-offline-border: color-mix(in srgb, var(--cc-offline) 35%, transparent);
+  --cc-unavailable-bg: color-mix(in srgb, var(--cc-unavailable) 12%, var(--cc-surface-1));
+  --cc-unavailable-border: color-mix(in srgb, var(--cc-unavailable) 35%, transparent);
+  --cc-uncertain-bg: color-mix(in srgb, var(--cc-uncertain) 12%, var(--cc-surface-1));
+  --cc-uncertain-border: color-mix(in srgb, var(--cc-uncertain) 35%, transparent);
+  --cc-glow-accent: 0 0 0 1px color-mix(in srgb, var(--cc-accent) 35%, transparent), 0 0 24px color-mix(in srgb, var(--cc-accent) 28%, transparent);
+  --cc-glow-heat: 0 0 0 1px color-mix(in srgb, var(--cc-heat) 35%, transparent), 0 0 24px color-mix(in srgb, var(--cc-heat) 28%, transparent);
+  --cc-glow-success: 0 0 0 1px color-mix(in srgb, var(--cc-success) 35%, transparent), 0 0 24px color-mix(in srgb, var(--cc-success) 28%, transparent);
+  --cc-glow-warning: 0 0 0 1px color-mix(in srgb, var(--cc-warning) 35%, transparent), 0 0 24px color-mix(in srgb, var(--cc-warning) 28%, transparent);
+  --cc-glow-danger: 0 0 0 1px color-mix(in srgb, var(--cc-danger) 35%, transparent), 0 0 24px color-mix(in srgb, var(--cc-danger) 28%, transparent);
+}
+
+html[data-skin="v3"][data-theme="day"], .app.skin-v3.theme-day {
+  --cc-glow-accent: 0 6px 20px color-mix(in srgb, var(--cc-accent) 18%, transparent);
+  --cc-glow-heat: 0 6px 20px color-mix(in srgb, var(--cc-heat) 18%, transparent);
+  --cc-glow-success: 0 6px 20px color-mix(in srgb, var(--cc-success) 18%, transparent);
+  --cc-glow-warning: 0 6px 20px color-mix(in srgb, var(--cc-warning) 18%, transparent);
+  --cc-glow-danger: 0 6px 20px color-mix(in srgb, var(--cc-danger) 18%, transparent);
+}
+
+html[data-skin="v3"][data-accent="iris"][data-theme="night"],
+html[data-skin="v3"][data-accent="iris"][data-theme="night"] .app.skin-v3 {
+  --cc-accent: #bcadff;
+  --cc-accent-strong: #d5cbff;
+  --cc-focus: #e2dcff;
+}
+html[data-skin="v3"][data-accent="iris"][data-theme="day"],
+html[data-skin="v3"][data-accent="iris"][data-theme="day"] .app.skin-v3 {
+  --cc-accent: #6444aa;
+  --cc-accent-strong: #4e328b;
+  --cc-focus: #543295;
+}
+html[data-skin="v3"][data-accent="lagoon"][data-theme="night"],
+html[data-skin="v3"][data-accent="lagoon"][data-theme="night"] .app.skin-v3 {
+  --cc-accent: #54dfcb;
+  --cc-accent-strong: #a0f0e1;
+  --cc-focus: #bbfff2;
+}
+html[data-skin="v3"][data-accent="lagoon"][data-theme="day"],
+html[data-skin="v3"][data-accent="lagoon"][data-theme="day"] .app.skin-v3 {
+  --cc-accent: #006f66;
+  --cc-accent-strong: #00564f;
+  --cc-focus: #005e56;
+}
+html[data-skin="v3"][data-accent="rose"][data-theme="night"],
+html[data-skin="v3"][data-accent="rose"][data-theme="night"] .app.skin-v3 {
+  --cc-accent: #ffabc7;
+  --cc-accent-strong: #ffcddd;
+  --cc-focus: #ffe0e9;
+}
+html[data-skin="v3"][data-accent="rose"][data-theme="day"],
+html[data-skin="v3"][data-accent="rose"][data-theme="day"] .app.skin-v3 {
+  --cc-accent: #a63768;
+  --cc-accent-strong: #87234f;
+  --cc-focus: #892652;
+}

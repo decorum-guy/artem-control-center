@@ -1,3 +1,6 @@
+import { Slider } from "./ui/Controls";
+import { v3VisualSkinEnabled } from "./visualShellConfig";
+import { RingGauge } from "./ui/RingGauge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ServiceSnapshot } from "@artem/contracts";
@@ -200,14 +203,20 @@ export function LightStripControl({ service, variant = "home", interactive = tru
     : data.colorTempKelvin ? temperatureSwatch(data.colorTempKelvin) : "#879399";
   const status = !live ? (data.stale ? "Данные устарели" : "Недоступна") : data.state === "on" ? "Включена" : "Выключена";
 
-  return <section className={`light-strip light-strip--${variant}`} data-testid={`light-strip-${variant}`} aria-label="Лента в зале">
+  return <section className={`light-strip light-strip--${variant}`} data-testid={`light-strip-${variant}`} data-instrument-active={v3VisualSkinEnabled ? Boolean(live && data.state === "on") : undefined} aria-label="Лента в зале">
     <header className="light-strip__header">
-      <span className="light-strip__identity"><span className="light-strip__lamp" style={{ background: currentSwatch }} aria-hidden="true" /><span><strong>Лента в зале</strong><small>{status}</small></span></span>
+      <span className="light-strip__identity"><span className="light-strip__lamp" style={{ background: currentSwatch }} aria-hidden="true" />
+        {v3VisualSkinEnabled && <RingGauge size={64} tone="accent" label="Подтверждённая яркость ленты"
+          reading={live && data.state === "on" && typeof data.brightness === "number" ? { kind: "progress", fraction: data.brightness / 255 } : { kind: live ? "idle" : "unavailable" }} />}<span><strong>Лента в зале</strong><small>{status}</small></span></span>
       <button className="light-strip__power" type="button" aria-label={data.state === "on" ? "Выключить ленту" : "Включить ленту"} aria-pressed={data.state === "on"} disabled={!canUse(data.state === "on" ? LIGHT_STRIP_POWER_OFF : LIGHT_STRIP_POWER_ON)} onClick={() => void run(data.state === "on" ? LIGHT_STRIP_POWER_OFF : LIGHT_STRIP_POWER_ON)}>{data.state === "on" ? "Выкл" : "Вкл"}</button>
     </header>
     <div className="light-strip__brightness">
+      {v3VisualSkinEnabled ? <Slider label="Яркость" value={draftBrightness} min={1} max={255}
+        displayValue={`${Math.round(draftBrightness / 255 * 100)}%`} disabled={!canUse(LIGHT_STRIP_SET_BRIGHTNESS) || data.state !== "on"}
+        onChange={setDraftBrightness} onCommit={next => { if (next !== data.brightness) void run(LIGHT_STRIP_SET_BRIGHTNESS, { brightness: next }); }} /> : <>
       <label htmlFor={`light-brightness-${variant}`}>Яркость <output>{Math.round(draftBrightness / 255 * 100)}%</output></label>
       <input id={`light-brightness-${variant}`} type="range" min="1" max="255" value={draftBrightness} disabled={!canUse(LIGHT_STRIP_SET_BRIGHTNESS) || data.state !== "on"} onChange={(event) => setDraftBrightness(Number(event.target.value))} onPointerUp={(event) => { const value = Number(event.currentTarget.value); if (value !== data.brightness) void run(LIGHT_STRIP_SET_BRIGHTNESS, { brightness: value }); }} onKeyUp={(event) => { if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) void run(LIGHT_STRIP_SET_BRIGHTNESS, { brightness: Number(event.currentTarget.value) }); }} />
+      </>}
     </div>
     <div className="light-strip__favorites"><span className="light-strip__caption">Часто выбираете</span><div className="light-strip__swatches">
       {favorites.length ? favorites.map((favorite) => {
@@ -223,7 +232,8 @@ export function LightStripControl({ service, variant = "home", interactive = tru
         <section className="light-strip__choice-column" aria-labelledby="light-picker-modes"><h3 id="light-picker-modes">Режимы</h3><div className="light-strip__modes">{modes.map((effect) => <button key={effect} type="button" className={`light-strip__mode${data.effect === effect ? " is-active" : ""}`} disabled={!canUse(LIGHT_STRIP_SET_EFFECT) || data.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_EFFECT, { effect }); setPickerOpen(false); }}><span className="light-strip__mode-mark" style={{ background: effectSwatch(effect) }} aria-hidden="true" />{effect}</button>)}</div></section>
       </div>
       {data.supportedColorModes?.includes("hs") && <div className="light-strip__custom"><label htmlFor="light-custom-color">Свой цвет</label><input id="light-custom-color" type="color" value={customColor} disabled={!canUse(LIGHT_STRIP_SET_COLOR) || data.state !== "on"} onChange={(event) => setCustomColor(event.target.value)} /><button type="button" disabled={!canUse(LIGHT_STRIP_SET_COLOR) || data.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_COLOR, { hsColor: hexToHs(customColor) }); setPickerOpen(false); }}>Применить</button></div>}
-      {data.supportedColorModes?.includes("color_temp") && <div className="light-strip__temperature"><label htmlFor="light-temperature">Белый свет <output>{draftKelvin} K</output></label><input id="light-temperature" type="range" min={minimumKelvin} max={maximumKelvin} step="100" value={draftKelvin} disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onChange={(event) => setDraftKelvin(Number(event.target.value))} /><button type="button" disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_TEMPERATURE, { kelvin: draftKelvin }); setPickerOpen(false); }}>Применить</button></div>}
+      {data.supportedColorModes?.includes("color_temp") && <div className="light-strip__temperature">{v3VisualSkinEnabled ? <Slider label="Белый свет" value={draftKelvin} min={minimumKelvin} max={maximumKelvin} step={100} unit=" K"
+      disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onChange={setDraftKelvin} /> : <><label htmlFor="light-temperature">Белый свет <output>{draftKelvin} K</output></label><input id="light-temperature" type="range" min={minimumKelvin} max={maximumKelvin} step="100" value={draftKelvin} disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onChange={(event) => setDraftKelvin(Number(event.target.value))} /></>}<button type="button" disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_TEMPERATURE, { kelvin: draftKelvin }); setPickerOpen(false); }}>Применить</button></div>}
       </div></div></div>, document.body)}
   </section>;
 }

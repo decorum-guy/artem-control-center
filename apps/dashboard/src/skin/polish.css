@@ -1,0 +1,71 @@
+html[data-skin="v3"] .cc-jarvis-orb {
+  --orb-color: var(--cc-text-secondary);
+  display: inline-grid; place-items: center; width: 44px; height: 44px; flex: none;
+  color: var(--orb-color); border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, color-mix(in srgb,var(--orb-color) 27%,var(--cc-surface-1)), var(--cc-canvas) 78%);
+}
+html[data-skin="v3"] .cc-jarvis-orb[data-orb-state="listening"] { --orb-color: var(--cc-accent); }
+html[data-skin="v3"] .cc-jarvis-orb:is([data-orb-state="transcribing"],[data-orb-state="processing"],[data-orb-state="submitting"]) { --orb-color: var(--cc-uncertain); }
+html[data-skin="v3"] .cc-jarvis-orb[data-orb-state="speaking"] { --orb-color: var(--cc-accent-strong); }
+html[data-skin="v3"] .cc-jarvis-orb[data-orb-state="ready"] { --orb-color: var(--cc-success); }
+html[data-skin="v3"] .cc-jarvis-orb[data-orb-state="error"] { --orb-color: var(--cc-danger); }
+html[data-skin="v3"] .cc-jarvis-orb svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: 1.25; }
+html[data-skin="v3"] .cc-orb-rim { opacity: .55; }
+html[data-skin="v3"] .cc-orb-orbit { transform-origin: 24px 24px; }
+html[data-skin="v3"] .cc-orb-wave { stroke-linecap: round; stroke-linejoin: round; }
+html[data-skin="v3"][data-motion="full"] .cc-jarvis-orb:is([data-orb-state="transcribing"],[data-orb-state="submitting"],[data-orb-state="processing"]) .cc-orb-orbit { animation: cc-orbit 4s linear infinite; }
+html[data-skin="v3"][data-motion="full"] .cc-jarvis-orb:is([data-orb-state="speaking"],[data-orb-state="listening"]) .cc-orb-wave { animation: cc-orb-signal 2.4s var(--cc-motion-ease) infinite; }
+@keyframes cc-orbit { to { transform: rotate(360deg); } }
+@keyframes cc-orb-signal { 50% { opacity: .48; transform: scaleY(.76); } }
+html[data-skin="v3"] .jarvis-launcher {
+  min-width: 112px; padding: 4px 16px 4px 5px; border-radius: 28px; border-color: var(--cc-border);
+  background: var(--cc-glass); box-shadow: inset 0 1px var(--cc-edge-light),var(--cc-panel-shadow);
+  transform: none; transition: transform .1s var(--cc-motion-ease);
+}
+html[data-skin="v3"] .jarvis-launcher::after { display: none; }
+html[data-skin="v3"] .jarvis-launcher > .cc-jarvis-orb:first-child { font-size: inherit; padding: 0; border: 0; }
+html[data-skin="v3"] .jarvis-launcher--voice-active { border-color: var(--cc-selected-border); }
+html[data-skin="v3"] .jarvis-voice-hud__dot { animation: none; box-shadow: none; }
+html[data-skin="v3"] .jarvis-panel, html[data-skin="v3"] .jarvis-voice-hud { border-color: var(--cc-border); border-radius: var(--cc-radius-sheet); background: var(--cc-surface-1); }
+html[data-skin="v3"] .jarvis-icon-button, html[data-skin="v3"] .jarvis-voice-hud__cancel { min-width: 48px; min-height: 48px; }
+html[data-skin="v3"] .jarvis-panel__header > div:first-child { min-width: 0; }
+html[data-skin="v3"] .cc-orb-gallery { display: flex; flex-wrap: wrap; gap: 12px; }
+html[data-skin="v3"] .cc-orb-gallery * { animation: none !important; }
+/* The Cabin select carries its own visible label. Keep one label row so the
+   availability note has room in a compact Overview tile. */
+html[data-skin="v3"] .climate-control__select-label > span:first-child { display: none; }
+/* Device progress has a persistent label and gauge. A cluster of concurrent
+   commands can acknowledge its start without keeping several layers spinning. */
+html[data-skin="v3"] :is(.coffee-activity i, .climate-control__pending-icon,
+  .planning-icon-button--busy svg, .rog-psu-controls__pending-icon,
+  .overview-rog-widget__pending-icon) { animation-iteration-count: 2; }
+html[data-skin="v3"]::view-transition-old(root), html[data-skin="v3"]::view-transition-new(root) { animation-duration: 300ms; animation-timing-function: var(--cc-motion-ease); }
+
+.skin-v3 .settings-v2-appearance { grid-template-columns: 1fr; align-items: start; gap: 14px; }
+@media (min-width: 1000px) {
+  .skin-v3 .settings-v2-appearance__controls {
+    grid-template-columns: minmax(144px,.7fr) minmax(234px,1fr) minmax(256px,1.35fr);
+    align-items: start; gap: 18px;
+  }
+}
+@media (max-width: 999px) {
+  .skin-v3 .settings-v2-appearance__controls { grid-template-columns: 1fr; gap: 14px; }
+}
+.skin-v3 .cc-accent-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.skin-v3 .cc-accent-options button {
+  display: inline-flex; align-items: center; gap: 9px; min-height: 48px; padding: 7px 14px;
+  font: inherit; color: var(--cc-text-secondary); border: 1px solid var(--cc-border-strong);
+  border-radius: 24px; background: var(--cc-glass); box-shadow: inset 0 1px var(--cc-edge-light);
+}
+.skin-v3 .cc-accent-options button[aria-pressed="true"] { border-color: var(--cc-accent); color: var(--cc-text); background: var(--cc-selected-bg); }
+.skin-v3 .cc-accent-options i { position: relative; flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--swatch);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / 65%), inset 0 -2px 3px rgb(0 0 0 / 24%); }
+.skin-v3 [data-accent-swatch="ice"] { --swatch: #35d6ff; }
+.skin-v3 [data-accent-swatch="iris"] { --swatch: #bcadff; }
+.skin-v3 [data-accent-swatch="lagoon"] { --swatch: #54dfcb; }
+.skin-v3 [data-accent-swatch="rose"] { --swatch: #ffabc7; }
+
+.skin-v3 .cc-accent-options [aria-pressed="true"] i::after {
+  content: ""; position: absolute; width: 6px; height: 3px; top: 4px; left: 3px;
+  border-left: 2px solid #132034; border-bottom: 2px solid #132034; transform: rotate(-45deg);
+}

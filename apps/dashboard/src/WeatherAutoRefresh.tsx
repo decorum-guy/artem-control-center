@@ -7,10 +7,21 @@ export function WeatherAutoRefresh() {
   const { refresh } = useWeather();
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    let lastAttempt = Date.now();
+    const refreshIfDue = () => {
+      const now = Date.now();
+      if (document.visibilityState !== "visible" || now - lastAttempt < REFRESH_INTERVAL_MS) return;
+      lastAttempt = now;
+      void refresh();
+    };
+    const timer = window.setInterval(refreshIfDue, REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshIfDue);
+    window.addEventListener("pageshow", refreshIfDue);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshIfDue);
+      window.removeEventListener("pageshow", refreshIfDue);
+    };
   }, [refresh]);
 
   return null;

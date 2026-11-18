@@ -1,3 +1,4 @@
+import { v3VisualSkinEnabled } from "./visualShellConfig";
 /* eslint-disable react-refresh/only-export-components */
 
 import {
@@ -233,14 +234,17 @@ export function InteractionLockControl() {
         <Icon name={locked ? "lock" : "lock-open"} size={22} className="interaction-lock-icon" />
         {holding && (
           <span
-            className="interaction-lock-progress"
+            className={v3VisualSkinEnabled ? "cc-lock-ring" : "interaction-lock-progress"}
             role="progressbar"
             aria-label={holdProgressCopy(holdProgress)}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(holdProgress * 100)}
           >
-            <span data-testid="interaction-lock-progress-fill" style={{ transform: `scaleY(${holdProgress})` }} />
+            {v3VisualSkinEnabled ? <svg data-testid="interaction-lock-progress-fill" viewBox="0 0 48 48" aria-hidden="true">
+              <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" opacity=".2" strokeWidth="2" />
+              <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={`${holdProgress * 100} 100`} transform="rotate(-90 24 24)" />
+            </svg> : <span data-testid="interaction-lock-progress-fill" style={{ transform: `scaleY(${holdProgress})` }} />}
           </span>
         )}
       </button>

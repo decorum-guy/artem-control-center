@@ -22,7 +22,7 @@ export interface WeatherSearchResult extends WeatherCandidate {
 export interface WeatherCurrent {
   time: string;
   temperature: number;
-  apparentTemperature: number;
+  apparentTemperature: number | null;
   precipitation: number;
   weatherCode: number;
   windSpeed: number;
@@ -33,7 +33,7 @@ export interface WeatherCurrent {
 export interface WeatherHour {
   time: string;
   temperature: number;
-  precipitationProbability: number;
+  precipitationProbability: number | null;
   precipitation: number;
   weatherCode: number;
   windSpeed: number;
@@ -44,9 +44,10 @@ export interface WeatherDay {
   weatherCode: number;
   temperatureMax: number;
   temperatureMin: number;
-  precipitationProbabilityMax: number;
-  sunrise: string;
-  sunset: string;
+  precipitationProbabilityMax: number | null;
+  precipitationTotal?: number | null;
+  sunrise: string | null;
+  sunset: string | null;
 }
 
 export interface WeatherForecast {
@@ -62,6 +63,7 @@ export interface WeatherForecast {
   hourly: WeatherHour[];
   daily: WeatherDay[];
   attribution: string;
+  provider?: "open-meteo" | "metno";
 }
 
 async function json<T>(response: Response): Promise<T> {

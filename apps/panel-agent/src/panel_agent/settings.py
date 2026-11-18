@@ -30,6 +30,7 @@ class IntegrationSettings:
     integration_unavailable_after_seconds: int = 300
     integration_max_backoff_seconds: int = 120
     avalar_ssh_enabled: bool = False
+    avalar_stage_private_health: bool = False
     avalar_ssh_host: str = "avalar-reg"
     avalar_ssh_remote_script: str = "~/control-center-avalar.sh"
     avalar_ssh_refresh_seconds: int = 180
@@ -108,6 +109,7 @@ class IntegrationSettings:
     avalar_backup_timeout_seconds: int = 180
     access_temporary_minutes: int = 30
     sse_heartbeat_seconds: int = 20
+    panel_hse_calendar_feed_id: str = field(default="", repr=False)
     panel_planning_enabled: bool = False
     panel_planning_reminder_mutations_enabled: bool = False
     panel_planning_task_mutations_enabled: bool = False
@@ -154,6 +156,7 @@ class IntegrationSettings:
             ),
             avalar_main_url=os.getenv("PANEL_AVALAR_MAIN_URL", "").rstrip("/"),
             avalar_stage_url=os.getenv("PANEL_AVALAR_STAGE_URL", "").rstrip("/"),
+            avalar_stage_private_health=_bool_env("PANEL_AVALAR_STAGE_PRIVATE_HEALTH", False),
             http_refresh_seconds=max(
                 5,
                 int(os.getenv("PANEL_HTTP_REFRESH_SECONDS", "30")),
@@ -428,6 +431,7 @@ class IntegrationSettings:
                 5,
                 int(os.getenv("PANEL_SSE_HEARTBEAT_SECONDS", "20")),
             ),
+            panel_hse_calendar_feed_id=os.getenv("PANEL_HSE_CALENDAR_FEED_ID", "").strip(),
             panel_planning_enabled=_bool_env("PANEL_PLANNING_ENABLED", False),
             panel_planning_reminder_mutations_enabled=_bool_env(
                 "PANEL_PLANNING_REMINDER_MUTATIONS_ENABLED",

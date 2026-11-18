@@ -1,3 +1,4 @@
+import { SelectField } from "./ui/SelectField";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useAccess } from "./AccessControls";
 import { useInteractionLock } from "./InteractionLock";
@@ -98,7 +99,7 @@ export function TodoistTasksPage({ status }: { status: TodoistStatus }) {
     <RouteHeader title="Задачи" eyebrow="Todoist" variant="compact" actions={<button className="planning-primary-button" disabled={!canWrite || busy || loading || !!error} onClick={() => { setMessage(""); setEditor("create"); }}>Новая задача</button>} />
     <div className="todoist-controls">
       <div className="planning-segmented" aria-label="Период задач">{views.map(([key, label]) => <button key={key} aria-pressed={view === key} disabled={busy} onClick={() => setView(key)}>{label}</button>)}</div>
-      <select aria-label="Проект" value={project} disabled={busy} onChange={(event) => setProject(event.target.value)}><option value="">Все проекты</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+      <SelectField aria-label="Проект" value={project} disabled={busy} onValueChange={(nextValue) => setProject(nextValue)}><option value="">Все проекты</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</SelectField>
       <button className="planning-secondary-button" disabled={loading || busy} onClick={() => { void load(); loadProjects(); }}>Обновить</button>
     </div>
     <p className="todoist-freshness" role="status">Todoist · {loading ? "Обновляем…" : error ? page ? "Сохранённые данные · Нет связи" : "Недоступен" : stale ? "Данные устарели · Обновите список" : "Подключён"}{page && ` · Обновлено ${new Date(page.lastSyncedAt).toLocaleTimeString("ru-RU")}`}{!canWrite && " · Только чтение"}</p>
@@ -151,14 +152,14 @@ function TodoistEditor({ task, projects, error, disabled, pending, onClose, onSa
       {error && <p role="alert">{error}</p>}
       <label>Название<input value={content} maxLength={500} disabled={disabled} onChange={(event) => setContent(event.target.value)} /></label>
       <label>Описание<textarea aria-label="Описание" value={description} maxLength={4000} disabled={disabled} onChange={(event) => setDescription(event.target.value)} /></label>
-      <label>Приоритет<select aria-label="Приоритет" value={priority} disabled={disabled} onChange={(event) => setPriority(event.target.value as TodoistPriority)}>{["p1", "p2", "p3", "p4"].map((item) => <option key={item}>{item}</option>)}</select></label>
+      <label>Приоритет<SelectField aria-label="Приоритет" value={priority} disabled={disabled} onValueChange={(nextValue) => setPriority(nextValue as TodoistPriority)}>{["p1", "p2", "p3", "p4"].map((item) => <option key={item}>{item}</option>)}</SelectField></label>
       <label>Дата<input type="date" value={due.slice(0, 10)} disabled={disabled} onChange={(event) => changeDate(event.target.value)} /></label>
       <button className="planning-secondary-button" aria-pressed={timed} disabled={disabled} onClick={() => { setTimed(!timed); changeDate(due.slice(0, 10), !timed); }}>{timed ? "С временем" : "Без времени"}</button>
-      {timed && <div className="todoist-date-time"><label>Время<input type="time" value={time} disabled={disabled} onChange={(event) => { setTime(event.target.value); changeDate(due.slice(0, 10), true, event.target.value); }} /></label><label>Часовой пояс<select aria-label="Часовой пояс" value={offset} disabled={disabled} onChange={(event) => { setOffset(event.target.value); changeDate(due.slice(0, 10), true, time, event.target.value); }}>{[...new Set([offset, ...Array.from({ length: 27 }, (_, index) => `${index < 12 ? "-" : "+"}${String(Math.abs(index - 12)).padStart(2, "0")}:00`)])].sort().map((zone) => <option key={zone} value={zone}>UTC{zone}{zone === "+03:00" ? " · Москва" : ""}</option>)}</select></label></div>}
+      {timed && <div className="todoist-date-time"><label>Время<input type="time" value={time} disabled={disabled} onChange={(event) => { setTime(event.target.value); changeDate(due.slice(0, 10), true, event.target.value); }} /></label><label>Часовой пояс<SelectField aria-label="Часовой пояс" value={offset} disabled={disabled} onValueChange={(nextValue) => { setOffset(nextValue); changeDate(due.slice(0, 10), true, time, nextValue); }}>{[...new Set([offset, ...Array.from({ length: 27 }, (_, index) => `${index < 12 ? "-" : "+"}${String(Math.abs(index - 12)).padStart(2, "0")}:00`)])].sort().map((zone) => <option key={zone} value={zone}>UTC{zone}{zone === "+03:00" ? " · Москва" : ""}</option>)}</SelectField></label></div>}
       <button className="planning-secondary-button" disabled={disabled || !due} onClick={() => changeDate("")}>Убрать дату</button>
       <p>Неизменённая дата сохраняет повторение и часовой пояс Todoist.</p>
       {original?.due?.is_recurring && <p>Повторяется: {original.due.string}. Изменение даты заменит расписание.</p>}
-      <label>Проект задачи<select aria-label="Проект задачи" value={project} disabled={disabled} onChange={(event) => setProject(event.target.value)}>{!original && <option value="">Входящие</option>}{original && !projects.some((item) => item.id === original.project_id) && <option value={original.project_id}>Текущий проект</option>}{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label>Проект задачи<SelectField aria-label="Проект задачи" value={project} disabled={disabled} onValueChange={(nextValue) => setProject(nextValue)}>{!original && <option value="">Входящие</option>}{original && !projects.some((item) => item.id === original.project_id) && <option value={original.project_id}>Текущий проект</option>}{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</SelectField></label>
       {original && <><p>Перенос — отдельное действие. Сохраните остальные изменения перед переносом.</p><button className="planning-secondary-button" disabled={disabled || unsaved || project === original.project_id} onClick={() => onMove(project)}>Перенести в проект</button></>}
       {validation && <p role="alert">{validation}</p>}
     </div>

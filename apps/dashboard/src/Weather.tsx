@@ -1,3 +1,5 @@
+import { Icon, type IconName } from "./icons";
+import { PageHeader } from "./ui/PageHeader";
 import {
   createContext,
   useCallback,
@@ -26,11 +28,11 @@ import {
   type WeatherSearchResult
 } from "./weatherApi";
 import { Sheet } from "./Sheet";
-import { v2VisualShellEnabled } from "./visualShellConfig";
+import { v2VisualShellEnabled, v3VisualSkinEnabled } from "./visualShellConfig";
 import { composeWeather, phaseTransform, readWeatherPhase, type WeatherPhase } from "./weatherCompositor";
 import { useWeatherMotionState } from "./weatherMotion";
 import { applyWeatherFixture, readWeatherFixtureId } from "./weatherFixtures";
-import { resolveWeatherHourPhase, weatherKind, weatherLabel, type WeatherGlyphPhase } from "./weatherPresentation";
+import { resolveWeatherHourPhase, weatherKind, weatherLabel, type WeatherGlyphPhase, type WeatherKind } from "./weatherPresentation";
 import { useInterfaceCopy } from "./interfaceCopy";
 import { useInteractionLock } from "./InteractionLock";
 
@@ -52,6 +54,17 @@ interface WeatherContextValue {
 const WeatherContext = createContext<WeatherContextValue | null>(null);
 const ACTIVE_LOCATION_KEY = "artem.weather.active-location";
 
+const weatherIcons: Record<WeatherKind, IconName> = {
+  clear: "sky", partly: "cloud", cloudy: "cloud", fog: "fog", rain: "rain", snow: "snow", storm: "storm", unknown: "info"
+};
+
+function weatherIcon(code: number, phase: WeatherGlyphPhase): IconName {
+  const kind = weatherKind(code);
+  if (kind === "clear" && phase !== "neutral") return phase === "day" ? "sun" : "moon";
+  if (kind === "partly" && phase !== "neutral") return phase === "day" ? "partly-day" : "partly-night";
+  return weatherIcons[kind];
+}
+
 function WeatherGlyph({ code, compact = false, phase }: { code: number; compact?: boolean; phase: WeatherGlyphPhase }) {
   const kind = weatherKind(code);
   const glyph = {
@@ -64,16 +77,39 @@ function WeatherGlyph({ code, compact = false, phase }: { code: number; compact?
     storm: "ϟ",
     unknown: "·"
   }[kind];
-  return <span className={`weather-glyph weather-glyph--${kind} ${compact ? "weather-glyph--compact" : ""}`} data-weather-phase={phase} aria-hidden="true">{glyph}</span>;
+  const icon = v3VisualSkinEnabled ? weatherIcon(code, phase) : undefined;
+  return <span className={`weather-glyph weather-glyph--${kind} ${compact ? "weather-glyph--compact" : ""}`}
+    data-weather-phase={phase} data-condition-icon={icon} aria-hidden="true">
+    {icon ? <Icon name={icon} size={32} /> : glyph}
+  </span>;
 }
 
-function formatTemperature(value: number): string {
+function formatTemperature(value: number | null): string {
+  if (value == null) return "—";
   return `${Math.round(value)}°`;
 }
 
-function formatClock(value: string): string {
+function formatClock(value: string | null): string {
+  if (!value) return "—";
   const time = value.includes("T") ? value.split("T")[1] : value;
   return time.slice(0, 5);
+}
+
+function RainAmount({ probability, amount }: { probability: number | null; amount?: number | null }) {
+  if (probability != null) {
+    return <span className={probability >= 40 ? "weather-rain-chance--active" : ""}>{probability}%</span>;
+  }
+  return <span title={amount == null ? "Нет данных об осадках" : "Количество осадков"}>{amount == null ? "—" : `${amount.toLocaleString("ru-RU")} мм`}</span>;
+}
+
+function WeatherCredit({ forecast }: { forecast: WeatherForecast }) {
+  return forecast.provider === "metno" ? (
+    <small className="weather-attribution">
+      Прогноз <a href="https://www.met.no/en" target="_blank" rel="noreferrer">MET Norway</a>
+      {" · "}<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>
+      {" · Суточные значения рассчитаны по прогнозу."}
+    </small>
+  ) : <small className="weather-attribution">{forecast.attribution}</small>;
 }
 
 function formatWeekday(value: string, short = false): string {
@@ -93,6 +129,8 @@ function observedTimeLabel(value: string, timezone: string): string {
   if (Number.isNaN(date.getTime())) return "";
   try {
     return new Intl.DateTimeFormat("ru-RU", {
+      day: "numeric",
+      month: "short",
       hour: "2-digit",
       minute: "2-digit",
       timeZone: timezone
@@ -264,13 +302,19 @@ export function WeatherHeaderSummary({ onOpen }: { onOpen: () => void }) {
   const temperature = forecast && Number.isFinite(forecast.current.temperature)
     ? formatTemperature(forecast.current.temperature)
     : "—°";
+  const location = forecast?.location.title ?? "Погода";
+  const condition = forecast ? weatherLabel(forecast.current.weatherCode) : loading ? "Обновляем прогноз…" : error ?? "Добавьте место";
+  const savedTime = forecast?.stale ? observedTimeLabel(forecast.observedAt, forecast.timezone) : "";
+  const summary = forecast?.stale ? (savedTime ? `Устарел · ${savedTime}` : "Прогноз устарел") : condition;
+  const detail = [location, temperature, condition, ...(forecast?.stale ? [summary] : [])].join(" · ");
   return (
-    <button className="weather-summary" type="button" onClick={onOpen} aria-label="Открыть погоду">
+    <button className="weather-summary" type="button" onClick={onOpen} aria-label="Открыть погоду" aria-description={v3VisualSkinEnabled ? detail : undefined} title={v3VisualSkinEnabled ? detail : undefined} data-long-label={v3VisualSkinEnabled && (location.length > 22 || condition.length > 28) || undefined}>
+      {v3VisualSkinEnabled && <Icon name="weather" className="cc-header-weather-icon" />}
       <span className="weather-summary__temperature">{temperature}</span>
       <span className="weather-summary__copy">
-        <span className="weather-summary__location">{forecast?.location.title ?? "Погода"}</span>
+        <span className="weather-summary__location">{location}</span>
         <span className="weather-summary__condition">
-          {forecast ? weatherLabel(forecast.current.weatherCode) : loading ? "Обновляем прогноз…" : error ?? "Добавьте место"}
+          {summary}
         </span>
       </span>
     </button>
@@ -337,9 +381,7 @@ function HourlyForecast({ forecast }: { forecast: WeatherForecast }) {
               <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
               <WeatherGlyph code={hour.weatherCode} compact phase={resolveWeatherHourPhase(hour.time, forecast.daily, forecast.timezone)} />
               <strong>{formatTemperature(hour.temperature)}</strong>
-              <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>
-                {hour.precipitationProbability}%
-              </span>
+              <RainAmount probability={hour.precipitationProbability} amount={hour.precipitation} />
             </article>
           ))}
         </div>
@@ -367,7 +409,7 @@ function DailyForecast({ forecast }: { forecast: WeatherForecast }) {
             </div>
             <WeatherGlyph code={day.weatherCode} compact phase="neutral" />
             <span className="weather-day__condition">{weatherLabel(day.weatherCode)}</span>
-            <span className={day.precipitationProbabilityMax >= 40 ? "weather-rain-chance--active" : ""}>{day.precipitationProbabilityMax}%</span>
+            <RainAmount probability={day.precipitationProbabilityMax} amount={day.precipitationTotal} />
             <div className="weather-day__temperatures"><strong>{formatTemperature(day.temperatureMax)}</strong><span>{formatTemperature(day.temperatureMin)}</span></div>
           </article>
         ))}
@@ -636,8 +678,8 @@ function LegacyWeatherPage() {
               <SunCard forecast={visibleForecast} />
               <section className="weather-source-card">
                 <p className="section-kicker">Источник</p>
-                <h2>Open‑Meteo</h2>
-                <p>{visibleForecast.attribution}. Точка прогноза определяется по сохранённым координатам; свежесть показывается отдельно.</p>
+                <h2>{visibleForecast.provider === "metno" ? "MET Norway" : "Open‑Meteo"}</h2>
+                <WeatherCredit forecast={visibleForecast} />
               </section>
             </aside>
           </div>
@@ -789,7 +831,7 @@ function WeatherHeroV2({
     >
       <WeatherCompositorView model={model} phase={phase} />
       <div className="weather-hero__content">
-        <div className="weather-hero__location">
+        <PageHeader composition="div" className="weather-hero__location">
           <div>
             <p className="section-kicker">{preview ? "Предпросмотр · " : ""}{copy("page.weather.title")}</p>
             <h1 title={forecast.location.title}>{forecast.location.title}</h1>
@@ -800,7 +842,7 @@ function WeatherHeroV2({
             <span className={forecast.stale ? "weather-freshness--stale" : ""}>{stateLabel}</span>
             <small>{forecast.sourceMode === "fixture" ? "Локальный тестовый режим" : forecast.timezoneAbbreviation}</small>
           </div>
-        </div>
+        </PageHeader>
 
         <div className="weather-hero__primary">
           <div className="weather-temperature">
@@ -850,7 +892,7 @@ function HourlyForecastV2({ forecast }: { forecast: WeatherForecast }) {
             <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
             <WeatherGlyph code={hour.weatherCode} compact phase={resolveWeatherHourPhase(hour.time, forecast.daily, forecast.timezone)} />
             <strong>{formatTemperature(hour.temperature)}</strong>
-            <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>{hour.precipitationProbability}%</span>
+            <RainAmount probability={hour.precipitationProbability} amount={hour.precipitation} />
           </article>
         ))}
         {!hours.length && <p className="weather-zone-unavailable">Почасовой прогноз недоступен.</p>}
@@ -870,7 +912,7 @@ function WeatherContextZone({ forecast }: { forecast: WeatherForecast }) {
         </div>
       </header>
       <div className="weather-context-rows">
-        {today && (
+        {today && (today.sunrise || today.sunset) && (
           <div className="weather-context-row">
             <span>Световой день</span>
             <strong>{formatClock(today.sunrise)} — {formatClock(today.sunset)}</strong>
@@ -885,6 +927,7 @@ function WeatherContextZone({ forecast }: { forecast: WeatherForecast }) {
           <strong>{forecast.current.precipitation.toFixed(1)} мм</strong>
         </div>
       </div>
+      <WeatherCredit forecast={forecast} />
     </section>
   );
 }
@@ -916,7 +959,7 @@ function DailyForecastV2({ forecast }: { forecast: WeatherForecast }) {
             </div>
             <WeatherGlyph code={day.weatherCode} compact phase="neutral" />
             <span className="weather-day__condition">{weatherLabel(day.weatherCode)}</span>
-            <span className={day.precipitationProbabilityMax >= 40 ? "weather-rain-chance--active" : ""}>{day.precipitationProbabilityMax}%</span>
+            <RainAmount probability={day.precipitationProbabilityMax} amount={day.precipitationTotal} />
             <div className="weather-day__temperatures"><strong>{formatTemperature(day.temperatureMax)}</strong><span>{formatTemperature(day.temperatureMin)}</span></div>
           </article>
         ))}

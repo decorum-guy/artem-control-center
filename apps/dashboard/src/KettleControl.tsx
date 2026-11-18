@@ -1,3 +1,5 @@
+import { v3VisualSkinEnabled } from "./visualShellConfig";
+import { TemperatureGauge } from "./ui/RingGauge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KettleData, ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
@@ -123,10 +125,13 @@ export function KettleControl({ service, variant = "home", interactive = true }:
     setSelected(options[index] ?? null);
   };
 
-  return <section className={`kettle-control kettle-control--${variant}`} data-testid="kettle-control" aria-label="Чайник">
+  return <section className={`kettle-control kettle-control--${variant}`} data-testid="kettle-control" data-instrument-active={v3VisualSkinEnabled ? Boolean(live && data.stage === "on") : undefined} aria-label="Чайник">
     <h2>Чайник</h2>
     <p className="kettle-control__temperature-label" aria-hidden="true">Текущая температура:</p>
-    <div className="kettle-control__temperature" data-testid="kettle-current-temperature" aria-label={`Текущая температура воды ${currentTemperature}`}>{currentTemperature}</div>
+    <div className="kettle-control__temperature" data-testid="kettle-current-temperature" aria-label={`Текущая температура воды ${currentTemperature}`}>
+      {v3VisualSkinEnabled ? <TemperatureGauge value={data.currentTemperature} tone="heat" label="Температура воды"
+        reading={live && typeof data.currentTemperature === "number" ? { kind: "progress", fraction: data.currentTemperature / 100 } : { kind: "unavailable" }} /> : currentTemperature}
+    </div>
     <p className="kettle-control__status" role="status">{status(data, service)}</p>
     <div className="kettle-control__actions">
       <button type="button" disabled={!canUse(primaryAction)} onClick={() => void run(primaryAction)}>{primaryAction === HOME_KETTLE_STOP ? "Остановить" : "Включить"}</button>

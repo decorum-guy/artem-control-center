@@ -300,3 +300,45 @@ test("reduced motion, backdrop safety and compact visible viewport keep controls
   await expect(page.getByTestId("calendar-editor-title")).toBeFocused();
   await noHorizontalOverflow(page);
 });
+test("HSE subscription and HSE Custom render separately and subscribed lessons stay read-only", async ({ page }) => {
+  await fixture(page);
+  const hse = {
+    ...sources[1], id: "hse-ruz", provider: "hse", label: "HSE РУЗ",
+    calendars: [{ ...sources[1].calendars[0], id: "hse-timetable", label: "HSE" }]
+  };
+  const custom = {
+    ...sources[1],
+    calendars: [{ ...sources[1].calendars[0], label: "HSE Custom" }]
+  };
+  const lessons = [hse, custom].map((source, index) => {
+    const calendar = source.calendars[0];
+    return {
+      ...event(`00000000-0000-4000-8000-00000000280${index}`, `Учебный пример ${index + 1}`, calendar.id,
+        "2026-08-12T12:00:00Z", "2026-08-12T13:30:00Z"),
+      sourceLabel: source.label,
+      calendarIdentity: { providerId: source.id, providerLabel: source.label, calendarId: calendar.id, calendarLabel: calendar.label },
+      canEdit: false, canDelete: false, providerWriteState: "read_only"
+    };
+  });
+  await page.route("**/api/v1/planning/events**", async (route) => {
+    const lastSegment = new URL(route.request().url()).pathname.split("/").at(-1);
+    const shared = {
+      schemaVersion: "planning.panel.v1", domain: "calendar_event", sources: [sources[0], custom, hse],
+      lastSyncedAt: "2026-08-12T09:00:00Z", staleAfter: null, sourceStatus: "current"
+    };
+    if (lastSegment === "events") {
+      await route.fulfill({ json: { ...shared, kind: "list", generatedAt: shared.lastSyncedAt,
+        items: lessons, limit: 100, offset: 0, count: lessons.length, hasMore: false } });
+    } else {
+      await route.fulfill({ json: { ...shared, kind: "object", object: lessons.find((item) => item.id === lastSegment) } });
+    }
+  });
+  await page.goto("/calendar?date=2026-08-12");
+  const rows = page.getByTestId("planning-calendar-event-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.getByTestId("planning-calendar-identity")).toHaveText(["HSE", "HSE Custom"]);
+  await rows.filter({ hasText: "Учебный пример 1" }).tap();
+  const detail = page.getByTestId("planning-calendar-detail");
+  await expect(detail).toContainText("Только просмотр");
+  await expect(detail.getByRole("button", { name: "Изменить" })).toHaveCount(0);
+});

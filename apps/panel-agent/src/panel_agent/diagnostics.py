@@ -28,6 +28,7 @@ from .contracts import (
     DiagnosticsTransition,
 )
 from .settings import IntegrationSettings
+from .avalar_health import AVALAR_HEALTH_REASONS
 from .rog_g703_power import _SAFE_ERROR_CODES as ROG_SAFE_ERROR_CODES
 from .planning import PlanningHealthIssue
 
@@ -48,6 +49,7 @@ _SERVICE_LABELS = {
     "avalar.main.website": "AVALAR Main",
     "avalar.stage.website": "AVALAR Stage",
     "rog_g703gi": "ROG",
+    "rog-g703-psu": "Монитор питания ASUS ROG",
     "panel-runtime": "Control Center runtime",
 }
 
@@ -121,7 +123,7 @@ def _severity(state: str) -> str:
 
 
 def _provider_label(provider: str) -> str:
-    return "iCloud Calendar" if provider == "icloud" else "Local Planning"
+    return {"icloud": "iCloud Calendar", "hse": "HSE РУЗ"}.get(provider, "Local Planning")
 
 
 def _provider_id(value: object) -> str:
@@ -195,13 +197,16 @@ def _problem_from_service(
     elif service.health == "healthy":
         return None
     state = "degraded" if service.id == "rog_g703gi" and service.health == "healthy" else _HEALTH_STATE.get(service.health, "degraded")
+    summary = _problem_summary(_service_label(service.id), state)
+    if service.id in {"avalar.main.website", "avalar.stage.website"} and service.source == "live" and error_code in AVALAR_HEALTH_REASONS:
+        summary = AVALAR_HEALTH_REASONS[error_code]
     return DiagnosticsProblem(
         id=f"service:{service.id}",
         subsystem=_service_label(service.id),
         severity=_severity(state),
         state=state,
         current=True,
-        summary=_problem_summary(_service_label(service.id), state),
+        summary=summary,
         firstObservedAt=first_observed_at,
         lastObservedAt=observed_at,
         lastHealthyAt=_safe_timestamp(data.get("lastSuccessfulObservedAt")),
@@ -619,9 +624,9 @@ class DiagnosticsCollector:
     @staticmethod
     def _provider_summaries(providers: Iterable[object]) -> list[DiagnosticsProviderSummary]:
         result: list[DiagnosticsProviderSummary] = []
-        for provider in list(providers)[:4]:
+        for provider in list(providers)[:5]:
             provider_name = getattr(provider, "provider", None)
-            if provider_name not in {"local", "icloud"}:
+            if provider_name not in {"local", "icloud", "hse"}:
                 continue
             calendars = getattr(provider, "calendars", [])
             result.append(

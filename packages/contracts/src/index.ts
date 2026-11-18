@@ -358,7 +358,7 @@ export interface DiagnosticsTechnicalEvidence {
   kind: "service" | "planning-domain" | "planning-provider" | "planning-aggregate";
   source: "reminders" | "tasks" | "calendar" | "projects" | "planning-status" | null;
   domain: "reminders" | "tasks" | "calendar" | null;
-  provider: "local" | "icloud" | null;
+  provider: "local" | "icloud" | "hse" | null;
   providerId: string | null;
   status: string | null;
   errorCode: string | null;
@@ -428,7 +428,7 @@ export interface DiagnosticsCalendarQuery {
 export interface DiagnosticsProviderSummary {
   id: string;
   kind: "native" | "external";
-  provider: "local" | "icloud";
+  provider: "local" | "icloud" | "hse";
   label: string;
   status: string;
   errorCode: string | null;
@@ -692,7 +692,7 @@ export interface PlanningCalendarSourceCalendar {
 export interface PlanningProviderStatus {
   id: string;
   kind: "native" | "external";
-  provider: "local" | "icloud";
+  provider: "local" | "icloud" | "hse";
   label: string;
   status: PlanningProviderFreshnessStatus;
   /** Latest sanitized provider-attempt category; absent only in older snapshots. */
@@ -886,6 +886,7 @@ export interface DashboardSnapshot {
   generatedAt: string;
   mode: PanelMode;
   fixtureScenario: string | null;
+  jarvisEnabled?: boolean;
   services: ServiceSnapshot[];
   planning?: PlanningSnapshot | null;
 }

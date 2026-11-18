@@ -1,3 +1,5 @@
+import { v3VisualSkinEnabled } from "../../visualShellConfig";
+import { Slider } from "../../ui/Controls";
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
 import { useInteractionLock } from "../../InteractionLock";
 import {
@@ -69,11 +71,11 @@ export function SystemControlsSettings() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  async function commit(control: SystemControlName) {
+  async function commit(control: SystemControlName, nextValue = draft[control]) {
     if (pending !== null) return;
     const current = status?.controls[control];
     if (!current || !current.available || current.value === null) return;
-    if (draft[control] === current.value) return;
+    if (nextValue === current.value) return;
     if (!guardMutation()) {
       setDraft((value) => ({ ...value, [control]: current.value as number }));
       setNotice("Панель заблокирована. Удерживайте замок для разблокировки.");
@@ -88,7 +90,7 @@ export function SystemControlsSettings() {
     setPending(control);
     setNotice(null);
     try {
-      const next = await setSystemControl(control, draft[control]);
+      const next = await setSystemControl(control, nextValue);
       acceptStatus(next);
       const applied = next.controls[control].value;
       setNotice(
@@ -132,11 +134,21 @@ export function SystemControlsSettings() {
             || locked
             || pending !== null
           );
+          const Wrapper = v3VisualSkinEnabled ? "div" : "label";
           return (
-            <label
+            <Wrapper
               key={control}
               className={`settings-system-control-row${disabled ? " settings-system-control-row--disabled" : ""}`}
             >
+              {v3VisualSkinEnabled ? <>
+                <Slider label={labels[control].title} value={value} min={0} max={100} unit="%"
+                  disabled={disabled} testId={`settings-system-${control}`}
+                  displayValue={current?.available && confirmed !== null ? `${value}%` : "—"}
+                  onChange={next => setDraft(existing => ({ ...existing, [control]: next }))}
+                  onCommit={next => void commit(control, next)}
+                  onCancel={() => { if (confirmed !== null) setDraft(existing => ({ ...existing, [control]: confirmed })); }} />
+                <small>{labels[control].description}</small>
+              </> : <>
               <span className="settings-system-control-row__copy">
                 <strong>{labels[control].title}</strong>
                 <small>{labels[control].description}</small>
@@ -166,6 +178,7 @@ export function SystemControlsSettings() {
                 onKeyUp={(event) => handleKeyUp(event, control)}
                 onBlur={() => void commit(control)}
               />
+              </>}
               <span className="settings-system-control-row__hint">
                 {pending === control
                   ? "Применяем и проверяем…"
@@ -173,7 +186,7 @@ export function SystemControlsSettings() {
                     ? availabilityCopy(current, locked)
                     : "Загружаем…"}
               </span>
-            </label>
+            </Wrapper>
           );
         })}
       </div>

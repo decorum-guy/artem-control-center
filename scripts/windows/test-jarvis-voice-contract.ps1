@@ -24,6 +24,7 @@ try {
     New-Item -ItemType Directory -Force -Path $runtime | Out-Null
     $runtimeEnvContents = @'
 # literal values: never execute this file
+PANEL_JARVIS_ENABLED=true
 PANEL_JARVIS_VOICE_ENABLED=true
 PANEL_JARVIS_VOICE_BRIDGE_TOKEN=bridge=token$literal
 PANEL_JARVIS_VOICE_PANEL_URL=http://127.0.0.1:8787
@@ -49,13 +50,16 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     Assert-JarvisVoice ($allowed["PANEL_JARVIS_VOICE_BRIDGE_TOKEN"] -ceq "bridge=token`$literal") "Token must remain a literal value after the first equals sign"
     Assert-JarvisVoice (-not $allowed.Contains("PANEL_UNRELATED_SHOULD_NOT_PROPAGATE")) "Unrelated PANEL variables must not propagate"
     Assert-JarvisVoice (-not $allowed.Contains("FISH_API_KEY")) "FISH_API_KEY in runtime.env must never be imported"
-    $configuration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $allowed
+    Assert-JarvisVoice (-not $allowed.Contains("PANEL_JARVIS_ENABLED")) "The worker must not inherit the assistant switch"
+    Assert-JarvisVoice (-not (Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $allowed).Enabled) "An absent assistant switch must keep audio disabled"
+    $settings = Get-ArtemJarvisVoiceRuntimeEnvironment -Paths $paths -IncludeAssistantSwitch
+    $configuration = Get-ArtemJarvisVoiceConfiguration -Paths $paths
     Assert-JarvisVoice ($configuration.Enabled -and $configuration.Configured -and $configuration.ModelsReady) "Complete valid local configuration must be ready"
 
     $originalCulture = [Globalization.CultureInfo]::CurrentCulture
     try {
         [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo("ru-RU")
-        $ruConfiguration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $allowed
+        $ruConfiguration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $settings
         Assert-JarvisVoice ($ruConfiguration.Configured -and $ruConfiguration.ModelsReady) "Dot-decimal wake threshold must remain valid under ru-RU Windows culture"
     }
     finally {
@@ -63,12 +67,12 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     }
 
     $disabled = [ordered]@{}
-    foreach ($key in $allowed.Keys) { $disabled[$key] = $allowed[$key] }
+    foreach ($key in $settings.Keys) { $disabled[$key] = $settings[$key] }
     $disabled["PANEL_JARVIS_VOICE_ENABLED"] = "false"
     Assert-JarvisVoice (-not (Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $disabled).Enabled) "Disabled configuration must not start audio"
     Assert-JarvisVoice (-not (Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $disabled).TtsEnabled) "Disabled voice configuration must keep TTS disabled"
     $missingModels = [ordered]@{}
-    foreach ($key in $allowed.Keys) { $missingModels[$key] = $allowed[$key] }
+    foreach ($key in $settings.Keys) { $missingModels[$key] = $settings[$key] }
     $missingModels["PANEL_JARVIS_STT_MODEL"] = (Join-Path $root "missing-model")
     Assert-JarvisVoice (-not (Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $missingModels).ModelsReady) "Missing local model artifacts must not be ready"
 
@@ -78,7 +82,7 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
 
     $env:FISH_API_KEY = "external-fish-key-fixture"
     $ttsEnabled = [ordered]@{}
-    foreach ($key in $allowed.Keys) { $ttsEnabled[$key] = $allowed[$key] }
+    foreach ($key in $settings.Keys) { $ttsEnabled[$key] = $settings[$key] }
     $ttsEnabled["PANEL_JARVIS_TTS_ENABLED"] = "true"
     $ttsConfiguration = Get-ArtemJarvisVoiceConfiguration -Paths $paths -Environment $ttsEnabled
     Assert-JarvisVoice ($ttsConfiguration.TtsEnabled -and $ttsConfiguration.TtsConfigured -and $ttsConfiguration.Configured) "Valid external Fish secret and closed TTS values must configure output"
@@ -192,7 +196,7 @@ PANEL_UNRELATED_SHOULD_NOT_PROPAGATE=never
     }
     $env:JARVIS_VOICE_EXPECTED_JSON = $expectedNonEmpty | ConvertTo-Json -Compress
     $null = Set-ArtemJarvisVoiceWorkerEnvironment -Paths $paths
-    & $python -c "import json,os; expected=json.loads(os.environ.pop('JARVIS_VOICE_EXPECTED_JSON')); import jarvis_voice_worker; import panel_agent.jarvis_voice; assert all(key in os.environ and os.environ[key] == value for key,value in expected.items()); assert 'PANEL_JARVIS_MIC_DEVICE' not in os.environ; assert 'PANEL_UNRELATED_SHOULD_NOT_PROPAGATE' not in os.environ; assert os.environ.get('FISH_API_KEY') == 'external-fish-key-fixture'"
+    & $python -c "import json,os; expected=json.loads(os.environ.pop('JARVIS_VOICE_EXPECTED_JSON')); import jarvis_voice_worker; import panel_agent.jarvis_voice; assert all(key in os.environ and os.environ[key] == value for key,value in expected.items()); assert 'PANEL_JARVIS_MIC_DEVICE' not in os.environ; assert 'PANEL_UNRELATED_SHOULD_NOT_PROPAGATE' not in os.environ; assert 'PANEL_JARVIS_ENABLED' not in os.environ; assert os.environ.get('FISH_API_KEY') == 'external-fish-key-fixture'"
     if ($LASTEXITCODE -ne 0) { throw "Dedicated voice child did not receive the exact safe source/runtime contract" }
 
     $launcher = Get-Content -LiteralPath (Join-Path $PSScriptRoot "run-jarvis-voice.ps1") -Raw
