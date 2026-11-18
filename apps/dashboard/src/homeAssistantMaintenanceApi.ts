@@ -12,8 +12,10 @@ export interface MaintenanceDecision {
 export interface HomeAssistantMaintenanceStatus {
   configured: boolean;
   reachable: boolean;
+  statusReason?: string | null;
   maintenanceGateEnabled: boolean;
   busy: boolean;
+  activeOperation?: MaintenanceOperation | null;
   services: Partial<Record<"homeAssistant" | "caddy" | "bot", { running: boolean; healthy: boolean | null; installedVersion?: string; configuredImage?: string }>>;
   actions: Record<HomeAssistantMaintenanceActionId, MaintenanceDecision>;
 }
@@ -23,9 +25,24 @@ export interface MaintenanceOperation {
   actionId: HomeAssistantMaintenanceActionId;
   status: "requested" | "dispatching" | "waiting_for_disconnect" | "waiting_for_recovery" | "verifying" | "success" | "failed";
   failureCode: string | null;
+  result?: "up_to_date" | "success" | null;
 }
 
-const safeCodes = new Set(["admin_required", "maintenance_busy", "maintenance_disabled", "configuration_missing", "compose_failed", "update_failed", "helper_failed", "ssh_timeout", "ssh_transport_failed", "core_update_unavailable", "update_not_available", "update_in_progress", "install_unsupported", "restart_recovery_timeout", "update_recovery_timeout", "update_not_applied", "profile_blocked", "elevation_required", "gate_disabled"]);
+export interface HomeAssistantUpdateCheck {
+  installedVersion: string;
+  latestVersion: string;
+  state: "available" | "up_to_date" | "ahead";
+  checkedAt: string;
+}
+
+const safeCodes = new Set([
+  "busy", "maintenance_busy", "maintenance_disabled", "configuration_missing", "compose_failed",
+  "update_failed", "helper_failed", "ssh_timeout", "ssh_transport_failed", "ssh_invalid_response",
+  "restart_recovery_timeout", "update_recovery_timeout", "update_not_applied", "request_id_conflict",
+  "profile_blocked", "pin_not_configured", "elevation_required", "gate_disabled", "integration_unavailable",
+  "home_server_not_configured", "installed_version_unknown", "unsupported_release_channel", "release_feed_unavailable",
+  "ssh_client_unavailable", "ssh_identity_file_missing", "ssh_known_hosts_file_missing", "ssh_output_too_large"
+]);
 
 async function parse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -38,6 +55,10 @@ async function parse<T>(response: Response): Promise<T> {
 
 export async function fetchHomeAssistantMaintenance(): Promise<HomeAssistantMaintenanceStatus> {
   return parse(await fetch("/api/v1/actions/home-assistant/maintenance", { cache: "no-store" }));
+}
+
+export async function checkHomeAssistantUpdate(): Promise<HomeAssistantUpdateCheck> {
+  return parse(await fetch("/api/v1/actions/home-assistant/maintenance/update-check", { cache: "no-store" }));
 }
 
 export async function startHomeAssistantMaintenance(actionId: HomeAssistantMaintenanceActionId, requestId: string): Promise<MaintenanceOperation> {

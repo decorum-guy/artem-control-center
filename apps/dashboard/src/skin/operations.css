@@ -64,3 +64,13 @@
   .skin-v3 .backups-summary > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .skin-v3 .home-authority-line { flex-wrap: wrap; }
 }
+
+html[data-skin="v3"] .ha-maintenance {
+  padding: clamp(14px, 2vw, 20px);
+  color: var(--cc-text); border-color: var(--cc-border); border-radius: var(--cc-radius-surface);
+  background: var(--cc-glass), var(--cc-surface-1); box-shadow: inset 0 1px var(--cc-edge-light);
+}
+html[data-skin="v3"] .ha-maintenance__versions > div { background: var(--cc-surface-2); border: 1px solid var(--cc-divider); }
+html[data-skin="v3"] .ha-maintenance__versions dd { font-family: var(--cc-font-mono); }
+html[data-skin="v3"] .ha-maintenance__update { padding-block-end: 12px; border-block-end: 1px solid var(--cc-divider); }
+html[data-skin="v3"] .ha-maintenance__notice { color: var(--cc-text); background: var(--cc-selected-bg); }

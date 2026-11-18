@@ -5,7 +5,7 @@ import { maintenanceActionCopy, maintenanceOperationActive } from "./HomeAssista
 describe("Home server maintenance presentation", () => {
   it("uses a distinct progress message for each fixed target", () => {
     expect(maintenanceActionCopy(HA_RESTART)).toEqual({ title: "Home Assistant", progress: "Перезапускаем Home Assistant…" });
-    expect(maintenanceActionCopy(HA_UPDATE_CORE).progress).toBe("Проверяем и обновляем Home Assistant…");
+    expect(maintenanceActionCopy(HA_UPDATE_CORE).progress).toBe("Устанавливаем обновление Home Assistant…");
     expect(maintenanceActionCopy(HOME_SERVER_CADDY_RESTART)).toEqual({ title: "Caddy", progress: "Перезапускаем Caddy…" });
     expect(maintenanceActionCopy(HOME_SERVER_BOT_RESTART)).toEqual({ title: "Telegram Bot", progress: "Перезапускаем Telegram-бота…" });
   });

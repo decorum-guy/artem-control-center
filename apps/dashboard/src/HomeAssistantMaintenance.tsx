@@ -1,102 +1,247 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useAccess } from "./AccessControls";
 import { useActionConfirmation } from "./ActionConfirmations";
 import { useInteractionLock } from "./InteractionLock";
 import { useNoticeCenter } from "./NoticeCenter";
 import { StatusText } from "./ShellPrimitives";
 import { newHomeAssistantRequestId } from "./homeAssistantControlApi";
-import { HA_RESTART, HA_UPDATE_CORE, HOME_SERVER_BOT_RESTART, HOME_SERVER_CADDY_RESTART, fetchHomeAssistantMaintenance, fetchHomeAssistantMaintenanceOperation, startHomeAssistantMaintenance, type HomeAssistantMaintenanceActionId, type HomeAssistantMaintenanceStatus, type MaintenanceOperation } from "./homeAssistantMaintenanceApi";
+import {
+  HA_RESTART, HA_UPDATE_CORE, HOME_SERVER_BOT_RESTART, HOME_SERVER_CADDY_RESTART,
+  checkHomeAssistantUpdate, fetchHomeAssistantMaintenance, fetchHomeAssistantMaintenanceOperation,
+  startHomeAssistantMaintenance, type HomeAssistantMaintenanceActionId, type HomeAssistantMaintenanceStatus,
+  type HomeAssistantUpdateCheck, type MaintenanceDecision, type MaintenanceOperation
+} from "./homeAssistantMaintenanceApi";
+import { formatPanelDate } from "./panelDate";
+import { Button } from "./ui/Controls";
 import "./HomeAssistantMaintenance.css";
 
-const phaseCopy: Record<MaintenanceOperation["status"], string> = {
-  requested: "Готовим действие…",
-  dispatching: "Отправляем команду…",
-  waiting_for_disconnect: "Home Assistant перезапускается…",
-  waiting_for_recovery: "Ожидаем возвращения Home Assistant…",
-  verifying: "Проверяем новую версию…",
-  success: "Действие подтверждено.",
-  failed: "Действие не завершено."
+const failureCopy: Record<string, string> = {
+  maintenance_busy: "На домашнем сервере уже выполняется другая операция.",
+  maintenance_disabled: "Это действие отключено на домашнем сервере.",
+  configuration_missing: "На домашнем сервере не настроено обслуживание контейнеров.",
+  home_server_not_configured: "На панели не настроено подключение к домашнему серверу.",
+  ssh_timeout: "Домашний сервер не ответил вовремя.",
+  ssh_transport_failed: "Не удалось подключиться к домашнему серверу.",
+  ssh_client_unavailable: "На панели недоступен клиент SSH.",
+  ssh_identity_file_missing: "На панели отсутствует ключ подключения к домашнему серверу.",
+  ssh_known_hosts_file_missing: "На панели отсутствует файл проверки подлинности домашнего сервера.",
+  ssh_invalid_response: "Домашний сервер вернул неподтверждённый ответ.",
+  ssh_output_too_large: "Ответ домашнего сервера превысил допустимый размер.",
+  installed_version_unknown: "Не удалось прочитать установленную версию Home Assistant.",
+  unsupported_release_channel: "Для этого образа нельзя сравнить версии с официальным каналом stable.",
+  release_feed_unavailable: "Не удалось получить версию из каталога Home Assistant. Повторите проверку позже.",
+  compose_failed: "Docker Compose не завершил команду на домашнем сервере.",
+  update_failed: "Не удалось проверить или применить образ Home Assistant.",
+  update_not_applied: "После запуска образ Home Assistant отличается от загруженного.",
+  restart_recovery_timeout: "Сервис не подтвердил готовность после перезапуска.",
+  update_recovery_timeout: "Home Assistant не подтвердил готовность после установки.",
+  helper_failed: "Служба обслуживания домашнего сервера не подтвердила результат.",
+  request_id_conflict: "Этот запрос уже использован для другого действия.",
+  request_failed_422: "Панель отклонила формат запроса."
 };
 
-function errorCopy(code: string | null): string {
-  if (code === "restart_recovery_timeout" || code === "update_recovery_timeout") return "Home Assistant не вернулся за отведённое время.";
-  if (code === "update_not_applied") return "Home Assistant вернулся, но новая версия не подтверждена.";
-  return "Системное действие сейчас недоступно.";
-}
 export function maintenanceActionCopy(actionId: HomeAssistantMaintenanceActionId): { title: string; progress: string } {
   if (actionId === HA_RESTART) return { title: "Home Assistant", progress: "Перезапускаем Home Assistant…" };
-  if (actionId === HA_UPDATE_CORE) return { title: "Home Assistant", progress: "Проверяем и обновляем Home Assistant…" };
+  if (actionId === HA_UPDATE_CORE) return { title: "Home Assistant", progress: "Устанавливаем обновление Home Assistant…" };
   if (actionId === HOME_SERVER_CADDY_RESTART) return { title: "Caddy", progress: "Перезапускаем Caddy…" };
   return { title: "Telegram Bot", progress: "Перезапускаем Telegram-бота…" };
 }
+
 export function maintenanceOperationActive(operation: MaintenanceOperation | null): boolean {
   return Boolean(operation && operation.status !== "success" && operation.status !== "failed");
 }
 
+function mayRequest(decision?: MaintenanceDecision) {
+  return Boolean(decision?.allowed || decision?.availability === "elevation_required");
+}
+
+function checkSummary(check: HomeAssistantUpdateCheck) {
+  if (check.state === "available") return `Доступна версия ${check.latestVersion}.`;
+  if (check.state === "ahead") return `Установленная версия новее версии ${check.latestVersion} в стабильном канале.`;
+  return `Установлена актуальная версия ${check.installedVersion}.`;
+}
+
 export function HomeAssistantMaintenance({ target }: { target?: "homeAssistant" | "bot" } = {}) {
-  const { ensureCapability } = useAccess();
+  const titleId = useId();
+  const { ensureCapability, explainAvailability } = useAccess();
   const { confirmAction } = useActionConfirmation();
   const { guardMutation } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
   const [status, setStatus] = useState<HomeAssistantMaintenanceStatus | null>(null);
   const [operation, setOperation] = useState<MaintenanceOperation | null>(null);
-  const active = maintenanceOperationActive(operation);
+  const [submitting, setSubmitting] = useState(false);
+  const [check, setCheck] = useState<HomeAssistantUpdateCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkFailure, setCheckFailure] = useState<string | null>(null);
+  const [statusLoaded, setStatusLoaded] = useState(false);
+  const statusSequence = useRef(0);
+  const actionPending = useRef(false);
+  const inProgress = maintenanceOperationActive(operation);
+  const busy = submitting || inProgress || Boolean(status?.busy);
+  const errorMessage = useCallback((code: string | null) => {
+    if (code && ["busy", "gate_disabled", "profile_blocked", "pin_not_configured", "integration_unavailable", "elevation_required"].includes(code)) {
+      return explainAvailability(code);
+    }
+    return failureCopy[code ?? ""] ?? "Не удалось получить подтверждение от панели. Проверьте состояние сервиса.";
+  }, [explainAvailability]);
 
   const refresh = useCallback(async () => {
-    try { const next = await fetchHomeAssistantMaintenance(); setStatus(next); return next; }
-    catch { setStatus(null); return null; }
+    const sequence = ++statusSequence.current;
+    const next = await fetchHomeAssistantMaintenance().catch(() => null);
+    if (sequence === statusSequence.current) {
+      setStatus(next);
+      setStatusLoaded(true);
+      if (next?.activeOperation) setOperation(next.activeOperation);
+    }
+    return next;
   }, []);
 
-  useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 10_000); return () => window.clearInterval(timer); }, [refresh]);
   useEffect(() => {
-    if (!operation || operation.status === "success" || operation.status === "failed") return;
-    const timer = window.setInterval(() => {
-      void fetchHomeAssistantMaintenanceOperation(operation.requestId).then((next) => {
-        setOperation(next);
-        if (next.status === "success") { showNotice({ id: "home-assistant-maintenance", severity: "success", title: maintenanceActionCopy(next.actionId).title, detail: "Системное действие подтверждено.", timeoutMs: 6_000 }); void refresh(); }
-        if (next.status === "failed") { showNotice({ id: "home-assistant-maintenance", severity: "error", title: maintenanceActionCopy(next.actionId).title, detail: errorCopy(next.failureCode), timeoutMs: 10_000 }); void refresh(); }
-      }).catch(() => undefined);
-    }, 1_000);
-    return () => window.clearInterval(timer);
-  }, [operation, refresh, showNotice]);
+    let live = true;
+    let timer: number;
+    async function poll() {
+      await refresh();
+      if (live) timer = window.setTimeout(poll, 10_000);
+    }
+    void poll();
+    return () => { live = false; ++statusSequence.current; window.clearTimeout(timer); };
+  }, [refresh]);
 
-  const run = useCallback(async (actionId: HomeAssistantMaintenanceActionId) => {
-    if (active || !guardMutation()) return;
-    let next = status ?? await refresh();
-    let decision = next?.actions[actionId];
-    if (decision?.availability === "elevation_required") {
-      if (await ensureCapability(actionId, "Обслуживание Home Assistant")) { next = await refresh(); decision = next?.actions[actionId]; }
+  const activeRequest = inProgress ? operation?.requestId : undefined;
+  useEffect(() => {
+    if (!activeRequest) return;
+    const requestId = activeRequest;
+    let live = true;
+    let timer: number;
+    async function poll() {
+      let next: MaintenanceOperation | null = null;
+      try { next = await fetchHomeAssistantMaintenanceOperation(requestId); }
+      catch (error) {
+        if (live && error instanceof Error && error.message === "request_failed_404") {
+          setOperation(null);
+          setCheck(null);
+          showNotice({ id: "home-assistant-maintenance", severity: "warning", title: "Домашний сервер",
+            detail: "Панель потеряла запись операции. Проверьте состояние сервиса перед повтором.", timeoutMs: 10_000 });
+          void refresh();
+          return;
+        }
+      }
+      if (!live) return;
+      if (next) {
+        setOperation(next);
+        if (next.status === "success" || next.status === "failed") {
+          const success = next.status === "success";
+          const detail = success ? successMessage(next) : errorMessage(next.failureCode);
+          showNotice({ id: "home-assistant-maintenance", title: maintenanceActionCopy(next.actionId).title,
+            severity: success ? "success" : "error", detail, timeoutMs: success ? 6_000 : 10_000 });
+          if (next.actionId === HA_UPDATE_CORE) setCheck(null);
+          void refresh();
+          return;
+        }
+      }
+      timer = window.setTimeout(poll, 1_000);
     }
-    if (!decision?.allowed) {
-      showNotice({ id: "home-assistant-maintenance", severity: "warning", title: "Домашний сервер", detail: errorCopy(decision?.availability ?? null), timeoutMs: 8_000 });
-      return;
-    }
-    const confirmation = await confirmAction(actionId);
-    if (!confirmation.confirmed || !guardMutation()) return;
+    timer = window.setTimeout(poll, 1_000);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [activeRequest, errorMessage, refresh, showNotice]);
+
+  async function checkVersion() {
+    if (checking) return;
+    setChecking(true);
+    setCheckFailure(null);
+    try { setCheck(await checkHomeAssistantUpdate()); }
+    catch (error) { setCheckFailure(error instanceof Error ? error.message : "check_failed"); }
+    finally { setChecking(false); }
+  }
+
+  async function run(actionId: HomeAssistantMaintenanceActionId) {
+    if (actionPending.current || busy || !guardMutation()) return;
+    actionPending.current = true;
     try {
+      let decision = (status ?? await refresh())?.actions[actionId];
+      if (decision?.availability === "elevation_required") {
+        if (!await ensureCapability(actionId, "Обслуживание домашнего сервера")) return;
+        decision = (await refresh())?.actions[actionId];
+      }
+      if (!decision?.allowed) throw new Error(decision?.availability ?? "integration_unavailable");
+      const install = actionId === HA_UPDATE_CORE;
+      const confirmation = await confirmAction(actionId, install ? {
+        description: checkFailure === "unsupported_release_channel" || !check
+          ? "Домашний сервер проверит заданный в Docker Compose образ. Если он изменился, Home Assistant перезапустится для установки."
+          : `Сейчас установлена версия ${check.installedVersion}. В стабильном канале доступна ${check.latestVersion}. На время установки Home Assistant перезапустится.`
+      } : undefined);
+      if (!confirmation.confirmed || !guardMutation()) return;
+      setSubmitting(true);
       const started = await startHomeAssistantMaintenance(actionId, newHomeAssistantRequestId());
       setOperation(started);
       const copy = maintenanceActionCopy(actionId);
       showNotice({ id: "home-assistant-maintenance", severity: "progress", title: copy.title, detail: copy.progress });
     } catch (error) {
-      showNotice({ id: "home-assistant-maintenance", severity: "error", title: maintenanceActionCopy(actionId).title, detail: errorCopy(error instanceof Error ? error.message : null), timeoutMs: 10_000 });
-    }
-  }, [active, confirmAction, ensureCapability, guardMutation, refresh, showNotice, status]);
+      showNotice({ id: "home-assistant-maintenance", severity: "error", title: maintenanceActionCopy(actionId).title,
+        detail: errorMessage(error instanceof Error ? error.message : null), timeoutMs: 10_000 });
+    } finally { actionPending.current = false; setSubmitting(false); }
+  }
 
-  const updateDecision = status?.actions[HA_UPDATE_CORE];
-  const restartDecision = status?.actions[HA_RESTART];
+  function actionButton(id: HomeAssistantMaintenanceActionId, label: string) {
+    const decision = status?.actions[id];
+    const reason = decision && !decision.allowed ? explainAvailability(decision.availability) : null;
+    return <div className="ha-maintenance__action">
+      <Button variant={id === HA_UPDATE_CORE ? "primary" : "secondary"} disabled={busy || !mayRequest(decision)} onClick={() => void run(id)}>{label}</Button>
+      {reason && <small>{reason}</small>}
+    </div>;
+  }
+
   const ha = status?.services.homeAssistant;
-  const caddy = status?.services.caddy;
-  const bot = status?.services.bot;
-  const service = target === "bot" ? bot : ha;
-  const online = Boolean(status?.reachable && service?.running && service.healthy !== false);
-  const stateLabel = !status?.reachable || !service?.running ? "Недоступно" : service.healthy === false ? "Требует внимания" : service.healthy ? "На связи" : "Контейнер запущен";
-  const operationMessage = operation ? (active ? maintenanceActionCopy(operation.actionId).progress : phaseCopy[operation.status]) : "Обслуживание доступно только через фиксированные системные действия.";
-  return <section className="ha-maintenance" data-testid="home-assistant-maintenance" aria-labelledby="ha-maintenance-title">
-    <header><div><p className="section-kicker">Система · домашний сервер</p><h2 id="ha-maintenance-title">{target === "bot" ? "Telegram-бот" : "Home Assistant"}</h2><p>{operationMessage}</p></div><StatusText label={stateLabel} tone={online ? "success" : "unavailable"} /></header>
-    {target !== "bot" && <dl className="ha-maintenance__versions"><div><dt>Версия Home Assistant</dt><dd>{ha?.installedVersion ?? "—"}</dd></div><div><dt>Образ контейнера</dt><dd>{ha?.configuredImage ?? "—"}</dd></div></dl>}
-    {operation?.status === "failed" && <p className="ha-maintenance__notice" role="status">{errorCopy(operation.failureCode)}</p>}
-    {target !== "bot" && <div className="ha-maintenance__actions"><button type="button" onClick={() => void run(HA_RESTART)} disabled={active || !restartDecision || (!restartDecision.allowed && restartDecision.availability !== "elevation_required")}>Перезапустить</button><button type="button" onClick={() => void run(HA_UPDATE_CORE)} disabled={active || !updateDecision || (!updateDecision.allowed && updateDecision.availability !== "elevation_required")}>Проверить и обновить</button></div>}
-    {target !== "homeAssistant" && <div className="ha-maintenance__service-actions">{!target && <><span>Caddy · {caddy?.healthy ? "на связи" : "нет подтверждения"}</span><button type="button" onClick={() => void run(HOME_SERVER_CADDY_RESTART)} disabled={active || !status?.actions[HOME_SERVER_CADDY_RESTART] || (!status.actions[HOME_SERVER_CADDY_RESTART].allowed && status.actions[HOME_SERVER_CADDY_RESTART].availability !== "elevation_required")}>Перезапустить Caddy</button></>}<span>Telegram Bot · {bot?.healthy ? "на связи" : "нет подтверждения"}</span><button type="button" onClick={() => void run(HOME_SERVER_BOT_RESTART)} disabled={active || !status?.actions[HOME_SERVER_BOT_RESTART] || (!status.actions[HOME_SERVER_BOT_RESTART].allowed && status.actions[HOME_SERVER_BOT_RESTART].availability !== "elevation_required")}>Перезапустить бота</button></div>}
+  const service = target === "bot" ? status?.services.bot : ha;
+  const reachable = status?.reachable && service?.running;
+  const stateLabel = !statusLoaded ? "Проверяем связь…" : !reachable ? "Нет связи" : service.healthy === false ? "Требует внимания" : service.healthy ? "На связи" : "Контейнер запущен";
+  const message = operation && (operation.status === "failed" ? errorMessage(operation.failureCode) : operation.status === "success" ? successMessage(operation) : maintenanceActionCopy(operation.actionId).progress);
+  const previousCheck = checking || Boolean(checkFailure) || Boolean(check && ha?.installedVersion && check.installedVersion !== ha.installedVersion);
+  const available = check?.state === "available" && !previousCheck;
+  return <section className="ha-maintenance" data-testid="home-assistant-maintenance" aria-labelledby={titleId}>
+    <header>
+      <div><p className="section-kicker">Домашний сервер</p><h2 id={titleId}>{target === "bot" ? "Telegram-бот" : "Home Assistant"}</h2></div>
+      <StatusText label={stateLabel} tone={!reachable ? "unavailable" : service.healthy === false ? "warning" : "success"} />
+    </header>
+    {statusLoaded && !status?.reachable && <p className="ha-maintenance__notice">{errorMessage(status?.statusReason ?? null)}</p>}
+    {target !== "bot" && <>
+      <dl className="ha-maintenance__versions">
+        <div><dt>Установленная версия</dt><dd>{ha?.installedVersion || "—"}</dd></div>
+        <div><dt>Образ контейнера</dt><dd>{ha?.configuredImage || "—"}</dd></div>
+      </dl>
+      <div className="ha-maintenance__update">
+        <div className="ha-maintenance__actions">
+          <Button variant={available ? "secondary" : "primary"} pendingLabel={checking ? "Проверяем версии…" : undefined} disabled={busy} onClick={() => void checkVersion()}>
+            Проверить обновления
+          </Button>
+          {available && actionButton(HA_UPDATE_CORE, "Установить обновление")}
+          {checkFailure === "unsupported_release_channel" && actionButton(HA_UPDATE_CORE, "Обновить настроенный образ")}
+        </div>
+        <div role="status" className="ha-maintenance__check-result">
+          {checkFailure && <p className="ha-maintenance__notice">{errorMessage(checkFailure)}</p>}
+          {check && <p>{previousCheck ? `Последняя подтверждённая версия в каталоге — ${check.latestVersion}.` : checkSummary(check)} <time dateTime={check.checkedAt}>Проверено {formatPanelDate(check.checkedAt)}</time></p>}
+        </div>
+      </div>
+      {actionButton(HA_RESTART, "Перезапустить Home Assistant")}
+    </>}
+    {!target && <div className="ha-maintenance__service">
+      <span>Caddy · {serviceHealth(status?.services.caddy)}</span>{actionButton(HOME_SERVER_CADDY_RESTART, "Перезапустить Caddy")}
+    </div>}
+    {target !== "homeAssistant" && <div className="ha-maintenance__service">
+      {!target && <span>Telegram-бот · {serviceHealth(status?.services.bot)}</span>}{actionButton(HOME_SERVER_BOT_RESTART, "Перезапустить Telegram-бота")}
+    </div>}
+    {message && <p className="ha-maintenance__notice" role="status">{message}</p>}
   </section>;
+}
+
+function serviceHealth(service?: { running: boolean; healthy: boolean | null }) {
+  if (!service?.running) return "нет связи";
+  if (service.healthy === false) return "требует внимания";
+  return service.healthy ? "на связи" : "контейнер запущен";
+}
+
+function successMessage(operation: MaintenanceOperation) {
+  if (operation.result === "up_to_date") return "Образ Home Assistant уже актуален.";
+  if (operation.actionId === HA_UPDATE_CORE) return "Обновление установлено. Home Assistant снова на связи.";
+  return "Перезапуск подтверждён.";
 }

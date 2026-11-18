@@ -14,12 +14,14 @@ import re
 import shutil
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .access_policy import AccessPolicyStore
 from .settings import IntegrationSettings
@@ -45,8 +47,15 @@ _SAFE_FAILURES = frozenset({
     "ssh_identity_file_missing", "ssh_known_hosts_file_missing", "ssh_timeout",
     "ssh_output_too_large", "ssh_transport_failed", "ssh_invalid_response",
     "helper_failed", "configuration_missing", "maintenance_busy", "compose_failed",
-    "restart_recovery_timeout", "update_recovery_timeout", "update_failed",
+    "restart_recovery_timeout", "update_recovery_timeout", "update_failed", "update_not_applied",
+    "maintenance_disabled", "release_feed_unavailable",
 })
+_STABLE_IMAGE = "ghcr.io/home-assistant/home-assistant:stable"
+_STABLE_VERSION = re.compile(r"[0-9]{4}\.(?:[1-9]|1[0-2])\.[0-9]{1,4}")
+_STABLE_FEEDS = (
+    "https://version.home-assistant.io/stable.json",
+    "https://raw.githubusercontent.com/home-assistant/version/master/stable.json",
+)
 _HOST_PATTERN = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$")
 _USER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -54,12 +63,36 @@ _USER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 class HomeServerMaintenanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     actionId: MaintenanceActionId
-    requestId: UUID
+    requestId: UUID = Field(strict=False)
 
 
 class HomeServerMaintenanceError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code if code in _SAFE_FAILURES else "helper_failed"
+        super().__init__(self.code)
+
+
+async def _read_stable_version() -> str:
+    async with httpx.AsyncClient(timeout=5, headers={"User-Agent": "Artem-Control-Center/1.0", "Accept": "application/json"}) as client:
+        for url in _STABLE_FEEDS:
+            try:
+                async with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    source = bytearray()
+                    async for chunk in response.aiter_bytes(4096):
+                        source.extend(chunk)
+                        if len(source) > 32_768:
+                            raise ValueError("release feed exceeds size limit")
+                data = json.loads(source)
+                if not isinstance(data, dict) or data.get("channel") != "stable":
+                    continue
+                core = data.get("homeassistant")
+                version = core.get("default") if isinstance(core, dict) else None
+                if isinstance(version, str) and _STABLE_VERSION.fullmatch(version):
+                    return version
+            except (httpx.HTTPError, ValueError):
+                continue
+    raise HomeServerMaintenanceError("release_feed_unavailable")
 
 
 def _safe_helper_failure(stdout: bytes) -> str:
@@ -92,7 +125,9 @@ async def _read_limited(stream: asyncio.StreamReader | None, limit: int) -> byte
 
 
 async def _terminal_status(stream: asyncio.StreamReader, operation: str, limit: int) -> int | None:
-    remaining = limit
+    # Compose can print progress for many image layers. Diagnostics are drained
+    # one line at a time. Only the helper's exit record is interpreted.
+    remaining = max(limit, 4 * 1024 * 1024) if operation == "update-ha" else limit
     while line := await stream.readline():
         remaining -= len(line)
         if remaining < 0:
@@ -206,9 +241,10 @@ class HomeServerSshTransport:
 
 
 class HomeServerMaintenanceExecutor:
-    def __init__(self, settings: IntegrationSettings, access: AccessPolicyStore, *, transport: HomeServerSshTransport | Any | None = None) -> None:
+    def __init__(self, settings: IntegrationSettings, access: AccessPolicyStore, *, transport: HomeServerSshTransport | Any | None = None, stable_version: Callable[[], Awaitable[str]] = _read_stable_version) -> None:
         self.settings, self.access = settings, access
         self.transport = transport or HomeServerSshTransport(settings)
+        self.stable_version = stable_version
         self.executions: OrderedDict[str, _Execution] = OrderedDict()
         self.active_request_id: str | None = None
         self._lock: asyncio.Lock | None = None
@@ -221,29 +257,64 @@ class HomeServerMaintenanceExecutor:
     def _gate(self) -> bool:
         return bool(self.settings.writes_enabled and self.settings.home_server_maintenance_enabled)
 
+    async def _services(self) -> dict[str, Any]:
+        payload = await self.transport.run("status")
+        if payload.get("schemaVersion") != 1 or payload.get("ok") is not True or payload.get("operation") != "status" or not isinstance(payload.get("services"), dict):
+            raise HomeServerMaintenanceError("ssh_invalid_response")
+        return _safe_services(payload["services"])
+
+    async def check_update(self) -> dict[str, Any]:
+        if not self.transport.configured():
+            raise HTTPException(503, detail="home_server_not_configured")
+        try:
+            ha = (await self._services()).get("homeAssistant", {})
+            installed = ha.get("installedVersion") or ""
+            if not ha.get("running"):
+                raise HTTPException(503, detail="installed_version_unknown")
+            if ha.get("configuredImage") != _STABLE_IMAGE:
+                raise HTTPException(409, detail="unsupported_release_channel")
+            if not _STABLE_VERSION.fullmatch(installed):
+                raise HTTPException(503, detail="installed_version_unknown")
+            latest = await self.stable_version()
+        except HomeServerMaintenanceError as error:
+            raise HTTPException(503, detail=error.code) from None
+        current_parts = tuple(map(int, installed.split(".")))
+        latest_parts = tuple(map(int, latest.split(".")))
+        comparison = "up_to_date"
+        if latest_parts > current_parts:
+            comparison = "available"
+        elif latest_parts < current_parts:
+            comparison = "ahead"
+        return {"installedVersion": installed, "latestVersion": latest, "state": comparison,
+                "checkedAt": datetime.now(timezone.utc).isoformat()}
+
     async def availability(self) -> dict[str, Any]:
         configured = bool(self.transport.configured())
         services: dict[str, Any] = {}
         reachable = False
+        reason = None if configured else "home_server_not_configured"
         if configured:
             try:
-                payload = await self.transport.run("status")
-                if payload.get("schemaVersion") == 1 and payload.get("ok") is True and payload.get("operation") == "status" and isinstance(payload.get("services"), dict):
-                    services, reachable = _safe_services(payload["services"]), True
-            except HomeServerMaintenanceError:
-                pass
+                services, reachable = await self._services(), True
+            except HomeServerMaintenanceError as error:
+                reason = error.code
         actions = {}
         for action in MAINTENANCE_ACTION_IDS:
             gate = self._gate() and (action != RESTART_CADDY_ACTION or self.settings.home_server_caddy_restart_enabled)
             decision = self.access.authorize(action, gate_enabled=gate, integration_available=configured and reachable, busy=self.active_request_id is not None)
             actions[action] = {**decision.as_dict(), "gateEnabled": gate, "integrationAvailable": configured and reachable, "busy": self.active_request_id is not None, "preconditionOk": True}
-        return {"schemaVersion": 1, "configured": configured, "reachable": reachable, "maintenanceGateEnabled": self.settings.home_server_maintenance_enabled, "busy": self.active_request_id is not None, "services": services, "actions": actions}
+        active = self.executions.get(self.active_request_id) if self.active_request_id else None
+        return {"schemaVersion": 1, "configured": configured, "reachable": reachable, "statusReason": reason,
+                "maintenanceGateEnabled": self.settings.home_server_maintenance_enabled, "busy": active is not None,
+                "activeOperation": active.public() if active else None, "services": services, "actions": actions}
 
     async def submit(self, request: HomeServerMaintenanceRequest) -> tuple[dict[str, Any], bool]:
         request_id = str(request.requestId)
         async with self._lock_for_loop():
             previous = self.executions.get(request_id)
             if previous:
+                if previous.action_id != request.actionId:
+                    raise HTTPException(409, detail="request_id_conflict")
                 return previous.public(), False
             availability = await self.availability()
             decision = availability["actions"][request.actionId]
@@ -303,6 +374,11 @@ def build_home_assistant_maintenance_router(executor: HomeServerMaintenanceExecu
     async def availability(response: Response) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
         return await executor.availability()
+
+    @router.get("/maintenance/update-check")
+    async def check_update(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        return await executor.check_update()
 
     @router.get("/maintenance/{request_id}")
     def operation(request_id: UUID, response: Response) -> dict[str, Any]:
