@@ -96,6 +96,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("alice_station_actions", "Управление Станцией Mini 2", "Разрешение выполнять фиксированные команды станции через AliceTG_Bot.", "Дом", "PANEL_ALICE_STATION_ACTIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("rog_g703_psu_actions", "Управление блоками питания ASUS", "Разрешение выполнять фиксированные действия двух БП через Home Assistant.", "Дом", "PANEL_ROG_G703_PSU_ACTIONS_ENABLED", "immediate", "none", True),
     CapabilityDefinition("avalar_ssh", "Статус AVALAR по SSH", "Получение состояния инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SSH_ENABLED", "immediate", "none"),
+    CapabilityDefinition("avalar_private_stage_health", "Готовность закрытого Stage", "Проверка приложения AVALAR по статусному SSH при ограниченном публичном доступе.", "Инфраструктура", "PANEL_AVALAR_STAGE_PRIVATE_HEALTH", "delayed", "restart"),
     CapabilityDefinition("avalar_actions", "Действия AVALAR", "Инфраструктурные действия внешнего сервиса.", "Инфраструктура", "PANEL_AVALAR_ACTIONS_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_stage_backup", "Резервная копия AVALAR Stage", "Разрешение фиксированного проверяемого backup-транспорта перед deploy Stage.", "Инфраструктура", "PANEL_AVALAR_STAGE_BACKUP_ENABLED", "immediate", "none"),
     CapabilityDefinition("avalar_smoke", "Проверка AVALAR", "Smoke-проверка инфраструктуры AVALAR.", "Инфраструктура", "PANEL_AVALAR_SMOKE_ENABLED", "immediate", "none"),

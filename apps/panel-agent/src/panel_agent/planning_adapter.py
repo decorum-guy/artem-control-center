@@ -3483,7 +3483,7 @@ def _status_has_unrepresented_operational_health(
             and not represented_codes.intersection(_PLANNING_OPERATIONAL_CONDITION_CODES["backup"])
         )
         or (
-            health.lastRestoreVerificationStatus not in {"ok", "unknown", "disabled"}
+            health.lastRestoreVerificationStatus not in {"ok", "success", "unknown", "disabled"}
             and not represented_codes.intersection(_PLANNING_OPERATIONAL_CONDITION_CODES["restore"])
         )
         or (

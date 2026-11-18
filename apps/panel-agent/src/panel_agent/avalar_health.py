@@ -32,6 +32,12 @@ AVALAR_LEGACY_SERVICE_ID_BY_TARGET = {
 AvalarTarget = Literal["main", "stage"]
 AvalarHealthOutcome = Literal["live", "unavailable"]
 
+AVALAR_HEALTH_REASONS = {
+    "avalar_health_forbidden": "Доступ к проверке приложения ограничен (HTTP 403)",
+    "avalar_health_missing": "Маршрут проверки приложения отсутствует (HTTP 404)",
+    "avalar_stage_not_ready": "Приложение закрытого Stage не прошло проверку готовности по SSH",
+}
+
 
 @dataclass(frozen=True)
 class AvalarHealthProbeResult:
@@ -41,6 +47,9 @@ class AvalarHealthProbeResult:
     health: Literal["healthy", "degraded"] | None = None
     summary: str = "Health endpoint unavailable"
     latency_ms: int | None = None
+    error_code: str | None = None
+    http_status: int | None = None
+    both_forbidden: bool = False
 
 
 def avalar_target_for_url_env(url_env: str) -> AvalarTarget | None:
@@ -96,6 +105,14 @@ async def probe_avalar_health(
                 client.get("/health/live"),
                 client.get("/health/ready"),
             )
+        statuses = {live_response.status_code, ready_response.status_code}
+        for status, reason in ((403, "avalar_health_forbidden"), (404, "avalar_health_missing")):
+            if status in statuses:
+                return AvalarHealthProbeResult(
+                    "live", health="degraded", summary=AVALAR_HEALTH_REASONS[reason],
+                    latency_ms=_bounded_latency_ms(started, clock), error_code=reason,
+                    http_status=status, both_forbidden=statuses == {403},
+                )
         live_payload = _json_object(live_response)
         ready_payload = _json_object(ready_response)
     except (asyncio.TimeoutError, httpx.HTTPError, ValueError, TypeError):

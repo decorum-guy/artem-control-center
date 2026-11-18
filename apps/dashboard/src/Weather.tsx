@@ -84,13 +84,32 @@ function WeatherGlyph({ code, compact = false, phase }: { code: number; compact?
   </span>;
 }
 
-function formatTemperature(value: number): string {
+function formatTemperature(value: number | null): string {
+  if (value == null) return "—";
   return `${Math.round(value)}°`;
 }
 
-function formatClock(value: string): string {
+function formatClock(value: string | null): string {
+  if (!value) return "—";
   const time = value.includes("T") ? value.split("T")[1] : value;
   return time.slice(0, 5);
+}
+
+function RainAmount({ probability, amount }: { probability: number | null; amount?: number | null }) {
+  if (probability != null) {
+    return <span className={probability >= 40 ? "weather-rain-chance--active" : ""}>{probability}%</span>;
+  }
+  return <span title={amount == null ? "Нет данных об осадках" : "Количество осадков"}>{amount == null ? "—" : `${amount.toLocaleString("ru-RU")} мм`}</span>;
+}
+
+function WeatherCredit({ forecast }: { forecast: WeatherForecast }) {
+  return forecast.provider === "metno" ? (
+    <small className="weather-attribution">
+      Прогноз <a href="https://www.met.no/en" target="_blank" rel="noreferrer">MET Norway</a>
+      {" · "}<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>
+      {" · Суточные значения рассчитаны по прогнозу."}
+    </small>
+  ) : <small className="weather-attribution">{forecast.attribution}</small>;
 }
 
 function formatWeekday(value: string, short = false): string {
@@ -110,6 +129,8 @@ function observedTimeLabel(value: string, timezone: string): string {
   if (Number.isNaN(date.getTime())) return "";
   try {
     return new Intl.DateTimeFormat("ru-RU", {
+      day: "numeric",
+      month: "short",
       hour: "2-digit",
       minute: "2-digit",
       timeZone: timezone
@@ -358,9 +379,7 @@ function HourlyForecast({ forecast }: { forecast: WeatherForecast }) {
               <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
               <WeatherGlyph code={hour.weatherCode} compact phase={resolveWeatherHourPhase(hour.time, forecast.daily, forecast.timezone)} />
               <strong>{formatTemperature(hour.temperature)}</strong>
-              <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>
-                {hour.precipitationProbability}%
-              </span>
+              <RainAmount probability={hour.precipitationProbability} amount={hour.precipitation} />
             </article>
           ))}
         </div>
@@ -388,7 +407,7 @@ function DailyForecast({ forecast }: { forecast: WeatherForecast }) {
             </div>
             <WeatherGlyph code={day.weatherCode} compact phase="neutral" />
             <span className="weather-day__condition">{weatherLabel(day.weatherCode)}</span>
-            <span className={day.precipitationProbabilityMax >= 40 ? "weather-rain-chance--active" : ""}>{day.precipitationProbabilityMax}%</span>
+            <RainAmount probability={day.precipitationProbabilityMax} amount={day.precipitationTotal} />
             <div className="weather-day__temperatures"><strong>{formatTemperature(day.temperatureMax)}</strong><span>{formatTemperature(day.temperatureMin)}</span></div>
           </article>
         ))}
@@ -657,8 +676,8 @@ function LegacyWeatherPage() {
               <SunCard forecast={visibleForecast} />
               <section className="weather-source-card">
                 <p className="section-kicker">Источник</p>
-                <h2>Open‑Meteo</h2>
-                <p>{visibleForecast.attribution}. Точка прогноза определяется по сохранённым координатам; свежесть показывается отдельно.</p>
+                <h2>{visibleForecast.provider === "metno" ? "MET Norway" : "Open‑Meteo"}</h2>
+                <WeatherCredit forecast={visibleForecast} />
               </section>
             </aside>
           </div>
@@ -871,7 +890,7 @@ function HourlyForecastV2({ forecast }: { forecast: WeatherForecast }) {
             <time>{index === 0 ? "Сейчас" : formatClock(hour.time)}</time>
             <WeatherGlyph code={hour.weatherCode} compact phase={resolveWeatherHourPhase(hour.time, forecast.daily, forecast.timezone)} />
             <strong>{formatTemperature(hour.temperature)}</strong>
-            <span className={hour.precipitationProbability >= 40 ? "weather-rain-chance--active" : ""}>{hour.precipitationProbability}%</span>
+            <RainAmount probability={hour.precipitationProbability} amount={hour.precipitation} />
           </article>
         ))}
         {!hours.length && <p className="weather-zone-unavailable">Почасовой прогноз недоступен.</p>}
@@ -891,7 +910,7 @@ function WeatherContextZone({ forecast }: { forecast: WeatherForecast }) {
         </div>
       </header>
       <div className="weather-context-rows">
-        {today && (
+        {today && (today.sunrise || today.sunset) && (
           <div className="weather-context-row">
             <span>Световой день</span>
             <strong>{formatClock(today.sunrise)} — {formatClock(today.sunset)}</strong>
@@ -906,6 +925,7 @@ function WeatherContextZone({ forecast }: { forecast: WeatherForecast }) {
           <strong>{forecast.current.precipitation.toFixed(1)} мм</strong>
         </div>
       </div>
+      <WeatherCredit forecast={forecast} />
     </section>
   );
 }
@@ -937,7 +957,7 @@ function DailyForecastV2({ forecast }: { forecast: WeatherForecast }) {
             </div>
             <WeatherGlyph code={day.weatherCode} compact phase="neutral" />
             <span className="weather-day__condition">{weatherLabel(day.weatherCode)}</span>
-            <span className={day.precipitationProbabilityMax >= 40 ? "weather-rain-chance--active" : ""}>{day.precipitationProbabilityMax}%</span>
+            <RainAmount probability={day.precipitationProbabilityMax} amount={day.precipitationTotal} />
             <div className="weather-day__temperatures"><strong>{formatTemperature(day.temperatureMax)}</strong><span>{formatTemperature(day.temperatureMin)}</span></div>
           </article>
         ))}

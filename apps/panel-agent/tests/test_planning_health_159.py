@@ -371,6 +371,22 @@ def test_domain_stale_and_offline_remain_more_severe_than_provider_degradation(t
     assert offline.sourceStatus == "offline"
 
 
+@pytest.mark.parametrize(("result", "has_issue"), [("ok", False), ("success", False), ("failed", True)])
+def test_restore_verification_status_matches_backup_contract(tmp_path, result, has_issue):
+    client = SelectiveRefreshClient()
+    client.health_overrides = {"lastRestoreVerificationStatus": result}
+    adapter = make_adapter(tmp_path, client, [0.0])
+
+    async def exercise():
+        await adapter.start()
+        try:
+            return adapter.projection.health.issues
+        finally:
+            await adapter.close()
+
+    assert any(issue.source == "planning-status" for issue in asyncio.run(exercise())) is has_issue
+
+
 def test_operational_health_remains_degraded_independently_of_provider(tmp_path):
     client = SelectiveRefreshClient()
     client.provider_status = "current"

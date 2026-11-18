@@ -94,6 +94,9 @@ class AvalarSshDetailsAdapter:
             for service_id, operation in _OPERATIONS.items():
                 try:
                     payload = await self._command_runner(operation)
+                    expected = "stage" if operation == "details-stage" else "production"
+                    if payload.get("environment") != expected:
+                        raise SshDetailsError("SSH status returned another environment")
                     self._details[service_id] = _sanitize_payload(payload)
                 except (OSError, ValueError, asyncio.TimeoutError, SshDetailsError):
                     cached = self._details.get(service_id)
@@ -295,6 +298,8 @@ def _sanitize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         if value is not None and not _TIMESTAMP_PATTERN.fullmatch(str(value)):
             raise SshDetailsError(f"SSH details payload has invalid {field}")
     clean = {key: payload.get(key) for key in _ALLOWED_FIELDS}
+    if environment == "stage" and payload.get("application_readiness") in ("ready", "not_ready", "unavailable"):
+        clean["application_readiness"] = payload["application_readiness"]
     clean["details_source"] = "live"
     clean["details_observed_at"] = datetime.now(timezone.utc).isoformat()
     return clean

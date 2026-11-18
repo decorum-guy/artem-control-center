@@ -139,6 +139,10 @@ that represent production service identity use the canonical IDs.
 The table is a historical/internal compatibility mapping, not a second
 production identity source. Unknown or unrelated service IDs are not rewritten.
 
+## Monitoring a private Stage
+
+Configure the public Main and Stage base URLs and the existing status-only SSH identity. On a Stage protected by the hosting access policy, `PANEL_AVALAR_STAGE_PRIVATE_HEALTH=true` lets the agent combine HTTP 403 from both fixed probes with a recent application check from the Stage SSH adapter. The host runs its deployed PHP live and ready checks and returns a bounded result. The panel exposes the HTTP status and the source of the readiness observation. Missing routes, stale SSH data, mixed HTTP results and a failed application check remain visible. Main uses the public HTTPS contract.
+
 ## Backup boundary
 
 Backup execution is not implemented by this cutover. Issue #8 remains the

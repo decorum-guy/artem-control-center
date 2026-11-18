@@ -1380,6 +1380,7 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "coffee_notification_writes": SETTINGS.coffee_notification_writes_enabled,
         "coffee_actions": SETTINGS.coffee_actions_enabled,
         "avalar_ssh": SETTINGS.avalar_ssh_enabled,
+        "avalar_private_stage_health": SETTINGS.avalar_stage_private_health,
             "avalar_actions": SETTINGS.avalar_actions_enabled,
             "avalar_stage_backup": SETTINGS.avalar_stage_backup_enabled,
         "avalar_smoke": SETTINGS.avalar_smoke_enabled,
