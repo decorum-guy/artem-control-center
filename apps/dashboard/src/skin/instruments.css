@@ -139,8 +139,8 @@ html[data-skin="v3"] .station-presets__secondary { display: inline-flex; align-i
 }
 
 html[data-skin="v3"] .kettle-control:is(.kettle-control--home, .kettle-control--overview) {
-  --cc-gauge-size: 140.8px;
-  --cc-kettle-value-size: 44px;
+  --cc-gauge-size: 128px;
+  --cc-kettle-value-size: 40px;
   container: kettle / inline-size;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(var(--cc-gauge-size), 1fr);

@@ -81,8 +81,8 @@ for (const width of [1280, 720]) {
           controlsFit: buttons.every(b => b.height >= 48 && b.width >= 48 && b.left >= rect.left && b.right <= rect.right && b.bottom <= rect.bottom + 1),
           clipped: el.scrollHeight > el.clientHeight + 1 || dial.top < rect.top || dial.bottom > rect.bottom };
       });
-      expect(geometry.size).toBeGreaterThanOrEqual(128);
-      expect(geometry.value).toBeGreaterThanOrEqual(40);
+      expect(geometry.size).toBeCloseTo(128, 1);
+      expect(geometry.value).toBe(40);
       expect(geometry.center).toBeGreaterThan(.70);
       expect(geometry.center).toBeLessThan(.78);
       expect(geometry.controlsFit).toBe(true);
