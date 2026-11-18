@@ -182,6 +182,7 @@ class HttpIntegrationAdapter:
             ),
             data={
                 "role": "telegram-workflow",
+                "maintenanceTarget": "bot",
                 "coffeeDeviceAuthority": False,
                 "coffeeTimingAuthority": False,
                 "homeAssistant": details.get("home_assistant"),
@@ -210,6 +211,7 @@ def _alice_unavailable(summary: str = "Health adapter not configured") -> Servic
         ),
         data={
             "role": "telegram-workflow",
+            "maintenanceTarget": "bot",
             "coffeeDeviceAuthority": False,
             "coffeeTimingAuthority": False,
         },

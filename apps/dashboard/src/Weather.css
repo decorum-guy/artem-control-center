@@ -442,6 +442,7 @@
 .weather-search-results button:hover { border-color: var(--border); background: var(--surface-hover); }
 .weather-search-results button span { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .weather-search-results > p { margin: 8px 0; font-size: 12px; }
+.weather-freshness small a, .weather-attribution a { color: inherit; text-underline-offset: .18em; }
 .weather-attribution { display: block; margin-top: 12px; color: var(--text-muted); font-size: 12px; }
 .weather-inline-error { margin: 8px 0 0; padding: 9px 11px; border-radius: var(--radius-control); color: var(--danger); background: var(--danger-soft); font-size: 12px; }
 

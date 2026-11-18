@@ -78,6 +78,7 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "planning.calendar_sources.refresh": "standard",
     "settings.ai.providers": "standard",
     "settings.reminder_delivery": "standard",
+    "settings.appearance": "standard",
     "settings.interface_copy": "standard",
     "settings.device_visibility": "standard",
     "settings.capabilities.manage": "full",

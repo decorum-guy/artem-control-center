@@ -57,19 +57,19 @@ function fixture({ imageAfter = AFTER, health = "healthy", readinessUrl = "", co
 echo "$*" >> "$LOG"
 if [[ "$1" == inspect && "$2" == --format ]]; then
   case "$3" in
-    '{{.Image}}') echo '${BEFORE}' ;;
+    '{{.Image}}') if grep -q 'force-recreate' "$LOG"; then echo '${imageAfter}'; else echo '${BEFORE}'; fi ;;
     '{{.State.Running}}') echo true ;;
     '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}') echo '${health}' ;;
     '{{.Config.Image}}') echo ghcr.io/home-assistant/home-assistant:stable ;;
   esac
   exit 0
 fi
+if [[ "$1" == image && "$2" == inspect ]]; then echo '${imageAfter}'; exit 0; fi
 if [[ "$1" == exec ]]; then echo 2026.1.0; exit 0; fi
 if [[ "$1" == compose ]]; then
   [[ "\${COMPOSE_FAIL:-}" == 1 ]] && exit 1
   case " $* " in
     *' ps -q '*) [[ "\${MISSING_SERVICE:-}" == 1 ]] || echo container-ha ;;
-    *' images -q '*) echo '${imageAfter}' ;;
   esac
   exit 0
 fi

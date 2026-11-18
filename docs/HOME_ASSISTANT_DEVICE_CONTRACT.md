@@ -269,7 +269,9 @@ to that helper as an OpenSSH forced command. Its `authorized_keys` entry must
 use the equivalent of `restrict,command="/usr/local/lib/artem-control-center/home-maintenance"`
 plus explicit `no-pty,no-agent-forwarding,no-X11-forwarding,no-port-forwarding`;
 it grants no arbitrary shell. The helper validates `SSH_ORIGINAL_COMMAND` as
-exactly one fixed operation token. The root-owned
+exactly one fixed operation token. The optional `COMPOSE_OVERLAY` preserves the deployed networking when updating the HA service. Set `PANEL_HOME_SERVER_CADDY_RESTART_ENABLED=false` on the panel and `CADDY_MAINTENANCE_ENABLED=no` on the host to scope controls to HA and the Telegram bot. When the containers have no Docker health check, the helper uses their configured local readiness URLs.
+
+The root-owned
 configuration supplies `COMPOSE_PROJECT_DIR`, `COMPOSE_FILE`, three service
 names and optional server-local readiness URLs. It is deliberately not checked
 into this repository. `scripts/windows/setup-home-server-ssh.ps1` creates

@@ -78,6 +78,7 @@ class IntegrationSettings:
     todoist_enabled: bool | None = None
     todoist_writes_enabled: bool = False
     home_server_maintenance_enabled: bool = False
+    home_server_caddy_restart_enabled: bool = True
     home_server_ssh_host: str = ""
     home_server_ssh_user: str = ""
     home_server_ssh_identity_file: str = ""
@@ -342,6 +343,7 @@ class IntegrationSettings:
                 if "PANEL_TODOIST_ENABLED" in os.environ else None
             ),
             todoist_writes_enabled=_bool_env("PANEL_TODOIST_WRITES_ENABLED", False),
+            home_server_caddy_restart_enabled=_bool_env("PANEL_HOME_SERVER_CADDY_RESTART_ENABLED", True),
             home_server_maintenance_enabled=_bool_env(
                 "PANEL_HOME_SERVER_MAINTENANCE_ENABLED",
                 False,

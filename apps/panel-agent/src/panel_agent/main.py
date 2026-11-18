@@ -57,6 +57,7 @@ from .project_registry_migration import (
     CANONICAL_AVALAR_PROJECT_ID,
     ensure_canonical_avalar_project,
 )
+from .appearance import build_appearance_router
 from .runtime_control import router as runtime_control_router
 from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
@@ -327,6 +328,7 @@ app.include_router(
     )
 )
 app.include_router(runtime_control_router)
+app.include_router(build_appearance_router(lambda: _write_allowed(True)))
 app.include_router(
     build_system_controls_router(
         system_controls,
@@ -1375,7 +1377,8 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "planning_calendar_mutations": SETTINGS.panel_planning_calendar_mutations_enabled,
         "planning_provider_calendar_mutations": SETTINGS.panel_planning_provider_calendar_mutations_enabled,
             "panel_writes": SETTINGS.writes_enabled,
-            "home_server_maintenance": SETTINGS.home_server_maintenance_enabled,
+        "home_server_maintenance": SETTINGS.home_server_maintenance_enabled,
+        "home_server_caddy_restart": SETTINGS.home_server_caddy_restart_enabled,
         "coffee_timing_writes": SETTINGS.coffee_timing_writes_enabled,
         "coffee_notification_writes": SETTINGS.coffee_notification_writes_enabled,
         "coffee_actions": SETTINGS.coffee_actions_enabled,

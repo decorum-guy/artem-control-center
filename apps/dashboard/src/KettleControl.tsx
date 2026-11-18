@@ -127,7 +127,7 @@ export function KettleControl({ service, variant = "home", interactive = true }:
 
   return <section className={`kettle-control kettle-control--${variant}`} data-testid="kettle-control" data-instrument-active={v3VisualSkinEnabled ? Boolean(live && data.stage === "on") : undefined} aria-label="Чайник">
     <h2>Чайник</h2>
-    <p className="kettle-control__temperature-label" aria-hidden="true">Текущая температура:</p>
+    <p className="kettle-control__temperature-label" aria-hidden="true">{v3VisualSkinEnabled && variant === "home" ? "Температура воды" : "Текущая температура:"}</p>
     <div className="kettle-control__temperature" data-testid="kettle-current-temperature" aria-label={`Текущая температура воды ${currentTemperature}`}>
       {v3VisualSkinEnabled ? <TemperatureGauge value={data.currentTemperature} tone="heat" label="Температура воды"
         reading={live && typeof data.currentTemperature === "number" ? { kind: "progress", fraction: data.currentTemperature / 100 } : { kind: "unavailable" }} /> : currentTemperature}

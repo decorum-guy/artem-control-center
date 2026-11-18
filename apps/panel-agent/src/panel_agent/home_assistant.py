@@ -486,6 +486,7 @@ class HomeAssistantAdapter:
                 ),
                 data={
                     "adapter": "home-assistant-rest-websocket",
+                    "maintenanceTarget": "homeAssistant",
                     "missingEntities": missing,
                     "writesEnabled": self._settings.writes_enabled,
                     "transport": {

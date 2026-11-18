@@ -91,6 +91,42 @@ async def _read_limited(stream: asyncio.StreamReader | None, limit: int) -> byte
             raise HomeServerMaintenanceError("ssh_output_too_large")
 
 
+async def _terminal_status(stream: asyncio.StreamReader, operation: str, limit: int) -> int | None:
+    remaining = limit
+    while line := await stream.readline():
+        remaining -= len(line)
+        if remaining < 0:
+            raise HomeServerMaintenanceError("ssh_output_too_large")
+        if line.startswith(b"__ARTEM_HOME_RESULT__"):
+            parts = line.split()
+            if (len(parts) != 3 or parts[0] != b"__ARTEM_HOME_RESULT__" or parts[1] != operation.encode()
+                    or not re.fullmatch(rb"[0-9]{1,3}", parts[2]) or int(parts[2]) > 255 or not line.endswith(b"\n")):
+                raise HomeServerMaintenanceError("ssh_invalid_response")
+            return int(parts[2])
+    return None
+
+
+async def _read_ssh_result(process, operation: str, limit: int) -> tuple[bytes, int]:
+    # The old helper relies on EOF and the SSH exit code. A newer host can
+    # attest completion before the Windows SSH process releases its pipes.
+    readers = [asyncio.create_task(process.stdout.readline()),
+               asyncio.create_task(_terminal_status(process.stderr, operation, limit))]
+    try:
+        stdout, code = await asyncio.gather(*readers)
+        if len(stdout) > limit:
+            raise HomeServerMaintenanceError("ssh_output_too_large")
+        if code is None:
+            stdout += await _read_limited(process.stdout, limit - len(stdout))
+            code = await process.wait()
+        return stdout, code
+    except (ValueError, asyncio.LimitOverrunError):
+        raise HomeServerMaintenanceError("ssh_output_too_large") from None
+    finally:
+        for reader in readers:
+            reader.cancel()
+        await asyncio.gather(*readers, return_exceptions=True)
+
+
 @dataclass
 class _Execution:
     request_id: str
@@ -141,22 +177,23 @@ class HomeServerSshTransport:
         if not executable:
             raise HomeServerMaintenanceError("ssh_client_unavailable")
         try:
-            process = await asyncio.create_subprocess_exec(*self.argv(executable, operation), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            process = await asyncio.create_subprocess_exec(*self.argv(executable, operation), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=self.output_limit + 1)
         except FileNotFoundError:
             raise HomeServerMaintenanceError("ssh_client_unavailable") from None
         except (OSError, ValueError):
             raise HomeServerMaintenanceError("ssh_transport_failed") from None
-        reads = (asyncio.create_task(_read_limited(process.stdout, self.output_limit)), asyncio.create_task(_read_limited(process.stderr, self.output_limit)), asyncio.create_task(process.wait()))
         try:
-            stdout, _stderr, returncode = await asyncio.wait_for(asyncio.gather(*reads), timeout=self.command_timeout)
+            timeout = min(20, self.command_timeout) if operation == "status" else self.command_timeout
+            stdout, returncode = await asyncio.wait_for(_read_ssh_result(process, operation, self.output_limit), timeout)
         except asyncio.TimeoutError:
-            process.kill()
-            await asyncio.gather(process.wait(), *reads, return_exceptions=True)
             raise HomeServerMaintenanceError("ssh_timeout") from None
-        except HomeServerMaintenanceError:
-            process.kill()
-            await asyncio.gather(process.wait(), *reads, return_exceptions=True)
-            raise
+        finally:
+            if process.returncode is None:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.wait()
         if returncode != 0:
             raise HomeServerMaintenanceError(_safe_helper_failure(stdout))
         try:
@@ -197,8 +234,9 @@ class HomeServerMaintenanceExecutor:
                 pass
         actions = {}
         for action in MAINTENANCE_ACTION_IDS:
-            decision = self.access.authorize(action, gate_enabled=self._gate(), integration_available=configured and reachable, busy=self.active_request_id is not None)
-            actions[action] = {**decision.as_dict(), "gateEnabled": self._gate(), "integrationAvailable": configured and reachable, "busy": self.active_request_id is not None, "preconditionOk": True}
+            gate = self._gate() and (action != RESTART_CADDY_ACTION or self.settings.home_server_caddy_restart_enabled)
+            decision = self.access.authorize(action, gate_enabled=gate, integration_available=configured and reachable, busy=self.active_request_id is not None)
+            actions[action] = {**decision.as_dict(), "gateEnabled": gate, "integrationAvailable": configured and reachable, "busy": self.active_request_id is not None, "preconditionOk": True}
         return {"schemaVersion": 1, "configured": configured, "reachable": reachable, "maintenanceGateEnabled": self.settings.home_server_maintenance_enabled, "busy": self.active_request_id is not None, "services": services, "actions": actions}
 
     async def submit(self, request: HomeServerMaintenanceRequest) -> tuple[dict[str, Any], bool]:

@@ -71,3 +71,25 @@ test("long, fractional and missing kettle readings stay inside the ring", async 
     await verifyDialClearance(gauge);
   }
 });
+
+test("a fresh kiosk picks up the last palette from Panel Agent", async ({ browser, request, baseURL }) => {
+  const sample = await (await request.get("/api/v1/snapshot?scenario=ha-healthy")).json();
+  sample.mode = "production";
+  let saved = { accent: "iris", colorMode: "night" };
+  for (const cold of [false, true]) {
+    const context = await browser.newContext({ baseURL });
+    await context.route("**/api/v1/snapshot?*", route => route.fulfill({ json: sample }));
+    await context.route("**/api/v1/settings/appearance", async route => {
+      if (route.request().method() === "PATCH") saved = { ...saved, ...route.request().postDataJSON() };
+      await route.fulfill({ json: saved });
+    });
+    const page = await context.newPage();
+    await page.goto("/settings?motion=reduced");
+    await expect(page.locator("html")).toHaveAttribute("data-accent", cold ? "rose" : "iris");
+    if (!cold) {
+      await page.locator('[data-accent-swatch="rose"]').click();
+      await expect.poll(() => saved.accent).toBe("rose");
+    }
+    await context.close();
+  }
+});

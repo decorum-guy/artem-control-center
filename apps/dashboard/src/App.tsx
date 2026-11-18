@@ -1,6 +1,6 @@
 import { flushSync } from "react-dom";
 import { SelectField } from "./ui/SelectField";
-import { readAccent, persistAccent, readColorMode, persistColorMode, type Accent } from "./skin/accent";
+import { readAccent, persistAccent, readColorMode, persistColorMode, explicitlyStoredAppearance, loadAppearance, saveAppearance, type Appearance, type Accent } from "./skin/accent";
 import { BootScreen } from "./ui/States";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fixtureScenarios } from "@artem/config";
@@ -231,14 +231,50 @@ export function App() {
     return () => { delete document.documentElement.dataset.accent; };
   }, [accent]);
 
+  const durableAppearance = v3VisualSkinEnabled && snapshot?.mode === "production";
+  const chosen = useRef<Appearance>({});
+  const pendingAppearance = useRef(Promise.resolve());
+  const writeAppearance = useCallback((change: Appearance) => {
+    pendingAppearance.current = pendingAppearance.current.then(() => saveAppearance(change)).catch(() => {
+      showNotice({ id: "appearance-save", severity: "warning", title: "Оформление применено до закрытия панели",
+        detail: "Не удалось сохранить выбор на этом компьютере.", timeoutMs: 6_000 });
+    });
+  }, [showNotice]);
+
+  useEffect(() => {
+    if (!durableAppearance) return;
+    const controller = new AbortController();
+    void loadAppearance(controller.signal).then(saved => {
+      if (controller.signal.aborted) return;
+      const local = explicitlyStoredAppearance();
+      const migration: Appearance = {};
+      if (!chosen.current.accent) {
+        if (saved.accent) { setAccent(saved.accent); persistAccent(saved.accent); }
+        else if (local.accent) migration.accent = local.accent;
+      }
+      if (!chosen.current.colorMode && !querySetting("theme", ["day", "night"] as const, "")) {
+        if (saved.colorMode) { setTheme(saved.colorMode); persistColorMode(saved.colorMode); }
+        else if (local.colorMode) migration.colorMode = local.colorMode;
+      }
+      if (Object.keys(migration).length) writeAppearance(migration);
+    }).catch(() => { /* Stored browser preferences still work while offline. */ });
+    return () => controller.abort();
+  }, [durableAppearance, writeAppearance]);
+
   function changeAccent(next: Accent) {
     setAccent(next);
     persistAccent(next);
+    chosen.current.accent = next;
+    if (durableAppearance) writeAppearance({ accent: next });
   }
 
   function changeTheme(next: Theme) {
     if (next === theme) return;
-    if (v3VisualSkinEnabled) persistColorMode(next);
+    if (v3VisualSkinEnabled) {
+      persistColorMode(next);
+      chosen.current.colorMode = next;
+      if (durableAppearance) writeAppearance({ colorMode: next });
+    }
     if (v3VisualSkinEnabled && motion === "full" && !document.hidden
       && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && document.startViewTransition) {
       document.startViewTransition(() => flushSync(() => setTheme(next)));
