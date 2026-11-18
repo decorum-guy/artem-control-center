@@ -31,7 +31,7 @@ function dueLabel(task: TodoistTask): string {
 export function TodoistTasksPage({ status }: { status: TodoistStatus }) {
   const access = useAccess();
   const { locked, guardMutation } = useInteractionLock();
-  const [view, setView] = useState<TodoistView>("today");
+  const [view, setView] = useState<TodoistView>("all");
   const [project, setProject] = useState("");
   const [projects, setProjects] = useState<TodoistProject[]>([]);
   const [projectError, setProjectError] = useState("");

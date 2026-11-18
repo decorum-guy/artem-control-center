@@ -28,6 +28,24 @@ async function fixtures(page: Page, options: { writes?: boolean; error?: string 
   return calls;
 }
 
+test("Todoist opens all active tasks on entry and restores that view on return", async ({ page }) => {
+  const reads: string[] = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === "/api/v1/todoist/tasks") reads.push(url.searchParams.get("view")!);
+  });
+  await fixtures(page);
+  const period = page.getByLabel("Период задач");
+  await expect(period.getByRole("button", { name: "Все", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await period.getByRole("button", { name: "Сегодня" }).click();
+  await expect.poll(() => reads.at(-1)).toBe("today");
+  await page.goto("/home");
+  await page.goto("/tasks");
+  await expect(period.getByRole("button", { name: "Все", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => reads.at(-1)).toBe("all");
+  expect(reads[0]).toBe("all");
+});
+
 for (const theme of ["day", "night"]) {
   test(`Todoist touch geometry and mutations at 1280x720 ${theme}`, async ({ page }, testInfo) => {
     const calls = await fixtures(page);

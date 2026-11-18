@@ -41,7 +41,10 @@ html[data-skin="v3"] :is(.coffee-activity i, .climate-control__pending-icon,
   .overview-rog-widget__pending-icon) { animation-iteration-count: 2; }
 html[data-skin="v3"]::view-transition-old(root), html[data-skin="v3"]::view-transition-new(root) { animation-duration: 300ms; animation-timing-function: var(--cc-motion-ease); }
 
-.skin-v3 .settings-v2-appearance { grid-template-columns: 1fr; align-items: start; gap: 14px; }
+.skin-v3 .settings-v2-page { display: grid; align-content: start; gap: var(--cc-space-4); }
+.skin-v3 .settings-v2-page > .v2-route-header { margin-bottom: 0; }
+.skin-v3 .settings-v2-summary-grid { margin-top: 0; }
+.skin-v3 .settings-v2-appearance { grid-template-columns: 1fr; align-items: start; gap: 14px; padding-block: 18px; }
 @media (min-width: 1000px) {
   .skin-v3 .settings-v2-appearance__controls {
     grid-template-columns: minmax(144px,.7fr) minmax(234px,1fr) minmax(256px,1.35fr);
