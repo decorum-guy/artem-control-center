@@ -107,6 +107,52 @@ function expectStationGeometryStable(
 }
 
 test.describe("Issue 298 Station Mini 2 owner artwork", () => {
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
+    test(`scrolls genres inside the Music dialog at ${viewport.width}px`, async ({ page }) => {
+      test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
+      await page.setViewportSize(viewport);
+      await installStationAvailability(page);
+      const presets = Array.from({ length: 30 }, (_, i) => ({ id: i.toString(16).padStart(12, "0"), title: `Подборка ${i + 1}` }));
+      let releasePresets!: () => void;
+      const waiting = new Promise<void>(resolve => { releasePresets = resolve; });
+      await page.route("**/api/v1/actions/station/presets", async route => {
+        await waiting;
+        await route.fulfill({ json: { schemaVersion: 1, revision: "r1", updatedAt: "2026-09-27T00:00:00Z", presets } });
+      });
+      await page.goto("/overview?motion=reduced");
+      const music = page.getByRole("button", { name: /Музыка/ });
+      await music.scrollIntoViewIfNeeded();
+      const openerY = (await music.boundingBox())!.y;
+      await music.click();
+      const dialog = page.getByRole("dialog", { name: "Что включить?" });
+      await expect(dialog.getByRole("status")).toHaveText("Загружаем подборки…");
+      const loadingTop = (await dialog.boundingBox())!.y;
+      releasePresets();
+      const rows = dialog.locator(".station-presets__row");
+      await expect(rows).toHaveCount(30);
+      const box = (await dialog.boundingBox())!;
+      expect(box.y).toBeCloseTo(loadingTop, 0);
+      expect(Math.abs(box.x + box.width / 2 - viewport.width / 2)).toBeLessThan(1);
+      expect(Math.abs(box.y + box.height / 2 - viewport.height / 2)).toBeLessThan(1);
+      const heading = dialog.getByRole("heading");
+      const headingY = (await heading.boundingBox())!.y;
+      await rows.first().hover();
+      await page.mouse.wheel(0, 2200);
+      await expect(rows.last()).toBeInViewport();
+      const backgroundY = () => page.locator(".station-mini-widget__music").evaluate(el => el.getBoundingClientRect().y);
+      await page.mouse.wheel(0, 300);
+      await page.mouse.move(6, viewport.height / 2);
+      await page.mouse.wheel(0, -500);
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      expect(await backgroundY()).toBeCloseTo(openerY, 0);
+      expect((await heading.boundingBox())!.y).toBeCloseTo(headingY, 0);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(music).toBeFocused();
+      expect((await music.boundingBox())!.y).toBeCloseTo(openerY, 0);
+    });
+  }
+
   test("keeps Station layout fixed through initial and repeated action lifecycles", async ({ page }) => {
     test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
     await page.setViewportSize({ width: 1280, height: 720 });
@@ -518,7 +564,7 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
     expect(executedRequestId).toMatch(/^[0-9a-f-]{36}$/i);
     await expect(widget.locator(".station-mini-widget__glow--active")).toHaveCount(1);
     await expect(widget.locator(".station-mini-widget__glow")).toHaveCount(1);
-    await expect(widget.getByRole("button", { name: "Play" })).toHaveAttribute("aria-busy", "true");
+    await expect(widget.locator('button[aria-label="Play"]')).toHaveAttribute("aria-busy", "true");
     const pending = await readStationGeometry(page);
     const early = await page.waitForTimeout(150).then(() => readStationGeometry(page));
     expectStationGeometryStable(before, pending, "preset pending");

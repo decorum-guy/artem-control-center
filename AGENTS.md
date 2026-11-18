@@ -25,7 +25,7 @@ template, использовать декоративные gradient blobs, по
 fake metrics или marketing hero copy.
 
 Редизайн V3 «Кабина» (решение владельца от 17.11.2026, флаг сборки
-`VITE_V3_VISUAL_SKIN`, по умолчанию выключен): свечение, градиенты и имитация стекла
+`VITE_V3_VISUAL_SKIN`, включён в штатной production-сборке по решению от 18.11.2026): свечение, градиенты и имитация стекла
 допустимы только в границах `docs/design/control-center-v3/DESIGN_SPEC.md`, где свет
 означает состояние. План, статус и решения: `docs/design/control-center-v3/ROADMAP.md`.
 

@@ -18,7 +18,9 @@ The production runtime:
 Every installer/update build invokes `npm run build:production`. That command
 applies the source-controlled `accepted-v2` frontend profile, so the Samsung
 does not need any `VITE_*` variables in its local runtime configuration. The
-profile enables accepted V2 presentation, Planning routes and B4 browser
+profile defaults to the V3 Cabin appearance on the V2 shell. To build with
+the V2 appearance, set `VITE_V3_VISUAL_SKIN=false` in the build environment.
+The profile enables Planning routes and B4 browser
 writer surfaces, and the reviewed touch lock. Panel Agent `PANEL_*` runtime
 settings remain independent server-side authorization, integration and safety
 controls.
@@ -79,7 +81,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\instal
 The installer:
 
 1. stops the legacy fixture launcher if present;
-2. runs repository setup and builds the accepted V2 production dashboard;
+2. runs repository setup and builds the dashboard with the production profile;
 3. creates a safe local `runtime.env` only when one does not exist;
 4. applies Edge kiosk policies;
 5. registers the `Artem Control Center Runtime` logon task;
@@ -153,7 +155,7 @@ fetch main
 → npm ci
 → setup Python dependencies
 → full read-only validation
-→ accepted V2 production dashboard build
+→ production dashboard build
 → production start and health check
 → record last-known-good commit
 ```

@@ -49,7 +49,8 @@ async function verifyDialClearance(gauges: Locator) {
   const gaps = await gauges.evaluateAll(nodes => nodes.map(node => {
     const rect = node.getBoundingClientRect();
     const face = node.querySelector("circle")!;
-    const radius = Number(face.getAttribute("r")) - Number(face.getAttribute("stroke-width"))/2;
+    const radius = (Number(face.getAttribute("r")) - Number(face.getAttribute("stroke-width")) / 2)
+      * rect.width / face.ownerSVGElement!.viewBox.baseVal.width;
     const range = document.createRange(); range.selectNodeContents(node.querySelector(".cc-gauge-center")!);
     const text = range.getBoundingClientRect();
     return radius - Math.max(...[text.left,text.right].flatMap(x => [text.top,text.bottom].map(y =>

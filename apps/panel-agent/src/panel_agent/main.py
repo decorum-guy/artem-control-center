@@ -1415,6 +1415,9 @@ def _capability_inventory() -> dict:
             active = active_build[definition.id]
             desired = overrides.get(definition.id, configured)
         elif definition.technical_flag.startswith("VITE_"):
+            # Older manifests recorded the shell but did not identify its skin.
+            if definition.technical_flag not in build_flags:
+                continue
             active = desired = build_flags[definition.technical_flag]
         else:
             active = desired = _read_only_capability_enabled(definition.id)

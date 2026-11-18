@@ -70,6 +70,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("planning_calendar_route", "Раздел «Календарь»", "Доступность раздела календаря в панели.", "Планирование", "VITE_PLANNING_CALENDAR_ROUTE_ENABLED", "delayed", "rebuild", True),
     CapabilityDefinition("planning_reminders_route", "Раздел «Напоминания»", "Доступность раздела напоминаний в панели.", "Планирование", "VITE_PLANNING_REMINDERS_ROUTE_ENABLED", "delayed", "rebuild", True),
     CapabilityDefinition("v2_visual_shell", "Новая оболочка панели", "Основная оболочка интерфейса.", "Интерфейс", "VITE_V2_VISUAL_SHELL", "delayed", "rebuild"),
+    CapabilityDefinition("v3_visual_skin", "Оформление «Кабина»", "Визуальное оформление V3 в установленной сборке.", "Интерфейс", "VITE_V3_VISUAL_SKIN", "delayed", "rebuild"),
     CapabilityDefinition("overview_v2", "Главный экран V2", "Базовая версия главного экрана.", "Интерфейс", "VITE_OVERVIEW_V2_ENABLED", "delayed", "rebuild"),
     CapabilityDefinition("overview_editor_ui", "Поддержка редактора главного экрана", "Сборка интерфейса редактора главного экрана.", "Интерфейс", "VITE_OVERVIEW_EDITOR_ENABLED", "delayed", "rebuild"),
     CapabilityDefinition("planning_reminder_mutations_ui", "Поддержка изменения напоминаний", "Сборка интерфейса для изменения напоминаний.", "Планирование", "VITE_PLANNING_REMINDER_MUTATIONS_ENABLED", "delayed", "rebuild"),
