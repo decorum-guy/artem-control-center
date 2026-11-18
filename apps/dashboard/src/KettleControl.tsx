@@ -5,6 +5,7 @@ import type { KettleData, ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { useInteractionLock } from "./InteractionLock";
 import { useNoticeCenter } from "./NoticeCenter";
+import { DialogFrame } from "./DialogFrame";
 import {
   executeHomeAssistantAction, fetchHomeAssistantActionAvailability,
   HOME_KETTLE_BOIL, HOME_KETTLE_SET_TEA_MODE, HOME_KETTLE_STOP, newHomeAssistantRequestId,
@@ -49,6 +50,7 @@ export function KettleControl({ service, variant = "home", interactive = true }:
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selected, setSelected] = useState<KettleTeaMode | null>(null);
   const wheelRef = useRef<HTMLDivElement>(null);
+  const pickerButtonRef = useRef<HTMLButtonElement>(null);
   const options = useMemo(() => teaOrder.filter((mode) => data.availableTeaModes?.includes(mode)), [data.availableTeaModes]);
   const live = service.health === "healthy" && data.available && !data.stale && data.stage !== "unavailable";
   const primaryAction = data.stage === "on" ? HOME_KETTLE_STOP : HOME_KETTLE_BOIL;
@@ -72,13 +74,6 @@ export function KettleControl({ service, variant = "home", interactive = true }:
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !pendingRef.current) setPickerOpen(false); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [pickerOpen]);
-
   const canUse = (actionId: KettleActionId) => {
     const decision = availability?.actions[actionId];
     return Boolean(interactive && live && !locked && !pending && decision && (decision.allowed || decision.availability === "elevation_required"));
@@ -135,17 +130,30 @@ export function KettleControl({ service, variant = "home", interactive = true }:
     <p className="kettle-control__status" role="status">{status(data, service)}</p>
     <div className="kettle-control__actions">
       <button type="button" disabled={!canUse(primaryAction)} onClick={() => void run(primaryAction)}>{primaryAction === HOME_KETTLE_STOP ? "Остановить" : "Включить"}</button>
-      <button type="button" disabled={!canUse(HOME_KETTLE_SET_TEA_MODE) || options.length === 0} onClick={openPicker}>Выбрать чай</button>
+      <button ref={pickerButtonRef} type="button" aria-haspopup="dialog" disabled={!canUse(HOME_KETTLE_SET_TEA_MODE) || options.length === 0} onClick={openPicker}>Выбрать чай</button>
     </div>
     {!live && <p className="kettle-control__notice">Управление отключено до подтверждения свежего состояния.</p>}
-    {pickerOpen && interactive && <div className="kettle-picker-backdrop" onClick={() => { if (!pending) setPickerOpen(false); }}>
-      <div className="kettle-picker" role="dialog" aria-modal="true" aria-labelledby="kettle-picker-title" onClick={(event) => event.stopPropagation()}>
-        <div className="kettle-picker__header"><h3 id="kettle-picker-title">Выбрать чай</h3><button type="button" aria-label="Закрыть" disabled={pending} onClick={() => setPickerOpen(false)}>Закрыть</button></div>
-        <div className="kettle-picker__wheel" ref={wheelRef} onScroll={onWheelScroll} aria-label="Виды чая">
-          {options.map((mode) => <button key={mode} type="button" className="kettle-picker__option" aria-selected={selected === mode} onClick={() => { if (wheelRef.current) wheelRef.current.scrollTop = options.indexOf(mode) * rowHeight; setSelected(mode); }}>{kettleTeaLabels[mode]}</button>)}
-        </div>
-        <div className="kettle-picker__actions"><button type="button" disabled={pending} onClick={() => setPickerOpen(false)}>Отмена</button><button type="button" className="kettle-picker__start" disabled={pending || !selected || !canUse(HOME_KETTLE_SET_TEA_MODE)} onClick={() => { if (selected) void run(HOME_KETTLE_SET_TEA_MODE, selected); }}>Запустить</button></div>
+    {pickerOpen && interactive && <DialogFrame
+      title="Выбрать чай"
+      className="kettle-picker"
+      restoreFocusRef={pickerButtonRef}
+      onClose={() => setPickerOpen(false)}
+      canClose={() => !pendingRef.current}
+      footer={<div className="kettle-picker__actions">
+        <button type="button" disabled={pending} onClick={() => setPickerOpen(false)}>Отмена</button>
+        <button type="button" className="kettle-picker__start"
+          disabled={!selected || !options.includes(selected) || !canUse(HOME_KETTLE_SET_TEA_MODE)}
+          onClick={() => { if (selected) void run(HOME_KETTLE_SET_TEA_MODE, selected); }}>Запустить</button>
+      </div>}
+    >
+      <div className="kettle-picker__wheel" ref={wheelRef} onScroll={onWheelScroll} role="group" aria-label="Виды чая">
+        {options.map((mode, index) => <button key={mode} type="button" className="kettle-picker__option"
+          aria-pressed={selected === mode} disabled={pending}
+          onClick={() => {
+            if (wheelRef.current) wheelRef.current.scrollTop = index * rowHeight;
+            setSelected(mode);
+          }}>{kettleTeaLabels[mode]}</button>)}
       </div>
-    </div>}
+    </DialogFrame>}
   </section>;
 }

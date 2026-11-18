@@ -32,6 +32,24 @@
   border-bottom: 1px solid var(--cc-divider); gap: 12px; align-items: center;
 }
 .skin-v3 .system-problem-history time { font: 400 12px/1.5 var(--cc-font-mono); color: var(--cc-text-secondary); }
+.skin-v3 .system-primary-zone--runtime .system-runtime-workzone > .runtime-controls {
+  align-items: center;
+  justify-content: center;
+  gap: var(--cc-space-2);
+  text-align: center;
+}
+.skin-v3 .system-primary-zone--runtime .runtime-control-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: min(100%, 32rem);
+}
+.skin-v3 .system-primary-zone--runtime .runtime-control-actions button {
+  min-width: 0;
+  padding: 4px 8px;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
 .skin-v3 .backups-work-zone { max-width: 64rem; }
 .skin-v3 .backups-card__header h2 { font: 450 clamp(30px,4vw,48px)/1.1 var(--cc-font-family); letter-spacing: -.055em; }
 .skin-v3 .backups-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1px; background: var(--cc-divider); overflow: hidden; border: 1px solid var(--cc-border); border-radius: var(--cc-radius-surface); }

@@ -3,6 +3,8 @@
 Todoist is an opt-in authoritative source for `/tasks`. It has its own typed
 Panel Agent adapter, resource IDs and API; it never enters Planning UUID models.
 Calendar, Reminders and the Overview `Дела` slice continue using Planning.
+Opening Tasks selects «Все» across all projects. The period and project filters
+apply while the page is open. Returning to Tasks starts with «Все» again.
 The Todoist source is shown explicitly on the Tasks page. No public endpoint,
 VPS relay, Caddy change or AliceTG_Bot configuration is required.
 

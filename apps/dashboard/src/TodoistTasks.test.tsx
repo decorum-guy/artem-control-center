@@ -36,6 +36,8 @@ test("loading then escaped rows, real projects and priority p1", async () => {
   let resolve!: (result: typeof page) => void;
   vi.mocked(client.todoistTasks).mockReturnValue(new Promise((done) => { resolve = done; }));
   await mount(); expect(host.textContent).toContain("Обновляем");
+  expect(client.todoistTasks).toHaveBeenCalledWith("all", "", undefined);
+  expect(button("Все").getAttribute("aria-pressed")).toBe("true");
   await act(async () => resolve(page));
   expect(host.textContent).toContain("P1 · Home"); expect(host.querySelector("script")).toBeNull();
 });
@@ -73,7 +75,7 @@ test("quota rejection keeps the draft and does not retry reads or writes", async
 test("cursor pages deduplicate task IDs", async () => {
   vi.mocked(client.todoistTasks).mockResolvedValueOnce({ ...page, nextCursor: "next" }).mockResolvedValueOnce(page);
   await mount(); await click("Загрузить ещё");
-  expect(client.todoistTasks).toHaveBeenLastCalledWith("today", "", "next"); expect(host.querySelectorAll("li")).toHaveLength(1);
+  expect(client.todoistTasks).toHaveBeenLastCalledWith("all", "", "next"); expect(host.querySelectorAll("li")).toHaveLength(1);
 });
 test("disabled Todoist preserves legacy fallback", async () => {
   vi.mocked(client.todoistStatus).mockResolvedValue({ ...status, enabled: false, activeSource: "planning" });

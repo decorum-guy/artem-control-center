@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.skip(process.env.VITE_V2_VISUAL_SHELL !== "true" || process.env.VITE_V3_VISUAL_SKIN !== "true",
-  "Jarvis artwork and image variants belong to the Cabin profile.");
+  "These layouts belong to the Cabin profile.");
 
 for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
   test(`climate labels and availability fit the Overview tile at ${viewport.width}×${viewport.height}`, async ({ page }) => {
@@ -138,6 +138,95 @@ for (const width of [1280, 720]) {
       for (const gap of geometry.gaps) expect(gap).toBeCloseTo(8, 0);
       for (const dy of geometry.centers) expect(Math.abs(dy)).toBeLessThan(1);
       expect(geometry.smallestTarget).toBeGreaterThanOrEqual(48);
+      if (variant === "home") {
+        const filters = await card.locator(".climate-control__select-label button").evaluateAll(buttons =>
+          buttons.map(button => {
+            const field = button.getBoundingClientRect();
+            const row = button.closest(".climate-control__controls")!.getBoundingClientRect();
+            return { width: field.width, rowWidth: row.width, height: field.height };
+          }));
+        expect(filters).toHaveLength(2);
+        for (const filter of filters) {
+          expect(filter.width).toBeLessThan(filter.rowWidth * .9);
+          expect(filter.height).toBeGreaterThanOrEqual(48);
+        }
+      }
     }
+  });
+}
+
+for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
+  test(`settings cards have equal gaps and panel actions are centered at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/settings?motion=reduced");
+    const gaps = await page.getByTestId("route-settings").evaluate(root => {
+      const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
+      const appearance = box(".settings-v2-appearance");
+      const sound = box(".settings-system-controls");
+      return [sound.top - appearance.bottom, box(".settings-v2-summary-grid").top - sound.bottom];
+    });
+    expect(gaps[0]).toBeGreaterThanOrEqual(12);
+    expect(gaps[1]).toBeCloseTo(gaps[0], 0);
+
+    await page.goto("/system?motion=reduced");
+    const offsets = await page.getByTestId("system-runtime-zone").evaluate(zone => {
+      const frame = zone.getBoundingClientRect();
+      const heading = document.createRange();
+      heading.selectNodeContents(zone.querySelector("h2")!);
+      const title = heading.getBoundingClientRect();
+      const buttons = Array.from(zone.querySelectorAll("button"), button => button.getBoundingClientRect());
+      const left = Math.min(...buttons.map(box => box.left)), right = Math.max(...buttons.map(box => box.right));
+      const bottom = Math.max(...buttons.map(box => box.bottom));
+      return {
+        title: title.left + title.width / 2 - (frame.left + frame.width / 2),
+        actions: (left + right - frame.left - frame.right) / 2,
+        vertical: (title.top + bottom - frame.top - frame.bottom) / 2,
+        buttonsFit: buttons.every(box => box.width >= 48 && box.height >= 48 && box.bottom <= frame.bottom)
+      };
+    });
+    expect(Math.abs(offsets.title)).toBeLessThan(2);
+    expect(Math.abs(offsets.actions)).toBeLessThan(2);
+    expect(Math.abs(offsets.vertical)).toBeLessThan(4);
+    expect(offsets.buttonsFit).toBe(true);
+  });
+
+  test(`only the tea wheel scrolls at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const action = "home.kettle.set_tea_mode";
+    await page.route("**/api/v1/actions/home-assistant/availability", route => route.fulfill({
+      json: { schemaVersion: 1, actions: { [action]: { allowed: true, availability: "allowed" } } }
+    }));
+    const writes: string[] = [];
+    page.on("request", request => {
+      if (request.method() === "POST" && request.url().endsWith("/actions/home-assistant")) writes.push(request.url());
+    });
+    await page.goto("/home?scenario=home-climate-healthy&motion=full");
+    const opener = page.getByRole("button", { name: "Выбрать чай" });
+    const scrollContainer = await opener.evaluateHandle(el => {
+      for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+        if (parent.scrollHeight > parent.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
+      }
+      return document.scrollingElement!;
+    });
+    await opener.click();
+    const dialog = page.getByRole("dialog", { name: "Выбрать чай" });
+    await expect(dialog).toBeVisible();
+    await expect(page.locator(".app")).toHaveAttribute("inert", "");
+    const fixed = () => dialog.evaluate(el => ["h2", ".kettle-picker__actions"]
+      .map(selector => Math.round(el.querySelector(selector)!.getBoundingClientRect().top)));
+    const before = await fixed();
+    const backgroundTop = await scrollContainer.evaluate(el => el.scrollTop);
+    const wheel = dialog.getByRole("group", { name: "Виды чая" });
+    await wheel.hover();
+    await page.mouse.wheel(0, 210);
+    await expect.poll(() => wheel.evaluate(el => el.scrollTop)).toBeGreaterThan(100);
+    await expect(wheel.locator("button[aria-pressed=true]")).toHaveCount(1);
+    await page.keyboard.press("PageDown");
+    expect(await fixed()).toEqual(before);
+    expect(await scrollContainer.evaluate(el => el.scrollTop)).toBe(backgroundTop);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    expect(writes).toEqual([]);
   });
 }

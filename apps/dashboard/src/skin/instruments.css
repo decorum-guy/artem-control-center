@@ -107,6 +107,9 @@ html[data-skin="v3"] .coffee-asset[data-image-visible="true"] .cc-coffee-motion 
 }
 .skin-v3 .climate-control__stepper:first-of-type { order: -1; }
 .skin-v3 .climate-control__target-value { margin-inline: -3px; }
+.skin-v3 .climate-control--home .climate-control__select-label {
+  inline-size: min(100%, max(17rem, 84%));
+}
 @container (max-width: 281px) {
   html[data-skin="v3"] .climate-control .climate-control__controls > .climate-control__temperature-control {
     grid-column: 1 / -1;
