@@ -49,6 +49,7 @@ _SERVICE_LABELS = {
     "avalar.main.website": "AVALAR Main",
     "avalar.stage.website": "AVALAR Stage",
     "rog_g703gi": "ROG",
+    "rog-g703-psu": "Монитор питания ASUS ROG",
     "panel-runtime": "Control Center runtime",
 }
 

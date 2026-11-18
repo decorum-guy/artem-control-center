@@ -40,3 +40,15 @@ test("header weather summary opens the dedicated weather route", async ({ page }
   await expect(page).toHaveURL(/\/weather/);
   await expect(page.getByTestId("route-weather")).toBeVisible();
 });
+
+test("the header dates a stale forecast before opening Weather", async ({ page }) => {
+  await page.route(/\/api\/v1\/weather\?locationId=/, async (route) => {
+    const response = await route.fetch();
+    const forecast = await response.json();
+    await route.fulfill({ response, json: { ...forecast, stale: true, sourceMode: "stale", observedAt: "2026-10-29T16:45:15Z" } });
+  });
+  await page.goto("/overview?scenario=ha-healthy");
+  const summary = page.getByRole("button", { name: "Открыть погоду" });
+  await expect(summary).toContainText("Устарел");
+  await expect(summary).toContainText(/29.+19:45/);
+});

@@ -304,7 +304,9 @@ export function WeatherHeaderSummary({ onOpen }: { onOpen: () => void }) {
     : "—°";
   const location = forecast?.location.title ?? "Погода";
   const condition = forecast ? weatherLabel(forecast.current.weatherCode) : loading ? "Обновляем прогноз…" : error ?? "Добавьте место";
-  const detail = [location, temperature, condition].join(" · ");
+  const savedTime = forecast?.stale ? observedTimeLabel(forecast.observedAt, forecast.timezone) : "";
+  const summary = forecast?.stale ? (savedTime ? `Устарел · ${savedTime}` : "Прогноз устарел") : condition;
+  const detail = [location, temperature, condition, ...(forecast?.stale ? [summary] : [])].join(" · ");
   return (
     <button className="weather-summary" type="button" onClick={onOpen} aria-label="Открыть погоду" aria-description={v3VisualSkinEnabled ? detail : undefined} title={v3VisualSkinEnabled ? detail : undefined} data-long-label={v3VisualSkinEnabled && (location.length > 22 || condition.length > 28) || undefined}>
       {v3VisualSkinEnabled && <Icon name="weather" className="cc-header-weather-icon" />}
@@ -312,7 +314,7 @@ export function WeatherHeaderSummary({ onOpen }: { onOpen: () => void }) {
       <span className="weather-summary__copy">
         <span className="weather-summary__location">{location}</span>
         <span className="weather-summary__condition">
-          {condition}
+          {summary}
         </span>
       </span>
     </button>
