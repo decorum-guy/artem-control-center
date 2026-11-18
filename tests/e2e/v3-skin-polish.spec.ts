@@ -79,3 +79,32 @@ for (const width of [1280, 720]) {
     }
   });
 }
+
+for (const width of [1280, 720]) {
+  test(`climate controls have equal visible gaps on both pages at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 1280 });
+    for (const variant of ["home", "overview"]) {
+      await page.goto(`/${variant}?scenario=home-climate-healthy&motion=reduced`);
+      const card = page.locator(`.climate-control--${variant}`).first();
+      const geometry = await card.evaluate(element => {
+        const power = element.querySelector(".climate-control__power")!.getBoundingClientRect();
+        const [minus, plus] = Array.from(element.querySelectorAll(".climate-control__stepper"), el => el.getBoundingClientRect());
+        const confirm = element.querySelector(".climate-control__confirm")!.getBoundingClientRect();
+        const svg = element.querySelector<SVGSVGElement>(".climate-control__target-value svg")!;
+        const face = svg.querySelector("circle")!;
+        const rect = svg.getBoundingClientRect();
+        const diameter = (2 * face.r.baseVal.value + Number(face.getAttribute("stroke-width"))) * rect.width / svg.viewBox.baseVal.width;
+        const left = rect.left + (rect.width - diameter) / 2;
+        const buttons = [power, minus, plus, confirm];
+        return {
+          gaps: [minus.left - power.right, left - minus.right, plus.left - left - diameter, confirm.left - plus.right],
+          centers: buttons.map(button => button.top + button.height / 2 - (rect.top + rect.height / 2)),
+          smallestTarget: Math.min(...buttons.flatMap(button => [button.width, button.height]))
+        };
+      });
+      for (const gap of geometry.gaps) expect(gap).toBeCloseTo(8, 0);
+      for (const dy of geometry.centers) expect(Math.abs(dy)).toBeLessThan(1);
+      expect(geometry.smallestTarget).toBeGreaterThanOrEqual(48);
+    }
+  });
+}

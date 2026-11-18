@@ -34,7 +34,6 @@
   place-items: center;
   pointer-events: none;
 }
-.skin-v3 .cc-coffee-dial circle { vector-effect: non-scaling-stroke; }
 .skin-v3 .cc-coffee-dial .cc-gauge-track { stroke: color-mix(in srgb, var(--cc-text-muted) 32%, transparent); }
 .skin-v3 .cc-coffee-dial .cc-gauge-track--dashed { stroke: var(--cc-tone); }
 /* The dial belongs to the glass. The photo and its plinth share the user's
@@ -92,6 +91,26 @@ html[data-skin="v3"] .coffee-asset[data-image-visible="true"] .cc-coffee-motion 
 }
 .skin-v3 :is(.kettle-control__temperature,.climate-control__target-value) .cc-gauge-center {
   color: var(--cc-text); font: 550 20px/1 var(--cc-font-family); letter-spacing: -.035em; white-space: nowrap;
+}
+/* The 64px SVG includes 3px of transparent space at either end of its
+   58px painted ring. Space the controls from that visible edge. */
+.skin-v3 .climate-control { container-type: inline-size; }
+.skin-v3 .climate-control__controls {
+  --cc-climate-gap: 8px;
+  column-gap: var(--cc-climate-gap);
+}
+.skin-v3 .climate-control__temperature-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cc-climate-gap);
+}
+.skin-v3 .climate-control__stepper:first-of-type { order: -1; }
+.skin-v3 .climate-control__target-value { margin-inline: -3px; }
+@container (max-width: 281px) {
+  html[data-skin="v3"] .climate-control .climate-control__controls > .climate-control__temperature-control {
+    grid-column: 1 / -1;
+  }
 }
 .skin-v3 .cc-gauge-center:is([data-characters="4"],[data-characters="5"]) { font-size: 15px; }
 .skin-v3 .cc-gauge-center[data-characters="6"] { font-size: 12px; }
