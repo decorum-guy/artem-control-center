@@ -51,11 +51,14 @@ html[data-skin="v3"] :is(.tv-audio .tv-mute, .tv-pwa .tv-icon-button) { padding:
 }
 .tv-link-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
 .tv-link-actions:has(.tv-native-choice) { align-items: end; }
-.tv-native-choice { display: grid; min-inline-size: 0; gap: 4px; }
+.tv-native-choice { position: relative; display: grid; min-inline-size: 0; gap: 4px; }
 .tv-native-choice select {
+  appearance: none;
+  box-sizing: border-box;
   inline-size: 100%;
+  block-size: 48px;
   min-block-size: 48px;
-  padding-inline: 10px;
+  padding-inline: 10px 34px;
   font: inherit;
   font-size: 16px;
   color: var(--cc-text);
@@ -63,6 +66,7 @@ html[data-skin="v3"] :is(.tv-audio .tv-mute, .tv-pwa .tv-icon-button) { padding:
   border: 1px solid var(--cc-border-strong);
   border-radius: var(--cc-radius-control);
 }
+.tv-native-choice > svg { position: absolute; inset-inline-end: 12px; inset-block-end: 16px; pointer-events: none; }
 .tv-native-choice select:focus-visible { outline: 3px solid var(--cc-focus); outline-offset: 2px; }
 .tv-native-choice select:disabled { opacity: .62; }
 .tv-message { margin: 0; min-block-size: 2lh; overflow-wrap: anywhere; }

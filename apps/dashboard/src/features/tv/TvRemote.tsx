@@ -151,6 +151,7 @@ export function FullRemote({ controller, nativeLinkTargets = false }: { controll
             {!targets.length && <option value="">—</option>}
             {targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}
           </select>
+          <Icon name="chevron-down" size={16} />
         </label> : <Select compact label="Открыть в приложении" value={selected} options={targets} onChange={changeTarget} />}
         <Button type="submit" disabled={!remoteStatus || !url.trim() || !selected} aria-disabled={busy || undefined}>Отправить</Button>
       </div>
