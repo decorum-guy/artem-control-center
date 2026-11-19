@@ -42,15 +42,16 @@ for (const [scenario, kind] of [
     const coffee = page.locator(".coffee-panel").first();
     const dial = coffee.locator(".cc-coffee-dial");
     await expect(dial).toBeVisible();
+    const artwork = coffee.locator(".cc-coffee-position");
+    const dialLayer = await dial.evaluate(el => Number(getComputedStyle(el).zIndex));
+    const artworkLayer = await artwork.evaluate(el => Number(getComputedStyle(el).zIndex));
+    expect(dialLayer).toBeLessThan(artworkLayer);
     const value = dial.locator(".cc-gauge-value");
     if (kind === "warning") {
       await expect(dial.getByRole("img", { name: "Работает слишком долго", exact: true })).toBeVisible();
       await expect(dial.locator('g[data-tone="warning"] > circle')).toHaveCount(1);
       await expect(value).toHaveCSS("stroke-dasharray", "none");
       await expect(value).toHaveCSS("stroke", await coffee.evaluate(el => getComputedStyle(el).borderTopColor));
-      const artwork = coffee.locator(".cc-coffee-position");
-      const dialLayer = await dial.evaluate(el => Number(getComputedStyle(el).zIndex));
-      expect(dialLayer).toBeGreaterThan(await artwork.evaluate(el => Number(getComputedStyle(el).zIndex)));
     } else if (kind === "full") await expect(value).toHaveAttribute("stroke-dasharray", "100 100");
     else if (kind === "progress") {
       await expect(value).toHaveCount(1);
