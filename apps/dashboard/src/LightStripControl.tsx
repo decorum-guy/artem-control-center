@@ -160,7 +160,7 @@ export function LightStripControl({ service, variant = "home", interactive = tru
   useEffect(() => setDraftKelvin(data.colorTempKelvin ?? 4000), [data.colorTempKelvin]);
   useEffect(() => {
     if (!pickerOpen) return;
-    dialogRef.current?.focus();
+    dialogRef.current?.focus({ preventScroll: true });
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setPickerOpen(false);
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -171,7 +171,7 @@ export function LightStripControl({ service, variant = "home", interactive = tru
     };
     window.addEventListener("keydown", closeOnEscape);
     const opener = pickerButton.current;
-    return () => { window.removeEventListener("keydown", closeOnEscape); opener?.focus(); };
+    return () => { window.removeEventListener("keydown", closeOnEscape); opener?.focus({ preventScroll: true }); };
   }, [pickerOpen]);
 
   async function authorize(actionId: LightStripActionId, fresh: boolean, signal?: AbortSignal) {
