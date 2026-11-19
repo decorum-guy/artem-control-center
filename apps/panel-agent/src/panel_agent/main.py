@@ -95,6 +95,7 @@ from .ai_settings import AIProviderSettingsStore
 from .ai_text import AITextService
 from .ai_api import build_ai_router
 from .access_policy import AccessPolicyStore
+from .tv_api import build_tv_router
 from .backups import AvalarStageBackupEngine, BackupEngine, BackupService, PanelConfigSource, build_backup_router
 from .interface_copy import (
     FIXTURE_INTERFACE_COPY_SCENARIOS,
@@ -313,6 +314,7 @@ if MODE != "production":
         StationActionExecutor(SETTINGS, access_policy, lambda: False)
     ))
 app.include_router(build_backup_router(backup_service, access_policy))
+app.include_router(build_tv_router(lambda: _write_allowed(bool(os.getenv("PANEL_TV_EXECUTOR_TOKEN_FILE")))))
 app.include_router(
     build_project_registry_router(
         project_registry_store,

@@ -651,3 +651,19 @@ jobs:
 
       - name: Smoke-test production runtime
         run: npm run test:production-smoke
+
+      - name: Verify TV widget and phone remote in Chromium
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_V3_VISUAL_SKIN: "true"
+          VITE_OVERVIEW_V2_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/tv-remote.spec.ts
+
+      - name: Upload TV review screenshots
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tv-control-review-${{ github.sha }}
+          path: artifacts/tv-control-review
+          if-no-files-found: warn
