@@ -4,6 +4,10 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StationMiniWidget } from "./StationMiniWidget";
 
+const showNotice = vi.hoisted(() => vi.fn());
+vi.mock("../../NoticeCenter", () => ({ useNoticeCenter: () => ({ showNotice }) }));
+vi.mock("../../InteractionLock", () => ({ useInteractionLock: () => ({ locked: false, guardMutation: () => true }) }));
+
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("Station preset sheets", () => {

@@ -29,11 +29,8 @@ from .contracts import (
 )
 from .settings import IntegrationSettings
 from .avalar_health import AVALAR_HEALTH_REASONS
-from .rog_g703_power import _SAFE_ERROR_CODES as ROG_SAFE_ERROR_CODES
+from .rog_g703_power import ROG_INCIDENT_ERROR_CODES
 from .planning import PlanningHealthIssue
-
-ROG_INCIDENT_ERROR_CODES = ROG_SAFE_ERROR_CODES | {"action_failed"}
-
 
 _SAFE_REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _SAFE_OPAQUE_ID = re.compile(r"^[a-z0-9][a-z0-9._:-]{0,127}$")
@@ -192,7 +189,7 @@ def _problem_from_service(
     # Sleeping/offline is an expected ROG host state; only a confirmed
     # integration failure is an owner incident.
     if service.id == "rog_g703gi":
-        if error_code not in ROG_INCIDENT_ERROR_CODES or error_code == "health_unreachable":
+        if error_code not in ROG_INCIDENT_ERROR_CODES:
             return None
     elif service.health == "healthy":
         return None

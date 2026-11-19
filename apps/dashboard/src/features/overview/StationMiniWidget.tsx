@@ -8,9 +8,16 @@ import { DialogFrame } from "../../DialogFrame";
 import { addStationPreset, deleteStationPreset, executeStationPreset, fetchStationPresets,
   type StationPresetInventory } from "../../stationPresetsApi";
 import { resolveWidgetAsset } from "../../widgetAssets";
+import { useInteractionLock } from "../../InteractionLock";
+import { useNoticeCenter } from "../../NoticeCenter";
+import { useCommandSeries } from "../../useCommandSeries";
 
 const STATION_ARTWORK = resolveWidgetAsset("./assets/widgets/station-mini-2.png", v3VisualSkinEnabled);
 const STATION_GLOW_FEEDBACK_DURATION_MS = 1200;
+type VolumeStep = "media.alice.volume_up" | "media.alice.volume_down";
+function isVolumeStep(action: StationActionId): action is VolumeStep {
+  return action === "media.alice.volume_up" || action === "media.alice.volume_down";
+}
 
 const LABELS: Record<StationActionId, string> = {
   "media.alice.play": "Play",
@@ -42,6 +49,8 @@ function ActionIcon({ actionId }: { actionId: StationActionId }) {
 }
 
 export function StationMiniWidget({ interactive }: { interactive: boolean }) {
+  const { locked, guardMutation } = useInteractionLock();
+  const { showNotice } = useNoticeCenter();
   const [availability, setAvailability] = useState<StationActionAvailability | null>(null);
   const [pending, setPending] = useState(false);
   const [glowPulse, setGlowPulse] = useState(0);
@@ -56,12 +65,35 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   const [sheetMessage, setSheetMessage] = useState("");
   const musicButton = useRef<HTMLButtonElement>(null);
   const glowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const otherAction = useRef(false);
+  const decisionEpoch = useRef(0);
+  function refreshActions() {
+    const epoch = ++decisionEpoch.current;
+    void fetchStationAvailability().then(
+      value => { if (epoch === decisionEpoch.current) setAvailability(value); },
+      () => { if (epoch === decisionEpoch.current) setAvailability(null); }
+    );
+  }
+  const volume = useCommandSeries<VolumeStep, void>({
+    mode: "ordered", enabled: interactive && !locked,
+    dispatch: async (step, signal) => {
+      if (signal.aborted || !guardMutation() || !availability?.actions[step]?.allowed) throw new Error("blocked");
+      await executeStationAction(step);
+    },
+    onFinish: ({ accepted, completed, error, cancelled }) => {
+      const uncertain = error instanceof Error && error.message === "station_dispatch_uncertain";
+      const detail = error || cancelled
+        ? `Отправка подтверждена для ${completed} из ${accepted}. ${uncertain ? "Результат следующей команды неизвестен." : "Серия остановлена."}`
+        : accepted === 1 ? "Команда отправлена" : `Команды громкости отправлены · ${completed}`;
+      showNotice({ id: "station.volume", title: "Громкость Алисы", detail,
+        severity: error || cancelled ? "warning" : "success" });
+      refreshActions();
+    }
+  });
 
   useEffect(() => {
-    let active = true;
-    void fetchStationAvailability().then((value) => { if (active) setAvailability(value); })
-      .catch(() => { if (active) setAvailability(null); });
-    return () => { active = false; if (glowTimer.current) clearTimeout(glowTimer.current); };
+    refreshActions();
+    return () => { decisionEpoch.current++; if (glowTimer.current) clearTimeout(glowTimer.current); };
   }, []);
 
   function triggerGlowFeedback() {
@@ -75,7 +107,14 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   }
 
   async function run(actionId: StationActionId) {
-    if (pending || !interactive || !availability?.actions[actionId]?.allowed) return;
+    if (otherAction.current || !interactive || !guardMutation() || !availability?.actions[actionId]?.allowed) return;
+    if (isVolumeStep(actionId)) {
+      if (volume.submit(actionId)) { decisionEpoch.current++; setMessage(null); triggerGlowFeedback(); }
+      return;
+    }
+    if (volume.isActive()) return;
+    decisionEpoch.current++;
+    otherAction.current = true;
     setPending(true);
     setMessage(null);
     triggerGlowFeedback();
@@ -86,8 +125,9 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
       setMessage(error instanceof Error && error.message === "station_dispatch_uncertain"
         ? "Результат отправки неизвестен" : "Не удалось отправить команду");
     } finally {
+      otherAction.current = false;
       setPending(false);
-      void fetchStationAvailability().then(setAvailability).catch(() => setAvailability(null));
+      refreshActions();
     }
   }
 
@@ -114,7 +154,8 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   }
 
   async function runPreset(presetId: string) {
-    if (pending || !availability?.actions["media.alice.play"]?.allowed) return;
+    if (otherAction.current || volume.isActive() || !guardMutation() || !availability?.actions["media.alice.play"]?.allowed) return;
+    otherAction.current = true;
     setPending(true);
     triggerGlowFeedback();
     setSheetMessage("");
@@ -127,12 +168,14 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
         ? "Результат отправки неизвестен" : "Не удалось отправить команду");
       if (error instanceof Error && error.message === "unknown_station_preset") void refreshPresets();
     } finally {
+      otherAction.current = false;
       setPending(false);
     }
   }
 
   async function mutate(kind: "add" | "delete", presetId?: string) {
-    if (!inventory || pending) return;
+    if (!inventory || otherAction.current || volume.isActive() || !guardMutation()) return;
+    otherAction.current = true;
     setPending(true);
     try {
       const next = kind === "add"
@@ -153,6 +196,7 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
         setSheetMessage("Не удалось изменить подборки");
       }
     } finally {
+      otherAction.current = false;
       setPending(false);
     }
   }
@@ -171,21 +215,21 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     <div className="station-mini-widget__controls" aria-label="Управление Станцией Mini 2">
       {STATION_ACTIONS.map((actionId) => <button key={actionId} type="button"
         className="station-mini-widget__button" aria-label={LABELS[actionId]} title={LABELS[actionId]}
-        disabled={!interactive || pending || !availability?.actions[actionId]?.allowed}
-        aria-busy={pending} onClick={() => { void run(actionId); }}>
+        disabled={!interactive || locked || pending || (isVolumeStep(actionId) ? volume.full : volume.active) || !availability?.actions[actionId]?.allowed}
+        aria-busy={pending || (volume.active && isVolumeStep(actionId))} onClick={() => { void run(actionId); }}>
         <ActionIcon actionId={actionId} />
       </button>)}
     </div>
     <button ref={musicButton} type="button" className="station-mini-widget__music" onClick={openMusic} aria-haspopup="dialog"
       disabled={!interactive}>🎵 Музыка <span aria-hidden="true">⌄</span></button>
-    <p className="station-mini-widget__message" role="status">{message ?? (availability ? "" : "Управление недоступно")}</p>
+    <p className="station-mini-widget__message" role="status">{volume.active ? "Меняем громкость…" : message ?? (availability ? "" : "Управление недоступно")}</p>
     {sheet !== "closed" && <DialogFrame className="station-presets__sheet" testId="station-presets"
       title={sheet === "music" ? "Что включить?" : sheet === "manage" ? "Настроить подборки" : "Добавить подборку"}
       onClose={closeSheet} restoreFocusRef={musicButton}>
         {sheet === "music" && <>
           <div className="station-presets__list">
             {inventory?.presets.map((preset) => <button key={preset.id} type="button"
-              className="station-presets__row" disabled={pending || !availability?.actions["media.alice.play"]?.allowed}
+              className="station-presets__row" disabled={pending || volume.active || !availability?.actions["media.alice.play"]?.allowed}
               onClick={() => { void runPreset(preset.id); }}>
               <span>{preset.title}</span><span aria-hidden="true">{v3VisualSkinEnabled ? <Icon name="chevron-right" /> : "▶"}</span>
             </button>)}

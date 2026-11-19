@@ -69,7 +69,7 @@ test.describe("living room RGB strip", () => {
         placement: { x: 0, y: 0, w: 5, h: 4 }, sizeVariant: "standard", config: {} }],
       warnings: [], unplaced: [], writesEnabled: false
     } }));
-    await page.goto("/overview?scenario=home-light-strip");
+    await page.goto("/overview?scenario=home-light-strip&motion=reduced");
     await expect(page.getByTestId("overview-light-strip-widget")).toBeVisible();
     const light = page.getByTestId("light-strip-overview");
     await expect(light).toContainText("Лента в зале");

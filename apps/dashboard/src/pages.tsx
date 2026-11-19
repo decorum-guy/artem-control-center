@@ -1,3 +1,4 @@
+import { serviceNeedsAttention } from "./problemModel";
 import { SelectField } from "./ui/SelectField";
 import { EmptyState } from "./ui/States";
 import { v3VisualSkinEnabled } from "./visualShellConfig";
@@ -23,6 +24,7 @@ import { CoffeeSettingsPanel } from "./CoffeeSettings";
 import { RuntimeControls } from "./RuntimeControls";
 import { PlanningOverviewCard } from "./PlanningOverviewCard";
 import { RogG703Controls } from "./RogG703Controls";
+import { selectSystemServiceSubjects } from "./features/operations/routeDensity";
 import { RouteHeader, WorkZone } from "./ShellPrimitives";
 import { pageSubtitleField, pageTitleField, useInterfaceCopy } from "./interfaceCopy";
 import { InterfaceCopySettingsPanel } from "./features/settings/InterfaceCopySettings";
@@ -73,7 +75,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
     (service) => service.presentation?.category !== "home-device"
   );
   const healthyServices = serviceCatalog.filter((service) => service.health === "healthy").length;
-  const attentionServices = serviceCatalog.filter((service) => service.health !== "healthy");
+  const attentionServices = serviceCatalog.filter(serviceNeedsAttention);
   const backupServices = ordered.filter((service) => service.dataContract.startsWith("backup."));
 
   return (
@@ -312,7 +314,7 @@ export function ServicesPage({ snapshot }: PageProps) {
       />
       <div className="service-summary-line">
         <span>{catalog.filter((service) => service.health === "healthy").length} работают</span>
-        <span>{catalog.filter((service) => service.health !== "healthy").length} требуют внимания</span>
+        <span>{catalog.filter(serviceNeedsAttention).length} требуют внимания</span>
         <span>{catalog.length} всего</span>
       </div>
 
@@ -342,7 +344,7 @@ export function ServicesPage({ snapshot }: PageProps) {
 }
 
 export function SystemPage({ snapshot }: { snapshot: DashboardSnapshot }) {
-  const rogG703 = snapshot.services.find((service) => service.id === "rog_g703gi");
+  const { rog: rogG703 } = selectSystemServiceSubjects(snapshot.services);
 
   return (
     <div className="system-page" data-testid="route-system">

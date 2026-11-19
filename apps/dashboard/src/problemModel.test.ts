@@ -87,6 +87,8 @@ describe("owner diagnostics problem model", () => {
     };
     expect(currentProblemsForSnapshot(snapshot({ services: [rog] }))).toEqual([]);
     expect(currentProblemsForSnapshot(snapshot({ services: [{ ...rog, data: { lastError: "health_unreachable" } }] }))).toEqual([]);
+    expect(currentProblemsForSnapshot(snapshot({ services: [{ ...rog, data: { lastError: "health_unreachable_persistent" } }] }))[0])
+      .toMatchObject({ id: "service:rog_g703gi", state: "offline" });
     expect(currentProblemsForSnapshot(snapshot({ services: [{ ...rog, data: { lastError: "wake_timeout" } }] }))[0])
       .toMatchObject({ id: "service:rog_g703gi", state: "offline" });
   });

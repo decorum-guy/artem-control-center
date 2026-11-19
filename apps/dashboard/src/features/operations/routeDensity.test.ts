@@ -3,7 +3,7 @@ import type { ServiceSnapshot } from "@artem/contracts";
 import {
   classifySystemService,
   countHealth,
-  groupHealthyServices,
+  groupServicesWithoutIncidents,
   healthLabel,
   selectHomePrimaryDevices,
   selectHomeAsusServices,
@@ -53,7 +53,7 @@ describe("PR7 route density helpers", () => {
   });
 
   it("groups only healthy services by trusted group and keeps missing group in the safe System fallback", () => {
-    const groups = groupHealthyServices([
+    const groups = groupServicesWithoutIncidents([
       service("home", { presentation: { category: "home-infrastructure", group: "Home infrastructure", overview: "aggregate", priority: 10 } }),
       service("unknown", { presentation: undefined }),
       service("attention", { health: "degraded", presentation: { category: "system", group: "System", overview: "incident-only", priority: 20 } })

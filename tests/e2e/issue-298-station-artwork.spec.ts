@@ -407,7 +407,6 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
     await page.waitForTimeout(150);
     const firstTime = await glow.evaluate((element) => Number(element.getAnimations()[0]?.currentTime ?? 0));
     await widget.getByRole("button", { name: "Volume up" }).click();
-    await expect(widget.getByRole("status")).toHaveText("Команда отправлена");
     const replay = await glow.evaluate((element) => ({
       count: element.parentElement?.querySelectorAll(".station-mini-widget__glow").length,
       currentTime: Number(element.getAnimations()[0]?.currentTime ?? 0),
@@ -416,6 +415,9 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
     expect(replay.count).toBe(1);
     expect(replay.active).toBe(true);
     expect(replay.currentTime).toBeLessThan(firstTime);
+    const volumeNotice = page.getByTestId("global-notice").filter({ hasText: "Громкость Алисы" });
+    await expect(volumeNotice).toHaveCount(1);
+    await expect(volumeNotice).toContainText("Команда отправлена");
     expect(requests.map(({ actionId }) => actionId)).toEqual(["media.alice.play", "media.alice.volume_up"]);
     for (const request of requests) expect(request.requestId).toMatch(/^[0-9a-f-]{36}$/i);
     await expect.poll(() => glow.evaluate((element) => element.classList.contains("station-mini-widget__glow--active"))).toBe(false);

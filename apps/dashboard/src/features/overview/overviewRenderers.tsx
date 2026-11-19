@@ -1,3 +1,4 @@
+import { serviceNeedsAttention } from "../../problemModel";
 import type { ReactNode } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
 import { useConnectivityActions } from "../../ConnectivityActions";
@@ -171,7 +172,7 @@ function OverviewHealthWidget(runtime: OverviewRuntimeContext): ReactNode {
     service.presentation?.category !== "home-device" && service.id !== "rog_g703gi"
   );
   const healthyCount = catalog.filter((service) => service.health === "healthy").length;
-  const attention = catalog.filter((service) => service.health !== "healthy");
+  const attention = catalog.filter(serviceNeedsAttention);
   const incident = attention[0] ?? null;
   const backups = services.filter((service) => service.dataContract.startsWith("backup."));
   const homeAssistant = services.find((service) => service.id === "home-assistant");
