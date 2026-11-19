@@ -10,14 +10,15 @@ const item = { instanceId: "owner.television", widgetType: "home.television", vi
 const coffee = { instanceId: "owner.coffee", widgetType: "home.coffee-machine", visibility: "visible",
   placement: { x: 5, y: 1, w: 7, h: 4 }, sizeVariant: "standard", config: {} };
 
-async function layout(page: Page) {
+async function layout(page: Page, items = [item, coffee],
+  portraitItems = [item, { ...coffee, placement: { x: 0, y: 5, w: 7, h: 4 } }]) {
   await page.route(/\/api\/v1\/overview\/layout(?:\/portrait)?$/, async route => {
     const doc = { schemaVersion: "overview.layout.v2", profileId: "samsung-control", presetId: "overview.default",
       presetVersion: 6, revision: 7, viewportClass: "landscape-12", updatedAt: "2026-11-19T12:00:00Z",
-      items: [item, coffee], warnings: [], unplaced: [], writesEnabled: true };
+      items, warnings: [], unplaced: [], writesEnabled: true };
     const portrait = route.request().url().includes("/layout/portrait");
     await route.fulfill({ json: portrait ? { schemaVersion: "overview.portrait.v1", profile: "portrait",
-      layout: { ...doc, items: [item, { ...coffee, placement: { x: 0, y: 5, w: 7, h: 4 } }] } } : doc });
+      layout: { ...doc, items: portraitItems } } : doc });
   });
 }
 async function shot(page: Page, name: string) {
@@ -283,4 +284,62 @@ test("Samsung live capabilities fit V3 without changing the widget layout", asyn
       await shot(page, orientation + "-" + theme + "-rapid-sheet");
     }
   }
+});
+
+test("compact TV lines up with the kettle and exposes the quick actions", async ({ page }) => {
+  const compactTV = { ...item, sizeVariant: "detail", placement: { x: 0, y: 3, w: 7, h: 3 } };
+  const kettle = { ...item, instanceId: "owner.kettle", widgetType: "home.kettle", sizeVariant: "detail",
+    placement: { x: 0, y: 0, w: 7, h: 3 } };
+  await layout(page, [kettle, compactTV], [kettle, compactTV]);
+  let status = { ...updated, maintenance: { happ: "not-needed" } };
+  const commands: unknown[] = [];
+  await page.route("**/api/tv/status", route => route.fulfill({ json: status }));
+  await page.route("**/api/tv/command", async route => {
+    const command = route.request().postDataJSON();
+    commands.push(command);
+    if (command.action === "vpn-connect") {
+      status = { ...status, vpn: true, maintenance: { happ: "verified" } };
+      await route.fulfill({ json: { outcome: "vpn-connected" } });
+    } else {
+      await route.fulfill({ json: { outcome: "app-open" } });
+    }
+  });
+  for (const [width, height, orientation] of [[1280, 720, "landscape"], [720, 1280, "portrait"]] as const) {
+    await page.setViewportSize({ width, height });
+    for (const theme of ["night", "day"]) {
+      await page.goto("/overview?theme=" + theme);
+      const widget = page.getByTestId("television-widget");
+      const kettleCard = page.locator('[data-instance-id="owner.kettle"]');
+      const slider = widget.getByRole("slider", { name: "Громкость" });
+      await expect(slider).toBeEnabled();
+      const unit = (await widget.boundingBox())!;
+      const other = (await kettleCard.boundingBox())!;
+      const [icon, screen, audio, remote] = await Promise.all([
+        widget.locator(".tv-widget-title svg").boundingBox(),
+        widget.getByText("Экран включён", { exact: true }).boundingBox(),
+        widget.locator(".cc-slider-copy > span").boundingBox(),
+        widget.getByRole("button", { name: "Полный пульт" }).boundingBox()
+      ]);
+      expect(Math.abs(unit.x - other.x)).toBeLessThan(1);
+      expect(Math.abs(unit.width - other.width)).toBeLessThan(1);
+      expect(Math.abs(unit.y - (other.y + other.height) - 12)).toBeLessThan(1);
+      expect(Math.abs(screen!.x - icon!.x)).toBeLessThan(1);
+      expect(Math.abs(audio!.x - icon!.x)).toBeLessThan(1);
+      expect(remote!.y + remote!.height).toBeLessThanOrEqual(unit.y + unit.height);
+      if (!commands.length) {
+        await expect(widget.getByText("Туннель отключён", { exact: true })).toBeVisible();
+        await widget.getByRole("button", { name: "Яндекс Браузер" }).click();
+        await expect(widget.getByText("Приложение открыто.")).toBeVisible();
+        await widget.getByRole("button", { name: "Подключить VPN через Happ" }).click();
+      }
+      await expect(widget.getByText("Happ подключён", { exact: true })).toBeVisible();
+      await widget.scrollIntoViewIfNeeded();
+      await shot(page, orientation + "-" + theme + "-compact-kettle-and-tv");
+      await widget.getByRole("button", { name: "Полный пульт" }).click();
+      const remotePanel = page.getByRole("region", { name: "Управление телевизором" });
+      await expect(remotePanel.getByRole("slider", { name: "Громкость" })).toBeEnabled();
+      await expect(remotePanel.getByRole("button", { name: "Подключить VPN через Happ" })).toBeEnabled();
+    }
+  }
+  expect(commands).toEqual([{ action: "open-app", app: "browser" }, { action: "vpn-connect" }]);
 });

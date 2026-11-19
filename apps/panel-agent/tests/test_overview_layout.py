@@ -68,6 +68,23 @@ def get_layout(client: TestClient):
     return response
 
 
+def test_tv_detail_can_follow_a_same_width_kettle_without_moving_it(tmp_path, monkeypatch):
+    module = load_app(monkeypatch, tmp_path / "layout.json")
+    client = TestClient(module.app)
+    baseline = get_layout(client)
+    kettle = {"instanceId": "owner.kettle", "widgetType": "home.kettle", "visibility": "visible",
+              "sizeVariant": "detail", "placement": {"x": 0, "y": 8, "w": 7, "h": 3}, "config": {}}
+    tv = {"instanceId": "owner.television", "widgetType": "home.television", "visibility": "visible",
+          "sizeVariant": "detail", "placement": {"x": 0, "y": 11, "w": 7, "h": 3}, "config": {}}
+    response = client.patch("/api/v1/overview/layout", headers={"If-Match": baseline.headers["ETag"]},
+                            json={"items": [kettle, tv]})
+    assert response.status_code == 200
+    assert get_layout(client).json()["items"] == [kettle, tv]
+    portrait = client.get("/api/v1/overview/layout/portrait").json()["layout"]
+    assert portrait["revision"] == 0
+    assert portrait["items"] == [kettle, tv]
+
+
 def test_trusted_appearance_schema_matches_registered_widget_vocabulary(tmp_path, monkeypatch):
     load_app(monkeypatch, tmp_path / "layout.json", writes=False)
     from panel_agent import overview_layout
