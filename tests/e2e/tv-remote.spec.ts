@@ -115,7 +115,12 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   status = "old-offline";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByText("Статус ТВ неизвестен")).toBeVisible();
+  await expect(remote.getByText("Happ и фильтр ADB · нет данных")).toBeVisible();
   await shot(page, "mobile-legacy-unknown");
+  await page.reload();
+  await expect(remote.getByText("Статус ТВ неизвестен")).toBeVisible();
+  await expect(remote.getByLabel("Ссылка на телевизор")).toHaveValue("https://example.org/?a=1&b=2");
+  await expect(remote.getByRole("button", { name: /Открыть в приложении · Яндекс Браузер/ })).toBeVisible();
   status = "online";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByRole("button", { name: "Вверх" })).toBeEnabled();

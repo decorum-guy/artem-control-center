@@ -51,9 +51,11 @@ function Commands({ controller, compact = false, showFeedback = true }: { contro
         aria-label={state?.muted === true ? "Включить звук" : state?.muted === false ? "Выключить звук" : "Переключить звук"}
         disabled={!remoteStatus} aria-disabled={pending !== null || undefined} onClick={act("mute")} />
     </div>
+    {!compact && !state?.maintenance && <p className="tv-maintenance">Happ и фильтр ADB · нет данных</p>}
     {!compact && state?.maintenance && <div className="tv-maintenance">
       {state.maintenance.guard !== undefined && <span>Фильтр ADB · {state.maintenance.guard === "verified" ? "проверен" : state.maintenance.guard === "failed" ? "проверка не прошла" : "нет подтверждения"}</span>}
       {state.maintenance.happ !== undefined && <span>Happ · {state.maintenance.happ === "verified" ? "VPN подтверждён" : state.maintenance.happ === "failed" ? "ошибка восстановления" : state.maintenance.happ === "pending" ? "восстановление" : "нет подтверждения"}</span>}
+      {state.maintenance.policy === "failed" && <span>Исключение KGZN · проверка не прошла</span>}
     </div>}
   </>;
 }

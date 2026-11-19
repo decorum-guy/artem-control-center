@@ -18,6 +18,18 @@ export type TvStatus = {
   maintenance?: { guard?: Maintenance; policy?: Maintenance; happ?: Maintenance };
 };
 type Notice = { text: string; kind: "command" | "link"; error?: boolean };
+type Draft = { catalogue: { apps?: App[]; saved?: Saved[] }; url: string; selection: string };
+const emptyDraft: Draft = { catalogue: {}, url: "", selection: "" };
+
+function readDraft(key: string): Draft {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(key) ?? "null") as Draft | null;
+    if (saved?.catalogue && typeof saved.url === "string" && typeof saved.selection === "string") return saved;
+  } catch {
+    // Private browsing and webviews can disable storage.
+  }
+  return emptyDraft;
+}
 
 const audioAction = (action: Action) => action === "volume-up" || action === "volume-down" || action === "mute";
 
@@ -30,18 +42,29 @@ function audioChanged(action: Action, before: TvStatus | null, observed: TvStatu
 }
 
 export function useTV(base: string, enabled = true) {
+  const draftKey = "tv-remote-draft-v1:" + base;
+  const [initial] = useState(() => readDraft(draftKey));
   const [link, setLink] = useState<Link>("connecting");
   const [state, setState] = useState<TvStatus | null>(null);
-  const [catalogue, setCatalogue] = useState<{ apps?: App[]; saved?: Saved[] }>({});
+  const [catalogue, setCatalogue] = useState(initial.catalogue);
   const [authorized, setAuthorized] = useState(true);
   const [pending, setPending] = useState<Action | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [url, setUrl] = useState("");
-  const [selection, setSelection] = useState("");
+  const [url, setUrl] = useState(initial.url);
+  const [selection, setSelection] = useState(initial.selection);
   const active = useRef(false);
   const audioRead = useRef(false);
   const epoch = useRef(0);
   const read = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    try {
+      if (authorized) sessionStorage.setItem(draftKey, JSON.stringify({ catalogue, url, selection }));
+      else sessionStorage.removeItem(draftKey);
+    } catch {
+      // The open page still retains its draft without storage.
+    }
+  }, [authorized, catalogue, draftKey, selection, url]);
 
   const loseStatus = useCallback((next: Link) => {
     epoch.current++;
@@ -63,6 +86,9 @@ export function useTV(base: string, enabled = true) {
       if (read.current !== controller) return;
       if (response.status === 401) {
         setAuthorized(false);
+        setCatalogue({});
+        setUrl("");
+        setSelection("");
         loseStatus("unknown");
         return;
       }
