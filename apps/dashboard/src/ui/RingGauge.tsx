@@ -16,13 +16,14 @@ function RingFace({ reading, tone, size }: Face & { size: number }) {
   const width = size === 148 ? 8 : 6;
   const radius = center - width;
   const circle = { cx: center, cy: center, r: radius, fill: "none", strokeWidth: width, pathLength: 100 };
-  const dashed = ["stale", "unavailable", "running_too_long"].includes(reading.kind);
+  const offline = reading.kind === "stale" || reading.kind === "unavailable";
+  const warning = reading.kind === "running_too_long";
   const count = reading.kind === "stages" ? Math.max(1, Math.min(32, Math.trunc(reading.count))) : 1;
-  const faceTone = reading.kind === "running_too_long" ? "warning"
-    : reading.kind === "stale" || reading.kind === "unavailable" ? "offline" : tone;
+  const faceTone = warning ? "warning" : offline ? "offline" : tone;
+  const trackClass = warning ? "cc-gauge-value" : `cc-gauge-track${offline ? " cc-gauge-track--dashed" : ""}`;
   return <g data-tone={faceTone} transform={`rotate(-90 ${center} ${center})`}>
-    <circle {...circle} className={`cc-gauge-track${dashed ? " cc-gauge-track--dashed" : ""}`}
-      strokeDasharray={dashed ? "2 6" : reading.kind === "stages" ? `${80 / count} ${20 / count}` : undefined} />
+    <circle {...circle} className={trackClass}
+      strokeDasharray={offline ? "2 6" : reading.kind === "stages" ? `${80 / count} ${20 / count}` : undefined} />
     {reading.kind === "progress" && Number.isFinite(reading.fraction) && reading.fraction > 0 &&
       <circle {...circle} className="cc-gauge-value" strokeLinecap="round" strokeDasharray={`${Math.min(1, reading.fraction) * 100} 100`} />}
     {reading.kind === "stages" && reading.active >= 0 && reading.active < count &&
