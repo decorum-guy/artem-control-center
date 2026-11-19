@@ -20,6 +20,7 @@
   и verification. `AliceTG_Bot` — Telegram-интерфейс изменения canonical HA
   helpers, отдельный monitored service и владелец coffee notification policy,
   delivery receipts и retries.
+- **TV control — planned:** расширяемый виджет телевизора и общий пульт для iPhone, Mac и Samsung: экран, навигация, звук, приложения, источники и передача URL. Требования и приёмка: [docs/TV_CONTROL.md](docs/TV_CONTROL.md); интерфейс ещё не реализован.
 - **Device priority:** кофемашина — первый приоритет Home-раздела; чайник подключается через тот же HA adapter, но может начинать с более простого generic device widget.
 - **Project onboarding:** проекты подключаются декларативно по capabilities. Проект может быть monitor-only, иметь одну кнопку, несколько actions, backup или вообще не иметь управления.
 - **Automatic UI materialization:** после enable новый project/service автоматически появляется в UI. Специализированный widget используется при наличии, иначе создаётся обязательный Generic Service Widget; ручное дописывание списка сервисов в frontend запрещено.
@@ -52,6 +53,7 @@
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — продуктовая спецификация и UX.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты и границы ответственности.
 - [`docs/PROJECT_ONBOARDING.md`](docs/PROJECT_ONBOARDING.md) — capability-based подключение, отключение и настройка проектов.
+- [`docs/TV_CONTROL.md`](docs/TV_CONTROL.md) — расширяемый ТВ-виджет, пульт iPhone/Mac/Samsung, приложения и передача ссылок.
 - [`docs/WIDGET_SYSTEM.md`](docs/WIDGET_SYSTEM.md) — автоматическое появление сервисов, widget plug-ins, layout system и no-code widgets.
 - [`docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`](docs/HOME_ASSISTANT_DEVICE_CONTRACT.md) — HA device/timing authority, bot editor role и composite coffee model.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — разработка на Mac и финальная проверка на Windows/Linux.

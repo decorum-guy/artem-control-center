@@ -1,5 +1,16 @@
 # Roadmap
 
+## TV control extension — requirements recorded 2026-11-19
+
+Status: specification recorded; widget, mobile remote and permanent TV adapter are not implemented by this documentation change. Full scope: [TV_CONTROL.md](TV_CONTROL.md).
+
+- A shared TV adapter/capability catalog for Samsung, iPhone and Mac.
+- Extensible `home.television` widget proposal: screen, D-pad/OK/back/Home, volume/mute, YouTube, supported sources and an expanded remote.
+- A dedicated handheld remote is the next TV delivery priority; it does not wait for the general phone PWA expansion in Phase 14.
+- Typed YouTube/browser URL actions and an iPhone Share Sheet Shortcut; application/URL presets extend the same catalog.
+- Keep the administrative Panel Agent localhost-only; expose only a scoped TV interface to mobile clients.
+- Real iPhone and Samsung acceptance, including operation with Mac unavailable, is required. Desktop fixtures do not close this item.
+
 ## Phase 0 — Discovery and target validation
 
 - inventory laptop hardware, battery, storage and Windows state;
