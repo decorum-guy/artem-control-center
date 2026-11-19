@@ -73,7 +73,25 @@ def test_tv_ingress_session_status_revoke_and_asset_scope(tmp_path):
         assert json.loads(request("/remote/api/status", cookie=cookie)[1]) == {"availability": "offline"}
         assert request("/remote/api/command", payload={"action": "arbitrary"}, cookie=cookie)[0] == 400
         assert request("/remote/api/command", payload={"action": "up"}, cookie=cookie)[0] == 503
-        assert len(executor.commands) == 1
+        for payload in (
+            {"action": "navigate", "keys": ["down", "right", "ok"]},
+            {"action": "volume-set", "volume": 47},
+            {"action": "vpn-connect"},
+        ):
+            assert request("/remote/api/command", payload=payload)[0] == 401
+            assert request("/remote/api/command", payload=payload, cookie=cookie)[0] == 503
+            assert executor.commands[-1].model_dump(exclude_none=True) == payload
+        for payload in (
+            {"action": "navigate", "keys": ["ok", "up;id"]},
+            {"action": "navigate", "keys": ["up"] * 9},
+            {"action": "navigate"},
+            {"action": "volume-set", "volume": "30"},
+            {"action": "volume-set", "volume": False},
+            {"action": "home", "volume": 30},
+            {"action": "vpn-connect", "url": "https://example.org"},
+        ):
+            assert request("/remote/api/command", payload=payload, cookie=cookie)[0] == 400
+        assert len(executor.commands) == 4
         assert request("/remote/api/logout", payload={}, cookie=cookie)[0] == 200
         assert request("/remote/api/status", cookie=cookie)[0] == 401
     finally:

@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type Action = "screen-on" | "screen-off" | "up" | "down" | "left" | "right" | "ok" |
-  "back" | "home" | "volume-up" | "volume-down" | "mute" | "open-app" | "open-link" | "saved";
-type Command = { action: Action; app?: string; url?: string; id?: string };
+export type NavigationKey = "up" | "down" | "left" | "right" | "ok" | "back" | "home";
+export type Action = NavigationKey | "screen-on" | "screen-off" | "volume-up" | "volume-down" |
+  "volume-set" | "mute" | "open-app" | "open-link" | "saved" | "navigate" | "vpn-connect";
+type Command = { action: Action; app?: string; url?: string; id?: string; keys?: NavigationKey[]; volume?: number };
 type Link = "connecting" | "online" | "samsung-unreachable" | "tv-unreachable" | "unknown";
 type Maintenance = "unknown" | "pending" | "verified" | "failed" | "not-needed";
 type App = { id: string; label: string; links: boolean };
 type Saved = { id: string; label: string };
+type Controls = { navigationBatch?: boolean; connectHapp?: boolean; volumeRange?: { min: number; max: number } };
 export type TvStatus = {
   availability: "online" | "offline" | "connecting";
   connection?: "adb-unreachable" | "unverified";
   screen?: "on" | "off" | "sleeping" | "unknown";
   volume?: number | null;
+  minVolume?: number;
+  maxVolume?: number;
   muted?: boolean | null;
+  vpn?: boolean | null;
+  controls?: { navigationBatch?: boolean; connectHapp?: boolean };
   apps?: App[];
   saved?: Saved[];
   maintenance?: { guard?: Maintenance; policy?: Maintenance; happ?: Maintenance };
 };
 type Notice = { text: string; kind: "command" | "link"; error?: boolean };
-type Draft = { catalogue: { apps?: App[]; saved?: Saved[] }; url: string; selection: string };
+type Draft = { catalogue: { apps?: App[]; saved?: Saved[] }; url: string; selection: string; controls?: Controls };
 const emptyDraft: Draft = { catalogue: {}, url: "", selection: "" };
 
 function readDraft(key: string): Draft {
@@ -31,7 +37,9 @@ function readDraft(key: string): Draft {
   return emptyDraft;
 }
 
-const audioAction = (action: Action) => action === "volume-up" || action === "volume-down" || action === "mute";
+const audioAction = (action: Action) => ["volume-up", "volume-down", "volume-set", "mute"].includes(action);
+const navigationLimit = 8;
+const navigationFreshness = 1400;
 
 function audioChanged(action: Action, before: TvStatus | null, observed: TvStatus) {
   if (action === "mute") {
@@ -47,6 +55,7 @@ export function useTV(base: string, enabled = true) {
   const [link, setLink] = useState<Link>("connecting");
   const [state, setState] = useState<TvStatus | null>(null);
   const [catalogue, setCatalogue] = useState(initial.catalogue);
+  const [controls, setControls] = useState<Controls>(initial.controls ?? {});
   const [authorized, setAuthorized] = useState(true);
   const [pending, setPending] = useState<Action | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -56,22 +65,31 @@ export function useTV(base: string, enabled = true) {
   const audioRead = useRef(false);
   const epoch = useRef(0);
   const read = useRef<AbortController | null>(null);
+  const navigation = useRef({ keys: [] as NavigationKey[], firstTap: 0, timer: 0, running: false });
+
+  const clearNavigation = useCallback(() => {
+    const batch = navigation.current;
+    window.clearTimeout(batch.timer);
+    batch.timer = 0;
+    batch.keys = [];
+  }, []);
 
   useEffect(() => {
     try {
-      if (authorized) sessionStorage.setItem(draftKey, JSON.stringify({ catalogue, url, selection }));
+      if (authorized) sessionStorage.setItem(draftKey, JSON.stringify({ catalogue, url, selection, controls }));
       else sessionStorage.removeItem(draftKey);
     } catch {
       // The open page still retains its draft without storage.
     }
-  }, [authorized, catalogue, draftKey, selection, url]);
+  }, [authorized, catalogue, controls, draftKey, selection, url]);
 
   const loseStatus = useCallback((next: Link) => {
     epoch.current++;
+    clearNavigation();
     setNotice(null);
     setState(null);
     setLink(next);
-  }, []);
+  }, [clearNavigation]);
 
   const refresh = useCallback(async (): Promise<TvStatus | undefined> => {
     if (!enabled || document.visibilityState === "hidden") return;
@@ -87,6 +105,7 @@ export function useTV(base: string, enabled = true) {
       if (response.status === 401) {
         setAuthorized(false);
         setCatalogue({});
+        setControls({});
         setUrl("");
         setSelection("");
         loseStatus("unknown");
@@ -106,6 +125,15 @@ export function useTV(base: string, enabled = true) {
         }));
       }
       if (status.availability === "online") {
+        const min = status.minVolume;
+        const max = status.maxVolume;
+        if (status.controls) {
+          setControls((previous) => ({ ...status.controls,
+            volumeRange: typeof min === "number" && typeof max === "number" && min < max ?
+              { min, max } : previous.volumeRange }));
+        } else {
+          setControls({});
+        }
         setState(status);
         setLink("online");
         return status;
@@ -114,7 +142,8 @@ export function useTV(base: string, enabled = true) {
         status.availability === "connecting" && status.connection !== "unverified" ? "connecting" : "unknown");
     } catch (error) {
       if (read.current === controller) loseStatus(
-        (!received && error instanceof TypeError) || !navigator.onLine ? "samsung-unreachable" : "unknown"
+        (!received && (error instanceof TypeError || controller.signal.aborted)) || !navigator.onLine ?
+          "samsung-unreachable" : "unknown"
       );
     } finally {
       window.clearTimeout(timer);
@@ -141,6 +170,7 @@ export function useTV(base: string, enabled = true) {
     window.addEventListener("offline", wentOffline);
     return () => {
       epoch.current++;
+      clearNavigation();
       window.clearInterval(interval);
       read.current?.abort();
       read.current = null;
@@ -149,7 +179,7 @@ export function useTV(base: string, enabled = true) {
       window.removeEventListener("online", reset);
       window.removeEventListener("offline", wentOffline);
     };
-  }, [refresh, loseStatus]);
+  }, [refresh, loseStatus, clearNavigation]);
 
   const changeSession = (signedIn: boolean) => {
     read.current?.abort();
@@ -158,6 +188,7 @@ export function useTV(base: string, enabled = true) {
     loseStatus(signedIn ? "connecting" : "unknown");
     if (!signedIn) {
       setCatalogue({});
+      setControls({});
       setUrl("");
       setSelection("");
     }
@@ -171,7 +202,7 @@ export function useTV(base: string, enabled = true) {
     const feedback = (text: string, error = false, kind: Notice["kind"] = "command") => {
       if (epoch.current === attempt) setNotice({ text, kind, error });
     };
-    feedback("Отправка…");
+    if (command.action !== "navigate") feedback("Отправка…");
     try {
       const response = await fetch(base + "/command", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Panel-TV": "1" },
@@ -187,6 +218,8 @@ export function useTV(base: string, enabled = true) {
       if (epoch.current !== attempt) return;
       if (result.outcome === "confirmed" && audioAction(command.action) &&
           Number.isFinite(result.audio?.volume) && typeof result.audio?.muted === "boolean") {
+        read.current?.abort();
+        read.current = null;
         setState((previous) => previous && { ...previous, volume: result.audio.volume, muted: result.audio.muted });
         feedback("Звук подтверждён.");
       } else if (result.outcome === "confirmed" && (result.screen === "on" || result.screen === "off")) {
@@ -207,8 +240,14 @@ export function useTV(base: string, enabled = true) {
           }
         }
         feedback("Изменение звука не подтверждено.", true);
+      } else if (result.outcome === "sent" && command.action === "navigate") {
+        setNotice((previous) => previous?.kind === "link" ? previous : null);
+        return true;
       } else if (result.outcome === "sent") {
         feedback("Команда передана ТВ.");
+      } else if (result.outcome === "vpn-connected" || result.outcome === "vpn-already-connected") {
+        setState((previous) => previous && { ...previous, vpn: true });
+        feedback(result.outcome === "vpn-connected" ? "VPN Happ подключён." : "VPN уже подключён.");
       } else if (result.outcome === "app-open") {
         feedback(result.playbackConfirmed ? "Воспроизведение подтверждено." :
           result.linkRequested ? "Приложение открыто. Воспроизведение не подтверждено." : "Приложение открыто.");
@@ -230,8 +269,41 @@ export function useTV(base: string, enabled = true) {
     }
   };
 
+  const navigate = (key: NavigationKey) => {
+    if (!state?.controls?.navigationBatch) {
+      void send({ action: key });
+      return;
+    }
+    const batch = navigation.current;
+    if (!enabled || link !== "online" || document.visibilityState === "hidden" ||
+        (active.current && !batch.running)) return;
+    if (performance.now() - batch.firstTap > navigationFreshness) clearNavigation();
+    if (batch.keys.length >= navigationLimit) return;
+    if (!batch.keys.length) batch.firstTap = performance.now();
+    batch.keys.push(key);
+
+    const attempt = epoch.current;
+    const flush = async () => {
+      batch.timer = 0;
+      if (!batch.keys.length) return;
+      if (epoch.current !== attempt || active.current || document.visibilityState === "hidden" ||
+          performance.now() - batch.firstTap > navigationFreshness) {
+        clearNavigation();
+        return;
+      }
+      const keys = batch.keys;
+      batch.keys = [];
+      batch.running = true;
+      const sent = await send({ action: "navigate", keys });
+      batch.running = false;
+      if (!sent || attempt !== epoch.current) clearNavigation();
+      else if (batch.keys.length) batch.timer = window.setTimeout(() => { void flush(); }, 0);
+    };
+    if (!batch.running && !batch.timer) batch.timer = window.setTimeout(() => { void flush(); }, 140);
+  };
+
   const selected = catalogue.apps?.find((app) => app.id === selection && app.links)?.id ??
     catalogue.apps?.find((app) => app.links)?.id ?? "";
-  return { state, link, catalogue, authorized, pending, notice, remoteStatus: link === "online" && enabled,
-    send, refresh, changeSession, url, setUrl, selected, setSelection };
+  return { state, link, catalogue, controls, authorized, pending, notice, remoteStatus: link === "online" && enabled,
+    send, navigate, refresh, changeSession, url, setUrl, selected, setSelection };
 }

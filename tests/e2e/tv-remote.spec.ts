@@ -74,17 +74,17 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   const remote = page.getByRole("region", { name: "Управление телевизором" });
   await expect(remote.getByText("Подключение", { exact: true })).toBeVisible();
   await expect(remote.getByText("Ожидаем каталог приложений")).toBeVisible();
-  await expect(remote.getByRole("button", { name: /Открыть в приложении/ })).toBeDisabled();
+  await expect(remote.getByRole("combobox", { name: "Открыть в приложении" })).toBeDisabled();
   await shot(page, "mobile-connecting");
   status = "online";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByText("Экран включён")).toBeVisible();
-  for (const label of [/Открыть в приложении/, /Акцент/]) {
-    const bounds = await page.getByRole("button", { name: label }).boundingBox();
+  for (const control of [remote.getByRole("combobox", { name: "Открыть в приложении" }), page.getByRole("button", { name: /Акцент/ })]) {
+    const bounds = await control.boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(48);
     expect(bounds?.width).toBeGreaterThanOrEqual(48);
   }
-  const canvas = page.locator("main.tv-pwa");
+  const canvas = page.locator("html[data-tv-pwa]");
   const nightCanvas = await canvas.evaluate((node) => getComputedStyle(node).backgroundColor);
   await shot(page, "mobile-night");
   await page.getByRole("button", { name: "Дневная тема" }).click();
@@ -95,8 +95,11 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   await expect(canvas).not.toHaveCSS("background-color", nightCanvas);
   await shot(page, "mobile-day");
   await page.getByLabel("Ссылка на телевизор").fill("https://example.org/?a=1&b=2");
-  await page.getByRole("button", { name: /Открыть в приложении ·/ }).click();
-  await page.getByRole("option", { name: "Яндекс Браузер" }).click();
+  const destination = remote.getByRole("combobox", { name: "Открыть в приложении" });
+  await destination.selectOption("browser");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await destination.scrollIntoViewIfNeeded();
+  await shot(page, "mobile-native-destination");
   await page.getByRole("button", { name: "Отправить" }).click();
   await expect(page.getByText(/воспроизведение не подтверждено/i)).toBeVisible();
   expect(commands).toEqual([{ action: "open-link", app: "browser", url: "https://example.org/?a=1&b=2" }]);
@@ -106,7 +109,7 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   await expect(remote.getByRole("button", { name: "Вверх" })).toBeDisabled();
   await expect(remote.getByText(/Воспроизведение не подтверждено/)).toHaveCount(0);
   await expect(remote.getByRole("button", { name: "YouTube" })).toBeDisabled();
-  await expect(remote.getByRole("button", { name: /Открыть в приложении · Яндекс Браузер/ })).toBeVisible();
+  await expect(destination).toHaveValue("browser");
   await expect(remote.getByLabel("Ссылка на телевизор")).toHaveValue("https://example.org/?a=1&b=2");
   await shot(page, "mobile-tv-offline");
   await page.evaluate(() => window.dispatchEvent(new Event("offline")));
@@ -120,11 +123,11 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   await page.reload();
   await expect(remote.getByText("Статус ТВ неизвестен")).toBeVisible();
   await expect(remote.getByLabel("Ссылка на телевизор")).toHaveValue("https://example.org/?a=1&b=2");
-  await expect(remote.getByRole("button", { name: /Открыть в приложении · Яндекс Браузер/ })).toBeVisible();
+  await expect(destination).toHaveValue("browser");
   status = "online";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByRole("button", { name: "Вверх" })).toBeEnabled();
-  await expect(remote.getByRole("button", { name: /Открыть в приложении · Яндекс Браузер/ })).toBeVisible();
+  await expect(destination).toHaveValue("browser");
   expect(commands).toHaveLength(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
@@ -186,4 +189,98 @@ test("PWA keyboard, explicit screen commands and authoritative audio", async ({ 
   await expect(remote.getByRole("button", { name: "Погасить экран" })).toHaveCount(0);
   await shot(page, "mobile-reduced-muted-screen-off");
   expect(commands).toEqual(["up", "right", "up", "open-link", "volume-up", "mute", "screen-off"]);
+});
+
+const updated = { ...online, minVolume: 0, maxVolume: 100, vpn: false,
+  controls: { navigationBatch: true, connectHapp: true } };
+
+test("TV volume commits once, Happ confirms and recent navigation taps keep order", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 680 });
+  const commands: unknown[] = [];
+  const held: import("@playwright/test").Route[] = [];
+  let tv = updated;
+  await page.route("**/remote/api/status", route => route.fulfill({ json: tv }));
+  await page.route("**/remote/api/command", async route => {
+    const command = route.request().postDataJSON();
+    commands.push(command);
+    if (command.action === "navigate") {
+      held.push(route);
+      return;
+    }
+    if (command.action === "volume-set") {
+      tv = { ...tv, volume: command.volume };
+      await route.fulfill({ json: { outcome: "confirmed", audio: { volume: tv.volume, muted: false } } });
+    } else {
+      tv = { ...tv, vpn: true };
+      await route.fulfill({ json: { outcome: "vpn-connected" } });
+    }
+  });
+  await page.goto("/remote/");
+  await page.addStyleTag({ content: "html[data-tv-pwa] #root { --tv-safe-top: 42px; }" });
+  const remote = page.getByRole("region", { name: "Управление телевизором" });
+  const slider = remote.getByRole("slider", { name: "Громкость" });
+  await expect(slider).toBeEnabled();
+  const rect = await slider.boundingBox();
+  expect(rect?.height).toBeGreaterThanOrEqual(48);
+  await expect(slider).toHaveAttribute("aria-valuemax", "100");
+  await slider.press("ArrowRight");
+  await expect(slider).toHaveAttribute("aria-valuenow", "31");
+  await expect(remote.getByText("Звук подтверждён.")).toBeVisible();
+  expect(commands).toEqual([{ action: "volume-set", volume: 31 }]);
+
+  await remote.getByRole("button", { name: "Подключить VPN через Happ" }).click();
+  await expect(remote.getByText("VPN Happ подключён.")).toBeVisible();
+
+  const down = remote.getByRole("button", { name: "Вниз" });
+  await down.click();
+  await expect.poll(() => held.length).toBe(1);
+  await expect(down).toBeEnabled();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowRight");
+  await held[0].fulfill({ json: { outcome: "sent" } });
+  await expect.poll(() => held.length).toBe(2);
+  expect(commands).toEqual([
+    { action: "volume-set", volume: 31 }, { action: "vpn-connect" },
+    { action: "navigate", keys: ["down"] }, { action: "navigate", keys: ["down", "right"] }
+  ]);
+  await page.keyboard.press("ArrowDown");
+  await held[1].fulfill({ status: 503, json: { outcome: "unconfirmed" } });
+  await expect(remote.getByText("Результат команды не подтверждён.")).toBeVisible();
+  await page.waitForTimeout(100);
+  expect(held).toHaveLength(2);
+
+  const canvas = page.locator("html[data-tv-pwa]");
+  expect(await canvas.evaluate((html) => getComputedStyle(html, "::before").backgroundImage)).toContain("radial-gradient");
+  const app = page.locator(".tv-pwa");
+  await app.evaluate((main) => { main.scrollTop = 140; });
+  expect(await app.evaluate((main) => main.scrollTop)).toBeGreaterThan(0);
+  expect(await app.evaluate((main) => document.elementFromPoint(30, 20)?.closest(".tv-pwa") === null)).toBe(true);
+  await app.evaluate((main) => { main.scrollTop = 0; });
+  await shot(page, "mobile-rapid-controls");
+  await page.getByRole("button", { name: "Дневная тема" }).click();
+  await shot(page, "mobile-rapid-controls-day");
+
+  await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+  await expect(remote.getByText("Нет связи с Samsung")).toBeVisible();
+  await expect(slider).toBeDisabled();
+  await expect(slider).toHaveAttribute("aria-valuetext", "—");
+  await expect(remote.getByRole("button", { name: "Подключить VPN через Happ" })).toBeDisabled();
+});
+
+test("Samsung live capabilities fit V3 without changing the widget layout", async ({ page }) => {
+  await layout(page);
+  await page.route("**/api/tv/status", route => route.fulfill({ json: updated }));
+  for (const [width, height, orientation] of [[1280, 720, "landscape"], [720, 1280, "portrait"]] as const) {
+    await page.setViewportSize({ width, height });
+    for (const theme of ["night", "day"]) {
+      await page.goto("/overview?theme=" + theme);
+      const widget = page.getByTestId("television-widget");
+      await expect(widget.getByRole("slider", { name: "Громкость" })).toBeVisible();
+      await shot(page, orientation + "-" + theme + "-rapid-card");
+      await widget.getByRole("button", { name: "Полный пульт" }).click();
+      await expect(page.getByRole("region", { name: "Управление телевизором" }).getByRole("button",
+        { name: /Открыть в приложении/ })).toBeEnabled();
+      await shot(page, orientation + "-" + theme + "-rapid-sheet");
+    }
+  }
 });

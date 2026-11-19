@@ -21,7 +21,22 @@ function Remote() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.accent = accent;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content",
+      getComputedStyle(document.documentElement).getPropertyValue("--cc-canvas").trim());
   }, [theme, accent]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const updateHeight = () => {
+      if (viewport.scale === 1) {
+        document.documentElement.style.setProperty("--tv-viewport-height", `${viewport.height}px`);
+      }
+    };
+    updateHeight();
+    viewport.addEventListener("resize", updateHeight);
+    return () => viewport.removeEventListener("resize", updateHeight);
+  }, []);
 
   const session = async (action: "login" | "logout", event?: FormEvent) => {
     event?.preventDefault();
@@ -59,7 +74,7 @@ function Remote() {
         <input id="tv-pairing" type="password" autoComplete="current-password" required
           autoCapitalize="off" value={code} onChange={(event) => setCode(event.target.value)} />
         <Button type="submit" variant="primary" disabled={pending || !code}>Подключить пульт</Button>
-      </form> : <FullRemote controller={controller} />}
+      </form> : <FullRemote controller={controller} nativeLinkTargets />}
       {loginError && <p className="tv-message" role="alert">{loginError}</p>}
     </WorkZone>
     <footer className="tv-pwa-footer">
