@@ -388,7 +388,7 @@ def test_rog_expected_states_and_fixed_failures_follow_the_real_last_error_contr
     collector = DiagnosticsCollector(IntegrationSettings())
     for service in (rog(), rog(last_error="health_unreachable"), rog(health="degraded", status="sleeping"), rog(health="degraded", status="hibernating")):
         assert collector.report(make_snapshot([service])).problems == []
-    for code in ("wake_timeout", "wol_send_failed", "ssh_timeout"):
+    for code in ("health_unreachable_persistent", "wake_timeout", "wol_send_failed", "ssh_timeout"):
         report = collector.report(make_snapshot([rog(last_error=code)]))
         assert len(report.problems) == 1
         assert report.problems[0].technicalEvidence.errorCode == code

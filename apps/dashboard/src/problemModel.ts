@@ -32,10 +32,16 @@ const planningIssueLabels: Record<PlanningHealthIssue["source"], string> = {
 
 const rogIncidentErrorCodes = new Set([
   "companion_health_failed", "companion_hibernate_failed", "companion_sleep_failed", "companion_response_too_large",
-  "hibernate_timeout", "invalid_companion_response", "rog_g703_not_configured", "ssh_action_rejected",
+  "hibernate_timeout", "health_unreachable_persistent", "invalid_companion_response", "rog_g703_not_configured", "ssh_action_rejected",
   "ssh_client_unavailable", "ssh_identity_file_missing", "ssh_invalid_response", "ssh_known_hosts_file_missing",
   "ssh_output_too_large", "ssh_timeout", "ssh_transport_failed", "sleep_timeout", "wake_timeout", "wol_send_failed", "action_failed"
 ]);
+export function serviceNeedsAttention(service: ServiceSnapshot): boolean {
+  if (!service.enabled) return false;
+  if (service.id !== "rog_g703gi") return service.health !== "healthy";
+  const code = (service.data as Record<string, unknown>).lastError;
+  return typeof code === "string" && rogIncidentErrorCodes.has(code);
+}
 const safePlanningIssueCodePattern = /^[a-z][a-z0-9_.-]{0,127}$/;
 
 function diagnosticsStateForPlanningIssue(
@@ -133,12 +139,7 @@ export function currentProblemsForSnapshot(
   const problems = new Map<string, DiagnosticsProblem>();
   const add = (next: DiagnosticsProblem) => { problems.set(next.id, next); };
   for (const service of snapshot.services) {
-    if (!service.enabled) continue;
-    if (service.id === "rog_g703gi") {
-      const data = service.data as Record<string, unknown>;
-      const code = data.lastError;
-      if (typeof code !== "string" || !rogIncidentErrorCodes.has(code)) continue;
-    } else if (service.health === "healthy") continue;
+    if (!serviceNeedsAttention(service)) continue;
     const subsystem = serviceLabels[service.id] ?? "Сервис";
     add(problem(
       `service:${service.id}`,

@@ -1,3 +1,4 @@
+import { serviceNeedsAttention } from "./problemModel";
 import { SelectField } from "./ui/SelectField";
 import { EmptyState } from "./ui/States";
 import { v3VisualSkinEnabled } from "./visualShellConfig";
@@ -73,7 +74,7 @@ export function OverviewPage({ snapshot, onNavigate, onCoffeeAction, coffeeActio
     (service) => service.presentation?.category !== "home-device"
   );
   const healthyServices = serviceCatalog.filter((service) => service.health === "healthy").length;
-  const attentionServices = serviceCatalog.filter((service) => service.health !== "healthy");
+  const attentionServices = serviceCatalog.filter(serviceNeedsAttention);
   const backupServices = ordered.filter((service) => service.dataContract.startsWith("backup."));
 
   return (
@@ -312,7 +313,7 @@ export function ServicesPage({ snapshot }: PageProps) {
       />
       <div className="service-summary-line">
         <span>{catalog.filter((service) => service.health === "healthy").length} работают</span>
-        <span>{catalog.filter((service) => service.health !== "healthy").length} требуют внимания</span>
+        <span>{catalog.filter(serviceNeedsAttention).length} требуют внимания</span>
         <span>{catalog.length} всего</span>
       </div>
 

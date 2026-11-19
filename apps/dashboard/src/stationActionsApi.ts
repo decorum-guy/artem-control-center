@@ -36,14 +36,16 @@ export async function executeStationAction(actionId: StationActionId): Promise<S
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ actionId, requestId })
-  });
+  }).catch(() => { throw new Error("station_dispatch_uncertain"); });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { detail?: unknown } | null;
-    throw new Error(body?.detail === "station_dispatch_uncertain" ? "station_dispatch_uncertain" : "station_dispatch_failed");
+    const uncertain = body?.detail === "station_dispatch_uncertain" || body?.detail === "station_invalid_response" ||
+      (response.status >= 500 && !body?.detail);
+    throw new Error(uncertain ? "station_dispatch_uncertain" : "station_dispatch_failed");
   }
-  const payload = await response.json() as StationActionResponse;
-  if (payload.status !== "dispatched" || payload.requestId !== requestId || payload.actionId !== actionId) {
-    throw new Error("station_invalid_response");
+  const payload = await response.json().catch(() => { throw new Error("station_dispatch_uncertain"); }) as StationActionResponse;
+  if (payload?.schemaVersion !== 1 || payload.status !== "dispatched" || payload.requestId !== requestId || payload.actionId !== actionId) {
+    throw new Error("station_dispatch_uncertain");
   }
   return payload;
 }

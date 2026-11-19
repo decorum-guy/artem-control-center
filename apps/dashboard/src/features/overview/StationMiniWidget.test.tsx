@@ -8,6 +8,10 @@ import { resolveWidgetAsset } from "../../widgetAssets";
 import { STATION_ACTIONS } from "../../stationActionsApi";
 import { StationMiniWidget } from "./StationMiniWidget";
 
+const showNotice = vi.hoisted(() => vi.fn());
+vi.mock("../../NoticeCenter", () => ({ useNoticeCenter: () => ({ showNotice }) }));
+vi.mock("../../InteractionLock", () => ({ useInteractionLock: () => ({ locked: false, guardMutation: () => true }) }));
+
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("Station Mini 2 Overview widget", () => {
@@ -141,7 +145,7 @@ describe("Station Mini 2 Overview widget", () => {
     expect(secondGlow).not.toBe(firstGlow);
     expect(host.querySelectorAll(".station-mini-widget__glow")).toHaveLength(1);
     expect(secondGlow?.classList.contains("station-mini-widget__glow--active")).toBe(true);
-    expect(vi.getTimerCount()).toBe(timersBeforePress + 1);
+    expect(vi.getTimerCount()).toBe(timersBeforePress + 2);
     expect(actionCalls).toHaveLength(2);
     expect(actionCalls.map((call) => call.path)).toEqual([
       "/api/v1/actions/station", "/api/v1/actions/station"
@@ -152,9 +156,10 @@ describe("Station Mini 2 Overview widget", () => {
       expect(Object.keys(call.body ?? {}).sort()).toEqual(["actionId", "requestId"]);
       expect(call.body?.requestId).toBeTruthy();
     }
-    expect(host.textContent).toContain("Команда отправлена");
+    expect(showNotice).not.toHaveBeenCalled();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1199); });
+    expect(showNotice).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "station.volume", detail: "Команда отправлена" }));
     expect(host.querySelector(".station-mini-widget__glow--active")).not.toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(host.querySelector(".station-mini-widget__glow--active")).toBeNull();

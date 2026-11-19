@@ -8,7 +8,7 @@ import {
   countHealth,
   enabledServices,
   healthTone,
-  groupHealthyServices,
+  groupServicesWithoutIncidents,
   isHomeDevice,
   serviceGroupLabels,
   serviceGroupOrder,
@@ -16,6 +16,7 @@ import {
 } from "../operations/routeDensity";
 import { ServiceDetailsSheet } from "./ServiceDetailsSheet";
 import { useInterfaceCopy } from "../../interfaceCopy";
+import { serviceNeedsAttention } from "../../problemModel";
 
 export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const { copy } = useInterfaceCopy();
@@ -23,11 +24,12 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
   const detailsService = snapshot.services.find(service => service.id === detailsId);
   const catalog = enabledServices(snapshot.services).filter((service) => !isHomeDevice(service));
   const counts = countHealth(catalog);
-  const attention = servicesByAttention(catalog).filter((service) => service.health !== "healthy");
-  const healthyGroups = groupHealthyServices(catalog);
+  const attention = servicesByAttention(catalog).filter(serviceNeedsAttention);
+  const healthyGroups = groupServicesWithoutIncidents(catalog);
+  const quietOffline = catalog.some(service => service.health !== "healthy" && !serviceNeedsAttention(service));
   const attentionSummary = attention.length
     ? `Требуют внимания · ${attention.length}`
-    : "Всё в норме";
+    : quietOffline ? "Нет активных проблем" : "Всё в норме";
   const countSummary = `${counts.healthy} в норме · ${counts.degraded + counts.stale} деградировали или устарели · ${counts.offline} недоступны`;
 
   return (
@@ -41,7 +43,7 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
 
       <OperationalStatusSummary
         statusLabel={attentionSummary}
-        tone={attention.length ? healthTone(attention[0].health) : "success"}
+        tone={attention.length ? healthTone(attention[0].health === "healthy" ? "degraded" : attention[0].health) : "success"}
         detail={countSummary}
         attention={attention.length > 0}
         data-testid="services-attention-summary"
@@ -60,8 +62,8 @@ export function ServicesV2Page({ snapshot }: { snapshot: DashboardSnapshot }) {
             </ErrorBoundary>
           )) : (
             <div className="services-attention-empty" data-testid="services-all-healthy">
-              <StatusText label="Все подключённые сервисы в норме" tone="success" />
-              <span>Подробности здоровых групп остаются свернутыми ниже.</span>
+              <StatusText label={quietOffline ? "Нет активных проблем" : "Все подключённые сервисы в норме"} tone="success" />
+              <span>Состояния сервисов доступны в группах ниже.</span>
             </div>
           )}
         </div>

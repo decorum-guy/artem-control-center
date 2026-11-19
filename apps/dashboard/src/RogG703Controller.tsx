@@ -21,7 +21,7 @@ type AvailabilityMap = Record<RogG703ActionId, RogG703ActionAvailability>;
 
 export const rogG703StatusCopy: Record<RogG703DeviceStatus, { label: string; detail: string }> = {
   online: { label: "В сети", detail: "ASUS отвечает" },
-  offline: { label: "Не в сети", detail: "Устройство не отвечает — сон или гибернация" },
+  offline: { label: "Не в сети", detail: "Нет ответа на проверку связи с ASUS" },
   waking: { label: "Пробуждение", detail: "Ждём, когда ASUS появится в сети" },
   sleeping: { label: "Сон", detail: "Ждём завершения перехода" },
   hibernating: { label: "Гибернация", detail: "Ждём завершения перехода" },

@@ -7,11 +7,12 @@ import type { ServiceSnapshot } from "@artem/contracts";
 import { useAccess } from "./AccessControls";
 import { useInteractionLock } from "./InteractionLock";
 import { useNoticeCenter } from "./NoticeCenter";
+import { useCommandSeries } from "./useCommandSeries";
 import {
   executeHomeAssistantAction, fetchHomeAssistantActionAvailability, newHomeAssistantRequestId,
   LIGHT_STRIP_POWER_ON, LIGHT_STRIP_POWER_OFF, LIGHT_STRIP_SET_BRIGHTNESS,
   LIGHT_STRIP_SET_COLOR, LIGHT_STRIP_SET_TEMPERATURE, LIGHT_STRIP_SET_EFFECT,
-  type HomeAssistantActionAvailability, type LightStripActionId
+  type HomeAssistantActionAvailability, type HomeAssistantActionResponse, type LightStripActionId
 } from "./homeAssistantControlApi";
 import "./LightStripControl.css";
 
@@ -24,6 +25,7 @@ interface Favorite {
 }
 
 interface LightData {
+  observedAt?: string;
   state?: "on" | "off" | "unavailable";
   available?: boolean;
   stale?: boolean;
@@ -116,14 +118,28 @@ export function LightStripControl({ service, variant = "home", interactive = tru
   const { showNotice } = useNoticeCenter();
   const [availability, setAvailability] = useState<HomeAssistantActionAvailability | null>(null);
   const [pending, setPending] = useState<LightStripActionId | null>(null);
+  const decisionEpoch = useRef(0);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [draftBrightness, setDraftBrightness] = useState(data.brightness ?? 255);
+  const [selection, setSelection] = useState<number | null>(null);
+  const [receipt, setReceipt] = useState<HomeAssistantActionResponse | null>(null);
+  const editingBrightness = useRef(false);
+  const startingPower = useRef(false);
+  const regularAction = useRef(false);
   const [customColor, setCustomColor] = useState("#ff6e54");
   const [draftKelvin, setDraftKelvin] = useState(data.colorTempKelvin ?? 4000);
   const pickerButton = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const live = service.source === "live" && service.health === "healthy" && data.available !== false && !data.stale;
+  const latestLight = live && receipt?.light && Date.parse(receipt.observedAt) > Date.parse(data.observedAt ?? "")
+    ? receipt.light : data;
+  const draftBrightness = selection ?? latestLight.brightness ?? 255;
   const enabled = interactive && !locked && live && !pending;
+  useEffect(() => {
+    if (!enabled || (latestLight.state !== "on" && !startingPower.current)) {
+      editingBrightness.current = false;
+      setSelection(null);
+    }
+  }, [enabled, latestLight.state]);
   const effects = data.effects ?? [];
   const colors = effects.filter((effect) => Object.prototype.hasOwnProperty.call(palette, effect));
   const modes = effects.filter((effect) => !Object.prototype.hasOwnProperty.call(palette, effect));
@@ -132,15 +148,15 @@ export function LightStripControl({ service, variant = "home", interactive = tru
   const maximumKelvin = data.maxColorTempKelvin ?? 6500;
 
   const refresh = useCallback(async () => {
-    try { setAvailability(await fetchHomeAssistantActionAvailability()); }
-    catch { setAvailability(null); }
+    const epoch = ++decisionEpoch.current;
+    const next = await fetchHomeAssistantActionAvailability().catch(() => null);
+    if (decisionEpoch.current === epoch) setAvailability(next);
   }, []);
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 10_000);
-    return () => window.clearInterval(timer);
+    return () => { decisionEpoch.current++; window.clearInterval(timer); };
   }, [refresh]);
-  useEffect(() => setDraftBrightness(data.brightness ?? 255), [data.brightness]);
   useEffect(() => setDraftKelvin(data.colorTempKelvin ?? 4000), [data.colorTempKelvin]);
   useEffect(() => {
     if (!pickerOpen) return;
@@ -158,40 +174,85 @@ export function LightStripControl({ service, variant = "home", interactive = tru
     return () => { window.removeEventListener("keydown", closeOnEscape); opener?.focus(); };
   }, [pickerOpen]);
 
-  const run = useCallback(async (actionId: LightStripActionId, values: { brightness?: number; hsColor?: [number, number]; kelvin?: number; effect?: string } = {}) => {
-    if (!enabled || !guardMutation()) return;
-    let decision = availability?.actions[actionId];
-    if (!decision) {
-      try { decision = (await fetchHomeAssistantActionAvailability()).actions[actionId]; }
-      catch { /* The notice below explains unavailable control. */ }
-    }
+  async function authorize(actionId: LightStripActionId, fresh: boolean, signal?: AbortSignal) {
+    let decision = fresh ? undefined : availability?.actions[actionId];
+    if (!decision) decision = (await fetchHomeAssistantActionAvailability()).actions[actionId];
+    if (signal?.aborted || !guardMutation()) throw new Error("locked");
     if (decision?.availability === "elevation_required") {
       if (await ensureCapability(actionId, "Лента в зале")) {
         try { decision = (await fetchHomeAssistantActionAvailability()).actions[actionId]; }
         catch { decision = undefined; }
       }
     }
-    if (!decision?.allowed) {
-      showNotice({ id: "home.light_strip.action", severity: "warning", title: "Лента в зале", detail: decision ? explainAvailability(decision.availability) : "Управление сейчас недоступно.", timeoutMs: 6000 });
+    if (!decision?.allowed) throw new Error(decision?.availability ?? "integration_unavailable");
+    if (signal?.aborted || !guardMutation()) throw new Error("locked");
+  }
+
+  const brightness = useCommandSeries<number | "on", HomeAssistantActionResponse>({
+    mode: "latest", enabled,
+    dispatch: async (target, signal) => {
+      const actionId = target === "on" ? LIGHT_STRIP_POWER_ON : LIGHT_STRIP_SET_BRIGHTNESS;
+      await authorize(actionId, true, signal);
+      const requestId = newHomeAssistantRequestId();
+      const response = await executeHomeAssistantAction({ actionId, requestId,
+        ...(typeof target === "number" ? { brightness: target } : {}) });
+      if (response?.schemaVersion !== 1 || response.status !== "confirmed" || response.actionId !== actionId || response.requestId !== requestId ||
+          response.light?.state !== "on" || (typeof target === "number" &&
+          (typeof response.light.brightness !== "number" || Math.abs(response.light.brightness - target) > 3))) {
+        throw new Error("ha_verification_timeout");
+      }
+      if (!signal.aborted) setReceipt(response);
+      return response;
+    },
+    onFinish: ({ last, error, cancelled }) => {
+      startingPower.current = false;
+      if (!editingBrightness.current || error || cancelled) setSelection(null);
+      const level = last?.light?.brightness;
+      const detail = error || cancelled ? "Серия остановлена. Итоговое изменение не подтверждено."
+        : last?.actionId === LIGHT_STRIP_SET_BRIGHTNESS && typeof level === "number"
+        ? `Home Assistant подтвердил яркость ${Math.round(level / 255 * 100)}%.` : "Home Assistant подтвердил включение.";
+      showNotice({ id: "home.light_strip.action", severity: error || cancelled ? "warning" : "success",
+        title: "Лента в зале", detail });
+      void refresh();
+    }
+  });
+
+  function editBrightness(value: number) { editingBrightness.current = true; setSelection(value); }
+  function commitBrightness(value: number) {
+    editingBrightness.current = false;
+    if (regularAction.current || !guardMutation() || (latestLight.state !== "on" && !startingPower.current) ||
+        (!brightness.isActive() && value === latestLight.brightness) || !brightness.submit(value)) setSelection(null);
+  }
+
+  async function run(actionId: LightStripActionId, values: { hsColor?: [number, number]; kelvin?: number; effect?: string } = {}) {
+    if (!enabled || !guardMutation() || regularAction.current || brightness.isActive()) return;
+    if (actionId === LIGHT_STRIP_POWER_ON) {
+      startingPower.current = brightness.submit("on");
       return;
     }
-    if (!guardMutation()) return;
+    regularAction.current = true;
     setPending(actionId);
-    showNotice({ id: "home.light_strip.action", severity: "progress", title: "Лента в зале", detail: "Отправляем команду и ждём подтверждения…" });
     try {
+      await authorize(actionId, false);
+      showNotice({ id: "home.light_strip.action", severity: "progress", title: "Лента в зале", detail: "Отправляем команду и ждём подтверждения…" });
       await executeHomeAssistantAction({ actionId, requestId: newHomeAssistantRequestId(), ...values });
+      setReceipt(null);
       showNotice({ id: "home.light_strip.action", severity: "success", title: "Лента в зале", detail: "Home Assistant подтвердил изменение.", timeoutMs: 4000 });
       await refresh();
     } catch (error) {
       const code = error instanceof Error ? error.message : "";
-      showNotice({ id: "home.light_strip.action", severity: "error", title: "Лента в зале", detail: code === "ha_verification_timeout" ? "Не удалось подтвердить изменение состояния." : "Не удалось изменить состояние ленты.", timeoutMs: 8000 });
-    } finally { setPending(null); }
-  }, [availability, enabled, ensureCapability, explainAvailability, guardMutation, refresh, showNotice]);
+      showNotice({ id: "home.light_strip.action", severity: "error", title: "Лента в зале", detail: code === "ha_verification_timeout" ? "Не удалось подтвердить изменение состояния." : explainAvailability(code), timeoutMs: 8000 });
+    } finally { regularAction.current = false; setPending(null); }
+  }
 
   const canUse = (actionId: LightStripActionId) => {
     const decision = availability?.actions[actionId];
-    return Boolean(enabled && decision && (decision.allowed || decision.availability === "elevation_required"));
+    if (!enabled || !decision) return false;
+    if (brightness.active && actionId !== LIGHT_STRIP_SET_BRIGHTNESS) return false;
+    return decision.allowed || decision.availability === "elevation_required" ||
+      (brightness.active && decision.availability === "busy" && decision.integrationAvailable && decision.gateEnabled);
   };
+  const brightnessEnabled = canUse(LIGHT_STRIP_SET_BRIGHTNESS) && (latestLight.state === "on" || startingPower.current);
 
   const chooseFavorite = (favorite: Favorite) => {
     if (favorite.effect) void run(LIGHT_STRIP_SET_EFFECT, { effect: favorite.effect });
@@ -201,39 +262,41 @@ export function LightStripControl({ service, variant = "home", interactive = tru
   const currentSwatch = data.effect ? effectSwatch(data.effect)
     : data.rgbColor ? `rgb(${data.rgbColor.join(" ")})`
     : data.colorTempKelvin ? temperatureSwatch(data.colorTempKelvin) : "#879399";
-  const status = !live ? (data.stale ? "Данные устарели" : "Недоступна") : data.state === "on" ? "Включена" : "Выключена";
+  const status = !live ? (data.stale ? "Данные устарели" : "Недоступна")
+    : brightness.active ? (startingPower.current && latestLight.state !== "on" ? "Включаем…" : "Применяем…")
+    : latestLight.state === "on" ? "Включена" : "Выключена";
 
-  return <section className={`light-strip light-strip--${variant}`} data-testid={`light-strip-${variant}`} data-instrument-active={v3VisualSkinEnabled ? Boolean(live && data.state === "on") : undefined} aria-label="Лента в зале">
+  return <section className={`light-strip light-strip--${variant}`} data-testid={`light-strip-${variant}`} data-instrument-active={v3VisualSkinEnabled ? Boolean(live && latestLight.state === "on") : undefined} aria-label="Лента в зале">
     <header className="light-strip__header">
       <span className="light-strip__identity"><span className="light-strip__lamp" style={{ background: currentSwatch }} aria-hidden="true" />
         {v3VisualSkinEnabled && <RingGauge size={64} tone="accent" label="Подтверждённая яркость ленты"
-          reading={live && data.state === "on" && typeof data.brightness === "number" ? { kind: "progress", fraction: data.brightness / 255 } : { kind: live ? "idle" : "unavailable" }} />}<span><strong>Лента в зале</strong><small>{status}</small></span></span>
-      <button className="light-strip__power" type="button" aria-label={data.state === "on" ? "Выключить ленту" : "Включить ленту"} aria-pressed={data.state === "on"} disabled={!canUse(data.state === "on" ? LIGHT_STRIP_POWER_OFF : LIGHT_STRIP_POWER_ON)} onClick={() => void run(data.state === "on" ? LIGHT_STRIP_POWER_OFF : LIGHT_STRIP_POWER_ON)}>{data.state === "on" ? "Выкл" : "Вкл"}</button>
+          reading={live && latestLight.state === "on" && typeof latestLight.brightness === "number" ? { kind: "progress", fraction: latestLight.brightness / 255 } : { kind: live ? "idle" : "unavailable" }} />}<span><strong>Лента в зале</strong><small>{status}</small></span></span>
+      <button className="light-strip__power" type="button" aria-label={latestLight.state === "on" ? "Выключить ленту" : "Включить ленту"} aria-pressed={latestLight.state === "on"} disabled={!canUse(latestLight.state === "on" ? LIGHT_STRIP_POWER_OFF : LIGHT_STRIP_POWER_ON)} onClick={() => void run(latestLight.state === "on" ? LIGHT_STRIP_POWER_OFF : LIGHT_STRIP_POWER_ON)}>{latestLight.state === "on" ? "Выкл" : "Вкл"}</button>
     </header>
     <div className="light-strip__brightness">
       {v3VisualSkinEnabled ? <Slider label="Яркость" value={draftBrightness} min={1} max={255}
-        displayValue={`${Math.round(draftBrightness / 255 * 100)}%`} disabled={!canUse(LIGHT_STRIP_SET_BRIGHTNESS) || data.state !== "on"}
-        onChange={setDraftBrightness} onCommit={next => { if (next !== data.brightness) void run(LIGHT_STRIP_SET_BRIGHTNESS, { brightness: next }); }} /> : <>
+        displayValue={`${Math.round(draftBrightness / 255 * 100)}%`} disabled={!brightnessEnabled}
+        onChange={editBrightness} onCommit={commitBrightness} onCancel={() => { editingBrightness.current = false; setSelection(null); }} /> : <>
       <label htmlFor={`light-brightness-${variant}`}>Яркость <output>{Math.round(draftBrightness / 255 * 100)}%</output></label>
-      <input id={`light-brightness-${variant}`} type="range" min="1" max="255" value={draftBrightness} disabled={!canUse(LIGHT_STRIP_SET_BRIGHTNESS) || data.state !== "on"} onChange={(event) => setDraftBrightness(Number(event.target.value))} onPointerUp={(event) => { const value = Number(event.currentTarget.value); if (value !== data.brightness) void run(LIGHT_STRIP_SET_BRIGHTNESS, { brightness: value }); }} onKeyUp={(event) => { if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) void run(LIGHT_STRIP_SET_BRIGHTNESS, { brightness: Number(event.currentTarget.value) }); }} />
+      <input id={`light-brightness-${variant}`} type="range" min="1" max="255" value={draftBrightness} disabled={!brightnessEnabled} onChange={(event) => editBrightness(Number(event.target.value))} onPointerUp={(event) => commitBrightness(Number(event.currentTarget.value))} onKeyUp={(event) => { if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) commitBrightness(Number(event.currentTarget.value)); }} />
       </>}
     </div>
     <div className="light-strip__favorites"><span className="light-strip__caption">Часто выбираете</span><div className="light-strip__swatches">
       {favorites.length ? favorites.map((favorite) => {
         const mode = Boolean(favorite.effect && !Object.prototype.hasOwnProperty.call(palette, favorite.effect));
-        return <button key={favorite.key} type="button" className={mode ? "light-strip__favorite-mode" : "light-strip__swatch"} style={mode ? undefined : { background: favoriteSwatch(favorite) }} title={`${favoriteLabel(favorite)} · ${favorite.count} раз`} aria-label={`${favoriteLabel(favorite)}, выбран ${favorite.count} раз`} disabled={!canUse(favorite.effect ? LIGHT_STRIP_SET_EFFECT : favorite.hsColor ? LIGHT_STRIP_SET_COLOR : LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onClick={() => chooseFavorite(favorite)}>{mode && <><span className="light-strip__mode-mark" style={{ background: favoriteSwatch(favorite) }} aria-hidden="true" />{favorite.effect}</>}</button>;
+        return <button key={favorite.key} type="button" className={mode ? "light-strip__favorite-mode" : "light-strip__swatch"} style={mode ? undefined : { background: favoriteSwatch(favorite) }} title={`${favoriteLabel(favorite)} · ${favorite.count} раз`} aria-label={`${favoriteLabel(favorite)}, выбран ${favorite.count} раз`} disabled={!canUse(favorite.effect ? LIGHT_STRIP_SET_EFFECT : favorite.hsColor ? LIGHT_STRIP_SET_COLOR : LIGHT_STRIP_SET_TEMPERATURE) || latestLight.state !== "on"} onClick={() => chooseFavorite(favorite)}>{mode && <><span className="light-strip__mode-mark" style={{ background: favoriteSwatch(favorite) }} aria-hidden="true" />{favorite.effect}</>}</button>;
       }) : <span className="light-strip__empty">Появятся после первых переключений</span>}
     </div><button ref={pickerButton} type="button" className="light-strip__more" disabled={!interactive || locked} onClick={() => setPickerOpen(true)} aria-label="Открыть выбор цвета и режима">Цвета и режимы</button></div>
     {pickerOpen && createPortal(<div className="light-strip__backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPickerOpen(false); }}><div className="light-strip__dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="light-picker-title" tabIndex={-1}>
       <header><div><strong id="light-picker-title">Цвета и режимы</strong><small>Возможности ленты из Home Assistant</small></div><button type="button" className="light-strip__close" onClick={() => setPickerOpen(false)} aria-label="Закрыть выбор цвета и режима">×</button></header>
-      <div className="light-strip__dialog-body">{data.state !== "on" && <p>Сначала включите ленту, затем выберите цвет.</p>}
+      <div className="light-strip__dialog-body">{latestLight.state !== "on" && <p>Сначала включите ленту, затем выберите цвет.</p>}
       <div className="light-strip__choices">
-        <section className="light-strip__choice-column" aria-labelledby="light-picker-colors"><h3 id="light-picker-colors">Цвета</h3><div className="light-strip__palette">{colors.map((effect) => <button key={effect} type="button" className={`light-strip__swatch light-strip__swatch--picker${data.effect === effect ? " is-active" : ""}`} style={{ background: effectSwatch(effect) }} title={effect} aria-label={effect} disabled={!canUse(LIGHT_STRIP_SET_EFFECT) || data.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_EFFECT, { effect }); setPickerOpen(false); }} />)}</div></section>
-        <section className="light-strip__choice-column" aria-labelledby="light-picker-modes"><h3 id="light-picker-modes">Режимы</h3><div className="light-strip__modes">{modes.map((effect) => <button key={effect} type="button" className={`light-strip__mode${data.effect === effect ? " is-active" : ""}`} disabled={!canUse(LIGHT_STRIP_SET_EFFECT) || data.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_EFFECT, { effect }); setPickerOpen(false); }}><span className="light-strip__mode-mark" style={{ background: effectSwatch(effect) }} aria-hidden="true" />{effect}</button>)}</div></section>
+        <section className="light-strip__choice-column" aria-labelledby="light-picker-colors"><h3 id="light-picker-colors">Цвета</h3><div className="light-strip__palette">{colors.map((effect) => <button key={effect} type="button" className={`light-strip__swatch light-strip__swatch--picker${data.effect === effect ? " is-active" : ""}`} style={{ background: effectSwatch(effect) }} title={effect} aria-label={effect} disabled={!canUse(LIGHT_STRIP_SET_EFFECT) || latestLight.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_EFFECT, { effect }); setPickerOpen(false); }} />)}</div></section>
+        <section className="light-strip__choice-column" aria-labelledby="light-picker-modes"><h3 id="light-picker-modes">Режимы</h3><div className="light-strip__modes">{modes.map((effect) => <button key={effect} type="button" className={`light-strip__mode${data.effect === effect ? " is-active" : ""}`} disabled={!canUse(LIGHT_STRIP_SET_EFFECT) || latestLight.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_EFFECT, { effect }); setPickerOpen(false); }}><span className="light-strip__mode-mark" style={{ background: effectSwatch(effect) }} aria-hidden="true" />{effect}</button>)}</div></section>
       </div>
-      {data.supportedColorModes?.includes("hs") && <div className="light-strip__custom"><label htmlFor="light-custom-color">Свой цвет</label><input id="light-custom-color" type="color" value={customColor} disabled={!canUse(LIGHT_STRIP_SET_COLOR) || data.state !== "on"} onChange={(event) => setCustomColor(event.target.value)} /><button type="button" disabled={!canUse(LIGHT_STRIP_SET_COLOR) || data.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_COLOR, { hsColor: hexToHs(customColor) }); setPickerOpen(false); }}>Применить</button></div>}
+      {data.supportedColorModes?.includes("hs") && <div className="light-strip__custom"><label htmlFor="light-custom-color">Свой цвет</label><input id="light-custom-color" type="color" value={customColor} disabled={!canUse(LIGHT_STRIP_SET_COLOR) || latestLight.state !== "on"} onChange={(event) => setCustomColor(event.target.value)} /><button type="button" disabled={!canUse(LIGHT_STRIP_SET_COLOR) || latestLight.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_COLOR, { hsColor: hexToHs(customColor) }); setPickerOpen(false); }}>Применить</button></div>}
       {data.supportedColorModes?.includes("color_temp") && <div className="light-strip__temperature">{v3VisualSkinEnabled ? <Slider label="Белый свет" value={draftKelvin} min={minimumKelvin} max={maximumKelvin} step={100} unit=" K"
-      disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onChange={setDraftKelvin} /> : <><label htmlFor="light-temperature">Белый свет <output>{draftKelvin} K</output></label><input id="light-temperature" type="range" min={minimumKelvin} max={maximumKelvin} step="100" value={draftKelvin} disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onChange={(event) => setDraftKelvin(Number(event.target.value))} /></>}<button type="button" disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || data.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_TEMPERATURE, { kelvin: draftKelvin }); setPickerOpen(false); }}>Применить</button></div>}
+      disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || latestLight.state !== "on"} onChange={setDraftKelvin} /> : <><label htmlFor="light-temperature">Белый свет <output>{draftKelvin} K</output></label><input id="light-temperature" type="range" min={minimumKelvin} max={maximumKelvin} step="100" value={draftKelvin} disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || latestLight.state !== "on"} onChange={(event) => setDraftKelvin(Number(event.target.value))} /></>}<button type="button" disabled={!canUse(LIGHT_STRIP_SET_TEMPERATURE) || latestLight.state !== "on"} onClick={() => { void run(LIGHT_STRIP_SET_TEMPERATURE, { kelvin: draftKelvin }); setPickerOpen(false); }}>Применить</button></div>}
       </div></div></div>, document.body)}
   </section>;
 }

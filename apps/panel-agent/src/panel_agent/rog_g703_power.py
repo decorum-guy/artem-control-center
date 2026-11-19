@@ -65,6 +65,7 @@ _SAFE_ERROR_CODES = {
     "companion_response_too_large",
     "hibernate_timeout",
     "health_unreachable",
+    "health_unreachable_persistent",
     "invalid_companion_response",
     "rog_g703_not_configured",
     "ssh_action_rejected",
@@ -79,6 +80,7 @@ _SAFE_ERROR_CODES = {
     "wake_timeout",
     "wol_send_failed",
 }
+ROG_INCIDENT_ERROR_CODES = (_SAFE_ERROR_CODES - {"health_unreachable"}) | {"action_failed"}
 
 
 def parse_mac(value: str) -> bytes:
@@ -523,6 +525,8 @@ class RogG703Device:
         self._sleep = sleep or asyncio.sleep
         self.status: RogDeviceStatus = "offline"
         self.last_error: str | None = None
+        self._missed_probes = 0
+        self._expected_offline = False
         self.observed_at = _iso()
         self.last_transition_at = self.observed_at
         self._on_change: ChangeCallback | None = None
@@ -565,14 +569,31 @@ class RogG703Device:
     async def refresh(self) -> bool:
         if not self.enabled or self.status in {"waking", "sleeping", "hibernating"}:
             return self.status == "online"
+        transition = self.last_transition_at
+        error = None
         try:
             online = await self.companion.health()
+        except RogPowerBackendError as exc:
+            online = False
+            if not exc.unreachable:
+                error = exc.code
+        except (ConnectionError, OSError, TimeoutError):
+            online = False
         except Exception:
             online = False
-        await self.set_status(
-            "online" if online else "offline",
-            error=None if online else "health_unreachable",
-        )
+            error = "action_failed"
+        if self.last_transition_at != transition:
+            return self.status == "online"
+        if online:
+            await self.set_status("online")
+        elif error:
+            self._expected_offline = False
+            await self.set_status("unavailable", error=error)
+        else:
+            self._missed_probes = min(2, self._missed_probes + 1)
+            if not self._expected_offline:
+                error = "health_unreachable_persistent" if self._missed_probes == 2 else "health_unreachable"
+            await self.set_status("offline", error=error)
         return online
 
     async def set_status(
@@ -581,6 +602,11 @@ class RogG703Device:
         *,
         error: str | None = None,
     ) -> None:
+        if value in {"online", "waking"}:
+            self._missed_probes = 0
+            self._expected_offline = False
+        elif value == "offline" and not error and self.status in {"sleeping", "hibernating"}:
+            self._expected_offline = True
         changed = self.status != value or self.last_error != error
         if self.status != value:
             self.last_transition_at = _iso()
@@ -650,7 +676,7 @@ class RogG703Device:
         }
         summaries = {
             "online": "В сети",
-            "offline": "Не отвечает · сон или гибернация",
+            "offline": "Переход в сон подтверждён" if self._expected_offline else "Нет ответа на проверку связи с ASUS",
             "waking": "Проверяем появление ASUS в сети",
             "sleeping": "Переходит в сон Windows",
             "hibernating": "Переходит в гибернацию Windows S4",
@@ -694,7 +720,7 @@ class RogG703Device:
                 "priority": 85,
                 "environment": "LAN",
                 "freshnessLabel": "только что",
-                "incidents": 0 if self.status == "online" else 1,
+                "incidents": int(self.last_error in ROG_INCIDENT_ERROR_CODES),
             },
         )
 

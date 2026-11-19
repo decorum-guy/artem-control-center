@@ -159,6 +159,41 @@ class FakeCompanion:
         self.health_values = [False]
 
 
+def test_repeated_health_loss_reports_one_incident_and_verified_sleep_stays_quiet():
+    async def scenario():
+        companion = FakeCompanion([True, False, False, True])
+        device = RogG703Device(rog_settings(), companion=companion)
+        assert await device.refresh()
+        assert not await device.refresh()
+        assert device.last_error == "health_unreachable"
+        assert device.service_snapshot().presentation.incidents == 0
+        assert not await device.refresh()
+        assert device.last_error == "health_unreachable_persistent"
+        assert device.service_snapshot().presentation.incidents == 1
+        assert await device.refresh()
+        assert device.last_error is None
+        await device.set_status("hibernating")
+        companion.health_values = [False]
+        assert await device.wait_until_offline(1)
+        for _ in range(3):
+            assert not await device.refresh()
+        assert device.status == "offline" and device.last_error is None
+        assert device.service_snapshot().presentation.incidents == 0
+
+    asyncio.run(scenario())
+
+
+def test_reachable_companion_rejection_is_not_reported_as_sleep():
+    class RejectingCompanion(FakeCompanion):
+        async def health(self):
+            raise RogPowerBackendError("companion_health_failed")
+
+    device = RogG703Device(rog_settings(), companion=RejectingCompanion())
+    assert not asyncio.run(device.refresh())
+    assert (device.status, device.last_error) == ("unavailable", "companion_health_failed")
+    assert device.service_snapshot().presentation.incidents == 1
+
+
 class FakeClock:
     def __init__(self) -> None:
         self.now = 0.0

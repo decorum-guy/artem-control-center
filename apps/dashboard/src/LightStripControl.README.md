@@ -9,3 +9,16 @@ The popup places the 22 static palette colors in a left-hand grid of filled squa
 The four main swatches come from the Panel Agent's persisted selection counts in the HA state cache. A count increases for an observed transition to a different effect, HS color, or white temperature, or when the strip turns on. Brightness-only updates and repeated unchanged state events do not count. Equal counts sort by most recent selection. The history begins when this panel version starts observing the entity; it does not invent earlier usage or infer missed changes during downtime. No seeded favorites appear in production.
 
 Fixture scenario: `home-light-strip`. Backend tests cover commands, rejection of unsupported values, sanitization, frequency ordering, and persistence.
+
+## Быстрая регулировка яркости
+
+Пока Home Assistant подтверждает текущее изменение, ползунок принимает новое значение.
+Из отложенных значений отправляется только последнее. Если владелец нажал «Вкл»,
+яркость можно выбрать сразу. Отправка яркости начинается после подтверждённого включения.
+В выключенном состоянии без запроса на включение ползунок заблокирован.
+
+Ползунок показывает выбранное значение. Кольцо отображает подтверждённое показание.
+Панель сверяет действие, UUID, состояние и яркость с ответом Home Assistant. Более новый
+снимок устройства имеет приоритет над ответом. Каждая серия получает одно итоговое
+уведомление. После ошибки, потери связи или блокировки панели оставшиеся изменения
+снимаются. Управление цветами, режимами и температурой света использует отдельные кнопки.

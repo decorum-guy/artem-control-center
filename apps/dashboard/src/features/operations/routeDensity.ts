@@ -5,6 +5,7 @@ import type {
 } from "@artem/contracts";
 import type { StatusTone } from "../../ShellPrimitives";
 import { resolveManifest, servicesByPriority } from "../../registry";
+import { serviceNeedsAttention } from "../../problemModel";
 
 export const healthPresentation: Record<HealthState, { label: string; tone: StatusTone }> = {
   healthy: { label: "В норме", tone: "success" },
@@ -133,11 +134,11 @@ export function trustedServiceGroup(service: ServiceSnapshot): ServiceGroup {
   return service.presentation?.group ?? "System";
 }
 
-export function groupHealthyServices(
+export function groupServicesWithoutIncidents(
   services: readonly ServiceSnapshot[]
 ): Map<ServiceGroup, ServiceSnapshot[]> {
   const groups = new Map<ServiceGroup, ServiceSnapshot[]>();
-  for (const service of enabledServices(services).filter((item) => item.health === "healthy")) {
+  for (const service of enabledServices(services).filter(item => !serviceNeedsAttention(item))) {
     const group = trustedServiceGroup(service);
     const current = groups.get(group) ?? [];
     current.push(service);
