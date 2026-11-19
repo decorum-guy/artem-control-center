@@ -70,6 +70,11 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   await page.goto("/remote/");
   const remote = page.getByRole("region", { name: "Управление телевизором" });
   await expect(remote.getByText("Экран включён")).toBeVisible();
+  for (const label of ["Открыть в приложении", "Акцент"]) {
+    const bounds = await page.getByLabel(label).boundingBox();
+    expect(bounds?.height).toBeGreaterThanOrEqual(48);
+    expect(bounds?.width).toBeGreaterThanOrEqual(48);
+  }
   const canvas = page.locator("main.tv-pwa");
   const nightCanvas = await canvas.evaluate((node) => getComputedStyle(node).backgroundColor);
   await shot(page, "mobile-night");

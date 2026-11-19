@@ -31,6 +31,17 @@
   border-radius: var(--cc-radius-control, 12px);
   padding: 7px 11px;
 }
+.tv-full select, .tv-pwa select {
+  appearance: none;
+  box-sizing: border-box;
+  block-size: 48px;
+  padding-inline-end: 32px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--cc-text-muted) 50%),
+    linear-gradient(135deg, var(--cc-text-muted) 50%, transparent 50%);
+  background-position: right 16px center, right 11px center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
 .tv-button {
   display: inline-flex;
   align-items: center;
