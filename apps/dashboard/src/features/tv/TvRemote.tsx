@@ -3,8 +3,8 @@ import type { FormEvent, KeyboardEvent } from "react";
 import { Icon } from "../../icons";
 import { StatusText, WorkZone } from "../../ShellPrimitives";
 import { Sheet } from "../../Sheet";
-import { Button, Select } from "../../ui/Controls";
-import { useTV, type Action } from "./useTV";
+import { Button, Select, Slider } from "../../ui/Controls";
+import { useTV, type Action, type NavigationKey } from "./useTV";
 import "./tv.css";
 
 type Controller = ReturnType<typeof useTV>;
@@ -25,10 +25,13 @@ function Feedback({ text, error = false }: { text?: string; error?: boolean }) {
 }
 
 function Commands({ controller, compact = false, showFeedback = true }: { controller: Controller; compact?: boolean; showFeedback?: boolean }) {
-  const { state, link, pending, notice, remoteStatus, send } = controller;
+  const { state, controls, link, pending, notice, remoteStatus, send } = controller;
+  const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
   const screen = state?.screen;
   const screenAction = screen === "on" ? "screen-off" : screen === "off" ? "screen-on" : null;
-  const audioPending = pending === "volume-up" || pending === "volume-down" || pending === "mute";
+  const audioPending = pending === "volume-up" || pending === "volume-down" || pending === "volume-set" || pending === "mute";
+  const volume = state?.volume ?? null;
+  const range = controls.volumeRange;
   const act = (action: Action) => () => { void send({ action }); };
   return <>
     <div className="tv-device-row">
@@ -41,12 +44,19 @@ function Commands({ controller, compact = false, showFeedback = true }: { contro
     </div>
     <Feedback text={showFeedback && notice?.kind === "command" ? notice.text : undefined} error={notice?.error} />
     <div className="tv-audio" role="group" aria-label="Громкость" aria-busy={audioPending || undefined}>
+      {range ? <Slider label="Громкость" min={range.min} max={range.max} value={remoteStatus ? volumeDraft ?? volume ?? range.min : range.min}
+        displayValue={remoteStatus && volume !== null ? String(volumeDraft ?? volume) + (pending === "volume-set" ? "…" : "") : "—"}
+        disabled={!remoteStatus || volume === null || pending !== null} onChange={setVolumeDraft} onCancel={() => setVolumeDraft(null)}
+        onCommit={(value) => {
+          void send({ action: "volume-set", volume: value }).finally(() => setVolumeDraft(null));
+        }} /> : <>
       <span>Громкость</span>
       <div className="cc-stepper tv-volume">
         <Button icon="minus" aria-label="Тише" disabled={!remoteStatus} aria-disabled={pending !== null || undefined} onClick={act("volume-down")} />
         <output aria-label="Подтверждённая громкость" data-pending={audioPending || undefined}>{audioPending ? "…" : state?.volume ?? "—"}</output>
         <Button icon="plus" aria-label="Громче" disabled={!remoteStatus} aria-disabled={pending !== null || undefined} onClick={act("volume-up")} />
       </div>
+      </>}
       <Button className="tv-mute" icon={state?.muted === true ? "volume-muted" : "volume"}
         aria-label={state?.muted === true ? "Включить звук" : state?.muted === false ? "Выключить звук" : "Переключить звук"}
         disabled={!remoteStatus} aria-disabled={pending !== null || undefined} onClick={act("mute")} />
@@ -60,7 +70,7 @@ function Commands({ controller, compact = false, showFeedback = true }: { contro
   </>;
 }
 
-const keys: Partial<Record<string, Action>> = {
+const keys: Partial<Record<string, NavigationKey>> = {
   ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Enter: "ok", Backspace: "back", Home: "home"
 };
 const directions = [
@@ -68,21 +78,22 @@ const directions = [
   ["right", "Вправо", "chevron-right"], ["down", "Вниз", "chevron-down"]
 ] as const;
 
-export function FullRemote({ controller }: { controller: Controller }) {
-  const { catalogue, pending, send, notice, url, setUrl, selected, setSelection, remoteStatus, link } = controller;
+export function FullRemote({ controller, nativeLinkTargets = false }: { controller: Controller; nativeLinkTargets?: boolean }) {
+  const { catalogue, pending, send, navigate, notice, url, setUrl, selected, setSelection, remoteStatus, link } = controller;
   const input = useId();
   const [formError, setFormError] = useState("");
   const targets = catalogue.apps?.filter((app) => app.links).map((app) => ({ value: app.id, label: app.label })) ?? [];
   const busy = pending !== null;
+  const navigationBusy = busy && pending !== "navigate";
   const key = (event: KeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
-    if (!event.currentTarget.contains(target) || event.repeat || event.altKey || event.metaKey || event.ctrlKey ||
-        target.closest("input, select, textarea, [contenteditable], [aria-haspopup], [role=option]") ||
+    if (!event.currentTarget.contains(target) || event.defaultPrevented || event.repeat || event.altKey || event.metaKey || event.ctrlKey ||
+        target.closest("input, select, textarea, [contenteditable], [aria-haspopup], [role=option], [role=slider]") ||
         (event.key === "Enter" && target.closest("button"))) return;
     const action = keys[event.key];
     if (action && remoteStatus) {
       event.preventDefault();
-      if (!busy) void send({ action });
+      if (!navigationBusy) navigate(action);
     }
   };
   const transmit = (event: FormEvent) => {
@@ -99,6 +110,7 @@ export function FullRemote({ controller }: { controller: Controller }) {
     void send({ action: "open-link", app: selected, url: url.trim() });
   };
   const linkMessage = formError || (notice?.kind === "link" ? notice.text : undefined);
+  const changeTarget = (app: string) => { setSelection(app); setFormError(""); };
   return <section className="tv-full" tabIndex={0} aria-label="Управление телевизором" onKeyDown={key}
     onClickCapture={(event) => {
       // WebKit may leave focus on the page after a pointer activates a native button.
@@ -108,13 +120,13 @@ export function FullRemote({ controller }: { controller: Controller }) {
     <Commands controller={controller} />
     <div className="tv-dpad" role="group" aria-label="Навигация">
       {directions.map(([action, title, icon]) => <Button key={action} className={`tv-key-${action}`} icon={icon}
-        aria-label={title} onClick={() => { void send({ action }); }} disabled={!remoteStatus} aria-disabled={busy || undefined} />)}
-      <Button className="tv-key-ok" onClick={() => { void send({ action: "ok" }); }}
-        disabled={!remoteStatus} aria-disabled={busy || undefined}>OK</Button>
+        aria-label={title} onClick={() => navigate(action)} disabled={!remoteStatus} aria-disabled={navigationBusy || undefined} />)}
+      <Button className="tv-key-ok" onClick={() => navigate("ok")}
+        disabled={!remoteStatus} aria-disabled={navigationBusy || undefined}>OK</Button>
     </div>
     <div className="tv-actions">
-      <Button icon="chevron-left" onClick={() => { void send({ action: "back" }); }} disabled={!remoteStatus} aria-disabled={busy || undefined}>Назад</Button>
-      <Button icon="home" onClick={() => { void send({ action: "home" }); }} disabled={!remoteStatus} aria-disabled={busy || undefined}>Домой</Button>
+      <Button icon="chevron-left" onClick={() => navigate("back")} disabled={!remoteStatus} aria-disabled={navigationBusy || undefined}>Назад</Button>
+      <Button icon="home" onClick={() => navigate("home")} disabled={!remoteStatus} aria-disabled={navigationBusy || undefined}>Домой</Button>
     </div>
     <div className="tv-catalog" role="group" aria-label="Приложения">
       {catalogue.apps === undefined && <p className="tv-catalog-status">
@@ -125,14 +137,21 @@ export function FullRemote({ controller }: { controller: Controller }) {
         disabled={!remoteStatus} aria-disabled={busy || undefined}>{app.label}</Button>)}
       {catalogue.saved?.map((item) => <Button key={item.id} onClick={() => { void send({ action: "saved", id: item.id }); }}
         disabled={!remoteStatus} aria-disabled={busy || undefined}>{item.label}</Button>)}
+      {controller.controls.connectHapp && <Button icon="shield" aria-label="Подключить VPN через Happ"
+        onClick={() => { void send({ action: "vpn-connect" }); }} disabled={!remoteStatus} aria-disabled={busy || undefined}>Happ</Button>}
     </div>
     <form className="tv-link" onSubmit={transmit} noValidate>
       <label htmlFor={input}>Ссылка на телевизор</label>
       <input id={input} type="url" name="url" value={url} onChange={(event) => { setUrl(event.target.value); setFormError(""); }}
         placeholder="https://" maxLength={2048} autoCapitalize="off" autoCorrect="off" aria-invalid={Boolean(formError) || undefined} />
       <div className="tv-link-actions">
-        <Select compact label="Открыть в приложении" value={selected} options={targets}
-          onChange={(app) => { setSelection(app); setFormError(""); }} />
+        {nativeLinkTargets ? <label className="tv-native-choice">
+          <span>Открыть в приложении</span>
+          <select value={selected} disabled={!targets.length} onChange={(event) => changeTarget(event.target.value)}>
+            {!targets.length && <option value="">—</option>}
+            {targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}
+          </select>
+        </label> : <Select compact label="Открыть в приложении" value={selected} options={targets} onChange={changeTarget} />}
         <Button type="submit" disabled={!remoteStatus || !url.trim() || !selected} aria-disabled={busy || undefined}>Отправить</Button>
       </div>
       <Feedback text={linkMessage} error={Boolean(formError) || notice?.error} />

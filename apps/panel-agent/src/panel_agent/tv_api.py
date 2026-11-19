@@ -11,13 +11,14 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 from fastapi import APIRouter, Request as Incoming
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 TVAction = Literal[
     "up", "down", "left", "right", "ok", "back", "home",
     "volume-down", "volume-up", "mute", "screen-on", "screen-off",
-    "open-app", "open-link", "saved",
+    "open-app", "open-link", "saved", "navigate", "volume-set", "vpn-connect",
 ]
+TVNavigationKey = Literal["up", "down", "left", "right", "ok", "back", "home"]
 
 
 class TVCommand(BaseModel):
@@ -26,6 +27,20 @@ class TVCommand(BaseModel):
     app: Optional[str] = Field(None, max_length=80)
     url: Optional[str] = Field(None, max_length=2048)
     id: Optional[str] = Field(None, max_length=80)
+    keys: list[TVNavigationKey] | None = Field(None, min_length=1, max_length=8)
+    volume: int | None = Field(None, strict=True, ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def check_action_fields(self):
+        if (self.action == "navigate") != (self.keys is not None):
+            raise ValueError("Navigation requires keys on its own action")
+        if (self.action == "volume-set") != (self.volume is not None):
+            raise ValueError("Absolute volume requires a value on its own action")
+        if self.action in {"navigate", "volume-set", "vpn-connect"} and any(
+            value is not None for value in (self.app, self.url, self.id)
+        ):
+            raise ValueError("Unexpected app arguments for this action")
+        return self
 
 
 class TVExecutorClient:
