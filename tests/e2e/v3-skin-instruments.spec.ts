@@ -33,14 +33,25 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
   });
 }
 
-for (const [scenario, kind] of [["coffee-off", "idle"], ["coffee-warming", "progress"], ["coffee-ready", "full"], ["coffee-running-too-long", "dashed"], ["ha-offline", "dashed"]]) {
+for (const [scenario, kind] of [
+  ["coffee-off", "idle"], ["coffee-warming", "progress"], ["coffee-ready", "full"],
+  ["coffee-running-too-long", "warning"], ["coffee-stale", "dashed"], ["ha-offline", "dashed"]
+]) {
   test(`coffee instrument presents the confirmed state in ${scenario}`, async ({ page }) => {
     await page.goto("/home?scenario=" + scenario + "&motion=reduced");
     const coffee = page.locator(".coffee-panel").first();
     const dial = coffee.locator(".cc-coffee-dial");
     await expect(dial).toBeVisible();
     const value = dial.locator(".cc-gauge-value");
-    if (kind === "full") await expect(value).toHaveAttribute("stroke-dasharray", "100 100");
+    if (kind === "warning") {
+      await expect(dial.getByRole("img", { name: "Работает слишком долго", exact: true })).toBeVisible();
+      await expect(dial.locator('g[data-tone="warning"] > circle')).toHaveCount(1);
+      await expect(value).toHaveCSS("stroke-dasharray", "none");
+      await expect(value).toHaveCSS("stroke", await coffee.evaluate(el => getComputedStyle(el).borderTopColor));
+      const artwork = coffee.locator(".cc-coffee-position");
+      const dialLayer = await dial.evaluate(el => Number(getComputedStyle(el).zIndex));
+      expect(dialLayer).toBeGreaterThan(await artwork.evaluate(el => Number(getComputedStyle(el).zIndex)));
+    } else if (kind === "full") await expect(value).toHaveAttribute("stroke-dasharray", "100 100");
     else if (kind === "progress") {
       await expect(value).toHaveCount(1);
       const percent = Number((await value.getAttribute("stroke-dasharray"))?.split(" ")[0]);
@@ -49,8 +60,9 @@ for (const [scenario, kind] of [["coffee-off", "idle"], ["coffee-warming", "prog
     } else {
       await expect(value).toHaveCount(0);
       await expect(dial.locator(".cc-gauge-track--dashed")).toHaveCount(kind === "dashed" ? 1 : 0);
+      if (kind === "dashed") await expect(dial.locator('g[data-tone="offline"] > circle')).toHaveAttribute("stroke-dasharray", "2 6");
     }
-    if (kind === "full" || kind === "progress") {
+    if (kind === "full" || kind === "progress" || kind === "warning") {
       const { painted, requested } = await value.evaluate(element => {
         const ring = element as SVGCircleElement;
         const samples = 360;
@@ -61,10 +73,11 @@ for (const [scenario, kind] of [["coffee-off", "idle"], ["coffee-warming", "prog
           const y = ring.cy.baseVal.value + ring.r.baseVal.value * Math.sin(angle);
           if (ring.isPointInStroke(new DOMPoint(x, y))) hits++;
         }
-        return { painted: hits / samples, requested: parseFloat(ring.getAttribute("stroke-dasharray")!) / 100 };
+        const arc = ring.getAttribute("stroke-dasharray");
+        return { painted: hits / samples, requested: arc ? parseFloat(arc) / 100 : 1 };
       });
       // Round caps extend a partial arc slightly beyond its nominal endpoints.
-      if (kind === "full") expect(painted).toBe(1);
+      if (kind !== "progress") expect(painted).toBe(1);
       else expect(Math.abs(painted - requested)).toBeLessThan(.035);
     }
   });

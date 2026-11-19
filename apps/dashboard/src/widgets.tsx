@@ -475,7 +475,7 @@ export function CoffeeWidget({
         {v3VisualSkinEnabled && appearance.showImage && (
           <span className="cc-coffee-dial">
             <RingGauge reading={coffeeReading} tone={presentationStage === "ready" ? "success" : "heat"}
-              size={148} label={presentationProgress !== null ? `${presentationLabel} · ${view.progressText}` : presentationLabel} />
+              size={148} label={coffeeReading.kind === "progress" ? `${presentationLabel} · ${view.progressText}` : presentationLabel} />
           </span>
         )}
         {v3VisualSkinEnabled ? cabinArtwork : coffeeVisual}
