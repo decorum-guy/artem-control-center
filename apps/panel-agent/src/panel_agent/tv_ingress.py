@@ -1,4 +1,4 @@
-"""Standalone loopback PWA ingress. Publish only through a private HTTPS forward."""
+"""Private HTTPS ingress for the TV web remote and its narrow API."""
 from __future__ import annotations
 
 import argparse
@@ -239,7 +239,9 @@ def main():
             tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             tls.minimum_version = ssl.TLSVersion.TLSv1_2
             tls.load_cert_chain(args.cert, args.key)
-            server.socket = tls.wrap_socket(server.socket, server_side=True)
+            # Allow the request worker, with its per-connection timeout, to handle
+            # TLS handshakes so a stalled client cannot block the accept loop.
+            server.socket = tls.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
         server.serve_forever()
 
 
