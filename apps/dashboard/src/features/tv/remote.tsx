@@ -5,7 +5,9 @@ import { accents, persistAccent, persistColorMode, readAccent, readColorMode } f
 import type { Accent } from "../../skin/accent";
 import { Icon } from "../../icons";
 import { WorkZone } from "../../ShellPrimitives";
-import { FullRemote, useTV } from "./TvRemote";
+import { FullRemote } from "./TvRemote";
+import { useTV } from "./useTV";
+import { Button, Select } from "../../ui/Controls";
 import "../../styles.css";
 import "../../skin/skin.css";
 
@@ -33,7 +35,8 @@ function Remote() {
       });
       if (!response.ok) throw new Error();
       setCode("");
-      await controller.refresh();
+      controller.changeSession(action === "login");
+      if (action === "login") await controller.refresh();
     } catch {
       setLoginError(action === "login" ? "Вход не подтверждён. Проверьте код и подключение." : "Выход не подтверждён.");
     } finally {
@@ -41,31 +44,32 @@ function Remote() {
     }
   };
 
-  return <main className="tv-pwa">
+  return <main className={`app skin-v3 tv-pwa theme-${theme}`}>
     <header className="tv-pwa-header">
-      <div className="tv-widget-title"><Icon name="system" size={28} /><h1>Пульт ТВ</h1></div>
-      <button type="button" className="tv-button tv-icon-button" aria-label={theme === "night" ? "Дневная тема" : "Ночная тема"} onClick={() => {
+      <div className="tv-widget-title"><Icon name="television" size={28} /><h1>Пульт ТВ</h1></div>
+      <Button className="tv-icon-button" aria-label={theme === "night" ? "Дневная тема" : "Ночная тема"} onClick={() => {
         const next = theme === "night" ? "day" : "night";
         setTheme(next);
         persistColorMode(next);
-      }}><Icon name={theme === "night" ? "sun" : "moon"} /></button>
+      }}><Icon name={theme === "night" ? "sun" : "moon"} /></Button>
     </header>
     <WorkZone className="tv-pwa-panel">
       {!controller.authorized ? <form className="tv-link" onSubmit={(event) => { void session("login", event); }}>
         <label htmlFor="tv-pairing">Код подключения</label>
         <input id="tv-pairing" type="password" autoComplete="current-password" required
           autoCapitalize="off" value={code} onChange={(event) => setCode(event.target.value)} />
-        <button className="tv-button" disabled={pending || !code}>Подключить пульт</button>
+        <Button type="submit" variant="primary" disabled={pending || !code}>Подключить пульт</Button>
       </form> : <FullRemote controller={controller} />}
       {loginError && <p className="tv-message" role="alert">{loginError}</p>}
     </WorkZone>
     <footer className="tv-pwa-footer">
-      <label>Акцент <select value={accent} onChange={(event) => {
-        const next = event.target.value as Accent;
-        setAccent(next);
-        persistAccent(next);
-      }}>{Object.entries(accents).map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></label>
-      {controller.authorized && <button type="button" className="tv-button" disabled={pending} onClick={() => { void session("logout"); }}>Выйти</button>}
+      <Select compact label="Акцент" value={accent} options={Object.entries(accents).map(([value, label]) => ({ value, label }))}
+        onChange={(value) => {
+          const next = value as Accent;
+          setAccent(next);
+          persistAccent(next);
+        }} />
+      {controller.authorized && <Button disabled={pending} onClick={() => { void session("logout"); }}>Выйти</Button>}
     </footer>
   </main>;
 }

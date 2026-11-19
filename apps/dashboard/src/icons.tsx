@@ -26,10 +26,10 @@ export type IconName =
   | "hibernate"
   | "economy"
   | "performance"
-  | "menu" | "chevron-down" | "chevron-right" | "chevron-left"
+  | "menu" | "chevron-up" | "chevron-down" | "chevron-right" | "chevron-left"
   | "warning" | "info" | "signal" | "archive" | "apps" | "thermometer"
   | "sun" | "moon" | "sky" | "partly-day" | "partly-night" | "cloud" | "fog" | "rain" | "snow" | "storm"
-  | "volume" | "brightness" | "drop" | "bin" | "edit" | "backspace";
+  | "volume" | "volume-muted" | "television" | "brightness" | "drop" | "bin" | "edit" | "backspace";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   name: IconName;
@@ -52,6 +52,7 @@ const iconPaths: Record<IconName, ReactNode> = {
   snow: <><path d="M12 2v20M3.3 7l17.4 10m0-10L3.3 17M9.5 4.5 12 7l2.5-2.5m-5 15L12 17l2.5 2.5M4.2 10.1l3.5-1-.9-3.4m10.4 12.7-.9-3.5 3.5-1m-2.6-8.2-.9 3.4 3.5 1M4.2 13.9l3.5 1-.9 3.5" /></>,
   storm: <><g transform="translate(0 -4)">{smallCloud}</g><path d="m13.5 13-4 5h3l-2 4 6-6h-4Z" /></>,
   menu: <path d="M3 6h18M3 12h13M3 18h18" />,
+  "chevron-up": <path d="m6 15 6-6 6 6" />,
   "chevron-down": <path d="m6 9 6 6 6-6" />,
   "chevron-right": <path d="m9 5 7 7-7 7" />,
   "chevron-left": <path d="m15 5-7 7 7 7" />,
@@ -62,6 +63,8 @@ const iconPaths: Record<IconName, ReactNode> = {
   apps: <><rect x="3" y="3" width="7" height="7" rx="2" /><circle cx="17" cy="6.5" r="3.5" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
   thermometer: <><path d="M10 14V5a2 2 0 1 1 4 0v9a4 4 0 1 1-4 0Zm2-7v10" /><path d="M16 6h3m-3 4h2" /></>,
   volume: <><path d="M3 9h4l5-4v14l-5-4H3Zm13-1a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" /></>,
+  "volume-muted": <path d="M3 9h4l5-4v14l-5-4H3Zm13 1 5 5m0-5-5 5" />,
+  television: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8m-4-4v4" /></>,
   brightness: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2" /></>,
   drop: <path d="M12 2c0 0-7 8-7 13a7 7 0 0 0 14 0c0-5-7-13-7-13Z" />,
   bin: <><path d="M3 6h18M8 6V3h8v3M5 6l1 15h12l1-15M10 10v7m4-7v7" /></>,
