@@ -60,8 +60,12 @@ for (const powerOn of [false, true]) {
     await page.goto("/home?scenario=home-light-strip");
     const widget = page.getByTestId("light-strip-home");
     const slider = widget.getByRole("slider", { name: "Яркость" });
-    if (powerOn) await widget.getByRole("button", { name: "Включить ленту" }).click();
-    else await slider.press("End");
+    if (powerOn) {
+      await widget.getByRole("button", { name: "Включить ленту" }).click();
+    } else {
+      await expect(slider).toBeEnabled();
+      await slider.press("End");
+    }
     await expect.poll(() => requests.length).toBe(1);
     for (const key of ["Home", "End", "ArrowLeft"]) await slider.press(key);
     await expect(slider).toHaveAttribute("aria-valuenow", "254");
