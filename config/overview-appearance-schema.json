@@ -157,6 +157,7 @@
     "home.light-strip": { "defaults": {}, "controls": [] },
     "home.climate": { "defaults": {}, "controls": [] },
     "home.station-mini-2": { "defaults": {}, "controls": [] },
+    "home.television": { "defaults": {}, "controls": [] },
     "system.health-summary": { "defaults": {}, "controls": [] },
     "system.rog-g703-operational": { "defaults": {}, "controls": [] },
     "weather.alert": { "defaults": {}, "controls": [] },

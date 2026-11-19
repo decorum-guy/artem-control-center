@@ -9,6 +9,7 @@ describe("Overview V2 fixed registry", () => {
       "home.light-strip",
       "home.climate",
       "home.station-mini-2",
+      "home.television",
       "system.rog-g703-operational",
       "planning.summary",
       "system.health-summary",

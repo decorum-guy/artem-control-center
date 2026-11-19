@@ -1,0 +1,107 @@
+.tv-widget, .tv-full, .tv-pwa {
+  --tv-gap: var(--cc-space-3, 12px);
+  --tv-text: var(--cc-text, #e7edf8);
+  --tv-border: var(--cc-border, #3b4c64);
+  --tv-surface: var(--cc-surface-2, #182334);
+  color: var(--tv-text);
+}
+.overview-v2-real-widget.tv-widget {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-content: start;
+  padding: 12px;
+  container-type: inline-size;
+}
+.tv-widget-title { display: flex; align-items: center; gap: 10px; }
+.tv-widget-title svg { flex: 0 0 auto; color: var(--cc-text-muted, #9cacc2); }
+.tv-widget-title h2, .tv-pwa h1 { margin: 0; font-size: var(--cc-type-widget-title-size, 17px); }
+.tv-device-row, .tv-row { display: flex; gap: 8px; align-items: center; }
+.tv-device-row { justify-content: space-between; min-height: 28px; }
+.tv-widget .tv-device-row > .tv-button { flex: 0 0 48px; }
+.tv-volume { flex-wrap: wrap; }
+.tv-volume output { margin-left: auto; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.tv-button, .tv-full input, .tv-full select, .tv-pwa input, .tv-pwa select {
+  min-height: 48px;
+  min-width: 48px;
+  font: inherit;
+  color: var(--tv-text);
+  background: var(--tv-surface);
+  border: 1px solid var(--tv-border);
+  border-radius: var(--cc-radius-control, 12px);
+  padding: 7px 11px;
+}
+.tv-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.tv-button svg { width: 19px; height: 19px; }
+.tv-button[aria-pressed="true"]:not(:disabled) {
+  border-color: var(--cc-accent, #35d6ff);
+  box-shadow: var(--cc-glow-accent, none);
+  background: var(--cc-selected-bg, #22394b);
+}
+.tv-button:not(:disabled):active { background: var(--cc-selected-bg, #22394b); }
+.tv-button:disabled { opacity: .53; cursor: default; }
+.tv-button:focus-visible, .tv-full:focus-visible, .tv-full :is(input, select):focus-visible, .tv-pwa :is(input, select):focus-visible {
+  outline: 2px solid var(--cc-accent, #35d6ff);
+  outline-offset: 2px;
+}
+.tv-open { justify-content: space-between; width: 100%; }
+.tv-full { display: grid; gap: var(--tv-gap); }
+.tv-row--screen > * { flex: 1; min-width: 0; }
+.tv-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(48px, 72px));
+  grid-template-rows: repeat(3, 52px);
+  gap: 7px;
+  align-items: stretch;
+  justify-content: center;
+}
+.tv-dpad .tv-button { font-size: 1.55rem; line-height: 1; }
+.tv-key-up { grid-area: 1 / 2; }
+.tv-key-left { grid-area: 2 / 1; }
+.tv-dpad .tv-key-ok { grid-area: 2 / 2; font-size: 1rem; font-weight: 700; }
+.tv-key-right { grid-area: 2 / 3; }
+.tv-key-down { grid-area: 3 / 2; }
+.tv-catalog { display: flex; flex-wrap: wrap; gap: 8px; }
+.tv-link { display: grid; gap: 8px; }
+.tv-link label, .tv-message { font-size: .87rem; color: var(--cc-text-muted, #a6b6ca); }
+.tv-full .tv-link input { width: 100%; }
+.tv-message { margin: 0; overflow-wrap: anywhere; }
+.tv-full .tv-message:empty { min-height: 1.2em; }
+.tv-pwa {
+  box-sizing: border-box;
+  max-width: 520px;
+  margin: auto;
+  padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right))
+    max(22px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  min-height: 100dvh;
+  color-scheme: light dark;
+  font-family: var(--cc-font-family, system-ui);
+  background: var(--cc-canvas);
+}
+.tv-pwa h1 { font-size: 1.5rem; font-weight: 600; }
+.tv-pwa-header, .tv-pwa-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+html[data-theme="day"] .tv-pwa { color-scheme: light; }
+html[data-theme="night"] .tv-pwa { color-scheme: dark; }
+.tv-pwa-panel {
+  margin-block: 12px;
+  padding: 14px;
+  background: var(--cc-surface-1);
+  border: 1px solid var(--cc-border);
+  border-radius: var(--cc-radius-zone);
+  box-shadow: var(--cc-panel-shadow);
+}
+.tv-pwa input { font-size: 16px; }
+.tv-pwa-footer label { font-size: .87rem; }
+@container (max-width: 230px) {
+  .tv-widget .tv-volume .tv-button { flex: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-widget *, .tv-full *, .tv-pwa * { animation: none !important; transition: none !important; }
+}

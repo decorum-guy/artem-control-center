@@ -68,6 +68,11 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
         "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (7, 5)},
         "default": "standard",
     },
+    "home.television": {
+        "singleton": True,
+        "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (7, 5)},
+        "default": "standard",
+    },
     "system.rog-g703-operational": {
         "singleton": True,
         "sizes": {"compact": (6, 1), "standard": (12, 1), "detail": (6, 2)},

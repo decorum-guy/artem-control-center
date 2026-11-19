@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -7,9 +8,15 @@ const dashboardBuildOutDir = runtimeProcess.process?.env?.PANEL_DASHBOARD_BUILD_
 
 export default defineConfig({
   plugins: [react()],
-  build: productionOutDir || dashboardBuildOutDir
-    ? { outDir: productionOutDir ?? dashboardBuildOutDir, emptyOutDir: true }
-    : undefined,
+  build: {
+    manifest: true,
+    ...(productionOutDir || dashboardBuildOutDir
+      ? { outDir: productionOutDir ?? dashboardBuildOutDir, emptyOutDir: true } : {}),
+    rollupOptions: { input: {
+      dashboard: fileURLToPath(new URL("./index.html", import.meta.url)),
+      tvRemote: fileURLToPath(new URL("./remote/index.html", import.meta.url))
+    } }
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

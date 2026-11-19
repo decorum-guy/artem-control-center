@@ -116,6 +116,14 @@ export const overviewWidgetRegistry: readonly OverviewWidgetDefinition[] = [
     fixtureCopy: "Фиксированные команды для Станции Mini 2."
   }),
   definition({
+    widgetType: "home.television", title: "Телевизор", category: "Дом",
+    iconKey: "system", singleton: true,
+    minW: 4, minH: 4, maxW: 7, maxH: 5,
+    defaultSizeVariant: "standard",
+    sizes: { compact: { w: 4, h: 4 }, standard: { w: 5, h: 4 }, large: { w: 7, h: 5 } },
+    fixtureCopy: "Локальное управление телевизором."
+  }),
+  definition({
     widgetType: "system.rog-g703-operational",
     title: "ASUS ROG G703GI",
     category: "Управление",

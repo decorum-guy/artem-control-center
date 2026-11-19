@@ -965,6 +965,7 @@ export type OverviewWidgetType =
   | "home.kettle"
   | "home.light-strip"
   | "home.station-mini-2"
+  | "home.television"
   | "system.rog-g703-operational"
   | "planning.summary"
   | "system.health-summary"

@@ -1,3 +1,4 @@
+import { TelevisionWidget } from "../tv/TvRemote";
 import { serviceNeedsAttention } from "../../problemModel";
 import type { ReactNode } from "react";
 import type { ServiceSnapshot } from "@artem/contracts";
@@ -305,6 +306,8 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
       return renderKettle(runtime);
     case "home.light-strip":
       return renderLightStrip(runtime);
+    case "home.television":
+      return <TelevisionWidget interactive={!runtime.editMode} />;
     case "home.station-mini-2":
       return <StationMiniWidget interactive={!runtime.editMode} />;
     case "planning.summary":
