@@ -24,6 +24,7 @@ import { CoffeeSettingsPanel } from "./CoffeeSettings";
 import { RuntimeControls } from "./RuntimeControls";
 import { PlanningOverviewCard } from "./PlanningOverviewCard";
 import { RogG703Controls } from "./RogG703Controls";
+import { selectSystemServiceSubjects } from "./features/operations/routeDensity";
 import { RouteHeader, WorkZone } from "./ShellPrimitives";
 import { pageSubtitleField, pageTitleField, useInterfaceCopy } from "./interfaceCopy";
 import { InterfaceCopySettingsPanel } from "./features/settings/InterfaceCopySettings";
@@ -343,7 +344,7 @@ export function ServicesPage({ snapshot }: PageProps) {
 }
 
 export function SystemPage({ snapshot }: { snapshot: DashboardSnapshot }) {
-  const rogG703 = snapshot.services.find((service) => service.id === "rog_g703gi");
+  const { rog: rogG703 } = selectSystemServiceSubjects(snapshot.services);
 
   return (
     <div className="system-page" data-testid="route-system">
