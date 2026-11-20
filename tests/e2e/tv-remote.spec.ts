@@ -195,6 +195,68 @@ test("PWA keyboard, explicit screen commands and authoritative audio", async ({ 
 const updated = { ...online, minVolume: 0, maxVolume: 100, vpn: false,
   controls: { navigationBatch: true, connectHapp: true } };
 
+test("PWA clipboard icon pastes a link only on demand and never sends it", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 720 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { readText: async () => {
+        const data = document.documentElement.dataset;
+        data.clipboardReads = String(Number(data.clipboardReads ?? 0) + 1);
+        if (data.clipboardDenied) throw new DOMException("Denied", "NotAllowedError");
+        return data.clipboardText ?? "";
+      } },
+    });
+  });
+  const commands: unknown[] = [];
+  await page.route("**/remote/api/status", (route) => route.fulfill({ json: updated }));
+  await page.route("**/remote/api/command", (route) => {
+    commands.push(route.request().postDataJSON());
+    return route.fulfill({ json: { outcome: "app-open" } });
+  });
+  await page.goto("/remote/");
+  const remote = page.getByRole("region", { name: "Управление телевизором" });
+  const input = remote.getByLabel("Ссылка на телевизор");
+  const paste = remote.getByRole("button", { name: "Вставить ссылку" });
+  const formStatus = remote.locator("form").getByRole("status");
+  const target = remote.getByRole("combobox", { name: "Открыть в приложении" });
+  const canvas = page.locator("html");
+  await expect(paste.locator("svg")).toHaveCount(1);
+  await expect(paste).toHaveText("");
+  expect((await paste.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  expect((await paste.boundingBox())!.width).toBeGreaterThanOrEqual(48);
+  expect(await canvas.getAttribute("data-clipboard-reads")).toBeNull();
+  await target.selectOption("browser");
+
+  const link = "https://example.org/clipboard?x=1&y=2";
+  await canvas.evaluate((html, copied) => { html.dataset.clipboardText = "  " + copied + "  "; }, link);
+  await paste.click();
+  await expect(input).toHaveValue(link);
+  await expect(target).toHaveValue("browser");
+  await expect(canvas).toHaveAttribute("data-clipboard-reads", "1");
+  expect(commands).toEqual([]);
+  await shot(page, "mobile-paste-icon-night");
+  await page.getByRole("button", { name: "Дневная тема" }).click();
+  await paste.scrollIntoViewIfNeeded();
+  await shot(page, "mobile-paste-icon-day");
+
+  await canvas.evaluate((html) => { html.dataset.clipboardText = "not a link"; });
+  await paste.click();
+  await expect(formStatus).toContainText("Скопируйте ссылку HTTP или HTTPS");
+  await expect(input).toHaveValue(link);
+  await canvas.evaluate((html) => { html.dataset.clipboardDenied = "true"; });
+  await paste.click();
+  await expect(formStatus).toHaveText("Удерживайте поле ссылки и выберите «Вставить».");
+  await expect(input).toHaveValue(link);
+  await page.evaluate(() => Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true }));
+  await paste.click();
+  await expect(formStatus).toHaveText("Удерживайте поле ссылки и выберите «Вставить».");
+  expect(commands).toEqual([]);
+
+  await remote.getByRole("button", { name: "Отправить" }).click();
+  await expect.poll(() => commands).toEqual([{ action: "open-link", app: "browser", url: link }]);
+});
+
 async function navigationFixture(page: Page) {
   const commands: { keys: string[] }[] = [];
   const held: import("@playwright/test").Route[] = [];

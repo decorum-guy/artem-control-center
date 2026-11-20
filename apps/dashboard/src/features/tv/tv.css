@@ -41,6 +41,9 @@ html[data-skin="v3"] :is(.tv-audio .tv-mute, .tv-pwa .tv-icon-button) { padding:
 .tv-catalog-status, .tv-maintenance { margin: 0; font-size: .87rem; color: var(--cc-text-muted); }
 .tv-maintenance { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .tv-link { display: grid; gap: 8px; }
+.tv-link-input { display: flex; gap: 8px; }
+.tv-link-input input { min-inline-size: 0; }
+.tv-link-input .tv-icon-button { flex: none; }
 .tv-link label, .tv-message { font-size: .87rem; color: var(--cc-text-muted); }
 .tv-link input {
   width: 100%;

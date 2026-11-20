@@ -91,7 +91,7 @@ function Remote() {
         <input id="tv-pairing" type="password" autoComplete="current-password" required
           autoCapitalize="off" value={code} onChange={(event) => setCode(event.target.value)} />
         <Button type="submit" variant="primary" disabled={pending || !code}>Подключить пульт</Button>
-      </form> : <FullRemote controller={controller} nativeLinkTargets />}
+      </form> : <FullRemote controller={controller} nativeLinkTargets clipboardPaste />}
       {loginError && <p className="tv-message" role="alert">{loginError}</p>}
     </WorkZone>
     <footer className="tv-pwa-footer">
