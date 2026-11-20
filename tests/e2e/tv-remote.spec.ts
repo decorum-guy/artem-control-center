@@ -80,6 +80,7 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   status = "online";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByText("Экран включён")).toBeVisible();
+  await expect(remote.getByText("VPN включён", { exact: true })).toBeVisible();
   for (const control of [remote.getByRole("combobox", { name: "Открыть в приложении" }), page.getByRole("button", { name: /Акцент/ })]) {
     const bounds = await control.boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(48);
@@ -107,6 +108,7 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   status = "tv-offline";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByText("Samsung доступен, ТВ не отвечает")).toBeVisible();
+  await expect(remote.getByText("Статус VPN неизвестен", { exact: true })).toBeVisible();
   await expect(remote.getByRole("button", { name: "Вверх" })).toBeDisabled();
   await expect(remote.getByText(/Воспроизведение не подтверждено/)).toHaveCount(0);
   await expect(remote.getByRole("button", { name: "YouTube" })).toBeDisabled();
@@ -119,7 +121,8 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   status = "old-offline";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByText("Статус ТВ неизвестен")).toBeVisible();
-  await expect(remote.getByText("Happ и фильтр ADB · нет данных")).toBeVisible();
+  await expect(remote.getByText("Статус VPN неизвестен", { exact: true })).toBeVisible();
+  await expect(remote.getByText("Фильтр ADB · нет данных", { exact: true })).toBeVisible();
   await shot(page, "mobile-legacy-unknown");
   await page.reload();
   await expect(remote.getByText("Статус ТВ неизвестен")).toBeVisible();
@@ -400,8 +403,10 @@ test("TV volume commits once, Happ confirms and recent navigation taps keep orde
   await expect(remote.getByText("Звук подтверждён.")).toBeVisible();
   expect(commands).toEqual([{ action: "volume-set", volume: 31 }]);
 
+  await expect(remote.getByText("VPN выключен", { exact: true })).toBeVisible();
   await remote.getByRole("button", { name: "Подключить VPN через Happ" }).click();
-  await expect(remote.getByText("VPN Happ подключён.")).toBeVisible();
+  await expect(remote.getByText("VPN включён.", { exact: true })).toBeVisible();
+  await expect(remote.getByText("VPN включён", { exact: true })).toBeVisible();
 
   const down = remote.getByRole("button", { name: "Вниз" });
   await down.click();
@@ -552,18 +557,19 @@ test("compact TV lines up with the kettle and exposes the quick actions", async 
         expect(geometry.controlsOverflow).toBeLessThanOrEqual(0);
       }).toPass({ timeout: 5000 });
       if (!commands.length) {
-        await expect(widget.getByText("Туннель отключён", { exact: true })).toBeVisible();
+        await expect(widget.getByText("VPN выключен", { exact: true })).toBeVisible();
         await widget.getByRole("button", { name: "Яндекс Браузер" }).click();
         await expect(widget.getByText("Приложение открыто.")).toBeVisible();
         await widget.getByRole("button", { name: "Подключить VPN через Happ" }).click();
       }
-      await expect(widget.getByText("Happ подключён", { exact: true })).toBeVisible();
+      await expect(widget.getByText("VPN включён", { exact: true })).toBeVisible();
       await widget.scrollIntoViewIfNeeded();
       await shot(page, orientation + "-" + theme + "-compact-kettle-and-tv");
       await widget.getByRole("button", { name: "Полный пульт" }).click();
       const remotePanel = page.getByRole("region", { name: "Управление телевизором" });
       await expect(remotePanel.getByRole("slider", { name: "Громкость" })).toBeEnabled();
       await expect(remotePanel.getByRole("button", { name: "Подключить VPN через Happ" })).toBeEnabled();
+      await expect(remotePanel.getByText("VPN включён", { exact: true })).toBeVisible();
     }
   }
   expect(commands).toEqual([{ action: "open-app", app: "browser" }, { action: "vpn-connect" }]);

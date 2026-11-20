@@ -261,7 +261,7 @@ export function useTV(base: string, enabled = true) {
       } else if (result.outcome === "vpn-connected" || result.outcome === "vpn-already-connected") {
         setState((previous) => previous && { ...previous, vpn: true,
           maintenance: result.outcome === "vpn-connected" ? { ...previous.maintenance, happ: "verified" } : previous.maintenance });
-        feedback(result.outcome === "vpn-connected" ? "VPN Happ подключён." : "VPN уже подключён.");
+        feedback(result.outcome === "vpn-connected" ? "VPN включён." : "VPN уже включён.");
       } else if (result.outcome === "app-open") {
         feedback(result.playbackConfirmed ? "Воспроизведение подтверждено." :
           result.linkRequested ? "Приложение открыто. Воспроизведение не подтверждено." : "Приложение открыто.");
