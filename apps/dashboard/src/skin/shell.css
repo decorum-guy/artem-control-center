@@ -46,7 +46,7 @@
 .skin-v3 .v2-product-header .weather-summary .weather-summary__condition { color: var(--cc-text-muted); font-size: 11px; }
 .skin-v3 .v2-product-header .weather-summary > .cc-header-weather-icon { flex: none; color: var(--cc-accent); }
 .skin-v3 .v2-product-header .weather-summary[data-long-label] .weather-summary__copy { display: none; }
-.skin-v3 .v2-product-header :is(.v2-settings-shortcut, .interaction-lock-button) { border-color: var(--cc-border-strong); background: var(--cc-glass); box-shadow: inset 0 1px var(--cc-edge-light); width: 48px; height: 48px; flex: none; }
+.skin-v3 .v2-product-header .interaction-lock-button { border-color: var(--cc-border-strong); background: var(--cc-glass); box-shadow: inset 0 1px var(--cc-edge-light); width: 48px; height: 48px; flex: none; }
 .skin-v3 .v2-header-actions :is(.weather-summary,.v2-header-control):hover { background: var(--cc-selected-bg); border-radius: var(--cc-radius-control); }
 @container telemetry (max-width: 1040px) {
   .skin-v3 .cc-header-date > :first-child { display: none; }
@@ -61,11 +61,18 @@
 @media (max-aspect-ratio: 1/1) {
   .skin-v3 .v2-shell .v2-header-time { gap: 10px; justify-content: flex-end; }
   .skin-v3 .v2-shell .v2-header-actions { justify-items: stretch; }
+  .skin-v3 .v2-shell .v2-header-actions > .interaction-lock-status { grid-column: 1 / -1; }
   .skin-v3 .v2-shell .v2-header-control { width: 100%; }
   .skin-v3 .v2-shell .v2-header-control .cc-telemetry-short { width: 100%; }
   .skin-v3 :is(.portrait-navigation-toggle,.portrait-floating-navigation-toggle) { border-color: var(--cc-selected-border); background: var(--cc-surface-2); color: var(--cc-accent); box-shadow: inset 0 1px var(--cc-edge-light), var(--cc-panel-shadow); }
   .skin-v3 .portrait-navigation-toggle { gap: 8px; }
   html[data-skin="v3"] .portrait-navigation-list .v2-nav-link { min-height: 56px; }
+}
+@media (max-aspect-ratio: 1/1) and (min-width: 601px) {
+  .skin-v3 .v2-shell .v2-header-actions { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(48px, 1fr) auto; }
+}
+@media (max-aspect-ratio: 1/1) and (max-width: 600px) {
+  .skin-v3 .v2-header-actions > .interaction-lock-control { grid-column: 4; justify-self: end; }
 }
 .skin-v3 .v2-shell .v2-route-header[data-page-header] {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; justify-content: start; align-items: start;

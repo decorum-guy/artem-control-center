@@ -3,6 +3,7 @@ import { StatusChip } from "./ui/Controls";
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { DashboardSnapshot } from "@artem/contracts";
 import { WeatherHeaderSummary } from "./Weather";
+import { HeaderBattery } from "./HeaderBattery";
 import { TemporaryAccessIndicator, useAccess } from "./AccessControls";
 import type { AccessStatus } from "./accessApi";
 import { Icon, type IconName } from "./icons";
@@ -431,7 +432,10 @@ function V2ProductShell({
             </span> : <span>{dateLabel}</span>}
           </div>
           <div className="header-context v2-header-actions">
-            <WeatherHeaderSummary onOpen={() => onNavigate("/weather")} />
+            {v3VisualSkinEnabled ? <div className="cc-header-weather">
+              <HeaderBattery />
+              <WeatherHeaderSummary onOpen={() => onNavigate("/weather")} />
+            </div> : <WeatherHeaderSummary onOpen={() => onNavigate("/weather")} />}
             <button
               className={`system-summary v2-header-control v2-header-system ${attentionCount ? "system-summary--attention" : ""}`}
               type="button"
@@ -445,14 +449,14 @@ function V2ProductShell({
               </> : <StatusText label={systemLabel} tone={systemTone} />}
             </button>
             <V2AccessHeaderStatus onOpen={() => onNavigate("/settings")} />
-            <button
+            {!v3VisualSkinEnabled && <button
               className="settings-shortcut v2-settings-shortcut"
               type="button"
               aria-label={`Открыть ${copy("navigation.settings")}`}
               onClick={() => onNavigate("/settings")}
             >
               <Icon name="settings" />
-            </button>
+            </button>}
             <TemporaryAccessIndicator />
             <InteractionLockControl />
             <InteractionLockStatus />

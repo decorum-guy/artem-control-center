@@ -164,10 +164,12 @@ def test_repeated_health_loss_reports_one_incident_and_verified_sleep_stays_quie
         companion = FakeCompanion([True, False, False, True])
         device = RogG703Device(rog_settings(), companion=companion)
         assert await device.refresh()
+        confirmed = device.public_state()
         assert not await device.refresh()
-        assert device.last_error == "health_unreachable"
+        assert device.public_state() == confirmed
         assert device.service_snapshot().presentation.incidents == 0
         assert not await device.refresh()
+        assert device.status == "offline"
         assert device.last_error == "health_unreachable_persistent"
         assert device.service_snapshot().presentation.incidents == 1
         assert await device.refresh()
@@ -179,6 +181,23 @@ def test_repeated_health_loss_reports_one_incident_and_verified_sleep_stays_quie
             assert not await device.refresh()
         assert device.status == "offline" and device.last_error is None
         assert device.service_snapshot().presentation.incidents == 0
+
+    asyncio.run(scenario())
+
+
+def test_single_disconnected_probe_recovers_and_initial_failure_stays_unknown():
+    async def scenario():
+        device = RogG703Device(rog_settings(), companion=FakeCompanion([False, True, False, True, False, False]))
+        assert not await device.refresh()
+        assert device.status == "unavailable" and device.last_error is None
+        assert await device.refresh()
+        assert not await device.refresh()
+        assert device.status == "online"
+        assert await device.refresh()
+        assert not await device.refresh()
+        assert device.status == "online"
+        assert not await device.refresh()
+        assert device.status == "offline"
 
     asyncio.run(scenario())
 
@@ -206,6 +225,20 @@ class FakeClock:
         self.delays.append(delay)
         self.now += delay
         await asyncio.sleep(0)
+
+
+def test_sleep_verification_requires_consecutive_no_responses():
+    async def scenario():
+        clock = FakeClock()
+        device = RogG703Device(
+            rog_settings(), companion=FakeCompanion([False, True, False, False]), clock=clock, sleep=clock.sleep,
+        )
+        await device.set_status("sleeping")
+        assert await device.wait_until_offline(3)
+        assert clock.delays == [0.25, 0.5, 1.0]
+        assert device.status == "offline" and device.last_error is None
+
+    asyncio.run(scenario())
 
 
 async def wait_terminal(executor: RogG703ActionExecutor, correlation_id: str):

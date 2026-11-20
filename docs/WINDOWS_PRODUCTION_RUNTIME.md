@@ -137,6 +137,12 @@ PANEL_COFFEE_ACTIONS_ENABLED=false
 
 Changing the file requires a runtime restart. Future runtime access profiles do not rewrite this file; deployment gates remain the maximum permissions.
 
+## Battery in the V3 header
+
+The V3 header shows the Windows host battery to the left of the weather divider. The local Panel Agent exposes the Win32 `GetSystemPowerStatus` reading at `GET /api/v1/system/battery`. The level appears inside the battery. The lightning icon indicates active charging, and the accessible label distinguishes mains power from battery power. While visible, the header refreshes about every ten seconds and when the panel regains visibility or network access. [Microsoft Win32 documentation](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getsystempowerstatus)
+
+The read-only endpoint serves `null` when host battery data is unavailable. The header hides the icon if it has no battery reading. The phone remote does not use this endpoint.
+
 ## Update and automatic rollback
 
 The update helper requires:

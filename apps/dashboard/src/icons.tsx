@@ -18,7 +18,7 @@ export type IconName =
   | "refresh"
   | "lock"
   | "lock-open"
-  | "power"
+  | "power" | "lightning"
   | "minus"
   | "plus"
   | "check"
@@ -59,6 +59,7 @@ const iconPaths: Record<IconName, ReactNode> = {
   warning: <><path d="m12 3 10 17H2L12 3Z" /><path d="M12 9v5m0 2v1" /></>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v1" /></>,
   signal: <><path d="M3 16v4m5-8v8m5-12v12m5-16v16" /></>,
+  lightning: <path d="m13 2-8 12h6l-1 8 9-12h-6l1-8Z" />,
   archive: <><rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v11h14V9m-10 4h6" /></>,
   apps: <><rect x="3" y="3" width="7" height="7" rx="2" /><circle cx="17" cy="6.5" r="3.5" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
   thermometer: <><path d="M10 14V5a2 2 0 1 1 4 0v9a4 4 0 1 1-4 0Zm2-7v10" /><path d="M16 6h3m-3 4h2" /></>,
