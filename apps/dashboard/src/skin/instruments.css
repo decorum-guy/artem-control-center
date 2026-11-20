@@ -119,6 +119,17 @@ html[data-skin="v3"] .coffee-asset[data-image-visible="true"] .cc-coffee-motion 
 .skin-v3 .cc-gauge-center:is([data-characters="4"],[data-characters="5"]) { font-size: 15px; }
 .skin-v3 .cc-gauge-center[data-characters="6"] { font-size: 12px; }
 .skin-v3 .light-strip__identity > .cc-gauge { flex: none; width: 36px !important; height: 36px !important; }
+.skin-v3 .overview-v2-grid :is(
+  .station-mini-widget__header h2,
+  .light-strip__identity strong,
+  .climate-control__header h2,
+  .kettle-control h2,
+  .tv-widget-title h2
+) {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+}
 .skin-v3 .station-mini-widget__art { border-radius: 50%; background: radial-gradient(ellipse at center, var(--cc-surface-2), transparent 71%); }
 html[data-skin="v3"] .station-presets__secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .skin-v3 .overview-health-widget__aggregate { font: 500 21px/1.24 var(--cc-font-family); }

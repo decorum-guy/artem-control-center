@@ -395,6 +395,44 @@ test("Samsung live capabilities fit V3 without changing the widget layout", asyn
   }
 });
 
+test("the five V3 Overview instruments use the light-strip heading typography", async ({ page }) => {
+  const instruments = [
+    { ...item, instanceId: "owner.climate", widgetType: "home.climate",
+      placement: { x: 0, y: 0, w: 7, h: 3 } },
+    { ...item, instanceId: "owner.station", widgetType: "home.station-mini-2",
+      placement: { x: 7, y: 0, w: 5, h: 4 } },
+    { ...item, instanceId: "owner.kettle", widgetType: "home.kettle", sizeVariant: "detail",
+      placement: { x: 0, y: 3, w: 7, h: 3 } },
+    { ...item, instanceId: "owner.light", widgetType: "home.light-strip",
+      placement: { x: 7, y: 4, w: 5, h: 4 } },
+    { ...item, sizeVariant: "detail", placement: { x: 0, y: 6, w: 7, h: 3 } }
+  ];
+  await layout(page, instruments, instruments);
+  await page.route("**/api/tv/status", route => route.fulfill({ json: updated }));
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const grid = page.locator(".overview-v2-grid");
+  const names = ["Кондиционер", "Станция Mini 2", "Чайник", "Лента в зале", "Телевизор"];
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
+    await page.setViewportSize(viewport);
+    for (const theme of ["night", "day"]) {
+      await page.goto("/overview?scenario=home-light-strip&theme=" + theme);
+      await expect(grid.locator(".light-strip__identity strong")).toHaveText("Лента в зале");
+      for (const name of names) await expect(grid.getByText(name, { exact: true })).toBeVisible();
+      const typography = await grid.evaluate((root, labels) => {
+        const titleNodes = Array.from(root.querySelectorAll("h2, .light-strip__identity strong"));
+        return labels.map((name) => {
+          const title = titleNodes.find((element) => element.textContent?.trim() === name)!;
+          const { fontSize, fontWeight, lineHeight, fontFamily } = getComputedStyle(title);
+          return { fontSize, fontWeight, lineHeight, fontFamily };
+        });
+      }, names);
+      const lightStrip = typography[3];
+      expect(lightStrip.fontSize).toBe("18.4px");
+      expect(typography).toEqual(Array(5).fill(lightStrip));
+    }
+  }
+});
+
 test("compact TV lines up with the kettle and exposes the quick actions", async ({ page }) => {
   const compactTV = { ...item, sizeVariant: "detail", placement: { x: 0, y: 3, w: 7, h: 3 } };
   const kettle = { ...item, instanceId: "owner.kettle", widgetType: "home.kettle", sizeVariant: "detail",
