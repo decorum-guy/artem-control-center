@@ -43,6 +43,12 @@
   content: "";
 }
 
+@container telemetry (max-width: 1120px) {
+  .skin-v3 .v2-product-header:has(.cc-header-battery) .cc-header-date > :first-child { display: none; }
+  .skin-v3 .v2-product-header:has(.cc-header-battery) .cc-header-date > :last-child { display: inline; }
+  .skin-v3 .v2-product-header:has(.cc-header-battery):has(.interaction-lock-status) .weather-summary .weather-summary__copy { display: none; }
+}
+
 @media (max-aspect-ratio: 1/1) {
   .skin-v3 .cc-header-weather > .weather-summary { flex: 1 1 auto; }
 }

@@ -73,6 +73,13 @@ test("host battery shows its level before the weather and follows charging chang
     expect(batteryBox.y).toBeGreaterThanOrEqual(weatherBox.y);
     expect(batteryBox.y + batteryBox.height).toBeLessThanOrEqual(weatherBox.y + weatherBox.height);
     expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    if (viewport.width > viewport.height) {
+      const clipped = await header.locator(".v2-header-time > span > span, .weather-summary__temperature, .cc-status-chip").evaluateAll((nodes) =>
+        nodes.some((node) => node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 1));
+      const dateBox = (await header.locator(".cc-header-date").boundingBox())!;
+      expect(dateBox.x + dateBox.width).toBeLessThan(batteryBox.x);
+      expect(clipped).toBe(false);
+    }
   }
 
   telemetry = { percentage: 17, charging: false, pluggedIn: false };
