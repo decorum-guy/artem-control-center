@@ -195,6 +195,115 @@ test("PWA keyboard, explicit screen commands and authoritative audio", async ({ 
 const updated = { ...online, minVolume: 0, maxVolume: 100, vpn: false,
   controls: { navigationBatch: true, connectHapp: true } };
 
+async function navigationFixture(page: Page) {
+  const commands: { keys: string[] }[] = [];
+  const held: import("@playwright/test").Route[] = [];
+  let connected = true;
+  await page.route("**/remote/api/status", route => connected ? route.fulfill({ json: updated }) : route.abort());
+  await page.route("**/remote/api/command", route => {
+    commands.push(route.request().postDataJSON());
+    held.push(route);
+  });
+  await page.goto("/remote/");
+  const remote = page.getByRole("region", { name: "Управление телевизором" });
+  const right = remote.getByRole("button", { name: "Вправо" });
+  await expect(right).toBeEnabled();
+  await page.clock.install({ time: new Date("2026-11-20T00:00:00Z") });
+  await page.clock.pauseAt(new Date("2026-11-20T00:00:02Z"));
+  await right.evaluate((button: HTMLButtonElement) => { button.focus(); button.click(); });
+  await page.clock.runFor(140);
+  await expect.poll(() => held.length).toBe(1);
+  return { remote, commands, held, setConnected: (value: boolean) => { connected = value; } };
+}
+
+test("slow successful navigation preserves a repeated key and a different key", async ({ page }) => {
+  const { commands, held } = await navigationFixture(page);
+  await page.clock.runFor(210);
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowDown");
+  await page.clock.runFor(1850);
+  await held[0].fulfill({ json: { outcome: "sent" } });
+  await page.clock.runFor(50);
+  await expect.poll(() => commands.map(command => command.keys)).toEqual([["right"], ["right", "down"]]);
+  await held[1].fulfill({ json: { outcome: "sent" } });
+});
+
+test("navigation overflow is explicit and waiting taps expire without replay", async ({ page }) => {
+  const { commands, held, remote } = await navigationFixture(page);
+  for (let index = 0; index < 9; index++) await page.keyboard.press("ArrowRight");
+  await expect(remote.getByText("Очередь заполнена. Нажатие не принято.")).toBeVisible();
+  await page.clock.runFor(5100);
+  await expect(remote.getByText("Время ожидания истекло. Нажатия сброшены.")).toBeVisible();
+  await held[0].fulfill({ json: { outcome: "sent" } });
+  await page.clock.runFor(300);
+  await expect(remote.getByText("Время ожидания истекло. Нажатия сброшены.")).toBeVisible();
+  expect(commands.map(command => command.keys)).toEqual([["right"]]);
+});
+
+test("a 3.3 second acknowledgement releases exactly the eight accepted taps", async ({ page }) => {
+  const { commands, held, remote } = await navigationFixture(page);
+  for (let index = 0; index < 9; index++) await page.keyboard.press("ArrowDown");
+  await expect(remote.getByText("Очередь заполнена. Нажатие не принято.")).toBeVisible();
+  await page.clock.runFor(3300);
+  await held[0].fulfill({ json: { outcome: "sent" } });
+  await expect.poll(() => commands.map(command => command.keys)).toEqual([["right"], Array(8).fill("down")]);
+  await held[1].fulfill({ json: { outcome: "sent" } });
+});
+
+test("an uncertain navigation result drops waiting taps with feedback", async ({ page }) => {
+  const { remote, commands, held } = await navigationFixture(page);
+  await page.keyboard.press("ArrowDown");
+  await held[0].fulfill({ status: 503, json: { outcome: "unconfirmed" } });
+  await expect(remote.getByText("Результат команды не подтверждён.")).toBeVisible();
+  await expect(remote.getByText("Ожидавшие нажатия сброшены.")).toBeVisible();
+  await page.clock.runFor(300);
+  expect(commands.map(command => command.keys)).toEqual([["right"]]);
+});
+
+for (const interrupt of ["offline", "hidden", "session"] as const) {
+  test(`navigation discards waiting taps across ${interrupt}`, async ({ page }) => {
+    const { remote, commands, held, setConnected } = await navigationFixture(page);
+    const right = remote.getByRole("button", { name: "Вправо" });
+    await page.keyboard.press("ArrowDown");
+    if (interrupt === "offline") {
+      setConnected(false);
+      await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+      await expect(remote.getByText("Нет связи с Samsung")).toBeVisible();
+      setConnected(true);
+      await page.evaluate(() => window.dispatchEvent(new Event("online")));
+      await expect(right).toBeEnabled();
+      await expect(remote.getByText("Ожидавшие нажатия сброшены.")).toBeVisible();
+      await right.evaluate((button: HTMLButtonElement) => button.click());
+      await expect(remote.getByText("ТВ занят. Нажатие не принято.")).toBeVisible();
+      await held[0].fulfill({ json: { outcome: "sent" } });
+    } else if (interrupt === "hidden") {
+      const changeVisibility = (visibility: string) => {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: visibility });
+        document.dispatchEvent(new Event("visibilitychange"));
+      };
+      await page.evaluate(changeVisibility, "hidden");
+      await expect(right).toBeDisabled();
+      await held[0].fulfill({ json: { outcome: "sent" } });
+      await page.evaluate(changeVisibility, "visible");
+    } else {
+      await held[0].fulfill({ status: 401, json: { outcome: "invalid" } });
+      await expect(page.getByText("Код подключения")).toBeVisible();
+      await page.route("**/remote/api/login", route => route.fulfill({ json: { ok: true } }));
+      await page.getByLabel("Код подключения").fill("fixture-code");
+      await page.getByRole("button", { name: "Подключить пульт" })
+        .evaluate((button: HTMLButtonElement) => button.click());
+    }
+    await expect(right).toBeEnabled();
+    if (interrupt !== "offline") await expect(remote.getByText("Ожидавшие нажатия сброшены.")).toBeVisible();
+    await page.clock.runFor(700);
+    expect(commands.map(command => command.keys)).toEqual([["right"]]);
+    await right.evaluate((button: HTMLButtonElement) => button.click());
+    await page.clock.runFor(140);
+    await expect.poll(() => commands.map(command => command.keys)).toEqual([["right"], ["right"]]);
+    await held[1].fulfill({ json: { outcome: "sent" } });
+  });
+}
+
 test("TV volume commits once, Happ confirms and recent navigation taps keep order", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 680 });
   const commands: unknown[] = [];
