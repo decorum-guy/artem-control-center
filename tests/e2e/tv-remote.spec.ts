@@ -198,6 +198,42 @@ test("PWA keyboard, explicit screen commands and authoritative audio", async ({ 
 const updated = { ...online, minVolume: 0, maxVolume: 100, vpn: false,
   controls: { navigationBatch: true, connectHapp: true } };
 
+test("PWA keeps Happ visible on a cold start while the TV is unreachable", async ({ page }) => {
+  const { controls, apps } = updated;
+  let status: object = { availability: "connecting", controls, apps };
+  const commands: unknown[] = [];
+  await page.route("**/remote/api/status", (route) => route.fulfill({ json: status }));
+  await page.route("**/remote/api/command", (route) => {
+    commands.push(route.request().postDataJSON());
+    return route.fulfill({ json: { outcome: "vpn-already-connected" } });
+  });
+  await page.goto("/remote/");
+  const remote = page.getByRole("region", { name: "Управление телевизором" });
+  const happ = remote.getByRole("button", { name: "Подключить VPN через Happ" });
+  await expect(remote.getByRole("button", { name: "YouTube" })).toBeDisabled();
+  await expect(happ).toBeVisible();
+  await expect(happ).toBeDisabled();
+  await expect(remote.getByText("Статус VPN неизвестен", { exact: true })).toBeVisible();
+
+  status = { availability: "offline", connection: "adb-unreachable" };
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(remote.getByText("Samsung доступен, ТВ не отвечает")).toBeVisible();
+  await expect(happ).toBeVisible();
+  await expect(happ).toBeDisabled();
+  expect(commands).toEqual([]);
+
+  status = { ...updated, vpn: true };
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(happ).toBeEnabled();
+  await expect(remote.getByText("VPN включён", { exact: true })).toBeVisible();
+  expect(commands).toEqual([]);
+
+  status = { ...updated, controls: { navigationBatch: true, connectHapp: false } };
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(remote.getByText("VPN выключен", { exact: true })).toBeVisible();
+  await expect(happ).toHaveCount(0);
+});
+
 test("PWA fits a normal phone viewport and requires confirmation to sign out", async ({ page }) => {
   await page.setViewportSize({ width: 428, height: 879 });
   let signedIn = true;
