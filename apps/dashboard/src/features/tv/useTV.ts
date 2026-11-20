@@ -130,16 +130,15 @@ export function useTV(base: string, enabled = true) {
           saved: Array.isArray(status.saved) ? status.saved : previous.saved
         }));
       }
+      if (status.controls) {
+        const { minVolume: min, maxVolume: max } = status;
+        setControls((previous) => ({ ...status.controls,
+          volumeRange: status.availability === "online" && typeof min === "number" && typeof max === "number" && min < max ?
+            { min, max } : previous.volumeRange }));
+      } else if (status.availability === "online") {
+        setControls({});
+      }
       if (status.availability === "online") {
-        const min = status.minVolume;
-        const max = status.maxVolume;
-        if (status.controls) {
-          setControls((previous) => ({ ...status.controls,
-            volumeRange: typeof min === "number" && typeof max === "number" && min < max ?
-              { min, max } : previous.volumeRange }));
-        } else {
-          setControls({});
-        }
         setState(status);
         setLink("online");
         return status;
