@@ -198,6 +198,66 @@ test("PWA keyboard, explicit screen commands and authoritative audio", async ({ 
 const updated = { ...online, minVolume: 0, maxVolume: 100, vpn: false,
   controls: { navigationBatch: true, connectHapp: true } };
 
+test("PWA fits a normal phone viewport and requires confirmation to sign out", async ({ page }) => {
+  await page.setViewportSize({ width: 428, height: 879 });
+  let signedIn = true;
+  let logouts = 0;
+  await page.route("**/remote/api/status", (route) => signedIn ? route.fulfill({ json: updated }) : route.fulfill({ status: 401 }));
+  await page.route("**/remote/api/logout", async (route) => {
+    logouts++;
+    signedIn = false;
+    await route.fulfill({ status: 204 });
+  });
+  await page.goto("/remote/");
+  await page.addStyleTag({ content: "html[data-tv-pwa] #root { --tv-safe-top: 42px; --tv-safe-bottom: 34px; }" });
+  const remote = page.getByRole("region", { name: "Управление телевизором" });
+  await expect(remote.getByText("VPN выключен", { exact: true })).toBeVisible();
+  const shell = page.locator(".tv-pwa");
+  const accent = page.getByRole("button", { name: /Акцент ·/ });
+  const theme = page.getByRole("button", { name: "Дневная тема" });
+  const exit = page.getByRole("button", { name: "Выйти", exact: true });
+  const overflow = () => shell.evaluate((main) => main.scrollHeight - main.clientHeight);
+
+  for (const viewport of [{ width: 428, height: 879 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(overflow).toBeLessThanOrEqual(1);
+    const accentBox = (await accent.boundingBox())!;
+    const themeBox = (await theme.boundingBox())!;
+    expect(accentBox.x + accentBox.width).toBeLessThan(themeBox.x);
+    expect(accentBox.y).toBe(themeBox.y);
+    for (const control of [accent, theme, exit, remote.getByRole("button", { name: "Вставить ссылку" })]) {
+      const box = (await control.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(48);
+      expect(box.height).toBeGreaterThanOrEqual(48);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 34);
+    }
+  }
+  await shot(page, "mobile-compact-remote-night");
+  await theme.click();
+  await shot(page, "mobile-compact-remote-day");
+  await remote.getByLabel("Ссылка на телевизор").fill("https://example.org/pwa");
+  const send = remote.getByRole("button", { name: "Отправить" });
+  await page.setViewportSize({ width: 390, height: 480 });
+  await expect.poll(overflow).toBeGreaterThan(0);
+  await send.scrollIntoViewIfNeeded();
+  expect((await send.boundingBox())!.y).toBeLessThan(480 - 48);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await exit.click();
+  const confirmation = page.getByRole("dialog", { name: "Выйти из пульта?" });
+  await expect(confirmation).toBeVisible();
+  expect(logouts).toBe(0);
+  await confirmation.getByRole("button", { name: "Отмена" }).click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(exit).toBeFocused();
+  await expect(remote.getByLabel("Ссылка на телевизор")).toHaveValue("https://example.org/pwa");
+  expect(logouts).toBe(0);
+  await exit.click();
+  await confirmation.getByRole("button", { name: "Выйти", exact: true }).click();
+  await expect(page.getByLabel("Код подключения")).toBeVisible();
+  expect(logouts).toBe(1);
+});
+
 test("PWA clipboard icon pastes a link only on demand and never sends it", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 720 });
   await page.addInitScript(() => {
