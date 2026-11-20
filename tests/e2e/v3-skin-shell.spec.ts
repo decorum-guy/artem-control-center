@@ -52,3 +52,37 @@ test("loading and progress notices use the real shell and stay accessible", asyn
   await close.click();
   await expect(progress).toHaveCount(0);
 });
+
+test("host battery shows its level before the weather and follows charging changes", async ({ page }) => {
+  let telemetry: { percentage: number; charging: boolean; pluggedIn: boolean } | null =
+    { percentage: 100, charging: true, pluggedIn: true };
+  await page.route("**/api/v1/system/battery", (route) => route.fulfill({ json: telemetry }));
+
+  const header = page.getByTestId("product-header");
+  const battery = header.getByRole("img", { name: /Заряд аккумулятора/ });
+  const weather = header.getByRole("button", { name: "Открыть погоду" });
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/overview?motion=reduced");
+    await expect(battery).toHaveText("100%");
+    await expect(battery).toHaveAttribute("aria-label", /От сети\. Заряжается/);
+    await expect(battery.locator("svg")).toHaveCount(1);
+    const batteryBox = (await battery.boundingBox())!;
+    const weatherBox = (await weather.boundingBox())!;
+    expect(batteryBox.x + batteryBox.width).toBeLessThan(weatherBox.x);
+    expect(batteryBox.y).toBeGreaterThanOrEqual(weatherBox.y);
+    expect(batteryBox.y + batteryBox.height).toBeLessThanOrEqual(weatherBox.y + weatherBox.height);
+    expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  }
+
+  telemetry = { percentage: 17, charging: false, pluggedIn: false };
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(battery).toHaveText("17%");
+  await expect(battery).toHaveAttribute("aria-label", /От батареи\. Не заряжается/);
+  await expect(battery.locator("svg")).toHaveCount(0);
+
+  telemetry = null;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(battery).toHaveCount(0);
+  await expect(weather).toBeVisible();
+});

@@ -58,6 +58,7 @@ from .project_registry_migration import (
     ensure_canonical_avalar_project,
 )
 from .appearance import build_appearance_router
+from .host_battery import router as host_battery_router
 from .runtime_control import router as runtime_control_router
 from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
@@ -330,6 +331,7 @@ app.include_router(
     )
 )
 app.include_router(runtime_control_router)
+app.include_router(host_battery_router)
 app.include_router(build_appearance_router(lambda: _write_allowed(True)))
 app.include_router(
     build_system_controls_router(
