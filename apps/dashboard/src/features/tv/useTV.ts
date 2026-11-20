@@ -39,7 +39,10 @@ function readDraft(key: string): Draft {
 
 const audioAction = (action: Action) => ["volume-up", "volume-down", "volume-set", "mute"].includes(action);
 const navigationLimit = 8;
-const navigationFreshness = 1400;
+const navigationCollectMs = 140;
+// A live batch has taken up to 3.36 s to acknowledge. Allow one such response
+// plus margin for the waiting batch, then discard it even if the request hangs.
+const navigationWaitMs = 5000;
 
 function audioChanged(action: Action, before: TvStatus | null, observed: TvStatus) {
   if (action === "mute") {
@@ -59,6 +62,7 @@ export function useTV(base: string, enabled = true) {
   const [authorized, setAuthorized] = useState(true);
   const [pending, setPending] = useState<Action | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [navigationNotice, setNavigationNotice] = useState<string>();
   const [url, setUrl] = useState(initial.url);
   const [selection, setSelection] = useState(initial.selection);
   const active = useRef(false);
@@ -67,10 +71,11 @@ export function useTV(base: string, enabled = true) {
   const read = useRef<AbortController | null>(null);
   const navigation = useRef({ keys: [] as NavigationKey[], firstTap: 0, timer: 0, running: false });
 
-  const clearNavigation = useCallback(() => {
+  const clearNavigation = useCallback((message?: string) => {
     const batch = navigation.current;
     window.clearTimeout(batch.timer);
     batch.timer = 0;
+    if (message && batch.keys.length) setNavigationNotice(message);
     batch.keys = [];
   }, []);
 
@@ -85,7 +90,8 @@ export function useTV(base: string, enabled = true) {
 
   const loseStatus = useCallback((next: Link) => {
     epoch.current++;
-    clearNavigation();
+    clearNavigation("Ожидавшие нажатия сброшены.");
+    navigation.current.running = false;
     setNotice(null);
     setState(null);
     setLink(next);
@@ -171,6 +177,7 @@ export function useTV(base: string, enabled = true) {
     return () => {
       epoch.current++;
       clearNavigation();
+      navigation.current.running = false;
       window.clearInterval(interval);
       read.current?.abort();
       read.current = null;
@@ -202,15 +209,21 @@ export function useTV(base: string, enabled = true) {
     const feedback = (text: string, error = false, kind: Notice["kind"] = "command") => {
       if (epoch.current === attempt) setNotice({ text, kind, error });
     };
-    if (command.action !== "navigate") feedback("Отправка…");
+    if (command.action !== "navigate") {
+      setNavigationNotice(undefined);
+      feedback("Отправка…");
+    }
     try {
       const response = await fetch(base + "/command", {
         method: "POST", headers: { "Content-Type": "application/json", "X-Panel-TV": "1" },
         body: JSON.stringify(command), signal: AbortSignal.timeout(40000), cache: "no-store"
       });
       if (epoch.current !== attempt) return;
-      if (response.status === 401) setAuthorized(false);
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401) {
+        changeSession(false);
+        return;
+      }
+      if (response.status === 403) {
         feedback("Управление недоступно для этой сессии.", true);
         return;
       }
@@ -240,7 +253,7 @@ export function useTV(base: string, enabled = true) {
           }
         }
         feedback("Изменение звука не подтверждено.", true);
-      } else if (result.outcome === "sent" && command.action === "navigate") {
+      } else if (response.ok && result.outcome === "sent" && command.action === "navigate") {
         setNotice((previous) => previous?.kind === "link" ? previous : null);
         return true;
       } else if (result.outcome === "sent") {
@@ -271,40 +284,52 @@ export function useTV(base: string, enabled = true) {
   };
 
   const navigate = (key: NavigationKey) => {
+    if (!enabled || link !== "online" || document.visibilityState === "hidden" || !navigator.onLine) return;
+    const batch = navigation.current;
+    if (active.current && (!batch.running || !state?.controls?.navigationBatch)) {
+      setNavigationNotice("ТВ занят. Нажатие не принято.");
+      return;
+    }
     if (!state?.controls?.navigationBatch) {
       void send({ action: key });
       return;
     }
-    const batch = navigation.current;
-    if (!enabled || link !== "online" || document.visibilityState === "hidden" ||
-        (active.current && !batch.running)) return;
-    if (performance.now() - batch.firstTap > navigationFreshness) clearNavigation();
-    if (batch.keys.length >= navigationLimit) return;
-    if (!batch.keys.length) batch.firstTap = performance.now();
-    batch.keys.push(key);
 
     const attempt = epoch.current;
+    const expired = () => performance.now() - batch.firstTap >= navigationWaitMs;
+    const expire = () => clearNavigation("Время ожидания истекло. Нажатия сброшены.");
     const flush = async () => {
-      batch.timer = 0;
-      if (!batch.keys.length) return;
-      if (epoch.current !== attempt || active.current || document.visibilityState === "hidden" ||
-          performance.now() - batch.firstTap > navigationFreshness) {
-        clearNavigation();
+      if (epoch.current !== attempt || !batch.keys.length) return;
+      if (active.current || document.visibilityState === "hidden" || !navigator.onLine) {
+        clearNavigation("Ожидавшие нажатия сброшены.");
         return;
       }
+      if (expired()) return expire();
       const keys = batch.keys;
-      batch.keys = [];
+      clearNavigation();
       batch.running = true;
       const sent = await send({ action: "navigate", keys });
       batch.running = false;
-      if (!sent || attempt !== epoch.current) clearNavigation();
-      else if (batch.keys.length) batch.timer = window.setTimeout(() => { void flush(); }, 0);
+      if (attempt !== epoch.current) return;
+      if (sent) void flush();
+      else clearNavigation("Ожидавшие нажатия сброшены.");
     };
-    if (!batch.running && !batch.timer) batch.timer = window.setTimeout(() => { void flush(); }, 140);
+
+    if (batch.keys.length && expired()) expire();
+    else if (!batch.keys.length && !batch.running) setNavigationNotice(undefined);
+    if (batch.keys.length >= navigationLimit) {
+      setNavigationNotice("Очередь заполнена. Нажатие не принято.");
+      return;
+    }
+    if (!batch.keys.length) {
+      batch.firstTap = performance.now();
+      batch.timer = batch.running ? window.setTimeout(expire, navigationWaitMs) : window.setTimeout(flush, navigationCollectMs);
+    }
+    batch.keys.push(key);
   };
 
   const selected = catalogue.apps?.find((app) => app.id === selection && app.links)?.id ??
     catalogue.apps?.find((app) => app.links)?.id ?? "";
-  return { state, link, catalogue, controls, authorized, pending, notice, remoteStatus: link === "online" && enabled,
+  return { state, link, catalogue, controls, authorized, pending, notice, navigationNotice, remoteStatus: link === "online" && enabled,
     send, navigate, refresh, changeSession, url, setUrl, selected, setSelection };
 }

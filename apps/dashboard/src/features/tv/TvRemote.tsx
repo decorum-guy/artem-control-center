@@ -20,8 +20,10 @@ function deviceLabel({ link, state }: Controller) {
   return "Состояние экрана неизвестно";
 }
 
-function Feedback({ text, error = false }: { text?: string; error?: boolean }) {
-  return <p className="tv-message" data-error={error || undefined} role="status" title={text}>{text}</p>;
+function Feedback({ text, detail, error = false }: { text?: string; detail?: string; error?: boolean }) {
+  return <p className="tv-message" data-error={error || undefined} role="status" title={[text, detail].filter(Boolean).join(" ") || undefined}>
+    {text && <span>{text}</span>}{text && detail && " "}{detail && <span>{detail}</span>}
+  </p>;
 }
 
 function HappButton({ controller }: { controller: Controller }) {
@@ -32,7 +34,7 @@ function HappButton({ controller }: { controller: Controller }) {
 }
 
 function Commands({ controller, compact = false, showFeedback = true }: { controller: Controller; compact?: boolean; showFeedback?: boolean }) {
-  const { state, controls, link, pending, notice, remoteStatus, send } = controller;
+  const { state, controls, link, pending, notice, navigationNotice, remoteStatus, send } = controller;
   const [volumeDraft, setVolumeDraft] = useState<number | null>(null);
   const screen = state?.screen;
   const screenAction = screen === "on" ? "screen-off" : screen === "off" ? "screen-on" : null;
@@ -45,7 +47,8 @@ function Commands({ controller, compact = false, showFeedback = true }: { contro
   const tunnel = state?.vpn;
   const vpnLabel = tunnel === true ? (state.maintenance?.happ === "verified" ? "Happ подключён" : "VPN подключён") :
     tunnel === false ? "Туннель отключён" : "Туннель · нет данных";
-  const feedback = <Feedback text={showFeedback && notice?.kind === "command" ? notice.text : undefined} error={notice?.error} />;
+  const feedback = <Feedback text={showFeedback && notice?.kind === "command" ? notice.text : undefined}
+    detail={showFeedback ? navigationNotice : undefined} error={notice?.error || Boolean(navigationNotice)} />;
   return <>
     <div className="tv-device-row">
       {compact ? <div className="tv-widget-info">
@@ -112,7 +115,7 @@ export function FullRemote({ controller, nativeLinkTargets = false }: { controll
     const action = keys[event.key];
     if (action && remoteStatus) {
       event.preventDefault();
-      if (!navigationBusy) navigate(action);
+      navigate(action);
     }
   };
   const transmit = (event: FormEvent) => {

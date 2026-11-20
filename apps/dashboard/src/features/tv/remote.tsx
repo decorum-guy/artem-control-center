@@ -11,6 +11,14 @@ import { Button, Select } from "../../ui/Controls";
 import "../../styles.css";
 import "../../skin/skin.css";
 
+const bundle = new URL(import.meta.url).pathname.split("/").pop() ?? "v1";
+const workerPath = `/remote/sw.js?v=${encodeURIComponent(bundle)}`;
+
+function currentWorker() {
+  const worker = navigator.serviceWorker?.controller;
+  return worker ? new URL(worker.scriptURL).searchParams.get("v") === bundle : false;
+}
+
 function Remote() {
   const controller = useTV("/remote/api");
   const [theme, setTheme] = useState(readColorMode);
@@ -18,6 +26,7 @@ function Remote() {
   const [code, setCode] = useState("");
   const [loginError, setLoginError] = useState("");
   const [pending, setPending] = useState(false);
+  const [cacheCurrent, setCacheCurrent] = useState(currentWorker);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.accent = accent;
@@ -36,6 +45,14 @@ function Remote() {
     updateHeight();
     viewport.addEventListener("resize", updateHeight);
     return () => viewport.removeEventListener("resize", updateHeight);
+  }, []);
+
+  useEffect(() => {
+    const worker = navigator.serviceWorker;
+    const update = () => setCacheCurrent(currentWorker());
+    worker?.addEventListener("controllerchange", update);
+    update();
+    return () => worker?.removeEventListener("controllerchange", update);
   }, []);
 
   const session = async (action: "login" | "logout", event?: FormEvent) => {
@@ -86,11 +103,12 @@ function Remote() {
         }} />
       {controller.authorized && <Button disabled={pending} onClick={() => { void session("logout"); }}>Выйти</Button>}
     </footer>
+    {import.meta.env.PROD && <p className="tv-pwa-build">Сборка {bundle.replace(/^tvRemote-/, "").replace(/\.js$/, "")}
+      {cacheCurrent ? "" : " · кэш не подтверждён"}</p>}
   </main>;
 }
 
 createRoot(document.getElementById("root")!).render(<Remote />);
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  const version = new URL(import.meta.url).pathname.split("/").pop() ?? "v1";
-  void navigator.serviceWorker.register(`/remote/sw.js?v=${encodeURIComponent(version)}`, { scope: "/remote/" }).catch(() => {});
+  void navigator.serviceWorker.register(workerPath, { scope: "/remote/" }).catch(() => {});
 }
