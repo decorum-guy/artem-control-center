@@ -118,9 +118,9 @@ export const overviewWidgetRegistry: readonly OverviewWidgetDefinition[] = [
   definition({
     widgetType: "home.television", title: "Телевизор", category: "Дом",
     iconKey: "system", singleton: true,
-    minW: 4, minH: 4, maxW: 7, maxH: 5,
+    minW: 4, minH: 3, maxW: 7, maxH: 5,
     defaultSizeVariant: "standard",
-    sizes: { compact: { w: 4, h: 4 }, standard: { w: 5, h: 4 }, large: { w: 7, h: 5 } },
+    sizes: { compact: { w: 4, h: 4 }, standard: { w: 5, h: 4 }, large: { w: 7, h: 5 }, detail: { w: 7, h: 3 } },
     fixtureCopy: "Локальное управление телевизором."
   }),
   definition({

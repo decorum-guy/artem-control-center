@@ -2,9 +2,9 @@
 .overview-v2-real-widget.tv-widget {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
+  gap: 4px;
   align-content: start;
-  padding: 12px;
+  padding: 8px 12px;
   container-type: inline-size;
 }
 .tv-widget-title { display: flex; align-items: center; gap: 10px; }
@@ -12,6 +12,9 @@
 .tv-widget-title h2, .tv-pwa h1 { margin: 0; font-size: var(--cc-type-widget-title-size, 17px); }
 .tv-device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .tv-device-row .v2-status-text { min-inline-size: 0; white-space: normal; }
+.tv-widget-info { display: grid; min-inline-size: 0; gap: 2px; }
+.tv-widget-statuses { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 12px; }
+.tv-widget-statuses .v2-status-text { justify-content: flex-start; text-align: start; }
 html[data-skin="v3"] .tv-device-row .cc-button { padding-inline: 12px; }
 .tv-full { display: grid; gap: 10px; }
 .tv-actions, .tv-widget-actions, .tv-catalog { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -71,7 +74,13 @@ html[data-skin="v3"] :is(.tv-audio .tv-mute, .tv-pwa .tv-icon-button) { padding:
 .tv-native-choice select:disabled { opacity: .62; }
 .tv-message { margin: 0; min-block-size: 2lh; overflow-wrap: anywhere; }
 .tv-device-row + .tv-message { margin-block-start: -3px; }
-.tv-widget .tv-message { min-block-size: 1lh; }
+.tv-widget .tv-message {
+  min-block-size: 1lh;
+  line-height: var(--cc-type-metadata-line);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .tv-message[data-error] { color: var(--cc-warning); }
 html[data-skin="v3"] :is(.tv-widget, .tv-full) .cc-button[aria-disabled="true"] {
   background: var(--cc-surface-2);

@@ -21,7 +21,14 @@ function deviceLabel({ link, state }: Controller) {
 }
 
 function Feedback({ text, error = false }: { text?: string; error?: boolean }) {
-  return <p className="tv-message" data-error={error || undefined} role="status">{text}</p>;
+  return <p className="tv-message" data-error={error || undefined} role="status" title={text}>{text}</p>;
+}
+
+function HappButton({ controller }: { controller: Controller }) {
+  if (!controller.controls.connectHapp) return null;
+  return <Button icon="shield" aria-label="Подключить VPN через Happ"
+    onClick={() => { void controller.send({ action: "vpn-connect" }); }}
+    disabled={!controller.remoteStatus} aria-disabled={controller.pending !== null || undefined}>Happ</Button>;
 }
 
 function Commands({ controller, compact = false, showFeedback = true }: { controller: Controller; compact?: boolean; showFeedback?: boolean }) {
@@ -33,16 +40,28 @@ function Commands({ controller, compact = false, showFeedback = true }: { contro
   const volume = state?.volume ?? null;
   const range = controls.volumeRange;
   const act = (action: Action) => () => { void send({ action }); };
+  const screenStatus = <StatusText label={deviceLabel(controller)} showIndicator={!compact}
+    tone={link === "samsung-unreachable" || link === "tv-unreachable" ? "unavailable" : screen === "on" ? "success" : "neutral"} />;
+  const tunnel = state?.vpn;
+  const vpnLabel = tunnel === true ? (state.maintenance?.happ === "verified" ? "Happ подключён" : "VPN подключён") :
+    tunnel === false ? "Туннель отключён" : "Туннель · нет данных";
+  const feedback = <Feedback text={showFeedback && notice?.kind === "command" ? notice.text : undefined} error={notice?.error} />;
   return <>
     <div className="tv-device-row">
-      <StatusText label={deviceLabel(controller)}
-        tone={link === "samsung-unreachable" || link === "tv-unreachable" ? "unavailable" : state?.screen === "on" ? "success" : "neutral"} />
+      {compact ? <div className="tv-widget-info">
+        <header className="tv-widget-title"><Icon name="television" /><h2>Телевизор</h2></header>
+        <div className="tv-widget-statuses">
+          {screenStatus}
+          <StatusText label={vpnLabel} showIndicator={false} tone={tunnel === true ? "success" : "neutral"} />
+        </div>
+        {feedback}
+      </div> : screenStatus}
       <Button icon="power" variant="primary" disabled={!remoteStatus || !screenAction}
         aria-disabled={pending !== null || undefined} onClick={screenAction ? act(screenAction) : undefined}>
         {screenAction === "screen-off" ? "Погасить экран" : screenAction === "screen-on" ? "Включить экран" : "Экран"}
       </Button>
     </div>
-    <Feedback text={showFeedback && notice?.kind === "command" ? notice.text : undefined} error={notice?.error} />
+    {!compact && feedback}
     <div className="tv-audio" role="group" aria-label="Громкость" aria-busy={audioPending || undefined}>
       {range ? <Slider label="Громкость" min={range.min} max={range.max} value={remoteStatus ? volumeDraft ?? volume ?? range.min : range.min}
         displayValue={remoteStatus && volume !== null ? String(volumeDraft ?? volume) + (pending === "volume-set" ? "…" : "") : "—"}
@@ -137,8 +156,7 @@ export function FullRemote({ controller, nativeLinkTargets = false }: { controll
         disabled={!remoteStatus} aria-disabled={busy || undefined}>{app.label}</Button>)}
       {catalogue.saved?.map((item) => <Button key={item.id} onClick={() => { void send({ action: "saved", id: item.id }); }}
         disabled={!remoteStatus} aria-disabled={busy || undefined}>{item.label}</Button>)}
-      {controller.controls.connectHapp && <Button icon="shield" aria-label="Подключить VPN через Happ"
-        onClick={() => { void send({ action: "vpn-connect" }); }} disabled={!remoteStatus} aria-disabled={busy || undefined}>Happ</Button>}
+      <HappButton controller={controller} />
     </div>
     <form className="tv-link" onSubmit={transmit} noValidate>
       <label htmlFor={input}>Ссылка на телевизор</label>
@@ -163,13 +181,14 @@ export function FullRemote({ controller, nativeLinkTargets = false }: { controll
 export function TelevisionWidget({ interactive }: { interactive: boolean }) {
   const controller = useTV("/api/tv", interactive);
   const [open, setOpen] = useState(false);
-  const youtube = controller.catalogue.apps?.find((app) => app.id === "youtube");
+  const shortcuts = controller.catalogue.apps?.filter((app) => app.id === "youtube" || app.id === "browser") ?? [];
   return <WorkZone className="overview-v2-real-widget tv-widget" data-testid="television-widget">
-    <header className="tv-widget-title"><Icon name="television" /><h2>Телевизор</h2></header>
     <Commands controller={controller} compact showFeedback={!open} />
     <div className="tv-widget-actions">
-      {youtube && <Button onClick={() => { void controller.send({ action: "open-app", app: youtube.id }); }}
-        disabled={!controller.remoteStatus} aria-disabled={controller.pending !== null || undefined}>{youtube.label}</Button>}
+      {shortcuts.map((app) => <Button key={app.id} aria-label={app.label}
+        onClick={() => { void controller.send({ action: "open-app", app: app.id }); }}
+        disabled={!controller.remoteStatus} aria-disabled={controller.pending !== null || undefined}>{app.id === "browser" ? "Яндекс" : app.label}</Button>)}
+      <HappButton controller={controller} />
       <Button className="tv-open" onClick={() => setOpen(true)} disabled={!interactive}>Полный пульт <Icon name="chevron-right" /></Button>
     </div>
     {open && interactive && <Sheet title="Пульт телевизора" onClose={() => setOpen(false)} className="tv-sheet">
