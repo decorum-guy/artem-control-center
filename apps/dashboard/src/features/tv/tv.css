@@ -91,22 +91,24 @@ html[data-skin="v3"] :is(.tv-widget, .tv-full) .cc-button[aria-disabled="true"] 
 html[data-tv-pwa] body { min-block-size: 0; overflow: hidden; background: transparent; }
 html[data-tv-pwa] #root {
   --tv-safe-top: env(safe-area-inset-top, 0px);
+  --tv-safe-bottom: env(safe-area-inset-bottom, 0px);
   box-sizing: border-box;
   block-size: var(--tv-viewport-height, 100dvh);
   display: grid;
   grid-template-rows: minmax(0, 1fr);
-  padding-block: var(--tv-safe-top) env(safe-area-inset-bottom, 0px);
 }
 html[data-tv-pwa] .app.skin-v3.tv-pwa {
   box-sizing: border-box;
   inline-size: 100%;
   max-width: 520px;
   margin: 0 auto;
-  padding: 14px max(14px, env(safe-area-inset-right)) 22px max(14px, env(safe-area-inset-left));
+  padding: calc(14px + var(--tv-safe-top)) max(14px, env(safe-area-inset-right))
+    calc(22px + var(--tv-safe-bottom)) max(14px, env(safe-area-inset-left));
   min-block-size: 0;
   background: transparent;
   overflow: hidden auto;
   overscroll-behavior-y: contain;
+  scroll-padding-block: var(--tv-safe-top) var(--tv-safe-bottom);
 }
 .tv-pwa h1 { font-size: 1.5rem; font-weight: 600; }
 .tv-pwa-header, .tv-pwa-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
