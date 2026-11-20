@@ -81,6 +81,7 @@ _SAFE_ERROR_CODES = {
     "wol_send_failed",
 }
 ROG_INCIDENT_ERROR_CODES = (_SAFE_ERROR_CODES - {"health_unreachable"}) | {"action_failed"}
+OFFLINE_CONFIRMATIONS = 2
 
 
 def parse_mac(value: str) -> bytes:
@@ -523,7 +524,7 @@ class RogG703Device:
         self.companion: RogPowerBackend = companion or _selected_rog_power_backend(settings)
         self._clock = clock or time.monotonic
         self._sleep = sleep or asyncio.sleep
-        self.status: RogDeviceStatus = "offline"
+        self.status: RogDeviceStatus = "unavailable"
         self.last_error: str | None = None
         self._missed_probes = 0
         self._expected_offline = False
@@ -566,33 +567,35 @@ class RogG703Device:
             except asyncio.CancelledError:
                 pass
 
+    async def _probe_health(self) -> tuple[bool, str | None]:
+        try:
+            return await self.companion.health(), None
+        except RogPowerBackendError as exc:
+            return False, None if exc.unreachable else exc.code
+        except (ConnectionError, OSError, TimeoutError):
+            return False, None
+        except Exception:
+            return False, "action_failed"
+
     async def refresh(self) -> bool:
         if not self.enabled or self.status in {"waking", "sleeping", "hibernating"}:
             return self.status == "online"
         transition = self.last_transition_at
-        error = None
-        try:
-            online = await self.companion.health()
-        except RogPowerBackendError as exc:
-            online = False
-            if not exc.unreachable:
-                error = exc.code
-        except (ConnectionError, OSError, TimeoutError):
-            online = False
-        except Exception:
-            online = False
-            error = "action_failed"
+        online, error = await self._probe_health()
         if self.last_transition_at != transition:
             return self.status == "online"
         if online:
             await self.set_status("online")
         elif error:
+            self._missed_probes = 0
             self._expected_offline = False
             await self.set_status("unavailable", error=error)
         else:
-            self._missed_probes = min(2, self._missed_probes + 1)
-            if not self._expected_offline:
-                error = "health_unreachable_persistent" if self._missed_probes == 2 else "health_unreachable"
+            self._missed_probes = min(OFFLINE_CONFIRMATIONS, self._missed_probes + 1)
+            if self._missed_probes < OFFLINE_CONFIRMATIONS:
+                # Keep the previous confirmed state and its timestamp for one missed poll.
+                return False
+            error = None if self._expected_offline else "health_unreachable_persistent"
             await self.set_status("offline", error=error)
         return online
 
@@ -637,16 +640,11 @@ class RogG703Device:
     async def wait_until_offline(self, timeout_seconds: int) -> bool:
         deadline = self._clock() + timeout_seconds
         delay = 0.25
+        missed = 0
         while self._clock() < deadline:
-            try:
-                if not await self.companion.health():
-                    await self.set_status("offline")
-                    return True
-            except RogPowerBackendError as exc:
-                if exc.unreachable:
-                    await self.set_status("offline")
-                    return True
-            except (ConnectionError, OSError, TimeoutError):
+            online, error = await self._probe_health()
+            missed = missed + 1 if not online and error is None else 0
+            if missed >= OFFLINE_CONFIRMATIONS:
                 await self.set_status("offline")
                 return True
             remaining = deadline - self._clock()
@@ -672,7 +670,7 @@ class RogG703Device:
             "waking": "degraded",
             "sleeping": "degraded",
             "hibernating": "degraded",
-            "unavailable": "offline",
+            "unavailable": "degraded",
         }
         summaries = {
             "online": "В сети",

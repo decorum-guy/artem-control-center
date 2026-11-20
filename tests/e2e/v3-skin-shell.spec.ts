@@ -23,12 +23,16 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
       .filter((el) => !el.childElementCount && el.getBoundingClientRect().width > 0 && el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX === "hidden")
       .map((el) => el.textContent));
     expect(clipped).toEqual([]);
+    await expect(page.getByTestId("product-header").locator(".v2-settings-shortcut")).toHaveCount(0);
     if (viewport.height > viewport.width) {
       const menu = page.getByTestId("portrait-floating-navigation-toggle");
       await menu.click();
-      await expect(page.getByRole("dialog", { name: "Разделы" })).toBeVisible();
+      const navigation = page.getByRole("dialog", { name: "Разделы" });
+      await expect(navigation.getByRole("link", { name: "Настройки" })).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(menu).toBeFocused();
+    } else {
+      await expect(page.getByRole("navigation").getByRole("link", { name: "Настройки" })).toBeVisible();
     }
   });
 }

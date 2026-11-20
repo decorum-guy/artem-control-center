@@ -33,7 +33,7 @@ The companion exposes only these routes:
 
 Both power endpoints accept no request body. Each returns an accepted response, flushes it, and then schedules its own fixed executor. \`/hibernate\` invokes the fixed equivalent of \`shutdown.exe /h\`; \`/sleep\` invokes \`SetSuspendState(FALSE, TRUE, FALSE)\`, which requests Windows Sleep/suspend rather than hibernation. Neither operation provides shutdown, restart, logoff, shell, command, URL, proxy, or arbitrary process operations.
 
-The UI reports only \`Online\`, \`Offline\`, \`Waking\`, \`Sleeping\`, \`Hibernating\`, or \`Unavailable\`. Offline does not distinguish Sleep from Hibernate. Normal Shutdown/S5 is not presented by this integration.
+The panel keeps its last confirmed ASUS state and observation timestamp after one missing health response. Two consecutive reachability failures confirm offline from the panel's network. A valid health response resets the failure count and restores online immediately. On startup or when the backend rejects a health request, the device state is unknown until the panel has reachability evidence. The same two-response rule applies when verifying a requested Sleep or Hibernate transition. Offline describes reachability and does not identify the Windows power state.
 
 ## Configuration
 

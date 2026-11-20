@@ -449,14 +449,14 @@ function V2ProductShell({
               </> : <StatusText label={systemLabel} tone={systemTone} />}
             </button>
             <V2AccessHeaderStatus onOpen={() => onNavigate("/settings")} />
-            <button
+            {!v3VisualSkinEnabled && <button
               className="settings-shortcut v2-settings-shortcut"
               type="button"
               aria-label={`Открыть ${copy("navigation.settings")}`}
               onClick={() => onNavigate("/settings")}
             >
               <Icon name="settings" />
-            </button>
+            </button>}
             <TemporaryAccessIndicator />
             <InteractionLockControl />
             <InteractionLockStatus />
