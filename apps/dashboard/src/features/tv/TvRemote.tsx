@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { Icon } from "../../icons";
 import { StatusText, WorkZone } from "../../ShellPrimitives";
@@ -99,11 +99,25 @@ const directions = [
   ["up", "Вверх", "chevron-up"], ["left", "Влево", "chevron-left"],
   ["right", "Вправо", "chevron-right"], ["down", "Вниз", "chevron-down"]
 ] as const;
+const maxLinkLength = 2048;
 
-export function FullRemote({ controller, nativeLinkTargets = false }: { controller: Controller; nativeLinkTargets?: boolean }) {
+function isWebLink(value: string) {
+  try {
+    const parsed = new URL(value);
+    return ["https:", "http:"].includes(parsed.protocol) && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+export function FullRemote({ controller, nativeLinkTargets = false, clipboardPaste = false }:
+    { controller: Controller; nativeLinkTargets?: boolean; clipboardPaste?: boolean }) {
   const { catalogue, pending, send, navigate, notice, url, setUrl, selected, setSelection, remoteStatus, link } = controller;
   const input = useId();
+  const linkInput = useRef<HTMLInputElement>(null);
   const [formError, setFormError] = useState("");
+  const [pasteError, setPasteError] = useState("");
+  const [pasting, setPasting] = useState(false);
   const targets = catalogue.apps?.filter((app) => app.links).map((app) => ({ value: app.id, label: app.label })) ?? [];
   const busy = pending !== null;
   const navigationBusy = busy && pending !== "navigate";
@@ -121,17 +135,45 @@ export function FullRemote({ controller, nativeLinkTargets = false }: { controll
   const transmit = (event: FormEvent) => {
     event.preventDefault();
     if (!remoteStatus || busy || !url.trim() || !selected) return;
-    try {
-      const parsed = new URL(url.trim());
-      if (!["https:", "http:"].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error();
-    } catch {
+    setPasteError("");
+    if (!isWebLink(url.trim())) {
       setFormError("Введите ссылку HTTP или HTTPS без учётных данных.");
       return;
     }
     setFormError("");
     void send({ action: "open-link", app: selected, url: url.trim() });
   };
-  const linkMessage = formError || (notice?.kind === "link" ? notice.text : undefined);
+  const paste = async () => {
+    const field = linkInput.current;
+    if (!field) return;
+    const fallback = "Удерживайте поле ссылки и выберите «Вставить».";
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.readText) {
+      setPasteError(fallback);
+      return;
+    }
+    const previous = field.value;
+    setPasteError("");
+    setPasting(true);
+    try {
+      const copied = await clipboard.readText();
+      if (linkInput.current !== field || field.value !== previous) return;
+      const value = copied.trim();
+      if (value.length > maxLinkLength || !isWebLink(value)) {
+        setPasteError("Скопируйте ссылку HTTP или HTTPS без учётных данных, длиной до 2048 символов.");
+        return;
+      }
+      setUrl(value);
+      setFormError("");
+    } catch {
+      if (linkInput.current === field && field.value === previous) {
+        setPasteError(fallback);
+      }
+    } finally {
+      setPasting(false);
+    }
+  };
+  const linkMessage = pasteError || formError || (notice?.kind === "link" ? notice.text : undefined);
   const changeTarget = (app: string) => { setSelection(app); setFormError(""); };
   return <section className="tv-full" tabIndex={0} aria-label="Управление телевизором" onKeyDown={key}
     onClickCapture={(event) => {
@@ -163,8 +205,13 @@ export function FullRemote({ controller, nativeLinkTargets = false }: { controll
     </div>
     <form className="tv-link" onSubmit={transmit} noValidate>
       <label htmlFor={input}>Ссылка на телевизор</label>
-      <input id={input} type="url" name="url" value={url} onChange={(event) => { setUrl(event.target.value); setFormError(""); }}
-        placeholder="https://" maxLength={2048} autoCapitalize="off" autoCorrect="off" aria-invalid={Boolean(formError) || undefined} />
+      <div className="tv-link-input">
+        <input ref={linkInput} id={input} type="url" name="url" value={url}
+          onChange={(event) => { setUrl(event.target.value); setFormError(""); setPasteError(""); }}
+          placeholder="https://" maxLength={maxLinkLength} autoCapitalize="off" autoCorrect="off" aria-invalid={Boolean(formError) || undefined} />
+        {clipboardPaste && <Button className="tv-icon-button" icon="clipboard" aria-label="Вставить ссылку"
+          title="Вставить ссылку" disabled={pasting} onClick={() => { void paste(); }} />}
+      </div>
       <div className="tv-link-actions">
         {nativeLinkTargets ? <label className="tv-native-choice">
           <span>Открыть в приложении</span>
@@ -176,7 +223,7 @@ export function FullRemote({ controller, nativeLinkTargets = false }: { controll
         </label> : <Select compact label="Открыть в приложении" value={selected} options={targets} onChange={changeTarget} />}
         <Button type="submit" disabled={!remoteStatus || !url.trim() || !selected} aria-disabled={busy || undefined}>Отправить</Button>
       </div>
-      <Feedback text={linkMessage} error={Boolean(formError) || notice?.error} />
+      <Feedback text={linkMessage} error={Boolean(formError || pasteError) || notice?.error} />
     </form>
   </section>;
 }

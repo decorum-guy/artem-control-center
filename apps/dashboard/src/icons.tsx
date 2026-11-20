@@ -29,7 +29,7 @@ export type IconName =
   | "menu" | "chevron-up" | "chevron-down" | "chevron-right" | "chevron-left"
   | "warning" | "info" | "signal" | "archive" | "apps" | "thermometer"
   | "sun" | "moon" | "sky" | "partly-day" | "partly-night" | "cloud" | "fog" | "rain" | "snow" | "storm"
-  | "volume" | "volume-muted" | "television" | "brightness" | "drop" | "bin" | "edit" | "backspace";
+  | "volume" | "volume-muted" | "television" | "brightness" | "drop" | "bin" | "edit" | "backspace" | "clipboard";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "aria-hidden" | "aria-label"> & {
   name: IconName;
@@ -70,6 +70,7 @@ const iconPaths: Record<IconName, ReactNode> = {
   bin: <><path d="M3 6h18M8 6V3h8v3M5 6l1 15h12l1-15M10 10v7m4-7v7" /></>,
   edit: <path d="m4 16 12-12 4 4L8 20l-5 1 1-5Zm10-10 4 4" />,
   backspace: <><path d="M3 12 9 5h12v14H9L3 12Z" /><path d="m11 9 6 6m0-6-6 6" /></>,
+  clipboard: <><path d="M9 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3" /><rect x="9" y="2" width="6" height="6" rx="1" /></>,
   overview: (
     <>
       <rect x="3" y="3" width="7" height="7" />
