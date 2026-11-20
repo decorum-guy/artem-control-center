@@ -309,23 +309,31 @@ test("compact TV lines up with the kettle and exposes the quick actions", async 
     for (const theme of ["night", "day"]) {
       await page.goto("/overview?theme=" + theme);
       const widget = page.getByTestId("television-widget");
-      const kettleCard = page.locator('[data-instance-id="owner.kettle"]');
       const slider = widget.getByRole("slider", { name: "Громкость" });
       await expect(slider).toBeEnabled();
-      const unit = (await widget.boundingBox())!;
-      const other = (await kettleCard.boundingBox())!;
-      const [icon, screen, audio, remote] = await Promise.all([
-        widget.locator(".tv-widget-title svg").boundingBox(),
-        widget.getByText("Экран включён", { exact: true }).boundingBox(),
-        widget.locator(".cc-slider-copy > span").boundingBox(),
-        widget.getByRole("button", { name: "Полный пульт" }).boundingBox()
-      ]);
-      expect(Math.abs(unit.x - other.x)).toBeLessThan(1);
-      expect(Math.abs(unit.width - other.width)).toBeLessThan(1);
-      expect(Math.abs(unit.y - (other.y + other.height) - 12)).toBeLessThan(1);
-      expect(Math.abs(screen!.x - icon!.x)).toBeLessThan(1);
-      expect(Math.abs(audio!.x - icon!.x)).toBeLessThan(1);
-      expect(remote!.y + remote!.height).toBeLessThanOrEqual(unit.y + unit.height);
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      // Portrait scroll can still settle after the viewport change. Read both
+      // cards and their controls in one layout frame.
+      await expect(async () => {
+        const geometry = await widget.evaluate((card) => {
+          const box = (selector: string) => card.querySelector(selector)!.getBoundingClientRect();
+          const unit = card.getBoundingClientRect();
+          const other = document.querySelector('[data-instance-id="owner.kettle"]')!.getBoundingClientRect();
+          const icon = box(".tv-widget-title svg");
+          const screen = box(".tv-widget-statuses > .v2-status-text:first-child > span:last-child");
+          const audio = box(".cc-slider-copy > span");
+          const remote = box(".tv-open");
+          return { xDelta: unit.x - other.x, widthDelta: unit.width - other.width,
+            gap: unit.top - other.bottom, screenDelta: screen.x - icon.x, audioDelta: audio.x - icon.x,
+            controlsOverflow: remote.bottom - unit.bottom };
+        });
+        expect(Math.abs(geometry.xDelta)).toBeLessThan(1);
+        expect(Math.abs(geometry.widthDelta)).toBeLessThan(1);
+        expect(Math.abs(geometry.gap - 12)).toBeLessThan(1);
+        expect(Math.abs(geometry.screenDelta)).toBeLessThan(1);
+        expect(Math.abs(geometry.audioDelta)).toBeLessThan(1);
+        expect(geometry.controlsOverflow).toBeLessThanOrEqual(0);
+      }).toPass({ timeout: 5000 });
       if (!commands.length) {
         await expect(widget.getByText("Туннель отключён", { exact: true })).toBeVisible();
         await widget.getByRole("button", { name: "Яндекс Браузер" }).click();
