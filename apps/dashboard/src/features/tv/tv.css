@@ -105,28 +105,51 @@ html[data-tv-pwa] .app.skin-v3.tv-pwa {
   inline-size: 100%;
   max-width: 520px;
   margin: 0 auto;
-  padding: calc(14px + var(--tv-safe-top)) max(14px, env(safe-area-inset-right))
-    calc(22px + var(--tv-safe-bottom)) max(14px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: max(8px, var(--tv-safe-top)) max(8px, env(safe-area-inset-right))
+    max(8px, var(--tv-safe-bottom)) max(8px, env(safe-area-inset-left));
   min-block-size: 0;
   background: transparent;
   overflow: hidden auto;
   overscroll-behavior-y: contain;
   scroll-padding-block: var(--tv-safe-top) var(--tv-safe-bottom);
 }
-.tv-pwa h1 { font-size: 1.5rem; font-weight: 600; }
-.tv-pwa-header, .tv-pwa-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.tv-pwa-footer .cc-select { max-width: 14rem; }
-.tv-pwa-build { margin: 8px 0 0; color: var(--cc-text-muted); font-size: .75rem; }
+.tv-pwa h1 { font-size: 1.25rem; font-weight: 600; }
+.tv-pwa-header, .tv-pwa-footer { display: flex; flex: none; align-items: center; gap: 8px; }
+.tv-pwa-header { justify-content: space-between; }
+.tv-pwa-header-actions { display: flex; flex: none; align-items: center; gap: 6px; }
+html[data-skin="v3"] .tv-pwa-header-actions .cc-select {
+  inline-size: 100px;
+  block-size: 48px;
+  padding: 4px 8px;
+  gap: 4px;
+}
+html[data-skin="v3"] .tv-pwa-header-actions .cc-select strong {
+  font-size: .8125rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-pwa-header-actions .cc-select > svg { inline-size: 16px; }
+.tv-pwa-footer { justify-content: flex-end; margin-block-start: auto; }
+html[data-skin="v3"] .tv-pwa .tv-pwa-logout { font-size: .8125rem; padding-inline: 10px; }
+.tv-pwa-build { margin: 0; color: var(--cc-text-muted); font-size: .6875rem; text-align: end; overflow-wrap: anywhere; }
 html[data-theme="day"] .tv-pwa { color-scheme: light; }
 html[data-theme="night"] .tv-pwa { color-scheme: dark; }
 .tv-pwa-panel {
-  margin-block: 12px;
-  padding: 14px;
+  flex: none;
+  margin: 0;
+  padding: 10px;
   background: var(--cc-surface-1);
   border: 1px solid var(--cc-border);
   border-radius: var(--cc-radius-zone);
   box-shadow: var(--cc-panel-shadow);
 }
+.tv-pwa .tv-full, .tv-pwa .tv-link, .tv-pwa .tv-catalog { gap: 6px; }
+.tv-pwa .tv-message { min-block-size: 1lh; }
+html[data-skin="v3"] .tv-pwa .tv-catalog .cc-button { padding-inline: 10px; }
 .tv-pwa input { font-size: 16px; }
 @container (max-width: 300px) {
   .tv-widget .tv-audio > span { flex-basis: 100%; }

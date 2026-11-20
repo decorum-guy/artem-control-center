@@ -80,6 +80,7 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   status = "online";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByText("Экран включён")).toBeVisible();
+  await expect(remote.getByText("VPN включён", { exact: true })).toBeVisible();
   for (const control of [remote.getByRole("combobox", { name: "Открыть в приложении" }), page.getByRole("button", { name: /Акцент/ })]) {
     const bounds = await control.boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(48);
@@ -107,6 +108,7 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   status = "tv-offline";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByText("Samsung доступен, ТВ не отвечает")).toBeVisible();
+  await expect(remote.getByText("Статус VPN неизвестен", { exact: true })).toBeVisible();
   await expect(remote.getByRole("button", { name: "Вверх" })).toBeDisabled();
   await expect(remote.getByText(/Воспроизведение не подтверждено/)).toHaveCount(0);
   await expect(remote.getByRole("button", { name: "YouTube" })).toBeDisabled();
@@ -119,7 +121,8 @@ test("mobile PWA link, accent, offline and reconnect", async ({ page }) => {
   status = "old-offline";
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(remote.getByText("Статус ТВ неизвестен")).toBeVisible();
-  await expect(remote.getByText("Happ и фильтр ADB · нет данных")).toBeVisible();
+  await expect(remote.getByText("Статус VPN неизвестен", { exact: true })).toBeVisible();
+  await expect(remote.getByText("Фильтр ADB · нет данных", { exact: true })).toBeVisible();
   await shot(page, "mobile-legacy-unknown");
   await page.reload();
   await expect(remote.getByText("Статус ТВ неизвестен")).toBeVisible();
@@ -194,6 +197,66 @@ test("PWA keyboard, explicit screen commands and authoritative audio", async ({ 
 
 const updated = { ...online, minVolume: 0, maxVolume: 100, vpn: false,
   controls: { navigationBatch: true, connectHapp: true } };
+
+test("PWA fits a normal phone viewport and requires confirmation to sign out", async ({ page }) => {
+  await page.setViewportSize({ width: 428, height: 879 });
+  let signedIn = true;
+  let logouts = 0;
+  await page.route("**/remote/api/status", (route) => signedIn ? route.fulfill({ json: updated }) : route.fulfill({ status: 401 }));
+  await page.route("**/remote/api/logout", async (route) => {
+    logouts++;
+    signedIn = false;
+    await route.fulfill({ status: 204 });
+  });
+  await page.goto("/remote/");
+  await page.addStyleTag({ content: "html[data-tv-pwa] #root { --tv-safe-top: 42px; --tv-safe-bottom: 34px; }" });
+  const remote = page.getByRole("region", { name: "Управление телевизором" });
+  await expect(remote.getByText("VPN выключен", { exact: true })).toBeVisible();
+  const shell = page.locator(".tv-pwa");
+  const accent = page.getByRole("button", { name: /Акцент ·/ });
+  const theme = page.getByRole("button", { name: "Дневная тема" });
+  const exit = page.getByRole("button", { name: "Выйти", exact: true });
+  const overflow = () => shell.evaluate((main) => main.scrollHeight - main.clientHeight);
+
+  for (const viewport of [{ width: 428, height: 879 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(overflow).toBeLessThanOrEqual(1);
+    const accentBox = (await accent.boundingBox())!;
+    const themeBox = (await theme.boundingBox())!;
+    expect(accentBox.x + accentBox.width).toBeLessThan(themeBox.x);
+    expect(accentBox.y).toBe(themeBox.y);
+    for (const control of [accent, theme, exit, remote.getByRole("button", { name: "Вставить ссылку" })]) {
+      const box = (await control.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(48);
+      expect(box.height).toBeGreaterThanOrEqual(48);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 34);
+    }
+  }
+  await shot(page, "mobile-compact-remote-night");
+  await theme.click();
+  await shot(page, "mobile-compact-remote-day");
+  await remote.getByLabel("Ссылка на телевизор").fill("https://example.org/pwa");
+  const send = remote.getByRole("button", { name: "Отправить" });
+  await page.setViewportSize({ width: 390, height: 480 });
+  await expect.poll(overflow).toBeGreaterThan(0);
+  await send.scrollIntoViewIfNeeded();
+  expect((await send.boundingBox())!.y).toBeLessThan(480 - 48);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await exit.click();
+  const confirmation = page.getByRole("dialog", { name: "Выйти из пульта?" });
+  await expect(confirmation).toBeVisible();
+  expect(logouts).toBe(0);
+  await confirmation.getByRole("button", { name: "Отмена" }).click();
+  await expect(confirmation).toHaveCount(0);
+  await expect(exit).toBeFocused();
+  await expect(remote.getByLabel("Ссылка на телевизор")).toHaveValue("https://example.org/pwa");
+  expect(logouts).toBe(0);
+  await exit.click();
+  await confirmation.getByRole("button", { name: "Выйти", exact: true }).click();
+  await expect(page.getByLabel("Код подключения")).toBeVisible();
+  expect(logouts).toBe(1);
+});
 
 test("PWA clipboard icon pastes a link only on demand and never sends it", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 720 });
@@ -400,8 +463,10 @@ test("TV volume commits once, Happ confirms and recent navigation taps keep orde
   await expect(remote.getByText("Звук подтверждён.")).toBeVisible();
   expect(commands).toEqual([{ action: "volume-set", volume: 31 }]);
 
+  await expect(remote.getByText("VPN выключен", { exact: true })).toBeVisible();
   await remote.getByRole("button", { name: "Подключить VPN через Happ" }).click();
-  await expect(remote.getByText("VPN Happ подключён.")).toBeVisible();
+  await expect(remote.getByText("VPN включён.", { exact: true })).toBeVisible();
+  await expect(remote.getByText("VPN включён", { exact: true })).toBeVisible();
 
   const down = remote.getByRole("button", { name: "Вниз" });
   await down.click();
@@ -552,18 +617,19 @@ test("compact TV lines up with the kettle and exposes the quick actions", async 
         expect(geometry.controlsOverflow).toBeLessThanOrEqual(0);
       }).toPass({ timeout: 5000 });
       if (!commands.length) {
-        await expect(widget.getByText("Туннель отключён", { exact: true })).toBeVisible();
+        await expect(widget.getByText("VPN выключен", { exact: true })).toBeVisible();
         await widget.getByRole("button", { name: "Яндекс Браузер" }).click();
         await expect(widget.getByText("Приложение открыто.")).toBeVisible();
         await widget.getByRole("button", { name: "Подключить VPN через Happ" }).click();
       }
-      await expect(widget.getByText("Happ подключён", { exact: true })).toBeVisible();
+      await expect(widget.getByText("VPN включён", { exact: true })).toBeVisible();
       await widget.scrollIntoViewIfNeeded();
       await shot(page, orientation + "-" + theme + "-compact-kettle-and-tv");
       await widget.getByRole("button", { name: "Полный пульт" }).click();
       const remotePanel = page.getByRole("region", { name: "Управление телевизором" });
       await expect(remotePanel.getByRole("slider", { name: "Громкость" })).toBeEnabled();
       await expect(remotePanel.getByRole("button", { name: "Подключить VPN через Happ" })).toBeEnabled();
+      await expect(remotePanel.getByText("VPN включён", { exact: true })).toBeVisible();
     }
   }
   expect(commands).toEqual([{ action: "open-app", app: "browser" }, { action: "vpn-connect" }]);

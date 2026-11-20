@@ -45,8 +45,9 @@ function Commands({ controller, compact = false, showFeedback = true }: { contro
   const screenStatus = <StatusText label={deviceLabel(controller)} showIndicator={!compact}
     tone={link === "samsung-unreachable" || link === "tv-unreachable" ? "unavailable" : screen === "on" ? "success" : "neutral"} />;
   const tunnel = state?.vpn;
-  const vpnLabel = tunnel === true ? (state.maintenance?.happ === "verified" ? "Happ подключён" : "VPN подключён") :
-    tunnel === false ? "Туннель отключён" : "Туннель · нет данных";
+  const vpnLabel = tunnel === true ? "VPN включён" : tunnel === false ? "VPN выключен" : "Статус VPN неизвестен";
+  const vpnStatus = <StatusText label={vpnLabel} showIndicator={false} tone={tunnel === true ? "success" : "neutral"} />;
+  const maintenance = state?.maintenance;
   const feedback = <Feedback text={showFeedback && notice?.kind === "command" ? notice.text : undefined}
     detail={showFeedback ? navigationNotice : undefined} error={notice?.error || Boolean(navigationNotice)} />;
   return <>
@@ -55,7 +56,7 @@ function Commands({ controller, compact = false, showFeedback = true }: { contro
         <header className="tv-widget-title"><Icon name="television" /><h2>Телевизор</h2></header>
         <div className="tv-widget-statuses">
           {screenStatus}
-          <StatusText label={vpnLabel} showIndicator={false} tone={tunnel === true ? "success" : "neutral"} />
+          {vpnStatus}
         </div>
         {feedback}
       </div> : screenStatus}
@@ -83,11 +84,12 @@ function Commands({ controller, compact = false, showFeedback = true }: { contro
         aria-label={state?.muted === true ? "Включить звук" : state?.muted === false ? "Выключить звук" : "Переключить звук"}
         disabled={!remoteStatus} aria-disabled={pending !== null || undefined} onClick={act("mute")} />
     </div>
-    {!compact && !state?.maintenance && <p className="tv-maintenance">Happ и фильтр ADB · нет данных</p>}
-    {!compact && state?.maintenance && <div className="tv-maintenance">
-      {state.maintenance.guard !== undefined && <span>Фильтр ADB · {state.maintenance.guard === "verified" ? "проверен" : state.maintenance.guard === "failed" ? "проверка не прошла" : "нет подтверждения"}</span>}
-      {state.maintenance.happ !== undefined && <span>Happ · {state.maintenance.happ === "verified" ? "VPN подтверждён" : state.maintenance.happ === "failed" ? "ошибка восстановления" : state.maintenance.happ === "pending" ? "восстановление" : "нет подтверждения"}</span>}
-      {state.maintenance.policy === "failed" && <span>Исключение KGZN · проверка не прошла</span>}
+    {!compact && <div className="tv-maintenance">
+      {vpnStatus}
+      <span>Фильтр ADB · {maintenance?.guard === "verified" ? "проверен" : maintenance?.guard === "failed" ? "проверка не прошла" : "нет данных"}</span>
+      {tunnel !== true && maintenance?.happ === "pending" && <span>Happ подключает VPN</span>}
+      {tunnel !== true && maintenance?.happ === "failed" && <span>Happ не смог включить VPN</span>}
+      {maintenance?.policy === "failed" && <span>Исключение KGZN · проверка не прошла</span>}
     </div>}
   </>;
 }

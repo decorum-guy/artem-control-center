@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { accents, persistAccent, persistColorMode, readAccent, readColorMode } from "../../skin/accent";
 import type { Accent } from "../../skin/accent";
+import { DialogFrame } from "../../DialogFrame";
 import { Icon } from "../../icons";
 import { WorkZone } from "../../ShellPrimitives";
 import { FullRemote } from "./TvRemote";
@@ -26,6 +27,7 @@ function Remote() {
   const [code, setCode] = useState("");
   const [loginError, setLoginError] = useState("");
   const [pending, setPending] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
   const [cacheCurrent, setCacheCurrent] = useState(currentWorker);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -78,12 +80,20 @@ function Remote() {
 
   return <main className={`app skin-v3 tv-pwa theme-${theme}`}>
     <header className="tv-pwa-header">
-      <div className="tv-widget-title"><Icon name="television" size={28} /><h1>Пульт ТВ</h1></div>
-      <Button className="tv-icon-button" aria-label={theme === "night" ? "Дневная тема" : "Ночная тема"} onClick={() => {
-        const next = theme === "night" ? "day" : "night";
-        setTheme(next);
-        persistColorMode(next);
-      }}><Icon name={theme === "night" ? "sun" : "moon"} /></Button>
+      <div className="tv-widget-title"><Icon name="television" size={22} /><h1>Пульт ТВ</h1></div>
+      <div className="tv-pwa-header-actions">
+        <Select compact label="Акцент" value={accent} options={Object.entries(accents).map(([value, label]) => ({ value, label }))}
+          onChange={(value) => {
+            const next = value as Accent;
+            setAccent(next);
+            persistAccent(next);
+          }} />
+        <Button className="tv-icon-button" aria-label={theme === "night" ? "Дневная тема" : "Ночная тема"} onClick={() => {
+          const next = theme === "night" ? "day" : "night";
+          setTheme(next);
+          persistColorMode(next);
+        }}><Icon name={theme === "night" ? "sun" : "moon"} /></Button>
+      </div>
     </header>
     <WorkZone className="tv-pwa-panel">
       {!controller.authorized ? <form className="tv-link" onSubmit={(event) => { void session("login", event); }}>
@@ -95,16 +105,20 @@ function Remote() {
       {loginError && <p className="tv-message" role="alert">{loginError}</p>}
     </WorkZone>
     <footer className="tv-pwa-footer">
-      <Select compact label="Акцент" value={accent} options={Object.entries(accents).map(([value, label]) => ({ value, label }))}
-        onChange={(value) => {
-          const next = value as Accent;
-          setAccent(next);
-          persistAccent(next);
-        }} />
-      {controller.authorized && <Button disabled={pending} onClick={() => { void session("logout"); }}>Выйти</Button>}
+      {import.meta.env.PROD && <p className="tv-pwa-build">Сборка {bundle.replace(/^tvRemote-/, "").replace(/\.js$/, "")}
+        {cacheCurrent ? "" : " · кэш не подтверждён"}</p>}
+      {controller.authorized && <Button className="tv-pwa-logout" variant="ghost" disabled={pending} onClick={(event) => {
+        event.currentTarget.focus({ preventScroll: true });
+        setConfirmExit(true);
+      }}>Выйти</Button>}
     </footer>
-    {import.meta.env.PROD && <p className="tv-pwa-build">Сборка {bundle.replace(/^tvRemote-/, "").replace(/\.js$/, "")}
-      {cacheCurrent ? "" : " · кэш не подтверждён"}</p>}
+    {controller.authorized && confirmExit && <DialogFrame title="Выйти из пульта?" onClose={() => setConfirmExit(false)}
+      footer={<>
+        <Button onClick={() => setConfirmExit(false)}>Отмена</Button>
+        <Button variant="danger" onClick={() => { setConfirmExit(false); void session("logout"); }}>Выйти</Button>
+      </>}>
+      <p>Для повторного входа понадобится код подключения.</p>
+    </DialogFrame>}
   </main>;
 }
 
