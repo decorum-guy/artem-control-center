@@ -326,7 +326,7 @@ test("TV volume commits once, Happ confirms and recent navigation taps keep orde
     }
   });
   await page.goto("/remote/");
-  await page.addStyleTag({ content: "html[data-tv-pwa] #root { --tv-safe-top: 42px; }" });
+  await page.addStyleTag({ content: "html[data-tv-pwa] #root { --tv-safe-top: 42px; --tv-safe-bottom: 34px; }" });
   const remote = page.getByRole("region", { name: "Управление телевизором" });
   const slider = remote.getByRole("slider", { name: "Громкость" });
   await expect(slider).toBeEnabled();
@@ -362,9 +362,17 @@ test("TV volume commits once, Happ confirms and recent navigation taps keep orde
   const canvas = page.locator("html[data-tv-pwa]");
   expect(await canvas.evaluate((html) => getComputedStyle(html, "::before").backgroundImage)).toContain("radial-gradient");
   const app = page.locator(".tv-pwa");
-  await app.evaluate((main) => { main.scrollTop = 140; });
-  expect(await app.evaluate((main) => main.scrollTop)).toBeGreaterThan(0);
-  expect(await app.evaluate((main) => document.elementFromPoint(30, 20)?.closest(".tv-pwa") === null)).toBe(true);
+  const header = page.locator(".tv-pwa-header");
+  await app.evaluate((main) => { main.scrollTop = 0; });
+  expect((await header.boundingBox())?.y).toBeGreaterThanOrEqual(42);
+  await app.evaluate((main) => {
+    main.scrollTop = main.querySelector(".tv-pwa-header")!.getBoundingClientRect().top - 8;
+  });
+  expect(await app.evaluate(() => Boolean(document.elementFromPoint(75, 20)?.closest(".tv-pwa-header")))).toBe(true);
+  await app.evaluate((main) => { main.scrollTop = main.scrollHeight; });
+  const footer = await page.locator(".tv-pwa-footer").boundingBox();
+  const viewport = await app.boundingBox();
+  expect(footer!.y + footer!.height).toBeLessThanOrEqual(viewport!.y + viewport!.height - 34);
   await app.evaluate((main) => { main.scrollTop = 0; });
   await shot(page, "mobile-rapid-controls");
   await page.getByRole("button", { name: "Дневная тема" }).click();
