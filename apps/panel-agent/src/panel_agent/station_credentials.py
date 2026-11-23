@@ -6,10 +6,12 @@ import ctypes
 import json
 from ctypes import wintypes
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 MAX_CREDENTIAL_BYTES = 16_384
-KEYS = ("x_token", "music_client_id", "music_client_secret")
+ACCOUNT_KEYS = {"x_token", "music_client_id", "music_client_secret"}
+MUSIC_KEYS = {"music_token", "expires_at"}
 
 
 class _Blob(ctypes.Structure):
@@ -38,17 +40,24 @@ def dpapi(data: bytes, *, decrypt: bool) -> bytes:
 
 @dataclass(frozen=True)
 class StationCredentials:
-    x_token: str = field(repr=False)
-    music_client_id: str = field(repr=False)
-    music_client_secret: str = field(repr=False)
+    x_token: str = field(default="", repr=False)
+    music_client_id: str = field(default="", repr=False)
+    music_client_secret: str = field(default="", repr=False)
+    music_token: str = field(default="", repr=False)
+    expires_at: datetime | None = None
 
     @classmethod
     def parse(cls, content: bytes) -> StationCredentials:
         values = json.loads(content)
-        if not isinstance(values, dict) or set(values) != set(KEYS):
+        if not isinstance(values, dict) or values.keys() not in (ACCOUNT_KEYS, MUSIC_KEYS):
             raise ValueError("Invalid Station credential document")
         if not all(isinstance(value, str) and value and len(value) <= 4096 for value in values.values()):
             raise ValueError("Invalid Station credential fields")
+        if values.keys() == MUSIC_KEYS:
+            expires = datetime.fromisoformat(values["expires_at"])
+            if expires.utcoffset() is None:
+                raise ValueError("Station credential expiration needs a timezone")
+            return cls(music_token=values["music_token"], expires_at=expires)
         return cls(**values)
 
 

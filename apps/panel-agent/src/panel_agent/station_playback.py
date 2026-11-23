@@ -102,9 +102,13 @@ class StationPlaybackSettings:
     music_client_id: str = field(default="", repr=False)
     music_client_secret: str = field(default="", repr=False)
     credential_path: Path | None = field(default=None, repr=False)
+    stored_music_token: str = field(default="", repr=False)
+    music_expires_at: datetime | None = None
 
     @property
     def has_authorization(self) -> bool:
+        if self.stored_music_token:
+            return self.music_expires_at is not None and self.music_expires_at > datetime.now(timezone.utc)
         return bool(self.x_token and self.music_client_id and self.music_client_secret)
 
     @classmethod
@@ -152,9 +156,9 @@ class StationSessionTokens:
             raise StationAuthRequired
         # v3.22.3 obtains a Music OAuth token using the authorized X-token.
         # The Glagol endpoint expects this token rather than Passport cookies.
-        for _ in range(2):
+        for _ in range(1 if self.settings.stored_music_token else 2):
             if self.music_token is None:
-                self.music_token = await self._exchange()
+                self.music_token = self.settings.stored_music_token or await self._exchange()
             response = await self.client.get(
                 GLAGOL_TOKEN_URL,
                 params={"device_id": self.settings.device_id, "platform": "yandexmini_2"},
@@ -287,10 +291,15 @@ class StationPlaybackCollector:
                 await asyncio.sleep(CREDENTIAL_CHECK_SECONDS)
                 continue
             updated = replace(settings, x_token=credentials.x_token, music_client_id=credentials.music_client_id,
-                              music_client_secret=credentials.music_client_secret)
+                              music_client_secret=credentials.music_client_secret, stored_music_token=credentials.music_token,
+                              music_expires_at=credentials.expires_at)
+            if not updated.has_authorization:
+                await self.update("auth_required")
+                await asyncio.sleep(CREDENTIAL_CHECK_SECONDS)
+                continue
             session = asyncio.create_task(self._run_session(updated), name="station-authorized-session")
             try:
-                while store.version() == version:
+                while store.version() == version and updated.has_authorization:
                     done, _ = await asyncio.wait({session}, timeout=CREDENTIAL_CHECK_SECONDS)
                     if done:
                         session.result()

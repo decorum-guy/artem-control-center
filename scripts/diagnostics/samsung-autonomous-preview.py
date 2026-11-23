@@ -1,4 +1,4 @@
-"""Isolated overnight dashboard with an existing device-scoped Glagol lease."""
+"""Isolated Samsung dashboard using the protected Station OAuth file or a temporary lease."""
 
 from __future__ import annotations
 
@@ -34,6 +34,10 @@ lease_path = ROOT / "lease.dpapi"
 lease = json.loads(dpapi(lease_path.read_bytes(), decrypt=True))
 if time.time() >= lease["expiresAt"]:
     raise RuntimeError("The preview lease expired")
+oauth_file = ROOT / "station-credentials" / "oauth.dpapi"
+has_oauth_file = oauth_file.is_file()
+if not has_oauth_file and not lease.get("token"):
+    raise RuntimeError("The preview needs an authorized Station credential")
 
 isolated_profile = ROOT / "profile" / "ArtemControlCenter"
 isolated_profile.mkdir(parents=True, exist_ok=True)
@@ -59,6 +63,8 @@ os.environ.update(
     PANEL_BLE_STRIP_ADDRESS=lease["ble_address"],
     PANEL_TV_EXECUTOR_TOKEN_FILE=config.get("PANEL_TV_EXECUTOR_TOKEN_FILE") or "",
 )
+if has_oauth_file:
+    os.environ["PANEL_STATION_PLAYBACK_CREDENTIAL_FILE"] = str(oauth_file)
 
 import uvicorn
 
@@ -107,7 +113,8 @@ async def device_lease(settings):
             delay = min(delay * 2, 60)
 
 
-station_playback._run_session = device_lease
+if not has_oauth_file:
+    station_playback._run_session = device_lease
 assert ble_strip is not None
 app.include_router(build_ble_strip_router(ble_strip, access, lambda: allowed("PANEL_LIGHT_STRIP_ACTIONS_ENABLED")))
 executor = TVExecutorClient(Path(config["PANEL_TV_EXECUTOR_TOKEN_FILE"]))
@@ -125,6 +132,7 @@ async def acceptance():
         "mode": "isolated",
         "ready": startup_lifecycle.phase == "ready",
         "station": state.status if state else "connecting",
+        "stationCredentialSource": "windows_dpapi" if has_oauth_file else "temporary_device_lease",
         "stationObservedAt": state.observedAt if state else None,
         "metadata": {"title": bool(state and state.title), "artist": bool(state and state.artist),
                      "cover": bool(state and state.coverPath)},

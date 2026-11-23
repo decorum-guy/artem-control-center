@@ -330,3 +330,45 @@ def test_station_reply_clears_waiter_on_disconnect(monkeypatch):
         assert replies.pending is None
 
     asyncio.run(scenario())
+
+
+def test_music_vault_renews_glagol_lease_without_account_token():
+    from dataclasses import replace
+
+    from panel_agent.station_credentials import StationCredentials
+
+    expires = datetime.now(timezone.utc) + timedelta(days=1)
+    protected = StationCredentials.parse(json.dumps({
+        "music_token": "fixture-music", "expires_at": expires.isoformat(),
+    }).encode())
+    settings = StationPlaybackSettings("192.168.0.2", "0" * 64, "fixture", "",
+                                       stored_music_token=protected.music_token,
+                                       music_expires_at=protected.expires_at)
+
+    async def verify():
+        attempts = []
+
+        def respond(request):
+            assert request.method == "GET"
+            assert request.url.host == "quasar.yandex.net"
+            assert request.headers.get("authorization") == "OAuth fixture-music"
+            attempts.append(request)
+            if len(attempts) == 3:
+                return httpx.Response(403)
+            return httpx.Response(200, json={"status": "ok", "token": "device-lease"})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            tokens = StationSessionTokens(client, settings)
+            assert await tokens.acquire() == "device-lease"
+            assert await tokens.acquire() == "device-lease"
+            with pytest.raises(StationAuthRequired):
+                await tokens.acquire()
+            expired = replace(settings, music_expires_at=expires - timedelta(days=2))
+            with pytest.raises(StationAuthRequired):
+                await StationSessionTokens(client, expired).acquire()
+            assert len(attempts) == 3
+
+    asyncio.run(verify())
+    assert "fixture-music" not in repr(protected)
+    with pytest.raises(ValueError):
+        StationCredentials.parse(b'{"music_token":"x","expires_at":"2027-01-01"}')
