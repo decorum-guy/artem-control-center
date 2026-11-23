@@ -16,7 +16,7 @@ PORT = 8797
 ROOT = Path(__file__).resolve().parent
 WINDOWS_DATA = Path(os.environ["LOCALAPPDATA"])
 LIVE = WINDOWS_DATA / "ArtemControlCenter"
-sys.path[:0] = [str(ROOT / "src"), str(ROOT / "deps")]
+sys.path[:0] = [str(ROOT / "apps/panel-agent/src"), str(ROOT / "deps")]
 
 from dotenv import dotenv_values
 from websockets.exceptions import WebSocketException
