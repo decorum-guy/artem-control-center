@@ -6,12 +6,13 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-FINAL_HOURS = 16
+FINAL_HOURS = 48
 PORT = 8797
 ROOT = Path(__file__).resolve().parent
 WINDOWS_DATA = Path(os.environ["LOCALAPPDATA"])
@@ -34,6 +35,13 @@ lease = json.loads(dpapi(lease_path.read_bytes(), decrypt=True))
 if time.time() >= lease["expiresAt"]:
     raise RuntimeError("The preview lease expired")
 
+isolated_profile = ROOT / "profile" / "ArtemControlCenter"
+isolated_profile.mkdir(parents=True, exist_ok=True)
+old_history = LIVE / "station-retention-pilot" / "retention.json"
+new_history = isolated_profile / "station-retention.json"
+if old_history.is_file() and not new_history.exists():
+    shutil.copyfile(old_history, new_history)
+
 for key in list(os.environ):
     if key.startswith("PANEL_"):
         os.environ.pop(key)
@@ -46,6 +54,7 @@ os.environ.update(
     PANEL_STATION_PLAYBACK_HOST=lease["host"],
     PANEL_STATION_PLAYBACK_CERT_SHA256=lease["fingerprint"],
     PANEL_STATION_PLAYBACK_DEVICE_ID=lease["device_id"],
+    PANEL_STATION_RETENTION_ENABLED="true",
     PANEL_LIGHT_STRIP_PROVIDER="ble",
     PANEL_BLE_STRIP_ADDRESS=lease["ble_address"],
     PANEL_TV_EXECUTOR_TOKEN_FILE=config.get("PANEL_TV_EXECUTOR_TOKEN_FILE") or "",
@@ -126,6 +135,9 @@ async def acceptance():
         "access": access().effective_profile(),
         "revision": lease["revision"],
     }
+
+
+install_dashboard_routes(app, ROOT / "dashboard")
 
 
 async def serve():
