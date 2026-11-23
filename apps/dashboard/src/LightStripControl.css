@@ -48,3 +48,10 @@
 .light-strip--overview .light-strip__swatches { flex-wrap: nowrap; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
 @media (max-width: 650px) { .light-strip { padding: 16px; } .light-strip__dialog { padding: 16px; } .light-strip__choices { grid-template-columns: 1fr; gap: 16px; } .light-strip__choice-column + .light-strip__choice-column { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--cc-border); } .light-strip__palette { grid-template-columns: repeat(5, 50px); } .light-strip__swatch--picker { width: 50px; height: 50px; flex-basis: 50px; } }
 @media (prefers-reduced-motion: reduce) { .light-strip *, .light-strip__dialog * { scroll-behavior: auto; transition: none !important; } }
+
+.light-strip--ble .light-strip__header { flex-wrap: wrap; }
+.light-strip--ble .light-strip__lamp { background: var(--cc-surface-2); }
+.light-strip__ble-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.light-strip__ble-controls select { min-height: 48px; padding: 0 10px; border: 1px solid var(--cc-border); border-radius: 12px; background: var(--cc-surface-2); color: var(--cc-text); }
+.light-strip__ble-controls select:focus-visible { outline: 3px solid var(--cc-accent); outline-offset: 3px; }
+.light-strip__ble-receipt { min-height: 1.5em; color: var(--cc-text-secondary); }

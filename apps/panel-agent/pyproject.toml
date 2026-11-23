@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.9"
 dependencies = [
   "astral==3.2",
+  "bleak==3.1.0; sys_platform == 'win32' and python_version >= '3.11'",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "icalendar>=6.3,<8",

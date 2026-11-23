@@ -91,6 +91,8 @@ class IntegrationSettings:
     home_server_ssh_output_limit_bytes: int = 16 * 1024
     home_climate_actions_enabled: bool = False
     light_strip_actions_enabled: bool = False
+    light_strip_provider: str = "ha"
+    ble_strip_address: str = field(default="", repr=False)
     kettle_actions_enabled: bool = False
     alice_station_actions_enabled: bool = False
     rog_g703_psu_actions_enabled: bool = False
@@ -365,6 +367,8 @@ class IntegrationSettings:
                 False,
             ),
             light_strip_actions_enabled=_bool_env("PANEL_LIGHT_STRIP_ACTIONS_ENABLED", False),
+            light_strip_provider=os.getenv("PANEL_LIGHT_STRIP_PROVIDER", "ha").strip().lower(),
+            ble_strip_address=os.getenv("PANEL_BLE_STRIP_ADDRESS", "").strip(),
             kettle_actions_enabled=_bool_env("PANEL_KETTLE_ACTIONS_ENABLED", False),
             alice_station_actions_enabled=_bool_env("PANEL_ALICE_STATION_ACTIONS_ENABLED", False),
             rog_g703_psu_actions_enabled=_bool_env(
