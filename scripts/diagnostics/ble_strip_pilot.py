@@ -16,7 +16,19 @@ POWER = {
     "on": bytes.fromhex("7e 04 04 f0 00 01 ff 00 ef"),
     "off": bytes.fromhex("7e 04 04 00 00 00 ff 00 ef"),
 }
-RGB = {"red": (255, 0, 0), "green": (0, 255, 0), "blue": (0, 0, 255)}
+RGB = {
+    "red": (255, 0, 0),
+    "green": (0, 255, 0),
+    "blue": (0, 0, 255),
+    "yellow": (255, 220, 0),
+    "purple": (138, 0, 192),
+    "pink": (255, 0, 83),
+    "sky": (60, 156, 255),
+    "sea": (100, 255, 222),
+    # This preset appears white on the physically tested controller.
+    "white": (255, 56, 139),
+    "lime": (150, 255, 0),
+}
 ADDRESS = re.compile(r"(?i)(?:[a-f0-9]{2}:){5}[a-f0-9]{2}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
 
 
