@@ -360,6 +360,7 @@ Mac success не является Windows hardware acceptance. Hardware-dependen
 - [RULES.md](RULES.md) — обязательные operational/safety rules, truthfulness, protected production boundaries и PR-дисциплина.
 - [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md) — где лежат frontend, Panel Agent, provider adapters, contracts, Windows runtime и приватные tunnels.
 - [docs/AGENT_PLAYBOOK.md](docs/AGENT_PLAYBOOK.md) — onboarding sequence, Git preflight, тестирование, PR и отчёт.
+- [docs/TV_ACCESS.md](docs/TV_ACCESS.md) — доступ к телевизору с Mac через SSH Samsung и ADB, снимки `screencap`, живой `tv-mirror`/`scrcpy` и границы подтверждения экрана; прочитать перед диагностикой или приёмкой ТВ.
 - [docs/PRODUCTION_DIAGNOSTICS.md](docs/PRODUCTION_DIAGNOSTICS.md) — read-only Samsung/VPS diagnostics, Calendar/Planning freshness, refresh UI semantics и portrait widget fallback.
 - [docs/TODOIST_TASKS.md](docs/TODOIST_TASKS.md) — отдельный Todoist task provider и защищённые write-gates; он не заменяет Planning «Дела»/Calendar.
 - [issue #322](https://github.com/decorum-guy/artem-control-center/issues/322) — portrait 9:16 acceptance и сохранение landscape layouts.
