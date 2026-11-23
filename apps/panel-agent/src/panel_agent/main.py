@@ -62,6 +62,8 @@ from .host_battery import router as host_battery_router
 from .runtime_control import router as runtime_control_router
 from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
+from .station_playback import StationPlaybackCollector, StationPlaybackSettings, build_station_playback_router
+from .station_retention import configured_retention
 from .station_actions import StationActionExecutor, build_station_action_router
 from .snapshot import SnapshotPublisher
 from .weather import WeatherService, build_weather_router
@@ -182,6 +184,9 @@ project_registry_store = ProjectRegistryStore(SETTINGS.projects_config_path)
 weather_service = WeatherService(mode=MODE)
 JARVIS_ENABLED = os.getenv("PANEL_JARVIS_ENABLED", "false").strip().lower() == "true"
 diagnostics_collector = DiagnosticsCollector(SETTINGS)
+station_settings = StationPlaybackSettings.from_environment() if MODE in {"production", "read_only"} else None
+station_retention = configured_retention() if station_settings else None
+station_playback = StationPlaybackCollector(station_settings, on_state=station_retention.observe if station_retention else None)
 snapshot_publisher = SnapshotPublisher(
     mode=MODE,
     jarvis_enabled=JARVIS_ENABLED,
@@ -189,8 +194,11 @@ snapshot_publisher = SnapshotPublisher(
     planning_builder=runtime.planning_snapshot,
     heartbeat_seconds=SETTINGS.sse_heartbeat_seconds,
     on_snapshot=diagnostics_collector.observe,
+    station_playback_builder=lambda: station_playback.state,
+    station_retention_builder=station_retention.snapshot if station_retention else None,
 )
 runtime.set_snapshot_callback(snapshot_publisher.rebuild)
+station_playback.on_change = snapshot_publisher.rebuild
 overview_layout_store = OverviewLayoutStore(
     SETTINGS.overview_layout_path,
     writes_enabled=SETTINGS.overview_layout_writes_enabled and SETTINGS.writes_enabled,
@@ -288,10 +296,12 @@ async def lifespan(_: FastAPI):
         bootstrap(),
         name="panel-agent-bootstrap",
     )
+    station_playback.start()
     try:
         yield
     finally:
         startup_lifecycle.mark_stopping()
+        await station_playback.close()
         bootstrap_task = startup_lifecycle.bootstrap_task
         if bootstrap_task is not None and not bootstrap_task.done():
             bootstrap_task.cancel()
@@ -315,6 +325,7 @@ if MODE != "production":
         StationActionExecutor(SETTINGS, access_policy, lambda: False)
     ))
 app.include_router(build_backup_router(backup_service, access_policy))
+app.include_router(build_station_playback_router(station_playback))
 app.include_router(build_tv_router(lambda: _write_allowed(bool(os.getenv("PANEL_TV_EXECUTOR_TOKEN_FILE")))))
 app.include_router(
     build_project_registry_router(

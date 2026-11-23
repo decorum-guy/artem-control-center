@@ -881,6 +881,24 @@ export interface PlanningSnapshot {
   providerStatuses: PlanningProviderStatus[];
 }
 
+export interface StationPlayback {
+  status: "playing" | "paused" | "idle" | "stale" | "auth_required";
+  title: string | null;
+  artist: string | null;
+  coverPath: string | null;
+  observedAt: string | null;
+}
+
+export interface StationRetention {
+  activeSince: string | null;
+  samples: {
+    startedAt: string;
+    endedAt: string;
+    seconds: number;
+    outcome: "cleared" | "new_media" | "resumed" | "signal_lost";
+  }[];
+}
+
 export interface DashboardSnapshot {
   revision: number;
   generatedAt: string;
@@ -889,6 +907,8 @@ export interface DashboardSnapshot {
   jarvisEnabled?: boolean;
   services: ServiceSnapshot[];
   planning?: PlanningSnapshot | null;
+  stationPlayback?: StationPlayback | null;
+  stationRetention?: StationRetention | null;
 }
 
 export interface CoffeeTimingSettings {

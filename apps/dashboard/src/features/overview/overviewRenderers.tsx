@@ -309,7 +309,7 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
     case "home.television":
       return <TelevisionWidget interactive={!runtime.editMode} />;
     case "home.station-mini-2":
-      return <StationMiniWidget interactive={!runtime.editMode} />;
+      return <StationMiniWidget interactive={!runtime.editMode} playback={runtime.snapshot.stationPlayback} />;
     case "planning.summary":
       return renderPlanning(item, runtime);
     case "system.health-summary":
