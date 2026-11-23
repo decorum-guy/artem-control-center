@@ -367,7 +367,7 @@ if MODE != "production":
     ))
 app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(build_station_playback_router(station_playback))
-if ble_strip is not None:
+if ble_strip is not None and MODE == "production":
     app.include_router(build_ble_strip_router(
         ble_strip, lambda: access_policy,
         lambda: startup_lifecycle.phase == "ready"
