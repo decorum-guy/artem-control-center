@@ -651,6 +651,7 @@ export function App() {
                 theme={theme}
                 motion={motion}
                 calendarSources={snapshot?.planning?.providerStatuses ?? []}
+                stationRetention={snapshot?.stationRetention}
                 onThemeChange={changeTheme}
                 onMotionChange={setMotion}
                 jarvisEnabled={jarvisEnabled}

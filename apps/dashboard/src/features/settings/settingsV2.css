@@ -1421,3 +1421,18 @@
     grid-template-columns: 1fr;
   }
 }
+
+.station-retention-settings {
+  padding: 0 14px;
+  border: 1px solid var(--cc-border);
+  border-radius: 14px;
+  background: var(--cc-surface-1);
+}
+.station-retention-settings summary {
+  min-height: 48px;
+  align-content: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+.station-retention-settings p,
+.station-retention-settings li { color: var(--cc-text-secondary); }

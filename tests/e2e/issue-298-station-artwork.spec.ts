@@ -279,7 +279,7 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
       bounds: element.getBoundingClientRect().toJSON(),
       actionAncestor: element.closest("button, a, [role=button]") !== null
     }));
-    expect(imageMetrics.source).toContain("/assets/widgets/station-mini-2.png");
+    expect(imageMetrics.source).toMatch(/\/assets\/widgets\/station-mini-2(?:-panel\.webp|\.png)$/);
     expect(new URL(imageMetrics.resolvedSource).origin).toBe(new URL(page.url()).origin);
     expect(imageMetrics.naturalWidth).toBeGreaterThan(0);
     expect(imageMetrics.naturalHeight).toBeGreaterThan(0);
@@ -501,7 +501,7 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
     test.skip(!overviewV2Enabled, "Run with VITE_OVERVIEW_V2_ENABLED=true.");
     await page.setViewportSize({ width: 1280, height: 720 });
     await installStationAvailability(page);
-    await page.route("**/src/assets/widgets/station-mini-2.png", async (route) => route.fulfill({
+    await page.route(/\/src\/assets\/widgets\/station-mini-2(?:-panel\.webp|\.png)$/, async (route) => route.fulfill({
       status: 404,
       contentType: "image/png",
       body: ""

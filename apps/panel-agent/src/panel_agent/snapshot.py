@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator, Awaitable, Callable, Iterable
 
-from .contracts import DashboardSnapshot, PanelMode, ServiceSnapshot
+from .contracts import DashboardSnapshot, PanelMode, ServiceSnapshot, StationPlayback, StationRetention
 from .planning import PlanningProjection
 
 
@@ -20,6 +20,8 @@ class SnapshotPublisher:
         services_builder: Callable[[], Iterable[ServiceSnapshot]],
         planning_builder: Callable[[], PlanningProjection | None] | None = None,
         jarvis_enabled: bool = False,
+        station_playback_builder: Callable[[], StationPlayback | None] | None = None,
+        station_retention_builder: Callable[[], StationRetention | None] | None = None,
         heartbeat_seconds: float = 20,
         on_snapshot: Callable[[DashboardSnapshot], None] | None = None,
     ) -> None:
@@ -27,6 +29,8 @@ class SnapshotPublisher:
         self._jarvis_enabled = jarvis_enabled
         self._services_builder = services_builder
         self._planning_builder = planning_builder
+        self._station_playback_builder = station_playback_builder
+        self._station_retention_builder = station_retention_builder
         self._heartbeat_seconds = max(0.01, heartbeat_seconds)
         self._on_snapshot = on_snapshot
         self._snapshot: DashboardSnapshot | None = None
@@ -56,7 +60,9 @@ class SnapshotPublisher:
     async def rebuild(self) -> DashboardSnapshot:
         services = list(self._services_builder())
         planning = self._planning_builder() if self._planning_builder is not None else None
-        fingerprint = _fingerprint(services, self._mode, planning)
+        playback = self._station_playback_builder() if self._station_playback_builder else None
+        retention = self._station_retention_builder() if self._station_retention_builder else None
+        fingerprint = _fingerprint(services, self._mode, planning, playback, retention)
         loop = asyncio.get_running_loop()
         if self._lock is None or self._lock_loop is not loop:
             self._lock = asyncio.Lock()
@@ -77,6 +83,8 @@ class SnapshotPublisher:
                 fixtureScenario=None,
                 services=services,
                 planning=planning,
+                stationPlayback=playback,
+                stationRetention=retention,
             )
             revision = self._revision
             for queue in tuple(self._subscribers):
@@ -160,9 +168,13 @@ def _fingerprint(
     services: list[ServiceSnapshot],
     mode: PanelMode,
     planning: PlanningProjection | None = None,
+    playback: StationPlayback | None = None,
+    retention: StationRetention | None = None,
 ) -> str:
     payload = {
         "mode": mode,
+        "stationPlayback": playback.model_dump(exclude={"observedAt"}) if playback else None,
+        "stationRetention": retention.model_dump() if retention else None,
         "services": [
             _without_technical_fields(
                 service.model_dump(mode="json", exclude_none=False)
