@@ -91,7 +91,7 @@ describe("Station Mini 2 Overview widget", () => {
     expect(keyframes).toContain("100% {\n    opacity: 0;\n    transform: scale(1.03);");
     expect(css).toMatch(/\.station-mini-widget__button\s*\{[^}]*min-width:\s*48px;[^}]*min-height:\s*48px;/s);
     expect(css).toMatch(/\.station-mini-widget__music\s*\{[^}]*min-height:\s*48px;/s);
-    expect(css).toMatch(/\.station-mini-widget__message\s*\{[^}]*min-height:\s*1\.25em;[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.25;/s);
+    expect(css).toMatch(/\.station-mini-widget__message\s*\{[^}]*min-height:\s*15px;[^}]*font-size:\s*11px;[^}]*line-height:\s*15px;/s);
     expect(reducedMotion).toContain(".station-mini-widget__glow {\n    animation: none;\n    transition: none;\n    transform: none;");
     expect(reducedMotion).toContain(".station-mini-widget__glow--active { opacity: .78; }");
   });

@@ -76,6 +76,7 @@ function StationTrack({ track }: { track: StationPlayback | null }) {
       setExitComplete(false);
       return;
     }
+    if (!previousTrack.current) return;
     const timeout = setTimeout(() => {
       previousTrack.current = null;
       setExitComplete(true);
