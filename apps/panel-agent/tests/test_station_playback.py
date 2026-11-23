@@ -228,3 +228,55 @@ def test_collector_single_socket_reconnects_clears_stale_and_closes(track, monke
             assert not active and len(transports) == 3
 
     asyncio.run(exercise())
+
+
+def test_protected_credential_replaces_running_session(tmp_path, monkeypatch):
+    import json
+
+    from panel_agent import station_credentials, station_playback
+
+    monkeypatch.setattr(station_playback, "CREDENTIAL_CHECK_SECONDS", 0.01)
+    monkeypatch.setattr(station_credentials, "dpapi", lambda data, decrypt: data)
+    path = tmp_path / "oauth.dpapi"
+    starts: list[str] = []
+    stopped: list[str] = []
+
+    async def scenario():
+        collector = station_playback.StationPlaybackCollector(station_playback.StationPlaybackSettings(
+            "192.168.0.99", "1" * 64, "device", "", credential_path=path,
+        ))
+
+        async def fake_session(settings):
+            starts.append(settings.x_token)
+            try:
+                await asyncio.Future()
+            finally:
+                stopped.append(settings.x_token)
+
+        def write(token):
+            staged = path.with_suffix(".pending")
+            staged.write_text(json.dumps(dict(x_token=token, music_client_id="id", music_client_secret="test")))
+            staged.replace(path)
+
+        async def wait_for(predicate):
+            async with asyncio.timeout(1):
+                while not predicate():
+                    await asyncio.sleep(0.005)
+
+        monkeypatch.setattr(collector, "_run_session", fake_session)
+        collector.start()
+        try:
+            await wait_for(lambda: collector.state is not None)
+            assert collector.state.status == "auth_required"
+            write("test1")
+            await wait_for(lambda: starts == ["test1"])
+            write("test2")
+            await wait_for(lambda: starts == ["test1", "test2"])
+            assert stopped == ["test1"]
+            path.unlink()
+            await wait_for(lambda: collector.state.status == "auth_required")
+            assert stopped == ["test1", "test2"]
+        finally:
+            await collector.close()
+
+    asyncio.run(scenario())

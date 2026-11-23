@@ -12,9 +12,10 @@ import ssl
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
@@ -23,6 +24,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
 from .contracts import StationPlayback
+from .station_credentials import StationCredentialFile
 
 GLAGOL_TOKEN_URL = "https://quasar.yandex.net/glagol/token"
 MUSIC_TOKEN_URL = "https://oauth.mobile.yandex.net/1/token"
@@ -32,6 +34,7 @@ MAX_COVER_BYTES = 512 * 1024
 STATE_TIMEOUT_SECONDS = 35
 RECONNECT_SECONDS = 2
 AUTH_RETRY_SECONDS = 60
+CREDENTIAL_CHECK_SECONDS = 3
 
 
 class StationAuthRequired(RuntimeError):
@@ -46,6 +49,7 @@ class StationPlaybackSettings:
     x_token: str = field(repr=False)
     music_client_id: str = field(default="", repr=False)
     music_client_secret: str = field(default="", repr=False)
+    credential_path: Path | None = field(default=None, repr=False)
 
     @property
     def has_authorization(self) -> bool:
@@ -66,9 +70,11 @@ class StationPlaybackSettings:
                 or not re.fullmatch(r"[a-f0-9]{64}", fingerprint)
                 or not re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", device_id)):
             return None
+        path = os.getenv("PANEL_STATION_PLAYBACK_CREDENTIAL_FILE", "").strip()
         return cls(host, fingerprint, device_id, os.getenv("PANEL_STATION_PLAYBACK_X_TOKEN", "").strip(),
                    os.getenv("PANEL_STATION_PLAYBACK_MUSIC_CLIENT_ID", "").strip(),
-                   os.getenv("PANEL_STATION_PLAYBACK_MUSIC_CLIENT_SECRET", "").strip())
+                   os.getenv("PANEL_STATION_PLAYBACK_MUSIC_CLIENT_SECRET", "").strip(),
+                   Path(path) if path else None)
 
 
 def _allowed_https(value: str, hosts: set[str]):
@@ -212,6 +218,37 @@ class StationPlaybackCollector:
             await self.on_change()
 
     async def _run(self, settings: StationPlaybackSettings) -> None:
+        if settings.credential_path is None:
+            await self._run_session(settings)
+            return
+
+        # Replacing the protected file closes the old session before connecting
+        # with the new credential. A rejected or missing file can be corrected live.
+        store = StationCredentialFile(settings.credential_path)
+        while True:
+            version = store.version()
+            try:
+                credentials = store.read()
+            except (OSError, ValueError):
+                await self.update("auth_required")
+                await asyncio.sleep(CREDENTIAL_CHECK_SECONDS)
+                continue
+            updated = replace(settings, x_token=credentials.x_token, music_client_id=credentials.music_client_id,
+                              music_client_secret=credentials.music_client_secret)
+            session = asyncio.create_task(self._run_session(updated), name="station-authorized-session")
+            try:
+                while store.version() == version:
+                    done, _ = await asyncio.wait({session}, timeout=CREDENTIAL_CHECK_SECONDS)
+                    if done:
+                        session.result()
+                        await asyncio.sleep(CREDENTIAL_CHECK_SECONDS)
+                        break
+            finally:
+                session.cancel()
+                await asyncio.gather(session, return_exceptions=True)
+            await self.update("stale")
+
+    async def _run_session(self, settings: StationPlaybackSettings) -> None:
         if not settings.has_authorization:
             await self.update("auth_required")
             return

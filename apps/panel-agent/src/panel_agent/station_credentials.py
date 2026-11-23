@@ -1,0 +1,71 @@
+"""Windows current-user DPAPI storage for Station OAuth credentials."""
+
+from __future__ import annotations
+
+import ctypes
+import json
+from ctypes import wintypes
+from dataclasses import dataclass, field
+from pathlib import Path
+
+MAX_CREDENTIAL_BYTES = 16_384
+KEYS = ("x_token", "music_client_id", "music_client_secret")
+
+
+class _Blob(ctypes.Structure):
+    _fields_ = [("size", wintypes.DWORD), ("data", ctypes.POINTER(ctypes.c_ubyte))]
+
+
+def dpapi(data: bytes, *, decrypt: bool) -> bytes:
+    if not hasattr(ctypes, "windll"):
+        raise OSError("Station credential storage requires Windows")
+    source = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
+    incoming = _Blob(len(data), source)
+    result = _Blob()
+    crypt = ctypes.windll.crypt32
+    method = crypt.CryptUnprotectData if decrypt else crypt.CryptProtectData
+    # CRYPTPROTECT_UI_FORBIDDEN, without CRYPTPROTECT_LOCAL_MACHINE.
+    if not method(ctypes.byref(incoming), None, None, None, None, 1, ctypes.byref(result)):
+        raise ctypes.WinError()
+    try:
+        return ctypes.string_at(result.data, result.size)
+    finally:
+        free = ctypes.windll.kernel32.LocalFree
+        free.argtypes = [ctypes.c_void_p]
+        free.restype = ctypes.c_void_p
+        free(result.data)
+
+
+@dataclass(frozen=True)
+class StationCredentials:
+    x_token: str = field(repr=False)
+    music_client_id: str = field(repr=False)
+    music_client_secret: str = field(repr=False)
+
+    @classmethod
+    def parse(cls, content: bytes) -> StationCredentials:
+        values = json.loads(content)
+        if not isinstance(values, dict) or set(values) != set(KEYS):
+            raise ValueError("Invalid Station credential document")
+        if not all(isinstance(value, str) and value and len(value) <= 4096 for value in values.values()):
+            raise ValueError("Invalid Station credential fields")
+        return cls(**values)
+
+
+class StationCredentialFile:
+    def __init__(self, path: Path):
+        self.path = path
+
+    def version(self) -> tuple[int, int, int] | None:
+        try:
+            stat = self.path.stat()
+            return stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size
+        except OSError:
+            return None
+
+    def read(self) -> StationCredentials:
+        with self.path.open("rb") as file:
+            value = file.read(MAX_CREDENTIAL_BYTES + 1)
+        if not value or len(value) > MAX_CREDENTIAL_BYTES:
+            raise ValueError("Invalid protected Station file")
+        return StationCredentials.parse(dpapi(value, decrypt=True))
