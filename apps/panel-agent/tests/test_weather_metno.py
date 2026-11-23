@@ -139,7 +139,7 @@ def test_automatic_failover_and_recovery(monkeypatch, tmp_path, preferred, fallb
         assert (cached.provider, cached.stale, cached.sourceMode) == (fallback, False, "cached")
         assert calls == [preferred, fallback]
         assert WeatherForecast.model_validate_json(
-            service._cache_path(service.store.get()).read_text()
+            service._cache_path(service.store.get()).read_text(encoding="utf-8")
         ).provider == fallback
 
         offline.clear()
