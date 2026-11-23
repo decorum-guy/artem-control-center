@@ -265,7 +265,10 @@ test("PWA fits a normal phone viewport and requires confirmation to sign out", a
       const box = (await control.boundingBox())!;
       expect(box.width).toBeGreaterThanOrEqual(48);
       expect(box.height).toBeGreaterThanOrEqual(48);
-      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height - 34);
+      await expect.poll(async () => {
+        const settled = await control.boundingBox();
+        return settled ? settled.y + settled.height : Infinity;
+      }).toBeLessThanOrEqual(viewport.height - 34);
     }
   }
   await shot(page, "mobile-compact-remote-night");
