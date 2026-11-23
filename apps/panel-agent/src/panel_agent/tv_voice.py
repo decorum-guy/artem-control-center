@@ -19,7 +19,7 @@ SCENARIOS = {
     "Панель ТВ · YouTube": "youtube",
 }
 MAX_EVENT_AGE_SECONDS = 12
-DUPLICATE_WINDOW_SECONDS = 3
+DUPLICATE_WINDOW_SECONDS = 6
 
 
 class TVVoiceBridge:
