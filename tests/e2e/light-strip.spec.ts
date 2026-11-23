@@ -83,3 +83,30 @@ test.describe("living room RGB strip", () => {
     expect(await light.evaluate((widget) => widget.getBoundingClientRect().top)).toBe(topBeforePicker);
   });
 });
+
+test("the BLE card separates a sent command from the physical state", async ({ page }) => {
+  test.skip(!enabled, "Requires the V2 shell.");
+  const posts: Record<string, unknown>[] = [];
+  await page.route("**/api/v1/snapshot*", async (route) => {
+    const response = await route.fetch();
+    const snapshot = await response.json();
+    const strip = snapshot.services.find((service: { id: string }) => service.id === "living-room-light-strip");
+    Object.assign(strip, {
+      health: "healthy", source: "live", enabled: true, actions: [],
+      data: { provider: "ble", available: true, state: "unknown", observedAt: "2026-11-23T22:00:00Z" },
+    });
+    await route.fulfill({ response, json: snapshot });
+  });
+  await page.route("**/api/v1/ble-strip/action", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    posts.push(body);
+    await route.fulfill({ json: { outcome: "write_completed", physicalState: "unknown", requested: body } });
+  });
+  await page.goto("/home?scenario=home-light-strip");
+  const strip = page.getByTestId("light-strip-home");
+  await expect(strip.getByText("Bluetooth на связи")).toBeVisible();
+  await strip.getByRole("button", { name: "Светлый морской" }).click();
+  await expect(strip.getByRole("status")).toHaveText("Команда отправлена · Светлый морской");
+  await expect(strip.getByText("Состояние ленты неизвестно", { exact: false })).toBeVisible();
+  expect(posts).toEqual([{ operation: "color", color: "sea" }]);
+});
