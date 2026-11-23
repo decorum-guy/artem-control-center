@@ -265,6 +265,32 @@ class DiagnosticsReport(BaseModel):
     mutationGates: DiagnosticsMutationGates
 
 
+class StationPlayback(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["playing", "paused", "idle", "stale", "auth_required"]
+    title: str | None = None
+    artist: str | None = None
+    coverPath: str | None = None
+    observedAt: str
+
+
+class StationRetentionSample(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    startedAt: str
+    endedAt: str
+    seconds: float = Field(ge=0)
+    outcome: Literal["cleared", "new_media", "resumed", "signal_lost"]
+
+
+class StationRetention(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activeSince: str | None = None
+    samples: list[StationRetentionSample] = Field(default_factory=list, max_length=100)
+
+
 class DashboardSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -275,6 +301,8 @@ class DashboardSnapshot(BaseModel):
     jarvisEnabled: bool = False
     services: List[ServiceSnapshot]
     planning: Optional[PlanningProjection] = None
+    stationPlayback: StationPlayback | None = None
+    stationRetention: StationRetention | None = None
 
 
 class InterfaceCopyPageText(BaseModel):

@@ -1,3 +1,4 @@
+import type { StationPlayback } from "@artem/contracts";
 import { v3VisualSkinEnabled } from "../../visualShellConfig";
 import { Icon } from "../../icons";
 import { useEffect, useRef, useState } from "react";
@@ -48,7 +49,21 @@ function ActionIcon({ actionId }: { actionId: StationActionId }) {
   </svg>;
 }
 
-export function StationMiniWidget({ interactive }: { interactive: boolean }) {
+function TrackCover({ source }: { source: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const available = source !== null && /^\/api\/v1\/station-playback\/cover\/[a-f0-9]{64}$/.test(source) && !failed;
+  return <span className="station-mini-widget__cover" aria-hidden="true">
+    {available
+      ? <img src={source} alt="" decoding="async" draggable={false} onError={() => setFailed(true)} />
+      : <span>♪</span>}
+  </span>;
+}
+
+export function StationMiniWidget({ interactive, playback }: {
+  interactive: boolean;
+  playback?: StationPlayback | null;
+}) {
+  const track = (playback?.status === "playing" || playback?.status === "paused") && playback.title ? playback : null;
   const { locked, guardMutation } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
   const [availability, setAvailability] = useState<StationActionAvailability | null>(null);
@@ -203,7 +218,8 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
 
   return <WorkZone className="overview-v2-real-widget station-mini-widget" data-testid="overview-station-mini-widget" data-instrument-active={v3VisualSkinEnabled ? glowActive : undefined}>
     <header className="station-mini-widget__header"><h2>Станция Mini 2</h2></header>
-    <div className="station-mini-widget__art" data-testid="station-artwork-slot">
+    <div className="station-mini-widget__art" data-testid="station-artwork-slot" data-track-present={Boolean(track)}>
+      <div className="station-mini-widget__speaker">
       <span key={glowPulse} className={`station-mini-widget__glow${glowActive ? " station-mini-widget__glow--active" : ""}`} aria-hidden="true" />
       {STATION_ARTWORK && !artworkFailed && <img className="station-mini-widget__image" src={STATION_ARTWORK}
         alt="" aria-hidden="true" draggable={false} decoding="async" onError={() => setArtworkFailed(true)} />}
@@ -211,6 +227,17 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
         <rect x="16" y="8" width="48" height="84" rx="20" fill="none" stroke="currentColor" strokeWidth="2" />
         <circle cx="40" cy="77" r="3" fill="currentColor" />
       </svg>}
+      </div>
+      {track && <div className="station-mini-widget__track" data-testid="station-current-track">
+        <TrackCover key={track.coverPath} source={track.coverPath} />
+        <div className="station-mini-widget__track-text">
+          <strong title={track.title ?? undefined}>{track.title}</strong>
+          {track.artist && <span title={track.artist}>{track.artist}</span>}
+          {track.status === "paused" && <small>Пауза</small>}
+        </div>
+      </div>}
+      {playback?.status === "stale" && <small className="station-mini-widget__read-status">Нет связи с колонкой</small>}
+      {playback?.status === "auth_required" && <small className="station-mini-widget__read-status">Требуется вход в Яндекс</small>}
     </div>
     <div className="station-mini-widget__controls" aria-label="Управление Станцией Mini 2">
       {STATION_ACTIONS.map((actionId) => <button key={actionId} type="button"
