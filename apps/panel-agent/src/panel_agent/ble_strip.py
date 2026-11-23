@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .access_policy import AccessPolicyStore
 from .contracts import ServicePresentation, ServiceSnapshot
 
-SERVICE_ID = "living-room-light-strip"
+SERVICE_ID = "bedroom-ble-light-strip"
 SUFFIX = "-0000-1000-8000-00805f9b34fb"
 SERVICE, WRITE, NOTIFY = ("0000" + short + SUFFIX for short in ("fff0", "fff3", "fff4"))
 ADDRESS = re.compile(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}")
@@ -162,7 +162,7 @@ class BleStripManager:
     def snapshot(self) -> ServiceSnapshot:
         summary = "BLE доступна" if self.available else "Поиск BLE-ленты"
         return ServiceSnapshot(
-            id=SERVICE_ID, title="Лента в зале", dataContract="home.light-strip.v1",
+            id=SERVICE_ID, title="Лента в спальне", dataContract="home.light-strip.v1",
             health="healthy" if self.available else "offline", source="live" if self.available else "unavailable",
             summary=summary,
             presentation=ServicePresentation(category="home-device", group="Home infrastructure",

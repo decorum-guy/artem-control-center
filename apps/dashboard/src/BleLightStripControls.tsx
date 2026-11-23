@@ -47,7 +47,7 @@ export function BleLightStripControls({ service, variant, interactive }: {
     const suffix = command.operation === "on" || command.operation === "off"
       ? `power_${command.operation}` : `set_${command.operation}`;
     try {
-      if (!await ensureCapability(`home.light_strip.${suffix}`, "Лента в зале") || !guardMutation()) {
+      if (!await ensureCapability(`home.light_strip.${suffix}`, service.title) || !guardMutation()) {
         setReceipt("Управление недоступно в текущем профиле.");
         return;
       }
@@ -71,11 +71,11 @@ export function BleLightStripControls({ service, variant, interactive }: {
     }
   }
 
-  return <section className={`light-strip light-strip--${variant} light-strip--ble`} data-testid={`light-strip-${variant}`} aria-label="Лента в зале">
+  return <section className={`light-strip light-strip--${variant} light-strip--ble`} data-testid={`light-strip-${variant}`} aria-label={service.title}>
     <header className="light-strip__header">
       <span className="light-strip__identity">
         <span className="light-strip__lamp" aria-hidden="true" />
-        <span><strong>Лента в зале</strong><small>{live ? "Bluetooth на связи" : "Поиск ленты по Bluetooth"}</small></span>
+        <span><strong>{service.title}</strong><small>{live ? "Bluetooth на связи" : "Поиск ленты по Bluetooth"}</small></span>
       </span>
       <div className="light-strip__ble-controls">
         <button className="light-strip__power" type="button" disabled={disabled} onClick={() => void send({ operation: "on" }, "включить")}>Вкл</button>
@@ -99,7 +99,7 @@ export function BleLightStripControls({ service, variant, interactive }: {
       <button className="light-strip__more" type="submit" disabled={disabled || !percent}>Отправить</button>
     </form>
     <small className="light-strip__caption">Состояние ленты неизвестно{checked && Number.isFinite(checked.getTime()) && <>
-      {" · Связь проверена в "}<time dateTime={checked.toISOString()}>{checked.toLocaleTimeString()}</time>
+      {" · Связь проверена в "}<time dateTime={checked.toISOString()}>{checked.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</time>
     </>}</small>
     <div className="light-strip__ble-receipt" role="status">{receipt}</div>
   </section>;

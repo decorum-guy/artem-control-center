@@ -48,6 +48,7 @@ from .contracts import (
 )
 from .fixtures import load_fixture_document, services_for_scenario
 from .diagnostics import DiagnosticsCollector
+from .home_assistant import LIGHT_STRIP_SERVICE_ID
 from .integrations import IntegrationRuntime
 from .planning_api import build_planning_router
 from .todoist import TodoistAdapter
@@ -63,7 +64,7 @@ from .host_battery import router as host_battery_router
 from .runtime_control import router as runtime_control_router
 from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
-from .ble_strip import ADDRESS as BLE_ADDRESS, SERVICE_ID as BLE_SERVICE_ID, BleStripManager, build_ble_strip_router
+from .ble_strip import ADDRESS as BLE_ADDRESS, BleStripManager, build_ble_strip_router
 from .station_playback import StationPlaybackCollector, StationPlaybackSettings, build_station_playback_router
 from .station_retention import configured_retention
 from .station_actions import StationActionExecutor, build_station_action_router
@@ -192,7 +193,7 @@ station_retention = configured_retention() if station_settings else None
 station_playback = StationPlaybackCollector(station_settings, on_state=station_retention.observe if station_retention else None)
 ble_strip = (
     BleStripManager(SETTINGS.ble_strip_address)
-    if MODE in {"production", "read_only", "integration_test"} and SETTINGS.light_strip_provider == "ble"
+    if MODE in {"production", "read_only", "integration_test"} and SETTINGS.light_strip_provider in {"ble", "both"}
     and BLE_ADDRESS.fullmatch(SETTINGS.ble_strip_address)
     else None
 )
@@ -200,9 +201,8 @@ ble_strip = (
 
 def snapshot_services():
     services = runtime.services()
-    if SETTINGS.light_strip_provider != "ble":
-        return services
-    services = [service for service in services if service.id != BLE_SERVICE_ID]
+    if SETTINGS.light_strip_provider == "ble":
+        services = [service for service in services if service.id != LIGHT_STRIP_SERVICE_ID]
     if ble_strip is not None:
         services.append(ble_strip.snapshot())
     return services

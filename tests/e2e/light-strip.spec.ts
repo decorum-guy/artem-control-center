@@ -91,7 +91,9 @@ test("the BLE card separates a sent command from the physical state", async ({ p
     const response = await route.fetch();
     const snapshot = await response.json();
     const strip = snapshot.services.find((service: { id: string }) => service.id === "living-room-light-strip");
-    Object.assign(strip, {
+    snapshot.services.push({
+      ...strip,
+      id: "bedroom-ble-light-strip", title: "Лента в спальне",
       health: "healthy", source: "live", enabled: true, actions: [],
       data: { provider: "ble", available: true, state: "unknown", observedAt: "2026-11-23T22:00:00Z" },
     });
@@ -103,7 +105,8 @@ test("the BLE card separates a sent command from the physical state", async ({ p
     await route.fulfill({ json: { outcome: "write_completed", physicalState: "unknown", requested: body } });
   });
   await page.goto("/home?scenario=home-light-strip");
-  const strip = page.getByTestId("light-strip-home");
+  await expect(page.getByRole("region", { name: "Лента в зале" })).toBeVisible();
+  const strip = page.getByRole("region", { name: "Лента в спальне" });
   await expect(strip.getByText("Bluetooth на связи")).toBeVisible();
   await strip.getByRole("button", { name: "Светлый морской" }).click();
   await expect(strip.getByRole("status")).toHaveText("Команда отправлена · Светлый морской");

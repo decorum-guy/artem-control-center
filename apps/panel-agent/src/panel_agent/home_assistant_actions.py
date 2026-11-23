@@ -252,7 +252,7 @@ class HomeAssistantActionExecutor:
             capability_id = "home_climate_actions"
             configured = self.settings.home_climate_actions_enabled
         elif action_id in LIGHT_ACTION_IDS:
-            if self.settings.light_strip_provider != "ha":
+            if self.settings.light_strip_provider == "ble":
                 return False
             capability_id = "light_strip_actions"
             configured = self.settings.light_strip_actions_enabled

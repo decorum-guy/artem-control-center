@@ -28,6 +28,7 @@ KETTLE_TEA_MODES = (
 KETTLE_MODES = ("on", "off", *KETTLE_TEA_MODES)
 CLIMATE_ENTITY = "climate.konditsioner"
 LIGHT_STRIP_ENTITY = "light.zal_lenta"
+LIGHT_STRIP_SERVICE_ID = "living-room-light-strip"
 PSU_1_ENTITY = "switch.bp_1"
 PSU_2_ENTITY = "switch.bp_2"
 CLIMATE_HVAC_MODES = ("cool", "heat", "fan_only", "dry", "auto", "off")
@@ -591,7 +592,7 @@ class HomeAssistantAdapter:
             ),
         ]
         services.append(ServiceSnapshot(
-            id="living-room-light-strip",
+            id=LIGHT_STRIP_SERVICE_ID,
             title="Лента в зале",
             enabled=light is not None,
             health=light_health,
