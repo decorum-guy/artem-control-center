@@ -27,34 +27,56 @@ async function sampleTrackTransition(artwork: Locator, entering: boolean) {
       .find(animation => animation instanceof CSSTransition && animation.transitionProperty === property);
     const pan = transition(speaker, "transform");
     const fade = transition(presentation, "opacity");
-    if (!pan || !fade) return [];
-    pan.pause();
-    fade.pause();
-    await Promise.all([pan.ready, fade.ready]);
-    const frames = [0, 40, 80, 120, 160, 200, 240, 280, 320].map(time => {
-      pan.currentTime = fade.currentTime = time;
+    const scale = transition(presentation, "transform");
+    if (!pan || !fade || !scale) return [];
+    const animations = [pan, fade, scale];
+    animations.forEach(animation => animation.pause());
+    await Promise.all(animations.map(animation => animation.ready));
+    const duration = Math.max(...animations.map(animation => animation.effect!.getComputedTiming().endTime));
+    const frameMs = 1000 / 60;
+    const times = Array.from({ length: Math.ceil(duration / frameMs) }, (_, index) => index * frameMs);
+    const frames = [...times, duration].map(time => {
+      animations.forEach(animation => { animation.currentTime = time; });
+      const speakerBounds = speaker.getBoundingClientRect();
+      const artBounds = element.getBoundingClientRect();
+      const detailsStyle = getComputedStyle(presentation);
       return {
         time,
-        x: speaker.getBoundingClientRect().x,
-        opacity: Number(getComputedStyle(presentation).opacity),
-        text: presentation.querySelector("strong")?.textContent,
+        offset: speakerBounds.left + speakerBounds.width / 2 - artBounds.left - artBounds.width / 2,
+        opacity: Number(detailsStyle.opacity),
+        scale: new DOMMatrixReadOnly(detailsStyle.transform).a,
+        hasText: Boolean(presentation.querySelector("strong")?.textContent),
+        speakerAboveTrack: Number(getComputedStyle(speaker).zIndex) > Number(detailsStyle.zIndex),
       };
     });
-    pan.finish();
-    fade.finish();
+    animations.forEach(animation => animation.finish());
     return frames;
   });
-  expect(frames).toHaveLength(9);
+  expect(frames.length).toBeGreaterThanOrEqual(30);
   const first = frames[0];
   const last = frames.at(-1)!;
+  const travel = Math.abs(first.offset - last.offset);
   expect(first.opacity).toBe(entering ? 0 : 1);
   expect(last.opacity).toBe(entering ? 1 : 0);
-  expect(entering ? first.x - last.x : last.x - first.x).toBeGreaterThan(30);
-  expect(frames.slice(1, -1).every(frame => frame.opacity > 0 && frame.opacity < 1 && frame.text)).toBe(true);
+  expect(first.scale).toBeCloseTo(entering ? .95 : 1);
+  expect(last.scale).toBeCloseTo(entering ? 1 : .95);
+  expect(travel).toBeGreaterThan(30);
+  expect(frames.every(frame => frame.speakerAboveTrack)).toBe(true);
+  expect(frames.filter(frame => frame.opacity > .01).every(frame => frame.hasText)).toBe(true);
   for (const [index, frame] of frames.slice(1).entries()) {
     const previous = frames[index];
-    expect(entering ? frame.x <= previous.x : frame.x >= previous.x).toBe(true);
+    expect(entering ? frame.offset <= previous.offset + .01 : frame.offset >= previous.offset - .01).toBe(true);
     expect(entering ? frame.opacity >= previous.opacity : frame.opacity <= previous.opacity).toBe(true);
+    expect(entering ? frame.scale >= previous.scale : frame.scale <= previous.scale).toBe(true);
+  }
+  if (entering) {
+    const reveal = frames.find(frame => frame.opacity > 0)!;
+    expect(reveal.time).toBeGreaterThanOrEqual(260);
+    expect(Math.abs(reveal.offset - first.offset) / travel).toBeGreaterThan(.8);
+  } else {
+    const returnStart = frames.find(frame => Math.abs(frame.offset - first.offset) > .5)!;
+    expect(returnStart.time).toBeGreaterThanOrEqual(165);
+    expect(returnStart.opacity).toBeLessThan(.1);
   }
   return frames;
 }

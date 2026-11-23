@@ -16,7 +16,7 @@ import { useCommandSeries } from "../../useCommandSeries";
 
 const STATION_ARTWORK = resolveWidgetAsset("./assets/widgets/station-mini-2.png", v3VisualSkinEnabled);
 const STATION_GLOW_FEEDBACK_DURATION_MS = 1200;
-const TRACK_TRANSITION_MS = 320;
+const TRACK_FADE_OUT_MS = 220;
 type VolumeStep = "media.alice.volume_up" | "media.alice.volume_down";
 function isVolumeStep(action: StationActionId): action is VolumeStep {
   return action === "media.alice.volume_up" || action === "media.alice.volume_down";
@@ -80,7 +80,7 @@ function StationTrack({ track }: { track: StationPlayback | null }) {
     const timeout = setTimeout(() => {
       previousTrack.current = null;
       setExitComplete(true);
-    }, TRACK_TRANSITION_MS);
+    }, TRACK_FADE_OUT_MS + 30);
     return () => clearTimeout(timeout);
   }, [hasTrack]);
 
@@ -261,7 +261,7 @@ export function StationMiniWidget({ interactive, playback }: {
       <p className="station-mini-widget__message" role="status">{volume.active ? "Меняем громкость…" : message ?? (availability ? "" : "Управление недоступно")}</p>
     </header>
     <div className="station-mini-widget__art" data-testid="station-artwork-slot" data-track-present={Boolean(track)}
-      style={{ "--station-track-duration": `${TRACK_TRANSITION_MS}ms` } as CSSProperties}>
+      style={{ "--station-details-out": `${TRACK_FADE_OUT_MS}ms` } as CSSProperties}>
       <div className="station-mini-widget__speaker">
         <span key={glowPulse} className={`station-mini-widget__glow${glowActive ? " station-mini-widget__glow--active" : ""}`} aria-hidden="true" />
         {STATION_ARTWORK && !artworkFailed && <img className="station-mini-widget__image" src={STATION_ARTWORK}
