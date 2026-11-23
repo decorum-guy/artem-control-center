@@ -40,6 +40,7 @@ for key in list(os.environ):
 os.environ.update(
     LOCALAPPDATA=str(ROOT / "profile"),
     PANEL_AGENT_MODE="read_only",
+    PANEL_TV_VOICE_ENABLED="true",
     PANEL_HA_URL=ha.geturl(),
     PANEL_HA_TOKEN=config.get("PANEL_HA_TOKEN") or "",
     PANEL_STATION_PLAYBACK_HOST=lease["host"],
@@ -54,6 +55,7 @@ import uvicorn
 
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.ble_strip import build_ble_strip_router
+from panel_agent.capabilities import CapabilityOverrideStore
 from panel_agent.main import app, ble_strip, runtime, startup_lifecycle, station_playback
 from panel_agent.static_dashboard import install_dashboard_routes
 from panel_agent.station_playback import RECONNECT_SECONDS, StationAuthRequired, StationReplyUnavailable
@@ -71,8 +73,15 @@ def access():
 def allowed(key: str) -> bool:
     current = dotenv_values(LIVE / "runtime.env", interpolate=False)
     toggle = {"true", "1", "yes", "on"}
-    return (startup_lifecycle.phase == "ready" and (current.get("PANEL_WRITES_ENABLED") or "").lower() in toggle
-            and (current.get(key) or "").lower() in toggle)
+    if startup_lifecycle.phase != "ready" or (current.get("PANEL_WRITES_ENABLED") or "").lower() not in toggle:
+        return False
+    enabled = (current.get(key) or "").lower() in toggle
+    if key == "PANEL_LIGHT_STRIP_ACTIONS_ENABLED":
+        overrides = Path(current.get("PANEL_CAPABILITY_OVERRIDES_PATH") or LIVE / "capability-overrides.json")
+        saved, valid = CapabilityOverrideStore(overrides).read()
+        if valid:
+            enabled = saved["overrides"].get("light_strip_actions", enabled)
+    return enabled
 
 
 async def device_lease(settings):
