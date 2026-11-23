@@ -236,7 +236,7 @@ if (MODE == "production" and SETTINGS.tv_voice_enabled and tv_executor_token
         station_entity=SETTINGS.tv_voice_station_entity,
         executor=TVExecutorClient(Path(tv_executor_token)),
         access=lambda: access_policy,
-        write_enabled=lambda: _write_allowed(SETTINGS.tv_voice_enabled),
+        write_enabled=lambda: startup_lifecycle.phase == "ready" and _write_allowed(SETTINGS.tv_voice_enabled),
     )
     runtime.home_assistant.set_yandex_scenario_handler(tv_voice.handle)
 
@@ -316,8 +316,6 @@ async def lifespan(_: FastAPI):
     finally:
         startup_lifecycle.mark_stopping()
         await station_playback.close()
-        if tv_voice is not None:
-            await tv_voice.close()
         bootstrap_task = startup_lifecycle.bootstrap_task
         if bootstrap_task is not None and not bootstrap_task.done():
             bootstrap_task.cancel()
@@ -326,6 +324,8 @@ async def lifespan(_: FastAPI):
         if startup_lifecycle.scheduler_started:
             await coffee_delayed_start_scheduler.close()
         await runtime.close()
+        if tv_voice is not None:
+            await tv_voice.close()
         await snapshot_publisher.close()
 
 
