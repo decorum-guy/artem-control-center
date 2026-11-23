@@ -930,9 +930,9 @@ def test_tv_scenario_uses_core_socket_after_own_ack_and_does_not_require_asus():
     live = {"event_type": "yandex_scenario", "data": {"scenario_name": "live"}}
     socket = FakeHomeAssistantSocket([
         {"type": "result", "id": 1, "success": True},
+    ], events=[
         {"type": "event", "id": 3, "event": stale},
         {"type": "result", "id": 3, "success": True},
-    ], events=[
         {"type": "event", "id": 1, "event": live},
         {"type": "event", "id": 3, "event": live},
     ])
