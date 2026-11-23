@@ -280,3 +280,53 @@ def test_protected_credential_replaces_running_session(tmp_path, monkeypatch):
             await collector.close()
 
     asyncio.run(scenario())
+
+
+def test_station_reply_is_armed_before_send_and_keeps_all_cards():
+    import json
+
+    from panel_agent.station_playback import StationReplies
+
+    async def scenario():
+        cards = [{"item": 1}, {"item": 2}]
+
+        class Socket:
+            async def send(self, body):
+                request = json.loads(body)
+                assert request["payload"]["command"] == "sendText"
+                replies.receive({"requestId": "different", "vinsResponse": {"response": {"wrong": True}}})
+                replies.receive({"requestId": request["id"], "vinsResponse": {"response": {"is_streaming": True}}})
+                replies.receive({"requestId": request["id"], "vinsResponse": {"payload": {
+                    "response": {"cards": cards},
+                }}})
+
+        replies = StationReplies(Socket(), "test")
+        assert await replies.reminder_list() == {"cards": cards}
+        assert replies.pending is None
+
+    asyncio.run(scenario())
+
+
+def test_station_reply_clears_waiter_on_disconnect(monkeypatch):
+    from panel_agent import station_playback
+
+    async def scenario():
+        sent = asyncio.Event()
+
+        class Socket:
+            async def send(self, _body):
+                sent.set()
+
+        replies = station_playback.StationReplies(Socket(), "test")
+        requested = asyncio.create_task(replies.reminder_list())
+        await sent.wait()
+        replies.close()
+        with pytest.raises(station_playback.StationReplyUnavailable):
+            await requested
+        assert replies.pending is None
+        monkeypatch.setattr(station_playback, "REPLY_TIMEOUT_SECONDS", 0.01)
+        with pytest.raises(station_playback.StationReplyUnavailable):
+            await replies.reminder_list()
+        assert replies.pending is None
+
+    asyncio.run(scenario())

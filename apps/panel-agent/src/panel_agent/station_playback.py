@@ -35,10 +35,62 @@ STATE_TIMEOUT_SECONDS = 35
 RECONNECT_SECONDS = 2
 AUTH_RETRY_SECONDS = 60
 CREDENTIAL_CHECK_SECONDS = 3
+REPLY_TIMEOUT_SECONDS = 8
 
 
 class StationAuthRequired(RuntimeError):
     pass
+
+
+class StationReplyUnavailable(RuntimeError):
+    pass
+
+
+class StationReplies:
+    """One explicit list request per connection, with the existing reader owning recv()."""
+
+    def __init__(self, ws, token: str):
+        self.ws = ws
+        self.token = token
+        self.request_id: str | None = None
+        self.pending: asyncio.Future[dict] | None = None
+
+    async def reminder_list(self) -> dict:
+        if self.pending is not None:
+            raise StationReplyUnavailable
+        request_id = str(uuid.uuid4())
+        pending = asyncio.get_running_loop().create_future()
+        self.request_id, self.pending = request_id, pending
+        try:
+            async with asyncio.timeout(REPLY_TIMEOUT_SECONDS):
+                await self.ws.send(json.dumps({
+                    "conversationToken": self.token, "id": request_id,
+                    "payload": {"command": "sendText", "text": "Перечисли напоминания"},
+                    "sentTime": round(time.time() * 1000),
+                }, ensure_ascii=False))
+                return await pending
+        except TimeoutError as exc:
+            raise StationReplyUnavailable from exc
+        finally:
+            pending.cancel()
+            self.request_id, self.pending = None, None
+
+    def receive(self, frame: dict) -> None:
+        pending = self.pending
+        if pending is None or pending.done() or frame.get("requestId") != self.request_id:
+            return
+        envelope = frame.get("vinsResponse")
+        response = envelope.get("response") if isinstance(envelope, dict) else None
+        if isinstance(envelope, dict) and isinstance(envelope.get("payload"), dict):
+            response = envelope["payload"].get("response") or response
+        if isinstance(response, dict) and response and not response.get("is_streaming"):
+            pending.set_result(response)
+        elif str(frame.get("status", "")).lower() in {"401", "403", "error", "failed", "unauthorized", "forbidden"}:
+            pending.set_exception(StationReplyUnavailable())
+
+    def close(self) -> None:
+        if self.pending is not None and not self.pending.done():
+            self.pending.set_exception(StationReplyUnavailable())
 
 
 @dataclass(frozen=True)
@@ -189,6 +241,7 @@ class StationPlaybackCollector:
         self.cover_url: str | None = None
         self.covers: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
         self.cover_lock: asyncio.Lock | None = None
+        self._replies: StationReplies | None = None
 
     def start(self) -> None:
         if self.settings is not None and self.task is None:
@@ -284,20 +337,34 @@ class StationPlaybackCollector:
             await ws.send(json.dumps({"conversationToken": token, "id": str(uuid.uuid4()),
                                       "payload": {"command": "softwareVersion"},
                                       "sentTime": round(time.time() * 1000)}))
-            deadline = time.monotonic() + STATE_TIMEOUT_SECONDS
-            while True:
-                raw = await asyncio.wait_for(ws.recv(), timeout=max(0, deadline - time.monotonic()))
-                try:
-                    data = json.loads(raw)
-                except ValueError:
-                    continue
-                normalized = parse_state(data)
-                if normalized is None:
-                    if isinstance(data, dict) and data.get("status") in ("unauthorized", "forbidden", 401, 403):
-                        raise StationAuthRequired
-                    continue
+            replies = StationReplies(ws, token)
+            self._replies = replies
+            try:
                 deadline = time.monotonic() + STATE_TIMEOUT_SECONDS
-                await self.update(*normalized)
+                while True:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=max(0, deadline - time.monotonic()))
+                    try:
+                        data = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if isinstance(data, dict):
+                        replies.receive(data)
+                    normalized = parse_state(data)
+                    if normalized is None:
+                        if isinstance(data, dict) and data.get("status") in ("unauthorized", "forbidden", 401, 403):
+                            raise StationAuthRequired
+                        continue
+                    deadline = time.monotonic() + STATE_TIMEOUT_SECONDS
+                    await self.update(*normalized)
+            finally:
+                self._replies = None
+                replies.close()
+
+    async def request_reminder_list(self) -> dict:
+        """Explicit diagnostic request that may speak. No browser route or periodic calls."""
+        if self._replies is None:
+            raise StationReplyUnavailable
+        return await self._replies.reminder_list()
 
     async def cover(self, cover_id: str) -> tuple[bytes, str] | None:
         if self.cover_lock is None:
