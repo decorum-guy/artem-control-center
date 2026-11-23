@@ -95,7 +95,7 @@ def create_app(address: str, port: int, policy_path: Path, audit_dir: Path, writ
                 or request.headers.get("x-panel-intent") != "ble-pilot"
                 or request.client is None or request.client.host != "127.0.0.1"):
             raise HTTPException(403, "loopback_origin_required")
-        policy = AccessPolicyStore(policy_path, audit_dir=audit_dir)
+        policy = AccessPolicyStore(policy_path, audit_dir=audit_dir, read_only=True)
         policy.require(capability, gate_enabled=writes_enabled, busy=lock.locked())
         async with lock:
             try:

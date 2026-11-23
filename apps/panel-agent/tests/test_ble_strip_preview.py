@@ -70,3 +70,34 @@ def test_preview_checks_access_serializes_writes_and_reports_uncertain_delivery(
         policy.write_text(json.dumps({"schemaVersion": 1, "baseProfile": "read_only"}), encoding="utf-8")
         assert client.post("/color/sea", headers=headers).status_code == 403
     assert operations == [("on", None), ("white", None), ("brightness", 80), ("off", None)]
+
+
+def test_inflight_preview_does_not_restore_old_policy_on_expiry(pilot, tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    original_store = pilot.AccessPolicyStore
+    now = datetime(2026, 11, 23, tzinfo=timezone.utc)
+    clock = [now]
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps({
+        "schemaVersion": 1, "revision": 1, "baseProfile": "standard",
+        "temporaryFullExpiresAt": (now + timedelta(seconds=1)).isoformat(),
+    }), encoding="utf-8")
+    owner = original_store(policy_path, now=lambda: clock[0])
+    monkeypatch.setattr(pilot, "AccessPolicyStore",
+                        lambda *a, **kw: original_store(*a, **kw, now=lambda: clock[0]))
+
+    async def operate(*args, **kwargs):
+        owner.set_profile("read_only")
+        clock[0] += timedelta(seconds=2)
+        return {"result": "write_completed"}
+
+    monkeypatch.setattr(pilot, "operate", operate)
+    origin = "http://127.0.0.1:8795"
+    headers = {"Origin": origin, "X-Panel-Intent": "ble-pilot"}
+    app = pilot.create_app("AA:BB:CC:DD:EE:FF", 8795, policy_path, tmp_path / "preview-audit", True)
+    with TestClient(app, base_url=origin, client=("127.0.0.1", 12345)) as client:
+        assert client.post("/power/on", headers=headers).status_code == 200
+        assert json.loads(policy_path.read_text(encoding="utf-8"))["baseProfile"] == "read_only"
+        assert client.post("/power/off", headers=headers).status_code == 403
+    assert (tmp_path / "preview-audit" / "access-audit-2026-11-23.jsonl").is_file()
