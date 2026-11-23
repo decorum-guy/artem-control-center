@@ -47,7 +47,18 @@ class SnapshotPublisher:
 
     @property
     def snapshot(self) -> DashboardSnapshot | None:
-        return self._snapshot.model_copy(deep=True) if self._snapshot else None
+        if self._snapshot is None:
+            return None
+        snapshot = self._snapshot.model_copy(deep=True)
+        if snapshot.stationPlayback is not None and self._station_playback_builder:
+            latest = self._station_playback_builder()
+            if latest is not None:
+                # Keep the published content and revision paired. Refresh only
+                # the observation time when the collector still has that content.
+                current = snapshot.stationPlayback.model_copy(update={"observedAt": latest.observedAt})
+                if current == latest:
+                    snapshot.stationPlayback = current
+        return snapshot
 
     @property
     def subscriber_count(self) -> int:
@@ -69,7 +80,9 @@ class SnapshotPublisher:
             self._lock_loop = loop
         async with self._lock:
             if self._snapshot is not None and fingerprint == self._fingerprint:
-                return self._snapshot.model_copy(deep=True)
+                snapshot = self.snapshot
+                assert snapshot is not None
+                return snapshot
             self._revision += 1
             self._fingerprint = fingerprint
             previous_generated_at = (

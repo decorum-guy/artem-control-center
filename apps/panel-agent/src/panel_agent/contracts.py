@@ -272,7 +272,7 @@ class StationPlayback(BaseModel):
     title: str | None = None
     artist: str | None = None
     coverPath: str | None = None
-    observedAt: str
+    observedAt: str | None
 
 
 class StationRetentionSample(BaseModel):
