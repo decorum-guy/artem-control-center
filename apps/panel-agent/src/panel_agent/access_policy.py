@@ -44,6 +44,7 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "home.climate.set_temperature": "standard",
     "home.climate.set_mode": "standard",
     "home.climate.set_fan_mode": "standard",
+    "home.television.voice": "standard",
     "home.light_strip.power_on": "standard",
     "home.light_strip.power_off": "standard",
     "home.light_strip.set_brightness": "standard",

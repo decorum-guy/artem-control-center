@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -98,7 +99,8 @@ from .ai_settings import AIProviderSettingsStore
 from .ai_text import AITextService
 from .ai_api import build_ai_router
 from .access_policy import AccessPolicyStore
-from .tv_api import build_tv_router
+from .tv_api import TVExecutorClient, build_tv_router
+from .tv_voice import TVVoiceBridge
 from .backups import AvalarStageBackupEngine, BackupEngine, BackupService, PanelConfigSource, build_backup_router
 from .interface_copy import (
     FIXTURE_INTERFACE_COPY_SCENARIOS,
@@ -226,6 +228,18 @@ startup_lifecycle = PanelStartupLifecycle()
 access_policy = AccessPolicyStore.from_environment(
     temporary_minutes=SETTINGS.access_temporary_minutes,
 )
+tv_voice = None
+tv_executor_token = os.getenv("PANEL_TV_EXECUTOR_TOKEN_FILE")
+if (MODE == "production" and SETTINGS.tv_voice_enabled and tv_executor_token
+        and re.fullmatch(r"media_player\.[a-z0-9_]+", SETTINGS.tv_voice_station_entity)):
+    tv_voice = TVVoiceBridge(
+        station_entity=SETTINGS.tv_voice_station_entity,
+        executor=TVExecutorClient(Path(tv_executor_token)),
+        access=lambda: access_policy,
+        write_enabled=lambda: _write_allowed(SETTINGS.tv_voice_enabled),
+    )
+    runtime.home_assistant.set_yandex_scenario_handler(tv_voice.handle)
+
 system_controls = WindowsSystemControls()
 backup_source = PanelConfigSource.from_store_paths(
     overview_layout=overview_layout_store.path,
@@ -302,6 +316,8 @@ async def lifespan(_: FastAPI):
     finally:
         startup_lifecycle.mark_stopping()
         await station_playback.close()
+        if tv_voice is not None:
+            await tv_voice.close()
         bootstrap_task = startup_lifecycle.bootstrap_task
         if bootstrap_task is not None and not bootstrap_task.done():
             bootstrap_task.cancel()
