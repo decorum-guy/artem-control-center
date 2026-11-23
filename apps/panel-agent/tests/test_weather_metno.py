@@ -1,11 +1,13 @@
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from panel_agent.weather import WeatherForecast, WeatherService
+from panel_agent import weather
+from panel_agent.weather import WeatherError, WeatherForecast, WeatherService
 from panel_agent.weather_metno import project_forecast
 
 
@@ -47,6 +49,8 @@ def test_operator_source_through_service_and_restart(monkeypatch, tmp_path):
     upstream = ["live"]
 
     def respond(request):
+        if request.url.host == "api.open-meteo.com":
+            return httpx.Response(503)
         assert request.url.host == "api.met.no" and request.url.params["lat"] == "55.7558"
         calls.append(request)
         if upstream[0] == "offline":
@@ -81,5 +85,125 @@ def test_operator_source_through_service_and_restart(monkeypatch, tmp_path):
         upstream[0] = "unchanged"
         recovered = await restarted.forecast(force=True)
         assert not recovered.stale and recovered.observedAt == result.observedAt and len(calls) == 3
+
+    asyncio.run(exercise())
+
+
+def open_meteo_model(first):
+    hour = first.replace(tzinfo=None).isoformat()
+    day = first.date().isoformat()
+    return {
+        "timezone": "UTC",
+        "current": {
+            "time": hour, "temperature_2m": 10, "precipitation": 0, "weather_code": 0,
+            "wind_speed_10m": 9, "wind_direction_10m": 100, "is_day": 1,
+        },
+        "hourly": {
+            "time": [hour], "temperature_2m": [10], "precipitation_probability": [0],
+            "precipitation": [0], "weather_code": [0], "wind_speed_10m": [9],
+        },
+        "daily": {
+            "time": [day], "weather_code": [0], "temperature_2m_max": [12],
+            "temperature_2m_min": [3], "precipitation_probability_max": [0],
+            "sunrise": [f"{day}T05:00"], "sunset": [f"{day}T18:00"],
+        },
+    }
+
+
+@pytest.mark.parametrize(("preferred", "fallback"), [("open-meteo", "metno"), ("metno", "open-meteo")])
+def test_automatic_failover_and_recovery(monkeypatch, tmp_path, preferred, fallback):
+    first = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    providers = {"api.open-meteo.com": "open-meteo", "api.met.no": "metno"}
+    payloads = {"open-meteo": open_meteo_model(first), "metno": {"properties": model(first)}}
+    calls = []
+    offline = {preferred}
+    clock = [100.0]
+
+    def respond(request):
+        provider = providers[request.url.host]
+        calls.append(provider)
+        if provider in offline:
+            raise httpx.ConnectTimeout("offline", request=request)
+        return httpx.Response(200, json=payloads[provider])
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setattr(weather, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("PANEL_WEATHER_PROVIDER", preferred)
+
+    async def exercise():
+        service = WeatherService(mode="production")
+        live, cached = await asyncio.gather(service.forecast(), service.forecast())
+        assert (live.provider, live.stale, live.sourceMode) == (fallback, False, "live")
+        assert (cached.provider, cached.stale, cached.sourceMode) == (fallback, False, "cached")
+        assert calls == [preferred, fallback]
+        assert WeatherForecast.model_validate_json(
+            service._cache_path(service.store.get()).read_text(encoding="utf-8")
+        ).provider == fallback
+
+        offline.clear()
+        clock[0] += weather.PROVIDER_RETRY_SECONDS
+        recovered = await service.forecast()
+        assert (recovered.provider, recovered.stale, recovered.sourceMode) == (preferred, False, "live")
+        assert calls == [preferred, fallback, preferred]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("open_meteo_online", [True, False])
+def test_old_metno_model_uses_alternate_or_latest_stale_cache(monkeypatch, tmp_path, open_meteo_online):
+    first = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+    def respond(request):
+        if request.url.host == "api.met.no":
+            return httpx.Response(200, json={"properties": model(first - timedelta(hours=20))})
+        if open_meteo_online:
+            return httpx.Response(200, json=open_meteo_model(first))
+        return httpx.Response(200, json={})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("PANEL_WEATHER_PROVIDER", "metno")
+
+    async def exercise():
+        service = WeatherService(mode="production")
+        location = service.store.get()
+        previous = weather.normalize_forecast(open_meteo_model(first), location).model_copy(
+            update={"observedAt": (first - timedelta(hours=1)).isoformat()}
+        )
+        service._persist_cache(location, previous)
+
+        result = await service.forecast()
+        assert result.provider == "open-meteo"
+        if open_meteo_online:
+            assert result.sourceMode == "live" and not result.stale
+        else:
+            assert result.sourceMode == "stale" and result.stale
+            assert result.observedAt == previous.observedAt
+
+    asyncio.run(exercise())
+
+
+def test_both_providers_fail_without_saved_forecast(monkeypatch, tmp_path):
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.host)
+        return httpx.Response(503)
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("PANEL_WEATHER_PROVIDER", "open-meteo")
+
+    async def exercise():
+        service = WeatherService(mode="production")
+        for _ in range(2):
+            with pytest.raises(WeatherError, match="weather_provider_unavailable"):
+                await service.forecast()
+        assert calls == ["api.open-meteo.com", "api.met.no"]
+        assert not service.cache_root.exists()
 
     asyncio.run(exercise())

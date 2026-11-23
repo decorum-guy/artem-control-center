@@ -5,9 +5,11 @@ import json
 import os
 import time
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from weakref import WeakValueDictionary
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -20,6 +22,8 @@ from .weather_metno import MetNoProvider
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "ArtemControlCenter/3.0 (+https://github.com/decorum-guy/artem-control-center)"
+PROVIDER_ORDER = {"open-meteo": ("open-meteo", "metno"), "metno": ("metno", "open-meteo")}
+PROVIDER_RETRY_SECONDS = 60
 
 
 class WeatherLocation(BaseModel):
@@ -246,9 +250,12 @@ def _safe_list(payload: dict[str, Any], section: str, field: str) -> list[Any]:
 
 
 def normalize_forecast(payload: dict[str, Any], location: WeatherLocation | WeatherCandidate) -> WeatherForecast:
-    current = payload.get("current") or {}
+    current = payload["current"]
+    if not current["time"]:
+        raise ValueError("Open-Meteo current forecast has no timestamp")
+    datetime.fromisoformat(current["time"])
     hourly_times = _safe_list(payload, "hourly", "time")
-    current_time = str(current.get("time") or (hourly_times[0] if hourly_times else ""))
+    current_time = current["time"]
     start_index = 0
     for index, value in enumerate(hourly_times):
         if str(value) >= current_time:
@@ -293,6 +300,9 @@ def normalize_forecast(payload: dict[str, Any], location: WeatherLocation | Weat
         for index in range(min(7, len(daily_dates)))
     ]
 
+    if not hourly or not daily:
+        raise ValueError("Open-Meteo forecast is incomplete")
+
     observed_at = _iso_now()
     return WeatherForecast(
         location=location,
@@ -304,13 +314,13 @@ def normalize_forecast(payload: dict[str, Any], location: WeatherLocation | Weat
         stale=False,
         current=WeatherCurrent(
             time=current_time,
-            temperature=float(current.get("temperature_2m", 0)),
-            apparentTemperature=float(current.get("apparent_temperature", current.get("temperature_2m", 0))),
-            precipitation=float(current.get("precipitation", 0)),
-            weatherCode=int(current.get("weather_code", 0)),
-            windSpeed=float(current.get("wind_speed_10m", 0)),
-            windDirection=float(current.get("wind_direction_10m", 0)),
-            isDay=bool(current.get("is_day", 1)),
+            temperature=float(current["temperature_2m"]),
+            apparentTemperature=float(current.get("apparent_temperature", current["temperature_2m"])),
+            precipitation=float(current["precipitation"]),
+            weatherCode=int(current["weather_code"]),
+            windSpeed=float(current["wind_speed_10m"]),
+            windDirection=float(current["wind_direction_10m"]),
+            isDay=bool(current["is_day"]),
         ),
         hourly=hourly,
         daily=daily,
@@ -381,6 +391,8 @@ class WeatherService:
         self._metno = MetNoProvider()
         self.geocode_url = os.getenv("PANEL_WEATHER_GEOCODE_URL", NOMINATIM_URL).strip()
         self._memory_cache: dict[str, WeatherForecast] = {}
+        self._forecast_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+        self._retry_after: OrderedDict[tuple[str, str], float] = OrderedDict()
         # Python 3.9 binds asyncio primitives to the current event loop at
         # construction time.  The Panel Agent module is imported before the
         # fixture test loop exists, so create this lock on first use instead.
@@ -431,7 +443,7 @@ class WeatherService:
         if forecast is None:
             return None
         age = _age_seconds(forecast.observedAt)
-        return forecast.model_copy(update={"ageSeconds": age})
+        return forecast.model_copy(update={"ageSeconds": age, "location": location})
 
     async def forecast(
         self,
@@ -452,46 +464,93 @@ class WeatherService:
         if self.mode in {"fixtures", "integration_test"}:
             return fixture_forecast(location)
 
-        cached = self._cached(location)
-        if (cached is not None and self.provider == cached.provider == "open-meteo"
-                and not force and cached.ageSeconds < self.refresh_seconds):
-            return cached.model_copy(update={"sourceMode": "cached", "stale": False})
+        key = self._cache_key(location)
+        lock = self._forecast_locks.get(key)
+        if lock is None:
+            lock = self._forecast_locks[key] = asyncio.Lock()
+        async with lock:
+            return await self._resolve_forecast(location, key, force)
 
-        params = {
-            "latitude": location.latitude,
-            "longitude": location.longitude,
-            "current": "temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,is_day",
-            "hourly": "temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m",
-            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset",
-            "timezone": "auto",
-            "forecast_days": 7,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=self.request_timeout_seconds, headers={"User-Agent": USER_AGENT}) as client:
-                if self.provider == "metno":
-                    projection = await self._metno.forecast(
-                        client, location.latitude, location.longitude,
-                        self.cache_root if isinstance(location, WeatherLocation) else None,
-                        cached.timezone if cached else None,
-                    )
-                    result = WeatherForecast(location=location, **projection)
-                elif self.provider == "open-meteo":
-                    response = await client.get(self.forecast_url, params=params)
-                    response.raise_for_status()
-                    result = normalize_forecast(response.json(), location)
-                else:
-                    raise WeatherError("weather_provider_unknown")
-            self._memory_cache[self._cache_key(location)] = result
-            if isinstance(location, WeatherLocation) and (
-                cached is None or result.observedAt != cached.observedAt or result.current.time != cached.current.time
-                or result.provider != cached.provider
-            ):
+    async def _resolve_forecast(
+        self, location: WeatherLocation | WeatherCandidate, key: str, force: bool,
+    ) -> WeatherForecast:
+        cached = self._cached(location)
+        last_known = cached
+        failure: Exception | None = None
+        for provider in PROVIDER_ORDER.get(self.provider, ()):
+            retry_key = (key, provider)
+            if not force and time.monotonic() < self._retry_after.get(retry_key, 0):
+                continue
+            if (not force and cached is not None and not cached.stale
+                    and provider == cached.provider == "open-meteo"
+                    and cached.ageSeconds < self.refresh_seconds):
+                return cached.model_copy(update={"sourceMode": "cached"})
+
+            try:
+                result = await asyncio.wait_for(
+                    self._fetch_forecast(provider, location, cached),
+                    timeout=self.request_timeout_seconds + 1,
+                )
+            except (httpx.HTTPError, httpx.InvalidURL, asyncio.TimeoutError,
+                    ValueError, LookupError, TypeError, AttributeError, OSError) as exc:
+                failure = exc
+            else:
+                if not result.stale:
+                    self._retry_after.pop(retry_key, None)
+                    self._remember_forecast(location, key, result, cached)
+                    return result
+                if last_known is None or result.ageSeconds <= last_known.ageSeconds:
+                    last_known = result
+
+            self._retry_after[retry_key] = time.monotonic() + PROVIDER_RETRY_SECONDS
+            self._retry_after.move_to_end(retry_key)
+            if len(self._retry_after) > 64:
+                self._retry_after.popitem(last=False)
+
+        if last_known is not None:
+            stale = last_known.model_copy(update={"sourceMode": "stale", "stale": True})
+            self._remember_forecast(location, key, stale, cached)
+            return stale
+        raise WeatherError("weather_provider_unavailable") from failure
+
+    def _remember_forecast(
+        self, location: WeatherLocation | WeatherCandidate, key: str,
+        result: WeatherForecast, cached: WeatherForecast | None,
+    ) -> None:
+        self._memory_cache[key] = result
+        if isinstance(location, WeatherLocation) and (
+            cached is None or (result.provider, result.observedAt, result.current.time, result.stale)
+            != (cached.provider, cached.observedAt, cached.current.time, cached.stale)
+        ):
+            try:
                 self._persist_cache(location, result)
-            return result
-        except Exception as exc:
-            if cached is not None:
-                return cached.model_copy(update={"sourceMode": "stale", "stale": True})
-            raise WeatherError("weather_provider_unavailable") from exc
+            except OSError:
+                # The live forecast remains available in memory if the disk cache cannot be updated.
+                pass
+
+    async def _fetch_forecast(
+        self, provider: str, location: WeatherLocation | WeatherCandidate, cached: WeatherForecast | None,
+    ) -> WeatherForecast:
+        async with httpx.AsyncClient(timeout=self.request_timeout_seconds, headers={"User-Agent": USER_AGENT}) as client:
+            if provider == "metno":
+                projection = await self._metno.forecast(
+                    client, location.latitude, location.longitude,
+                    self.cache_root if isinstance(location, WeatherLocation) else None,
+                    cached.timezone if cached else None,
+                )
+                return WeatherForecast(location=location, **projection)
+
+            response = await client.get(self.forecast_url, params={
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+                "current": "temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,is_day",
+                "hourly": "temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m",
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset",
+                "timezone": "auto",
+                "forecast_days": 7,
+            })
+            response.raise_for_status()
+            return normalize_forecast(response.json(), location)
 
     async def search(self, query: str) -> list[WeatherSearchResult]:
         normalized = " ".join(query.split()).strip()
