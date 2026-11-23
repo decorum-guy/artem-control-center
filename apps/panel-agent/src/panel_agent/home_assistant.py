@@ -798,27 +798,25 @@ class HomeAssistantAdapter:
             self._yandex_intent_subscribed = False
             self._yandex_intent_status = "disabled"
         self._yandex_scenario_subscribed = False
-        if self._settings.tv_voice_enabled and self._yandex_scenario_handler:
+        scenario_requested = self._settings.tv_voice_enabled and self._yandex_scenario_handler is not None
+        if scenario_requested:
             await socket.send(json.dumps({
                 "id": _YANDEX_SCENARIO_SUBSCRIPTION_ID,
                 "type": "subscribe_events",
                 "event_type": "yandex_scenario",
             }))
-            try:
-                self._yandex_scenario_subscribed = await asyncio.wait_for(
-                    self._await_subscription_ack(
-                        socket, _YANDEX_SCENARIO_SUBSCRIPTION_ID, pre_ack_events, required=False,
-                    ), timeout=6,
-                )
-            except TimeoutError:
-                LOGGER.warning("TV voice HA subscription timed out")
         for message in pre_ack_events:
-            if message.get("id") != _YANDEX_SCENARIO_SUBSCRIPTION_ID:
-                await self._handle_websocket_event(message)
+            await self._handle_websocket_event(message)
         async for raw in socket:
             try:
                 message = json.loads(raw)
             except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if (scenario_requested and isinstance(message, dict)
+                    and message.get("type") == "result" and message.get("id") == _YANDEX_SCENARIO_SUBSCRIPTION_ID):
+                self._yandex_scenario_subscribed = message.get("success") is True
+                if not self._yandex_scenario_subscribed:
+                    LOGGER.warning("TV voice HA subscription denied")
                 continue
             await self._handle_websocket_event(message)
 
@@ -841,9 +839,6 @@ class HomeAssistantAdapter:
                 if message.get("success") is not True:
                     if required:
                         raise ValueError("Home Assistant WebSocket subscription failed")
-                    if subscription_id == _YANDEX_SCENARIO_SUBSCRIPTION_ID:
-                        LOGGER.warning("TV voice HA subscription denied")
-                        return False
                     self._last_yandex_intent_failure_at = self._clock()
                     error = message.get("error")
                     self._yandex_failure_status = (
