@@ -304,7 +304,9 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
         glowOverlapsImage: glowBounds.left < image.right && glowBounds.right > image.left && glowBounds.top < image.bottom && glowBounds.bottom > image.top,
         controlsTop: controls.top,
         musicTop: music.top,
-        messageTop: message.top
+        musicBottom: music.bottom,
+        widgetBottom: element.parentElement!.getBoundingClientRect().bottom,
+        messageBottom: message.bottom
       };
     });
     expect(geometry.slot.height).toBeGreaterThanOrEqual(65);
@@ -314,7 +316,8 @@ test.describe("Issue 298 Station Mini 2 owner artwork", () => {
     expect(geometry.glowOverlapsImage).toBe(true);
     expect(geometry.slot.bottom).toBeLessThanOrEqual(geometry.controlsTop);
     expect(geometry.controlsTop).toBeLessThan(geometry.musicTop);
-    expect(geometry.musicTop).toBeLessThan(geometry.messageTop);
+    expect(geometry.messageBottom).toBeLessThanOrEqual(geometry.slot.top);
+    expect(geometry.widgetBottom - geometry.musicBottom).toBeGreaterThanOrEqual(14);
 
     for (const button of await widget.locator("button[aria-label]").all()) {
       const box = await button.boundingBox();

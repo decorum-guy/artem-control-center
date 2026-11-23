@@ -19,6 +19,46 @@ function gridBounds(item: Locator) {
   });
 }
 
+async function sampleTrackTransition(artwork: Locator, entering: boolean) {
+  const frames = await artwork.evaluate(async (element) => {
+    const speaker = element.querySelector(".station-mini-widget__speaker")!;
+    const presentation = element.querySelector("[data-track-layer]")!;
+    const transition = (node: Element, property: string) => node.getAnimations()
+      .find(animation => animation instanceof CSSTransition && animation.transitionProperty === property);
+    const pan = transition(speaker, "transform");
+    const fade = transition(presentation, "opacity");
+    if (!pan || !fade) return [];
+    pan.pause();
+    fade.pause();
+    await Promise.all([pan.ready, fade.ready]);
+    const frames = [0, 40, 80, 120, 160, 200, 240, 280, 320].map(time => {
+      pan.currentTime = fade.currentTime = time;
+      return {
+        time,
+        x: speaker.getBoundingClientRect().x,
+        opacity: Number(getComputedStyle(presentation).opacity),
+        text: presentation.querySelector("strong")?.textContent,
+      };
+    });
+    pan.finish();
+    fade.finish();
+    return frames;
+  });
+  expect(frames).toHaveLength(9);
+  const first = frames[0];
+  const last = frames.at(-1)!;
+  expect(first.opacity).toBe(entering ? 0 : 1);
+  expect(last.opacity).toBe(entering ? 1 : 0);
+  expect(entering ? first.x - last.x : last.x - first.x).toBeGreaterThan(30);
+  expect(frames.slice(1, -1).every(frame => frame.opacity > 0 && frame.opacity < 1 && frame.text)).toBe(true);
+  for (const [index, frame] of frames.slice(1).entries()) {
+    const previous = frames[index];
+    expect(entering ? frame.x <= previous.x : frame.x >= previous.x).toBe(true);
+    expect(entering ? frame.opacity >= previous.opacity : frame.opacity <= previous.opacity).toBe(true);
+  }
+  return frames;
+}
+
 for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
   for (const reducedMotion of ["no-preference", "reduce"] as const) {
     test(`Station playback without reload ${viewport.width}×${viewport.height} ${reducedMotion}`, async ({ page }, testInfo) => {
@@ -84,6 +124,14 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
       const track: StationPlayback = { status: "playing", title: "Тестовый трек с длинным названием",
         artist: "Тестовый исполнитель", coverPath, observedAt };
       await publish(track);
+      await expect(artwork).toHaveAttribute("data-track-present", "true");
+      if (reducedMotion === "no-preference") {
+        const frames = await sampleTrackTransition(artwork, true);
+        await testInfo.attach("opening-frames", { body: JSON.stringify(frames), contentType: "application/json" });
+      } else {
+        await expect(artwork.locator("[data-track-layer]")).toHaveCSS("opacity", "1");
+        await expect(artwork.locator("[data-track-layer]")).toHaveCSS("transition-duration", "0s");
+      }
       await expect(card.getByTestId("station-current-track")).toBeVisible();
       await expect(card.getByText("Тестовый исполнитель")).toBeVisible();
       const transitions = reducedMotion === "reduce" ? "0" : "1";
@@ -107,7 +155,13 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
       expect(await gridBounds(neighbor)).toEqual(neighborBounds);
 
       await publish({ status: "idle", title: null, artist: null, coverPath: null, observedAt });
+      await expect(artwork).toHaveAttribute("data-track-present", "false");
+      if (reducedMotion === "no-preference") {
+        const frames = await sampleTrackTransition(artwork, false);
+        await testInfo.attach("closing-frames", { body: JSON.stringify(frames), contentType: "application/json" });
+      }
       await expect(card.getByTestId("station-current-track")).toHaveCount(0);
+      await expect(artwork.locator("[data-track-layer] strong")).toHaveCount(0);
       await expect.poll(async () => Math.abs((await speaker.boundingBox())!.x - centered!.x)).toBeLessThan(.5);
 
       await publish(track);
@@ -115,6 +169,11 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
       await publish({ status: "stale", title: null, artist: null, coverPath: null, observedAt });
       await expect(card.getByText("Нет связи с колонкой")).toBeVisible();
       await expect(card.getByTestId("station-current-track")).toHaveCount(0);
+      await expect(artwork.locator("[data-track-layer]")).toHaveAttribute("aria-hidden", "true");
+      const bottomGap = await card.evaluate(el => el.getBoundingClientRect().bottom
+        - el.querySelector(".station-mini-widget__music")!.getBoundingClientRect().bottom);
+      expect(bottomGap).toBeGreaterThanOrEqual(14);
+      expect(bottomGap).toBeLessThan(20);
       await expect.poll(async () => Math.abs((await speaker.boundingBox())!.x - centered!.x)).toBeLessThan(.5);
       expect(await gridBounds(card)).toEqual(bounds);
       expect(await gridBounds(neighbor)).toEqual(neighborBounds);
