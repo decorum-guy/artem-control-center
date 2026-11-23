@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -96,7 +97,8 @@ from .ai_settings import AIProviderSettingsStore
 from .ai_text import AITextService
 from .ai_api import build_ai_router
 from .access_policy import AccessPolicyStore
-from .tv_api import build_tv_router
+from .tv_api import TVExecutorClient, build_tv_router
+from .tv_voice import TVVoiceBridge
 from .backups import AvalarStageBackupEngine, BackupEngine, BackupService, PanelConfigSource, build_backup_router
 from .interface_copy import (
     FIXTURE_INTERFACE_COPY_SCENARIOS,
@@ -218,6 +220,18 @@ startup_lifecycle = PanelStartupLifecycle()
 access_policy = AccessPolicyStore.from_environment(
     temporary_minutes=SETTINGS.access_temporary_minutes,
 )
+tv_voice = None
+tv_executor_token = os.getenv("PANEL_TV_EXECUTOR_TOKEN_FILE")
+if (MODE == "production" and SETTINGS.tv_voice_enabled and tv_executor_token
+        and re.fullmatch(r"media_player\.[a-z0-9_]+", SETTINGS.tv_voice_station_entity)):
+    tv_voice = TVVoiceBridge(
+        station_entity=SETTINGS.tv_voice_station_entity,
+        executor=TVExecutorClient(Path(tv_executor_token)),
+        access=lambda: access_policy,
+        write_enabled=lambda: startup_lifecycle.phase == "ready" and _write_allowed(SETTINGS.tv_voice_enabled),
+    )
+    runtime.home_assistant.set_yandex_scenario_handler(tv_voice.handle)
+
 system_controls = WindowsSystemControls()
 backup_source = PanelConfigSource.from_store_paths(
     overview_layout=overview_layout_store.path,
@@ -300,6 +314,8 @@ async def lifespan(_: FastAPI):
         if startup_lifecycle.scheduler_started:
             await coffee_delayed_start_scheduler.close()
         await runtime.close()
+        if tv_voice is not None:
+            await tv_voice.close()
         await snapshot_publisher.close()
 
 
@@ -1397,6 +1413,7 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "avalar_main_deploy": SETTINGS.avalar_main_deploy_enabled,
         "rog_g703": SETTINGS.rog_g703_enabled,
         "rog_g703_alice": SETTINGS.rog_g703_alice_enabled,
+        "tv_voice": tv_voice is not None and SETTINGS.writes_enabled,
         "kiosk_controls": _bool_env("PANEL_KIOSK_CONTROLS_ENABLED"),
         "panel_update_controls": _bool_env("PANEL_UPDATE_CONTROLS_ENABLED"),
     }[capability_id]

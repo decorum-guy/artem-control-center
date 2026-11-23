@@ -51,6 +51,7 @@ WATCHED_ENTITIES = (
 LOGGER = logging.getLogger(__name__)
 _STATE_CHANGED_SUBSCRIPTION_ID = 1
 _YANDEX_INTENT_SUBSCRIPTION_ID = 2
+_YANDEX_SCENARIO_SUBSCRIPTION_ID = 3
 _MAX_PRE_ACK_EVENTS = 16
 YandexIntentHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -82,6 +83,8 @@ class HomeAssistantAdapter:
         self._stale_task: Optional[asyncio.Task[None]] = None
         self._panel_mode = panel_mode
         self._on_change = on_change
+        self._yandex_scenario_handler: Callable[[dict[str, Any]], None] | None = None
+        self._yandex_scenario_subscribed = False
         self._yandex_intent_handler: YandexIntentHandler | None = None
         self._yandex_intent_subscribed = False
         self._yandex_intent_status = "disabled"
@@ -106,6 +109,9 @@ class HomeAssistantAdapter:
         """Install the narrow handler for HA's yandex_dialogs ingress."""
 
         self._yandex_intent_handler = handler
+
+    def set_yandex_scenario_handler(self, handler: Callable[[dict[str, Any]], None]) -> None:
+        self._yandex_scenario_handler = handler
 
     async def respond_to_yandex_intent(self, text: str) -> None:
         """Send one fixed yandex_dialogs response event to Home Assistant."""
@@ -791,12 +797,26 @@ class HomeAssistantAdapter:
         else:
             self._yandex_intent_subscribed = False
             self._yandex_intent_status = "disabled"
+        self._yandex_scenario_subscribed = False
+        scenario_requested = self._settings.tv_voice_enabled and self._yandex_scenario_handler is not None
+        if scenario_requested:
+            await socket.send(json.dumps({
+                "id": _YANDEX_SCENARIO_SUBSCRIPTION_ID,
+                "type": "subscribe_events",
+                "event_type": "yandex_scenario",
+            }))
         for message in pre_ack_events:
             await self._handle_websocket_event(message)
         async for raw in socket:
             try:
                 message = json.loads(raw)
             except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if (scenario_requested and isinstance(message, dict)
+                    and message.get("type") == "result" and message.get("id") == _YANDEX_SCENARIO_SUBSCRIPTION_ID):
+                self._yandex_scenario_subscribed = message.get("success") is True
+                if not self._yandex_scenario_subscribed:
+                    LOGGER.warning("TV voice HA subscription denied")
                 continue
             await self._handle_websocket_event(message)
 
@@ -851,6 +871,12 @@ class HomeAssistantAdapter:
             return
         if event_type == "yandex_intent":
             await self._dispatch_yandex_intent(data)
+        if (event_type == "yandex_scenario" and message.get("id") == _YANDEX_SCENARIO_SUBSCRIPTION_ID
+                and self._yandex_scenario_subscribed and self._yandex_scenario_handler):
+            try:
+                self._yandex_scenario_handler(event)
+            except Exception:
+                LOGGER.warning("TV voice HA event handler failed")
 
     async def _dispatch_yandex_intent(self, data: dict[str, Any]) -> None:
         handler = self._yandex_intent_handler
@@ -947,6 +973,7 @@ class HomeAssistantAdapter:
         was_connected = self._websocket_connected
         should_record_failure = was_connected or self._source == "live"
         self._websocket_connected = False
+        self._yandex_scenario_subscribed = False
         self._yandex_intent_subscribed = False
         self._yandex_intent_status = "disabled"
         self._snapshot_confirmed_for_transport = False

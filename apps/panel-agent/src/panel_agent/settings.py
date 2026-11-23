@@ -47,6 +47,8 @@ class IntegrationSettings:
     avalar_stage_deploy_enabled: bool = False
     avalar_main_deploy_enabled: bool = False
     rog_g703_enabled: bool = False
+    tv_voice_enabled: bool = False
+    tv_voice_station_entity: str = ""
     rog_g703_alice_enabled: bool = False
     rog_g703_target_id: str = "rog_g703gi"
     rog_g703_mac: str = ""
@@ -231,6 +233,8 @@ class IntegrationSettings:
                 False,
             ),
             rog_g703_enabled=_bool_env("PANEL_ROG_G703_ENABLED", False),
+            tv_voice_enabled=_bool_env("PANEL_TV_VOICE_ENABLED", False),
+            tv_voice_station_entity=os.getenv("PANEL_TV_VOICE_STATION_ENTITY", "").strip(),
             rog_g703_alice_enabled=_bool_env(
                 "PANEL_ROG_G703_ALICE_ENABLED",
                 False,

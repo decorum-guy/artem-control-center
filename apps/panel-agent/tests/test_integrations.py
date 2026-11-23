@@ -917,3 +917,28 @@ def test_fixed_yandex_response_event_has_no_caller_selected_event_or_payload(tmp
     assert calls == [
         ("/api/events/yandex_intent_response", {"text": "Включаю ASUS.", "end_session": True})
     ]
+
+
+def test_tv_scenario_uses_core_socket_after_own_ack_and_does_not_require_asus():
+    adapter = HomeAssistantAdapter(
+        IntegrationSettings(ha_url="http://ha.test", ha_token="fixture", tv_voice_enabled=True),
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=_ha_states())),
+    )
+    seen = []
+    adapter.set_yandex_scenario_handler(seen.append)
+    stale = {"event_type": "yandex_scenario", "data": {"scenario_name": "buffered"}}
+    live = {"event_type": "yandex_scenario", "data": {"scenario_name": "live"}}
+    socket = FakeHomeAssistantSocket([
+        {"type": "result", "id": 1, "success": True},
+    ], events=[
+        {"type": "event", "id": 3, "event": stale},
+        {"type": "result", "id": 3, "success": True},
+        {"type": "event", "id": 1, "event": live},
+        {"type": "event", "id": 3, "event": live},
+    ])
+    asyncio.run(adapter._subscribe_socket(socket))
+    assert socket.sent == [
+        {"id": 1, "type": "subscribe_events", "event_type": "state_changed"},
+        {"id": 3, "type": "subscribe_events", "event_type": "yandex_scenario"},
+    ]
+    assert seen == [live]
