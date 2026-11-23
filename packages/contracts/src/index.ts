@@ -886,7 +886,7 @@ export interface StationPlayback {
   title: string | null;
   artist: string | null;
   coverPath: string | null;
-  observedAt: string;
+  observedAt: string | null;
 }
 
 export interface StationRetention {

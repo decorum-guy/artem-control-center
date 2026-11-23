@@ -1,10 +1,13 @@
 import asyncio
+import hashlib
+import json
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from panel_agent.contracts import StationPlayback
 from panel_agent.snapshot import SnapshotPublisher
 from panel_agent.station_playback import (
     StationAuthRequired,
@@ -50,20 +53,29 @@ def test_cover_rejects_untrusted_inputs(url):
 
 def test_one_snapshot_event_per_semantic_change_and_stale_clears_track():
     async def exercise():
-        collector = StationPlaybackCollector(None)
+        clock = [datetime(2026, 11, 23, tzinfo=timezone.utc)]
+        collector = StationPlaybackCollector(None, clock=lambda: clock[0])
         publisher = SnapshotPublisher(mode="read_only", services_builder=list,
                                       station_playback_builder=lambda: collector.state)
         collector.on_change = publisher.rebuild
         async with publisher.subscribe() as first, publisher.subscribe() as second:
             await collector.update("playing", "A track")
             assert first.get_nowait() == second.get_nowait() == 1
+            first_frame = publisher.snapshot
+            clock[0] += timedelta(seconds=2)
             await collector.update("playing", "A track")
             assert first.empty() and second.empty()
+            assert publisher.snapshot.stationPlayback.observedAt == clock[0].isoformat()
+            assert publisher.snapshot.generatedAt == first_frame.generatedAt
+            assert (await publisher.rebuild()).revision == 1
+            assert (await publisher.rebuild()).stationPlayback.observedAt == clock[0].isoformat()
             await collector.update("paused", "A track")
             assert first.get_nowait() == second.get_nowait() == 2
+            clock[0] += timedelta(minutes=1)
             await collector.update("stale")
             assert first.get_nowait() == second.get_nowait() == 3
             assert publisher.snapshot.stationPlayback.title is None
+            assert publisher.snapshot.stationPlayback.observedAt == (clock[0] - timedelta(minutes=1)).isoformat()
     asyncio.run(exercise())
 
 
@@ -120,3 +132,99 @@ def test_retention_excludes_replacement_resume_disconnect_and_stores_no_track(tm
         assert recorder.snapshot().activeSince is None
     assert "private source" not in path.read_text(encoding="utf-8")
     assert len(StationRetentionRecorder(path).snapshot().samples) == 4
+
+
+def test_collector_single_socket_reconnects_clears_stale_and_closes(track, monkeypatch):
+    import panel_agent.station_playback as module
+
+    monkeypatch.setattr(module, "STATE_TIMEOUT_SECONDS", 0.07)
+    monkeypatch.setattr(module, "RECONNECT_SECONDS", 0.002)
+    monkeypatch.setattr(module, "AUTH_RETRY_SECONDS", 5)
+    cert = b"fixture station certificate"
+    settings = StationPlaybackSettings("192.168.0.2", hashlib.sha256(cert).hexdigest(),
+                                       "device", "x", "app", "secret")
+
+    async def exercise():
+        notifications = asyncio.Queue()
+        transports = []
+        active = set()
+        acquired = []
+
+        class Socket:
+            def __init__(self):
+                self.queue = asyncio.Queue()
+                self.sent = []
+                tls = SimpleNamespace(getpeercert=lambda *, binary_form: cert)
+                self.transport = SimpleNamespace(get_extra_info=lambda name: tls)
+                self.no_state = False
+
+            async def recv(self):
+                if self.no_state:
+                    await asyncio.sleep(.005)
+                    return '{"state":{"playing":true}}'
+                value = await self.queue.get()
+                if isinstance(value, Exception):
+                    raise value
+                return json.dumps(value)
+
+            async def send(self, raw):
+                self.sent.append(json.loads(raw))
+
+        @asynccontextmanager
+        async def connect(url, **options):
+            socket = Socket()
+            transports.append(socket)
+            active.add(socket)
+            assert len(active) == 1
+            if len(transports) == 1:
+                socket.queue.put_nowait({"state": {"playing": True, "playerState": track}})
+            elif len(transports) == 2:
+                socket.no_state = True
+            elif len(transports) == 3:
+                socket.queue.put_nowait({"state": {"playing": False, "playerState": None}})
+            try:
+                yield socket
+            finally:
+                active.remove(socket)
+
+        async def acquire(_):
+            acquired.append("device-token")
+            return acquired[-1]
+
+        monkeypatch.setattr(module, "connect", connect)
+        monkeypatch.setattr(StationSessionTokens, "acquire", acquire)
+        collector = StationPlaybackCollector(settings)
+        publisher = SnapshotPublisher(mode="read_only", services_builder=list,
+                                      station_playback_builder=lambda: collector.state)
+
+        async def publish():
+            await publisher.rebuild()
+            notifications.put_nowait(collector.state.status)
+
+        collector.on_change = publish
+        async with publisher.subscribe() as tab_one, publisher.subscribe() as tab_two:
+            collector.start()
+            owned_task = collector.task
+            collector.start()
+            assert collector.task is owned_task
+            try:
+                async with asyncio.timeout(2):
+                    assert await notifications.get() == "playing"
+                    assert len(transports) == 1 and active == {transports[0]}
+                    assert tab_one.get_nowait() == tab_two.get_nowait() == 1
+                    assert transports[0].sent[0]["payload"] == {"command": "softwareVersion"}
+                    transports[0].queue.put_nowait(OSError("fixture disconnect"))
+                    assert await notifications.get() == "stale"
+                    assert publisher.snapshot.stationPlayback.title is None
+                    assert await notifications.get() == "idle"
+                    assert len(transports) == 3 and active == {transports[2]}
+                    assert len(acquired) == 3
+                    transports[2].queue.put_nowait({"status": "unauthorized"})
+                    assert await notifications.get() == "auth_required"
+                    assert publisher.snapshot.stationPlayback.title is None
+            finally:
+                await collector.close()
+            assert collector.task is None and owned_task.done()
+            assert not active and len(transports) == 3
+
+    asyncio.run(exercise())

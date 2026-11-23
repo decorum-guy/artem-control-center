@@ -30,6 +30,8 @@ COVER_HOSTS = {"avatars.yandex.net", "avatars.mds.yandex.net"}
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 MAX_COVER_BYTES = 512 * 1024
 STATE_TIMEOUT_SECONDS = 35
+RECONNECT_SECONDS = 2
+AUTH_RETRY_SECONDS = 60
 
 
 class StationAuthRequired(RuntimeError):
@@ -170,10 +172,12 @@ def parse_state(data: object) -> tuple[str, str | None, str | None, str | None, 
 class StationPlaybackCollector:
     def __init__(self, settings: StationPlaybackSettings | None,
                  on_change: Callable[[], Awaitable[object]] | None = None,
-                 on_state: Callable[[str, str | None], bool] | None = None) -> None:
+                 on_state: Callable[[str, str | None], bool] | None = None,
+                 *, clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> None:
         self.settings = settings
         self.on_change = on_change
         self.on_state = on_state
+        self._clock = clock
         self.state: StationPlayback | None = None
         self.task: asyncio.Task | None = None
         self.cover_url: str | None = None
@@ -200,8 +204,10 @@ class StationPlaybackCollector:
         cover_path = ("/api/v1/station-playback/cover/" + hashlib.sha256(cover.encode()).hexdigest()) if cover else None
         content = {"status": status, "title": title, "artist": artist, "coverPath": cover_path}
         playback_changed = self.state is None or self.state.model_dump(exclude={"observedAt"}) != content
-        if playback_changed:
-            self.state = StationPlayback.model_validate({**content, "observedAt": datetime.now(timezone.utc).isoformat()})
+        observed_at = self.state.observedAt if self.state is not None else None
+        if status not in {"stale", "auth_required"}:
+            observed_at = self._clock().isoformat()
+        self.state = StationPlayback.model_validate({**content, "observedAt": observed_at})
         if self.on_change is not None and (playback_changed or retention_changed):
             await self.on_change()
 
@@ -209,7 +215,7 @@ class StationPlaybackCollector:
         if not settings.has_authorization:
             await self.update("auth_required")
             return
-        delay = 2
+        delay = RECONNECT_SECONDS
         async with httpx.AsyncClient(timeout=7, trust_env=False) as client:
             tokens = StationSessionTokens(client, settings)
             while True:
@@ -219,11 +225,11 @@ class StationPlaybackCollector:
                 except StationAuthRequired:
                     tokens.music_token = None
                     await self.update("auth_required")
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(AUTH_RETRY_SECONDS)
                 except (OSError, TimeoutError, WebSocketException, httpx.HTTPError, ValueError):
                     await self.update("stale")
                     if time.monotonic() - started >= STATE_TIMEOUT_SECONDS:
-                        delay = 2
+                        delay = RECONNECT_SECONDS
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, 60)
 
