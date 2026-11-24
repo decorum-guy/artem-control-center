@@ -148,7 +148,7 @@ def test_writer_requires_local_intent_profile_and_new_version(tmp_path, monkeypa
     store.set_profile("read_only")
     collector = reminders.StationRemindersCollector(tmp_path / "unused")
     headers = {"Cookie": "Session_id=fixture"}
-    monkeypatch.setattr(collector, "_headers", lambda: headers)
+    monkeypatch.setattr(collector, "_current_session", lambda: reminders._ReminderSession(1, headers))
     collector.writer = reminders.StationRemindersWriter(
         collector, access=lambda: store, write_enabled=lambda: True
     )
@@ -205,7 +205,7 @@ def test_uncertain_creation_never_repeats_the_provider_post(tmp_path, monkeypatc
     store = AccessPolicyStore(tmp_path / "access.json")
     store.set_profile("standard")
     collector = reminders.StationRemindersCollector(tmp_path / "unused")
-    monkeypatch.setattr(collector, "_headers", lambda: {"Cookie": "Session_id=fixture"})
+    monkeypatch.setattr(collector, "_current_session", lambda: reminders._ReminderSession(1, {"Cookie": "Session_id=fixture"}))
     collector.writer = reminders.StationRemindersWriter(
         collector, access=lambda: store, write_enabled=lambda: True
     )
@@ -233,3 +233,104 @@ def test_uncertain_creation_never_repeats_the_provider_post(tmp_path, monkeypatc
     assert writes == [{"title": "Тестовая запись", "doable": True, "status": "INCOMPLETE",
                        "schedule": "DTSTART;TZID=Europe/Moscow:20411201T161500",
                        "reminders": [{"offset_seconds": "0"}]}]
+
+
+def test_recurrence_without_next_deadline_has_no_due_time():
+    recurring = note(schedule="DTSTART;TZID=Europe/Moscow:20261126T160000\r\nRRULE:FREQ=WEEKLY")
+    recurring.pop("deadline")
+    (item,), complete = reminders.normalize_reminder_list(payload(recurring))
+    assert complete and item.repeats and item.dueAt is None and item.version is None
+
+
+def test_rotation_drops_in_flight_result_and_partial_cache(tmp_path, monkeypatch):
+    vault = tmp_path / "reminders.dpapi"
+    monkeypatch.setattr(reminders, "dpapi", lambda data, *, decrypt: data)
+
+    def install(cookie):
+        vault.write_text(json.dumps({"client_uuid": "a" * 32, "cookies": {"Session_id": cookie}}))
+
+    async def check():
+        entered, release = asyncio.Event(), asyncio.Event()
+        install("previous")
+        collector = reminders.StationRemindersCollector(vault)
+        old = {**note(), "title": "Previous account"}
+        new = {**note(), "title": "New account"}
+        reads = 0
+
+        async def provider(request):
+            nonlocal reads
+            reads += 1
+            if reads == 2:
+                entered.set()
+                await release.wait()
+            if request.headers["cookie"] == "Session_id=previous":
+                return httpx.Response(200, json=payload(old))
+            return httpx.Response(200, json={**payload(new), "total_notes_count": "2"})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
+            await collector.refresh(client)
+            assert collector.state.status == "fresh"
+            waiting = asyncio.create_task(collector.refresh(client))
+            await entered.wait()
+            install("replacement")
+            assert collector.projection().items == ()
+            release.set()
+            await waiting
+            assert collector.projection().items == ()
+            await collector.refresh(client)
+            assert collector.state.status == "partial" and collector.state.observedAt is None
+            assert [item.title for item in collector.state.items] == ["New account"]
+
+    asyncio.run(check())
+
+
+def test_calendar_notes_follows_both_directions_and_deduplicates():
+    anchor = {**note(identity="center"), "note_id": "center"}
+    upcoming = {**note(identity="next"), "note_id": "next"}
+    previous = {**note(identity="prev"), "note_id": "prev"}
+    requests = []
+
+    def provider(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        if "forward_continuation_token" in body:
+            page = {**payload(anchor, upcoming), "run_out_of_forward_notes": True}
+        elif "backward_continuation_token" in body:
+            page = {**payload(previous), "run_out_of_backward_notes": True}
+        else:
+            page = {**payload(anchor), "forward_continuation_token": "next-page", "run_out_of_forward_notes": False,
+                    "backward_continuation_token": "prior-page", "run_out_of_backward_notes": False}
+        return httpx.Response(200, json={**page, "total_notes_count": "3"})
+
+    async def run():
+        collector = reminders.StationRemindersCollector(Path("unused"))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
+            merged = await collector._read(client, {"Cookie": "fixture"})
+        items, complete = reminders.normalize_reminder_list(merged)
+        assert complete and len(items) == 3
+
+    asyncio.run(run())
+    assert requests == [
+        {"hide_completed": True},
+        {"hide_completed": True, "forward_continuation_token": "next-page"},
+        {"hide_completed": True, "backward_continuation_token": "prior-page"},
+    ]
+
+
+def test_repeated_calendar_cursor_marks_snapshot_partial():
+    requests = []
+
+    def provider(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={**payload(note()), "total_notes_count": "1",
+                                        "forward_continuation_token": "repeated", "run_out_of_forward_notes": False})
+
+    async def run():
+        collector = reminders.StationRemindersCollector(Path("unused"))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
+            merged = await collector._read(client, {"Cookie": "fixture"})
+        items, complete = reminders.normalize_reminder_list(merged)
+        assert len(items) == 1 and not complete
+
+    asyncio.run(run())
+    assert len(requests) == 2

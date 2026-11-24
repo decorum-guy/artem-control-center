@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { StationReminderList } from "@artem/contracts";
 import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
 import { useInteractionLock } from "./InteractionLock";
 import { PlanningSheet } from "./PlanningRoutePrimitives";
 import { RouteHeader } from "./ShellPrimitives";
+import { pageTitleField, useInterfaceCopy } from "./interfaceCopy";
 
 const dateTime = new Intl.DateTimeFormat("ru-RU", {
   dateStyle: "medium",
@@ -21,6 +22,7 @@ const presets = [
   [180, "Через 3 часа"]
 ] as const;
 const statusText: Record<StationReminderList["status"], string> = {
+  not_configured: "Источник Алисы не настроен",
   loading: "Загружаем напоминания…",
   fresh: "",
   partial: "Яндекс вернул неполный список",
@@ -31,7 +33,7 @@ const writeErrors: Record<string, string> = {
   time_must_be_future: "Выберите время в будущем.",
   invalid_time: "Проверьте дату и время.",
   auth_required: "Нужно восстановить вход в Яндекс.",
-  incomplete_source: "Яндекс вернул неполный список. Дождитесь следующего обновления.",
+  incomplete_source: "Сохранение недоступно, пока Яндекс не вернёт полный список.",
   source_unavailable: "Яндекс недоступен. Повторите после восстановления связи.",
   reminder_changed: "Запись уже изменилась. Закройте окно и откройте её снова.",
   busy: "Сейчас сохраняется другое напоминание. Повторите чуть позже.",
@@ -50,7 +52,7 @@ function ReminderEditor({ item, onClose, onSave }: {
   onClose: () => void;
   onSave: (title: string, dueLocal: string) => Promise<void>;
 }) {
-  const initial = fields(item ? new Date(item.dueAt) : new Date(Date.now() + 30 * 60_000));
+  const initial = fields(item?.dueAt ? new Date(item.dueAt) : new Date(Date.now() + 30 * 60_000));
   const [title, setTitle] = useState(item?.title ?? "");
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
@@ -118,12 +120,13 @@ function ReminderEditor({ item, onClose, onSave }: {
   );
 }
 
-export function AliceRemindersSection({ fallback }: { fallback: ReactNode }) {
-  const [list, setList] = useState<StationReminderList | null>();
+export function AliceRemindersSection() {
+  const [list, setList] = useState<StationReminderList>();
   const [readFailed, setReadFailed] = useState(false);
   const [editor, setEditor] = useState<Reminder | "new" | null>(null);
   const [notice, setNotice] = useState("");
   const { guardMutation } = useInteractionLock();
+  const { copy } = useInterfaceCopy();
   const readEpoch = useRef(0);
 
   useEffect(() => {
@@ -136,14 +139,10 @@ export function AliceRemindersSection({ fallback }: { fallback: ReactNode }) {
           cache: "no-store",
           signal: controller.signal
         });
-        if (response.status === 404) {
-          if (!controller.signal.aborted && epoch === readEpoch.current) setList(null);
-          return;
-        }
-        if (!response.ok) throw new Error("Could not read Alice reminders");
-        const result: StationReminderList | null = await response.json();
+        if (!response.ok && response.status !== 404) throw new Error("Could not read Alice reminders");
+        const result: StationReminderList | null = response.status === 404 ? null : await response.json();
         if (!controller.signal.aborted && epoch === readEpoch.current) {
-          setList(result);
+          setList(result ?? { status: "not_configured", observedAt: null, items: [] });
           setReadFailed(false);
         }
       } catch {
@@ -191,10 +190,9 @@ export function AliceRemindersSection({ fallback }: { fallback: ReactNode }) {
     }
   }
 
-  if (list === null) return fallback;
   return (
     <div className="planning-route-page" data-testid="route-reminders">
-      <RouteHeader title="Напоминания" description="" />
+      <RouteHeader title={copy(pageTitleField("reminders"))} description="" />
       <section className="planning-card planning-alice-reminders" aria-labelledby="alice-reminders-title"
         data-testid="alice-reminders" data-status={list?.status}>
         <div className="planning-alice-reminders-heading">
@@ -217,12 +215,12 @@ export function AliceRemindersSection({ fallback }: { fallback: ReactNode }) {
               <li key={item.id} className="planning-route-row reminder-route-row">
                 <div className="planning-route-row__main">
                   <span className="planning-route-row__eyebrow">
-                    <time dateTime={item.dueAt}>{dateTime.format(new Date(item.dueAt))}</time> · МСК
+                    {item.dueAt ? <><time dateTime={item.dueAt}>{dateTime.format(new Date(item.dueAt))}</time> · МСК</> : "Ближайшее время неизвестно"}
                     {item.repeats && " · Повторяется"}
                   </span>
                   <strong>{item.title}</strong>
                 </div>
-                {list.canReschedule && item.version && (
+                {list.canReschedule && item.version && item.dueAt && (
                   <button type="button" className="planning-secondary-button" onClick={() => setEditor(item)}>Перенести</button>
                 )}
               </li>

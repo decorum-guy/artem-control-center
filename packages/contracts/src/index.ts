@@ -900,14 +900,14 @@ export interface StationRetention {
 }
 
 export interface StationReminderList {
-  status: "loading" | "fresh" | "partial" | "stale" | "auth_required";
+  status: "not_configured" | "loading" | "fresh" | "partial" | "stale" | "auth_required";
   observedAt: string | null;
   canCreate?: boolean;
   canReschedule?: boolean;
   items: {
     id: string;
     title: string;
-    dueAt: string;
+    dueAt: string | null;
     timezone: string;
     repeats: boolean;
     version?: string | null;

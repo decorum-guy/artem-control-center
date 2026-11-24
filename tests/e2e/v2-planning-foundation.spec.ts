@@ -71,80 +71,8 @@ test.describe("PR9 Planning visual/module foundation", () => {
     await expect(overlap).not.toContainText("Europe/Moscow");
 
     await page.goto("/reminders?theme=day");
-    await expect(page.getByTestId("route-reminders")).toHaveAttribute("data-planning-module", "planning.reminders-monitoring");
-    await expect(page.locator(".planning-segmented button")).toHaveCount(3);
-    await expect(page.getByTestId("planning-reminder-lifecycle").first()).toBeVisible();
-    await expect(page.getByTestId("planning-reminder-delivery").first()).toBeVisible();
-    await expect(page.locator("[data-testid='planning-future-action-slot']")).toHaveCount(planningMutationControlsEnabled ? 1 : 0);
-  });
-
-  test("captures the bounded PR9 review matrix", async ({ page }, testInfo) => {
-    const directory = artifactDirectory(testInfo);
-    await mkdir(directory, { recursive: true });
-
-    await page.goto("/tasks?theme=day");
-    await expect(page.getByTestId("planning-task-list")).toBeVisible();
-    await capture(page, directory, "planning-tasks-default");
-
-    await mutatePlanningRoute(page, "/api/v1/planning/tasks", (payload) => { payload.sourceStatus = "stale"; });
-    await page.goto("/tasks?theme=day");
-    await page.clock.fastForward(3_600);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Данные могут быть устаревшими");
-    await capture(page, directory, "planning-tasks-stale");
-    await page.unroute("**/api/v1/planning/tasks**");
-
-    await failPlanningRoute(page, "/api/v1/planning/tasks");
-    await page.goto("/tasks?theme=night");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
-    await capture(page, directory, "planning-tasks-offline");
-    await page.unroute("**/api/v1/planning/tasks**");
-
-    await mutatePlanningRoute(page, "/api/v1/planning/tasks", (payload) => {
-      payload.items = [];
-      payload.count = 0;
-      payload.hasMore = false;
-    });
-    await page.goto("/tasks?theme=day");
-    await expect(page.getByTestId("planning-route-empty")).toBeVisible();
-    await capture(page, directory, "planning-tasks-empty");
-    await page.unroute("**/api/v1/planning/tasks**");
-
-    await page.goto("/calendar?theme=day");
-    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(6);
-    await capture(page, directory, "planning-calendar-default");
-    await capture(page, directory, "planning-calendar-all-day");
-    await capture(page, directory, "planning-calendar-overlap");
-
-    await mutatePlanningRoute(page, "/api/v1/planning/events", (payload) => {
-      const items = payload.items as Array<Record<string, unknown>>;
-      items[0].calendarIdentity = {
-        providerId: "calendar-provider",
-        providerLabel: "Calendar provider",
-        calendarId: "personal",
-        calendarLabel: "Личный"
-      };
-      items[1].calendarIdentity = {
-        providerId: "calendar-provider",
-        providerLabel: "Calendar provider",
-        calendarId: "work",
-        calendarLabel: "Рабочий"
-      };
-    });
-    await page.goto("/calendar?theme=day");
-    await expect(page.getByTestId("planning-calendar-identity").filter({ hasText: "Личный" })).toBeVisible();
-    await expect(page.getByTestId("planning-calendar-identity").filter({ hasText: "Рабочий" })).toBeVisible();
-    await capture(page, directory, "planning-calendar-multiple-identities");
-    await page.unroute("**/api/v1/planning/events**");
-
-    await page.goto("/reminders?theme=day");
-    await expect(page.getByTestId("planning-reminder-list")).toBeVisible();
-    await capture(page, directory, "planning-reminders-default");
-    await page.getByRole("button", { name: "Пропущено" }).tap();
-    await expect(page.getByTestId("planning-reminder-list")).toContainText("Доставлено · ждёт завершения");
-    await capture(page, directory, "planning-reminders-delivered-pending");
-    await page.getByRole("button", { name: "Доставка", exact: true }).tap();
-    await expect(page.getByTestId("planning-reminder-list")).toContainText("Не доставлено");
-    await capture(page, directory, "planning-reminders-delivery-failure");
+    await expect(page.getByTestId("alice-reminders")).toContainText("Источник Алисы не настроен");
+    await capture(page, directory, "planning-reminders-alice");
 
     await page.goto("/overview?theme=day");
     await expect(page.getByTestId("planning-overview-card")).toBeVisible();

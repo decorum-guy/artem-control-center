@@ -14,7 +14,8 @@ import {
   SystemPage
 } from "./pages";
 import { BackupsPage } from "./BackupsPage";
-import { CalendarPage, RemindersPage, TasksPage } from "./PlanningRoutes";
+import { CalendarPage, TasksPage } from "./PlanningRoutes";
+import { AliceRemindersSection } from "./AliceRemindersSection";
 import { TasksProviderBoundary } from "./TodoistTasks";
 import {
   planningRouteEnabled
@@ -87,10 +88,6 @@ function routeFromLocation(): ShellRoutePath {
     return "/overview";
   }
   const requested = window.location.pathname as ShellRoutePath;
-  if (requested === "/reminders" && !planningRouteEnabled("/reminders")) {
-    window.history.replaceState({}, "", `/overview${window.location.search}`);
-    return "/overview";
-  }
   return [...userRoutes, "/dev/widget-gallery"].includes(requested) ? requested : "/overview";
 }
 
@@ -672,7 +669,7 @@ export function App() {
           {route === "/system" && (v2VisualShellEnabled ? <SystemV2Page snapshot={snapshot} /> : <SystemPage snapshot={snapshot} />)}
           {route === "/tasks" && <TasksProviderBoundary fallback={planningRouteEnabled("/tasks") ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />} />}
           {route === "/calendar" && (planningRouteEnabled("/calendar") ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
-          {route === "/reminders" && planningRouteEnabled("/reminders") && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
+          {route === "/reminders" && <AliceRemindersSection />}
           {!["/overview", "/weather", "/home", "/services", "/coffee-diary", "/backups", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
             <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}

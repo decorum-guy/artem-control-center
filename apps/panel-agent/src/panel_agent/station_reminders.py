@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -32,6 +33,8 @@ MOSCOW_ZONE = "Europe/Moscow"
 REFRESH_SECONDS = 30
 MAX_RESPONSE_BYTES = 512 * 1024
 MAX_NOTES = 200
+MAX_PAGES = 8
+PAGE_DIRECTIONS = ("forward", "backward")
 COOKIE_NAMES = {"Session_id", "sessionid2"}
 COOKIE_VALUE = re.compile(r"[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]{1,4096}")
 
@@ -41,7 +44,7 @@ class StationReminder(BaseModel):
 
     id: str
     title: str
-    dueAt: str
+    dueAt: str | None
     timezone: str
     repeats: bool
     version: str | None = None
@@ -50,7 +53,7 @@ class StationReminder(BaseModel):
 class StationReminderList(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    status: Literal["loading", "fresh", "partial", "stale", "auth_required"] = "loading"
+    status: Literal["not_configured", "loading", "fresh", "partial", "stale", "auth_required"] = "loading"
     observedAt: str | None = None
     items: tuple[StationReminder, ...] = ()
     canCreate: bool = False
@@ -92,7 +95,7 @@ def reminder_request_headers(identity: str, cookies: dict[str, str]) -> dict[str
     }
 
 
-def _time_of(note: dict) -> tuple[datetime, str, bool]:
+def _time_of(note: dict) -> tuple[datetime | None, str, bool]:
     schedule = note.get("schedule")
     if not isinstance(schedule, str) or not 0 < len(schedule) <= 4096:
         raise ValueError("Missing reminder schedule")
@@ -105,9 +108,13 @@ def _time_of(note: dict) -> tuple[datetime, str, bool]:
         raise ValueError("Unknown reminder timezone")
     repeats = bool(event.get("RRULE") or event.get("RDATE"))
     deadline = note.get("deadline")
-    if repeats and isinstance(deadline, str) and deadline:
-        # Calendar Notes returns the active deadline separately from a series' anchor.
-        current = datetime.fromisoformat(deadline)
+    if repeats:
+        if not isinstance(deadline, str) or not deadline:
+            return None, zone, repeats
+        try:
+            current = datetime.fromisoformat(deadline)
+        except ValueError:
+            return None, zone, repeats
         start = current if current.utcoffset() is not None else current.replace(tzinfo=start.tzinfo)
     return start, zone, repeats
 
@@ -129,14 +136,12 @@ def normalize_reminder_list(payload: object) -> tuple[tuple[StationReminder, ...
     if not isinstance(undated, list):
         raise ValueError("Invalid Calendar Notes payload")
     notes = [*payload["notes"], *undated]
-    total = payload.get("total_notes_count")
-    if isinstance(total, str) and re.fullmatch(r"[0-9]{1,10}", total):
-        # This RPC serializes protobuf counters as JSON strings.
-        total = int(total)
-    if len(notes) > MAX_NOTES or (total is not None and (type(total) is not int or total < len(notes))):
+    total = _note_count(payload)
+    if len(notes) > MAX_NOTES or (total is not None and total < len(notes)):
         raise ValueError("Invalid Calendar Notes size")
     complete = (
         total == len(notes)
+        and payload.get("_partial") is not True
         and not any(payload.get(key) for key in ("continuation_token", "forward_continuation_token", "backward_continuation_token"))
         and payload.get("run_out_of_forward_notes") is not False
         and payload.get("run_out_of_backward_notes") is not False
@@ -163,22 +168,89 @@ def normalize_reminder_list(payload: object) -> tuple[tuple[StationReminder, ...
                 continue
             provider_id = reminder.get("reminder_id")
             offset = reminder.get("offset_seconds")
-            # The native reminder tests verified delivery at the scheduled time.
+            # Calendar Notes confirms the scheduled time for zero offset.
             # Unknown relative offsets cannot be presented as actual due times.
             if not isinstance(provider_id, str) or not 0 < len(provider_id) <= 128 or type(offset) not in (str, int) or offset not in ("0", 0):
                 complete = False
                 continue
             identity = hashlib.sha256(provider_id.encode()).hexdigest()
             item = StationReminder(
-                id=identity, title=title.strip(), dueAt=due.isoformat(), timezone=zone,
+                id=identity, title=title.strip(), dueAt=due.isoformat() if due else None, timezone=zone,
                 repeats=repeats, version=None if repeats else _version(note),
             )
             if identity in result and result[identity] != item:
                 complete = False
                 continue
             result[identity] = item
-    items = tuple(sorted(result.values(), key=lambda item: (datetime.fromisoformat(item.dueAt), item.id)))
+    items = tuple(sorted(result.values(), key=lambda item: (item.dueAt is None, datetime.fromisoformat(item.dueAt) if item.dueAt else None, item.id)))
     return items, complete
+
+
+def _note_count(payload: dict) -> int | None:
+    total = payload.get("total_notes_count")
+    if isinstance(total, str) and re.fullmatch(r"[0-9]{1,10}", total):
+        return int(total)
+    return total if type(total) is int and total >= 0 else None
+
+
+@dataclass(frozen=True)
+class _ReminderSession:
+    generation: int
+    headers: dict[str, str] = field(repr=False)
+
+
+@dataclass
+class _ResponseBudget:
+    remaining: int = MAX_RESPONSE_BYTES
+
+    def consume(self, amount: int) -> None:
+        self.remaining -= amount
+        if self.remaining < 0:
+            raise ValueError("Oversized Calendar Notes response")
+
+
+class _CalendarPages:
+    """Merge Calendar Notes pages conservatively while the provider list can change."""
+
+    def __init__(self) -> None:
+        self.notes: dict[str, dict] = {}
+        self.total: int | None = None
+        self.partial = False
+
+    def add(self, page: object) -> dict:
+        if not isinstance(page, dict) or page.get("error") or not isinstance(page.get("notes"), list):
+            raise ValueError("Invalid Calendar Notes page")
+        undated = page.get("undated_notes", [])
+        if not isinstance(undated, list):
+            raise ValueError("Invalid Calendar Notes page")
+        total = _note_count(page)
+        if total is not None:
+            if self.total is not None and self.total != total:
+                self.partial = True
+            self.total = total
+        for note in [*page["notes"], *undated]:
+            if not isinstance(note, dict) or not isinstance(note.get("note_id"), str) or not note["note_id"]:
+                self.partial = True
+                continue
+            identity = note["note_id"]
+            if identity in self.notes and self.notes[identity] != note:
+                self.partial = True
+            if identity not in self.notes and len(self.notes) >= MAX_NOTES:
+                self.partial = True
+                break
+            self.notes.setdefault(identity, note)
+        # The browser uses directional cursors for Calendar Notes. An unknown
+        # generic cursor is evidence that this result is incomplete.
+        self.partial |= bool(page.get("continuation_token"))
+        return page
+
+    def result(self) -> dict:
+        notes = list(self.notes.values())
+        return {
+            "notes": notes,
+            "total_notes_count": self.total if self.total is not None and self.total >= len(notes) else None,
+            "_partial": self.partial,
+        }
 
 
 class StationRemindersCollector:
@@ -188,6 +260,9 @@ class StationRemindersCollector:
         self._task: asyncio.Task | None = None
         self.lock = asyncio.Lock()
         self.writer: StationRemindersWriter | None = None
+        self._credential_stamp: bytes | None = None
+        self._generation = 0
+        self._session: _ReminderSession | None = None
 
     def start(self) -> None:
         if self._task is None:
@@ -200,33 +275,76 @@ class StationRemindersCollector:
                 await self._task
             self._task = None
 
-    def _headers(self) -> dict[str, str]:
+    def _current_session(self) -> _ReminderSession:
         try:
             with self.credential_path.open("rb") as file:
                 data = file.read(MAX_CREDENTIAL_BYTES + 1)
             if not data or len(data) > MAX_CREDENTIAL_BYTES:
                 raise ValueError("Invalid protected reminder credential")
-            return reminder_request_headers(*reminder_session(dpapi(data, decrypt=True)))
+            stamp = hashlib.sha256(data).digest()
+            if self._session is not None and stamp == self._credential_stamp:
+                return self._session
+            self._generation += 1
+            self.state = StationReminderList()
+            self._session = _ReminderSession(
+                self._generation, reminder_request_headers(*reminder_session(dpapi(data, decrypt=True))),
+            )
+            self._credential_stamp = stamp
+            return self._session
         except (OSError, ValueError) as exc:
+            self._credential_stamp = None
+            self._session = None
+            self.state = StationReminderList(status="auth_required")
             raise ReminderAuthRequired from exc
 
-    async def _read(self, client: httpx.AsyncClient, headers: dict[str, str] | None = None) -> object:
-        return await self._request_json(
-            client, NOTES_URL, headers or self._headers(), {"hide_completed": True},
-        )
+    def _headers(self) -> dict[str, str]:
+        return self._current_session().headers
+
+    def is_current(self, session: _ReminderSession) -> bool:
+        try:
+            return self._current_session().generation == session.generation
+        except ReminderAuthRequired:
+            return False
+
+    async def _read(self, client: httpx.AsyncClient, headers: dict[str, str] | None = None) -> dict:
+        return await asyncio.wait_for(self._read_pages(client, headers or self._headers()), timeout=10)
+
+    async def _read_pages(self, client: httpx.AsyncClient, headers: dict[str, str]) -> dict:
+        pages = _CalendarPages()
+        budget = _ResponseBudget()
+        payload = {"hide_completed": True}
+        first = pages.add(await self._request_json(client, NOTES_URL, headers, payload, budget))
+        count = 1
+        for direction in PAGE_DIRECTIONS:
+            cursor_key = f"{direction}_continuation_token"
+            end_key = f"run_out_of_{direction}_notes"
+            page = first
+            seen: set[str] = set()
+            while page.get(cursor_key) or page.get(end_key) is False:
+                cursor = page.get(cursor_key)
+                if not isinstance(cursor, str) or not 0 < len(cursor) <= 4096 or cursor in seen or count >= MAX_PAGES:
+                    pages.partial = True
+                    break
+                seen.add(cursor)
+                count += 1
+                page = pages.add(await self._request_json(
+                    client, NOTES_URL, headers, {**payload, cursor_key: cursor}, budget,
+                ))
+        return pages.result()
 
     async def _request_json(
         self, client: httpx.AsyncClient, url: str, headers: dict[str, str], payload: dict,
+        budget: _ResponseBudget | None = None,
     ) -> object:
+        limit = budget if budget is not None else _ResponseBudget()
         async with client.stream("POST", url, headers=headers, json=payload) as response:
             if response.status_code in (401, 403):
                 raise ReminderAuthRequired
             response.raise_for_status()
             body = bytearray()
             async for chunk in response.aiter_bytes():
+                limit.consume(len(chunk))
                 body.extend(chunk)
-                if len(body) > MAX_RESPONSE_BYTES:
-                    raise ValueError("Oversized Calendar Notes response")
             return json.loads(body)
 
     async def refresh(self, client: httpx.AsyncClient) -> None:
@@ -235,13 +353,20 @@ class StationRemindersCollector:
 
     async def _refresh(self, client: httpx.AsyncClient) -> None:
         try:
-            items, complete = normalize_reminder_list(await asyncio.wait_for(self._read(client), timeout=10))
+            session = self._current_session()
         except ReminderAuthRequired:
-            # A replacement login could belong to another account.
-            self.state = StationReminderList(status="auth_required")
+            return
+        try:
+            items, complete = normalize_reminder_list(await self._read(client, session.headers))
+        except ReminderAuthRequired:
+            if self.is_current(session):
+                self.state = StationReminderList(status="auth_required")
         except (OSError, ValueError, httpx.HTTPError, asyncio.TimeoutError):
-            self.state = self.state.model_copy(update={"status": "stale"})
+            if self.is_current(session):
+                self.state = self.state.model_copy(update={"status": "stale"})
         else:
+            if not self.is_current(session):
+                return
             if complete:
                 self.confirm(items)
             else:
@@ -254,6 +379,10 @@ class StationRemindersCollector:
         self.state = StationReminderList(status="fresh", observedAt=datetime.now(timezone.utc).isoformat(), items=items)
 
     def projection(self) -> StationReminderList:
+        try:
+            self._current_session()
+        except ReminderAuthRequired:
+            return self.state
         if self.writer is None or self.state.status != "fresh":
             return self.state
         return self.state.model_copy(update={
@@ -353,8 +482,8 @@ class StationRemindersWriter:
                 target = change.due_time()
                 async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=7) as client:
                     try:
-                        headers = self.collector._headers()
-                        before = await asyncio.wait_for(self.collector._read(client, headers), timeout=10)
+                        session = self.collector._current_session()
+                        before = await self.collector._read(client, session.headers)
                         _, complete = normalize_reminder_list(before)
                     except ReminderAuthRequired as exc:
                         raise HTTPException(503, "auth_required") from exc
@@ -377,25 +506,20 @@ class StationRemindersWriter:
                         note = {"title": change.title, "doable": True, "status": "INCOMPLETE",
                                 "schedule": schedule, "reminders": [{"offset_seconds": "0"}]}
                     self.access().require(capability, gate_enabled=self.write_enabled())
-                    if not self._same_session(headers):
+                    if not self.collector.is_current(session):
                         raise HTTPException(409, "auth_required")
                     self._attempts.append(change.attemptId)
                     result = "unconfirmed"
-                    await self._mutate(client, path, headers, note, target)
+                    await self._mutate(client, path, session, note, target)
                     result = "confirmed"
                     return self.collector.projection()
         finally:
             self.access().audit_capability(capability, result=result, correlation_id=str(change.attemptId))
 
-    def _same_session(self, headers: dict[str, str]) -> bool:
-        try:
-            return self.collector._headers() == headers
-        except ReminderAuthRequired:
-            return False
-
     async def _mutate(
-        self, client: httpx.AsyncClient, path: str, headers: dict[str, str], note: dict, target: datetime,
+        self, client: httpx.AsyncClient, path: str, session: _ReminderSession, note: dict, target: datetime,
     ) -> None:
+        headers = session.headers
         try:
             envelope = await asyncio.wait_for(
                 self.collector._request_json(client, NOTES_BASE + path, headers, {"note": note}),
@@ -416,7 +540,7 @@ class StationRemindersWriter:
                 items, complete = normalize_reminder_list(after)
             except (ValueError, httpx.HTTPError, OSError, asyncio.TimeoutError, ReminderAuthRequired):
                 continue
-            if complete and self._same_session(headers):
+            if complete and self.collector.is_current(session):
                 self.collector.confirm(items)
                 latest = next((item for item in after["notes"] if item.get("note_id") == note_id), None)
                 if latest and latest.get("reminders") and _time_of(latest)[0] == target:
@@ -427,10 +551,10 @@ class StationRemindersWriter:
 def build_station_reminders_router(collector: StationRemindersCollector | None) -> APIRouter:
     router = APIRouter(prefix="/api/v1/station/reminders")
 
-    @router.get("", response_model=StationReminderList | None)
+    @router.get("", response_model=StationReminderList)
     async def reminders(response: Response):
         response.headers["Cache-Control"] = "no-store"
-        return collector.projection() if collector is not None else None
+        return collector.projection() if collector is not None else StationReminderList(status="not_configured")
 
     def writer() -> StationRemindersWriter:
         if collector is None or collector.writer is None:
