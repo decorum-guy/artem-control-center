@@ -273,12 +273,12 @@ test.describe("B3 Planning monitoring routes", () => {
       ["tasks-overdue", "/tasks?theme=day"],
       ["calendar-today", "/calendar?theme=day"],
       ["calendar-month", "/calendar?theme=day"],
-      ["reminders-soon", "/reminders?theme=day"],
-      ["reminders-delivery", "/reminders?theme=night"]
+      ["reminders-alice", "/reminders?theme=day"],
+      ["reminders-unconfigured", "/reminders?theme=night"]
     ] as const) {
       await page.goto(url);
       if (name === "tasks-overdue") await page.locator(".planning-segmented").first().getByRole("button", { name: "Просрочено" }).tap();
-      if (name === "reminders-delivery") await page.locator(".planning-segmented").getByRole("button", { name: "Доставка" }).tap();
+      if (name.startsWith("reminders-")) await expect(page.getByTestId("alice-reminders")).toContainText("Источник Алисы не настроен");
       await page.screenshot({ path: path.join(artifactDir, `${name}.png`), animations: "disabled" });
     }
     await page.route("**/api/v1/planning/tasks**", async (route) => {

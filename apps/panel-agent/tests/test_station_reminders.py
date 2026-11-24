@@ -334,3 +334,24 @@ def test_repeated_calendar_cursor_marks_snapshot_partial():
 
     asyncio.run(run())
     assert len(requests) == 2
+
+
+def test_calendar_notes_budget_applies_across_pages():
+    response_count = 0
+
+    def provider(_request):
+        nonlocal response_count
+        response_count += 1
+        return httpx.Response(200, json={
+            **payload(note()), "forward_continuation_token": "more",
+            "padding": "x" * (reminders.MAX_RESPONSE_BYTES // 2),
+        })
+
+    async def run():
+        collector = reminders.StationRemindersCollector(Path("unused"))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as client:
+            with pytest.raises(ValueError, match="Oversized"):
+                await collector._read(client, {"Cookie": "fixture"})
+
+    asyncio.run(run())
+    assert response_count == 2
