@@ -104,13 +104,22 @@ def _time_of(note: dict) -> tuple[datetime, str, bool]:
 def normalize_reminder_list(payload: object) -> tuple[tuple[StationReminder, ...], bool]:
     if not isinstance(payload, dict) or payload.get("error") or not isinstance(payload.get("notes"), list):
         raise ValueError("Invalid Calendar Notes payload")
-    notes = payload["notes"]
+    undated = payload.get("undated_notes", [])
+    if not isinstance(undated, list):
+        raise ValueError("Invalid Calendar Notes payload")
+    notes = [*payload["notes"], *undated]
     total = payload.get("total_notes_count")
-    if len(notes) > MAX_NOTES or (
-        total is not None and (type(total) is not int or total < len(notes))
-    ):
+    if isinstance(total, str) and re.fullmatch(r"[0-9]{1,10}", total):
+        # This RPC serializes protobuf counters as JSON strings.
+        total = int(total)
+    if len(notes) > MAX_NOTES or (total is not None and (type(total) is not int or total < len(notes))):
         raise ValueError("Invalid Calendar Notes size")
-    complete = not payload.get("continuation_token") and total in (None, len(notes))
+    complete = (
+        total == len(notes)
+        and not any(payload.get(key) for key in ("continuation_token", "forward_continuation_token", "backward_continuation_token"))
+        and payload.get("run_out_of_forward_notes") is not False
+        and payload.get("run_out_of_backward_notes") is not False
+    )
     result = {}
     for note in notes:
         if not isinstance(note, dict) or not isinstance(note.get("reminders"), list):
@@ -135,7 +144,7 @@ def normalize_reminder_list(payload: object) -> tuple[tuple[StationReminder, ...
             offset = reminder.get("offset_seconds")
             # The native reminder tests verified delivery at the scheduled time.
             # Unknown relative offsets cannot be presented as actual due times.
-            if not isinstance(provider_id, str) or not 0 < len(provider_id) <= 128 or offset not in ("0", 0):
+            if not isinstance(provider_id, str) or not 0 < len(provider_id) <= 128 or type(offset) not in (str, int) or offset not in ("0", 0):
                 complete = False
                 continue
             identity = hashlib.sha256(provider_id.encode()).hexdigest()

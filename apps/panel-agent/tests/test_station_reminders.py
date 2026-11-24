@@ -24,7 +24,10 @@ def note(time="160000", *, identity="test-reminder", schedule=None, offset="0"):
 
 
 def payload(*notes):
-    return {"notes": list(notes), "total_notes_count": len(notes)}
+    return {
+        "notes": list(notes), "total_notes_count": str(len(notes)), "undated_notes": [],
+        "run_out_of_forward_notes": True, "forward_continuation_token": "",
+    }
 
 
 def test_normalization_keeps_identity_timezone_and_confirmed_recurrence():
@@ -38,7 +41,7 @@ def test_normalization_keeps_identity_timezone_and_confirmed_recurrence():
     assert datetime.fromisoformat(item.dueAt).isoformat() == "2026-12-03T16:00:00+03:00"
     assert item.id not in {"provider-note-id", "private-device-id", "test-reminder"}
     _, complete = reminders.normalize_reminder_list({
-        **payload(recurring), "total_notes_count": 2, "continuation_token": "partial"
+        **payload(recurring), "total_notes_count": "2", "forward_continuation_token": "partial"
     })
     assert not complete
 
