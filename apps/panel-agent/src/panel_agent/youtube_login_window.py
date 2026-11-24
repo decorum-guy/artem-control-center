@@ -46,8 +46,8 @@ class YouTubeLoginWindow:
         user.EnumWindows(visit, 0)
         return window
 
-    def show(self) -> bool:
-        if not self.allowed() or (handle := self.find()) is None:
+    async def show(self) -> bool:
+        if not self.allowed() or (handle := self.find()) is None or self.process is None:
             return False
 
         user = ctypes.windll.user32
@@ -56,29 +56,55 @@ class YouTubeLoginWindow:
         user.IsIconic.argtypes = (wintypes.HWND,)
         user.BringWindowToTop.argtypes = (wintypes.HWND,)
         user.SetForegroundWindow.argtypes = (wintypes.HWND,)
+        user.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
+        user.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                      ctypes.c_int, ctypes.c_int, wintypes.UINT)
+        user.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT,
+                                      wintypes.UINT, wintypes.UINT)
         if user.GetForegroundWindow() == handle:
             return True
 
+        # AttachThreadInput requires the server thread to have a message queue.
+        message = wintypes.MSG()
+        user.PeekMessageW(ctypes.byref(message), None, 0, 0, 0)
+        pid = self.process.pid
         current = ctypes.windll.kernel32.GetCurrentThreadId()
         foreground = user.GetForegroundWindow()
         foreground_thread = user.GetWindowThreadProcessId(foreground, None) if foreground else 0
         target_pid = wintypes.DWORD()
         target_thread = user.GetWindowThreadProcessId(handle, ctypes.byref(target_pid))
-        if self.process is None or target_pid.value != self.process.pid:
+        if target_pid.value != pid:
             return False
         attached = [
             thread for thread in {foreground_thread, target_thread} - {0, current}
             if user.AttachThreadInput(current, thread, True)
         ]
+        # Chromium may sit under a fullscreen kiosk. Promote only this HWND
+        # for the activation request, and restore its original stacking policy.
+        topmost = bool(user.GetWindowLongW(handle, -20) & 0x8)  # GWL_EXSTYLE, WS_EX_TOPMOST
+        promoted = False
         try:
-            if user.IsIconic(handle):
-                user.ShowWindowAsync(handle, 9)  # SW_RESTORE
-            user.BringWindowToTop(handle)
-            user.SetForegroundWindow(handle)
-            return user.GetForegroundWindow() == handle
+            try:
+                if user.IsIconic(handle):
+                    user.ShowWindowAsync(handle, 9)  # SW_RESTORE
+                if not topmost:
+                    promoted = bool(user.SetWindowPos(handle, -1, 0, 0, 0, 0, 0x43))
+                user.BringWindowToTop(handle)
+                user.SetForegroundWindow(handle)
+            finally:
+                for thread in reversed(attached):
+                    user.AttachThreadInput(current, thread, False)
+
+            for _ in range(10):
+                if user.GetForegroundWindow() == handle:
+                    return True
+                await asyncio.sleep(.05)
+            return False
         finally:
-            for thread in reversed(attached):
-                user.AttachThreadInput(current, thread, False)
+            if promoted:
+                owner = user.GetWindowThreadProcessId(handle, ctypes.byref(target_pid))
+                if owner and target_pid.value == pid:
+                    user.SetWindowPos(handle, -2, 0, 0, 0, 0, 0x13)  # HWND_NOTOPMOST, no activate
 
     async def show_on_open(self) -> None:
         # A normal Edge window takes time to materialize. Make one request and
@@ -87,6 +113,6 @@ class YouTubeLoginWindow:
             if not self.allowed() or self.process is None or self.process.returncode is not None:
                 return
             if self.find() is not None:
-                self.show()
+                await self.show()
                 return
             await asyncio.sleep(.15)

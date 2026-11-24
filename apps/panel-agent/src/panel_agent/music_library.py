@@ -506,7 +506,7 @@ def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
         elif not browser.allowed():
             raise HTTPException(403, "connect_blocked")
         elif action == "focus":
-            if not browser.focus():
+            if not await browser.focus():
                 raise HTTPException(409, "window_unavailable")
         elif not browser.start(manual=True):
             raise HTTPException(409, "busy")

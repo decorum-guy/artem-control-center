@@ -182,8 +182,8 @@ class MusicBrowserConnector:
                 "canConnect": self.allowed() and not self.closed,
                 "canFocus": not self.closed and self.allowed() and self.window.find() is not None}
 
-    def focus(self) -> bool:
-        return not self.closed and self.window.show()
+    async def focus(self) -> bool:
+        return not self.closed and await self.window.show()
 
     def recover(self) -> None:
         versions = self.library.version()
