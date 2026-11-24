@@ -6,6 +6,7 @@ on:
       - main
       - codex/samsung-autonomous-2026-11-24
       - codex/current-track-youtube-music
+      - codex/youtube-music-release
   workflow_dispatch:
 
 permissions:
