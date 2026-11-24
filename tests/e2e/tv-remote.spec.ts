@@ -46,8 +46,9 @@ test("Samsung TV registry, day/night layouts and full remote", async ({ page }) 
       expect(heading?.height).toBeLessThan(35);
       await expect(widget.getByRole("button", { name: "Погасить экран" })).toBeEnabled();
       const physical = await widget.getByRole("button", { name: "Тише" }).boundingBox();
-      expect(physical?.height).toBeGreaterThanOrEqual(48);
-      expect(physical?.width).toBeGreaterThanOrEqual(48);
+      // Chromium can report a 48px target as 47.99997px after transforms.
+      expect(physical?.height).toBeGreaterThanOrEqual(47.99);
+      expect(physical?.width).toBeGreaterThanOrEqual(47.99);
       await shot(page, name + "-" + theme);
       await widget.getByRole("button", { name: "Полный пульт" }).click();
       await expect(page.getByRole("region", { name: "Управление телевизором" })).toBeVisible();
