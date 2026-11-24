@@ -268,9 +268,9 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
 export function MusicPage({ playback }: { playback?: StationPlayback | null }) {
   const { copy } = useInterfaceCopy();
   const displayedTrack = playback?.status === "playing" ? playback.trackId : undefined;
-  return <main className="music-page" data-testid="route-music">
+  return <section className="music-page" data-testid="route-music">
     <PageHeader title={copy("page.music.title")} description={copy("page.music.subtitle")} variant="compact" />
     <StationMiniPlayer playback={playback} />
     <div className="music-page__libraries"><LibraryPanel provider="yandex" current={displayedTrack} /><LibraryPanel provider="youtube" current={displayedTrack} /></div>
-  </main>;
+  </section>;
 }
