@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useInteractionLock } from "../../InteractionLock";
 
 interface MusicOption {
@@ -33,7 +33,7 @@ const resultLabels: Record<string, string> = {
   no_track: "На Мини 2 нет подтверждённого играющего трека.",
   already_in_music: "Уже есть в понравившейся музыке.",
   in_music: "Песня появилась в понравившейся музыке.",
-  youtube_like: "Лайк подтверждён в YouTube. В прочитанной части Music песня пока не найдена.",
+  youtube_like: "Лайк подтверждён в YouTube. Появление в понравившейся музыке пока не подтверждено.",
   unconfirmed: "Результат записи не подтверждён.",
   auth_required: "Подключи нужный канал Google.",
   unavailable: "Не удалось связаться с Music.",
@@ -47,6 +47,12 @@ export function MusicSaveSettings() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const { guardMutation } = useInteractionLock();
+  const details = useRef<HTMLDetailsElement>(null);
+  const operationId = state?.operation?.id;
+
+  useEffect(() => {
+    if (operationId && details.current) details.current.open = true;
+  }, [operationId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -91,10 +97,10 @@ export function MusicSaveSettings() {
 
   if (!state) return null;
   const result = state.operation;
-  return <details className="station-retention-settings" data-testid="music-save-settings" open={result?.status.startsWith("choose_") || undefined}>
+  return <details className="station-retention-settings" data-testid="music-save-settings" ref={details}>
     <summary>YouTube Music</summary>
     <p>{connectionLabels[state.connection]}{state.channel && ` · ${state.channel}`}</p>
-    <p>Сохранение в «{state.destination}» по фразе «Алиса, добавь песню в ютуб».</p>
+    <p>Сохранение в «{state.destination}» по фразе «Алиса, панель, сохрани трек».</p>
     {state.connection !== "connected" &&
       <button className="planning-secondary-button" type="button" disabled={pending} onClick={() => void act("verify")}>
         Проверить подключение

@@ -190,7 +190,7 @@ class MusicSave:
         state = "already_in_music" if already_liked and in_music else "in_music" if in_music else "youtube_like"
         self._state(op, state)
         self.access().audit_capability(CAPABILITY, result=state)
-        if in_music and op.track.source_id:
+        if op.track.source_id:
             key = (session.generation, op.track.source_id)
             self.saved[key] = candidate
             self.saved.move_to_end(key)

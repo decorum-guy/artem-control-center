@@ -10,9 +10,9 @@ import secrets
 import subprocess
 import sys
 import time
-import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
@@ -22,7 +22,7 @@ from panel_agent.youtube_music import CHANNEL_ID, DATA_API, SCOPE, TOKEN_URL, YO
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 
 
-def authorize(client: dict[str, str]) -> dict[str, str]:
+def authorize(client: dict[str, str], browser: Path) -> dict[str, str]:
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
@@ -35,18 +35,21 @@ def authorize(client: dict[str, str]) -> dict[str, str]:
         def do_GET(self) -> None:
             target = urlsplit(self.path)
             query = parse_qs(target.query)
-            matched = target.path == "/" and query.get("state") == [state]
+            matched = not received and target.path == "/" and query.get("state") == [state]
+            finished = target.path == "/complete" and bool(received)
+            self.send_response(303 if matched else 200 if finished else 404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
             if matched:
                 if code := query.get("code", [""])[0]:
                     received["code"] = code
                 else:
                     received["error"] = "denied"
-            self.send_response(200 if matched else 404)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Location", "/complete")
             self.end_headers()
-            self.wfile.write("Можешь закрыть вкладку.".encode() if matched else b"Not found")
+            if not matched:
+                self.wfile.write("Вход завершён. Можешь закрыть окно.".encode() if finished else b"Not found")
 
     with HTTPServer(("127.0.0.1", 0), Callback) as server:
         server.timeout = 1
@@ -56,11 +59,24 @@ def authorize(client: dict[str, str]) -> dict[str, str]:
             "state": state, "scope": SCOPE, "access_type": "offline", "prompt": "select_account consent",
             "code_challenge": challenge, "code_challenge_method": "S256",
         })
-        if not webbrowser.open(url):
-            raise RuntimeError("The local browser was not available")
-        deadline = time.monotonic() + 300
-        while not received and time.monotonic() < deadline:
-            server.handle_request()
+        # Chromium needs an isolated profile so an existing process cannot
+        # ignore these flags and send the consent traffic directly.
+        with TemporaryDirectory(prefix="artem-youtube-consent-", ignore_cleanup_errors=True) as profile:
+            opened = subprocess.Popen(
+                [str(browser), f"--user-data-dir={profile}", f"--proxy-server={YOUTUBE_PROXY}",
+                 "--no-first-run", "--no-default-browser-check", "--disable-background-networking", url],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 300
+                while not received and time.monotonic() < deadline and opened.poll() is None:
+                    server.handle_request()
+                if received:
+                    server.handle_request()
+            finally:
+                if opened.poll() is None:
+                    opened.terminate()
+                    opened.wait(timeout=8)
     if "code" not in received:
         raise RuntimeError("Authorization not completed")
 
@@ -91,12 +107,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("desktop_client", type=Path)
     parser.add_argument("vault_directory", type=Path)
+    parser.add_argument("--browser", type=Path, required=True, help="Path to an installed Chromium browser")
     args = parser.parse_args()
     if sys.platform != "win32":
         parser.error("run in the Windows session that owns the Panel Agent")
+    if not args.browser.is_absolute() or not args.browser.is_file() or args.browser.name.lower() not in {
+        "msedge.exe", "chrome.exe", "browser.exe", "chromium.exe"
+    }:
+        parser.error("pass the absolute path to an installed Chromium browser")
     try:
         client = json.loads(args.desktop_client.read_text(encoding="utf-8"))["installed"]
-        credential = authorize(client)
+        credential = authorize(client, args.browser)
         subprocess.run([sys.executable, str(Path(__file__).with_name("station-credential-store.py")),
                         str(args.vault_directory), "--youtube-music"],
                        input=json.dumps(credential).encode(), check=True, timeout=20)
