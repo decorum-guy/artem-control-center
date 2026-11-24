@@ -16,6 +16,7 @@ from .youtube_music import GoogleCredential, MusicAuthRequired, MusicReadDiagnos
 
 ACCOUNT_MENU = ["actions", 0, "openPopupAction", "popup", "multiPageMenuRenderer"]
 ACCOUNT_TTL_SECONDS = 120
+PLAYLIST_KEY = re.compile(r"[A-Za-z0-9_-]{2,147}")
 PLAYLIST_ID = re.compile(r"(?:PL|RD|OLA|VL|FL|LL|LM)[a-zA-Z0-9_-]{0,145}")
 
 
@@ -31,7 +32,7 @@ def thumbnail(value: object) -> str | None:
 
 def playlist(row: dict) -> Playlist | None:
     key, title = row.get("playlistId"), text(row.get("title"))
-    if not isinstance(key, str) or not PLAYLIST_ID.fullmatch(key) or not title:
+    if not isinstance(key, str) or not PLAYLIST_KEY.fullmatch(key) or not title:
         return None
     raw = row.get("count")
     count = int(raw) if type(raw) in (int, str) and re.fullmatch(r"[0-9]{1,7}", str(raw)) else None
@@ -159,7 +160,7 @@ def verify_browser_account(client, account: GoogleCredential, diagnostics: Music
 
 
 def _catalog_rows(entries: list, diagnostics: MusicReadDiagnostics | None) -> tuple[Playlist, ...]:
-    from ytmusicapi.navigation import MTRIR, NAVIGATION_BROWSE_ID, TITLE, nav
+    from ytmusicapi.navigation import MTRIR, NAVIGATION_BROWSE, PAGE_TYPE, TITLE, nav
     from ytmusicapi.parsers.browsing import parse_playlist
 
     rows = []
@@ -170,9 +171,14 @@ def _catalog_rows(entries: list, diagnostics: MusicReadDiagnostics | None) -> tu
             continue
         tile = item.get(MTRIR)
         if isinstance(tile, dict):
-            browse_id = nav(tile, TITLE + NAVIGATION_BROWSE_ID, True)
-            if isinstance(browse_id, str) and browse_id.startswith("VL") and PLAYLIST_ID.fullmatch(browse_id[2:]):
-                if row := playlist(parse_playlist(tile)):
+            browse = nav(tile, TITLE + NAVIGATION_BROWSE, True)
+            if isinstance(browse, dict):
+                browse_id = browse.get("browseId")
+                key = browse_id[2:] if isinstance(browse_id, str) and browse_id.startswith("VL") else ""
+                # The playlist page type also covers opaque IDs seen in live grid continuations.
+                typed_playlist = nav(browse, PAGE_TYPE, True) == "MUSIC_PAGE_TYPE_PLAYLIST"
+                accepted = PLAYLIST_KEY.fullmatch(key) and (PLAYLIST_ID.fullmatch(key) or typed_playlist)
+                if accepted and (row := playlist(parse_playlist(tile))):
                     rows.append(row)
                     continue
             # The create action is a service tile, never a personal playlist.
@@ -250,7 +256,8 @@ def read_page(client, key: str | None, cursor: Continuation | None,
             rows = (Playlist("LM", "Понравившаяся музыка", "liked"), *rows)
         return ProviderPage(rows, next_page)
 
-    if not PLAYLIST_ID.fullmatch(key):
+    # Only keys issued by the verified catalogue reach this provider via MusicLibrary.
+    if not PLAYLIST_KEY.fullmatch(key):
         raise MusicUnavailable
     if cursor is None:
         response = browse({"browseId": key if key.startswith("VL") else "VL" + key})

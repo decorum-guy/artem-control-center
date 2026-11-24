@@ -40,9 +40,14 @@ def grid(*entries, token=None):
     return browse_sections({"gridRenderer": data})
 
 
-def tile(key):
+def tile(key, page_type=None):
+    browse = {"browseId": "VL" + key}
+    if page_type:
+        browse["browseEndpointContextSupportedConfigs"] = {
+            "browseEndpointContextMusicConfig": {"pageType": page_type}
+        }
     return {"musicTwoRowItemRenderer": {
-        "title": {"runs": [{"text": "Fixture list", "navigationEndpoint": {"browseEndpoint": {"browseId": "VL" + key}}}]},
+        "title": {"runs": [{"text": "Fixture list", "navigationEndpoint": {"browseEndpoint": browse}}]},
         "subtitle": {"runs": [{"text": "Playlist"}]},
     }}
 
@@ -142,6 +147,18 @@ def test_catalog_follows_both_supported_continuation_shapes():
     assert middle.continuation == Continuation("fixture-append", "append")
     end = read_page(Client(append([tile("PLlast")])), None, middle.continuation)
     assert [row.key for row in end.rows] == ["PLlast"] and end.continuation is None
+
+
+def test_grid_continuation_recognizes_opaque_id_only_with_playlist_page_type():
+    key = "different_family_fixture_playlist"
+    continuation = Continuation("fixture-grid", "grid")
+    def response(tile):
+        return Client({"continuationContents": {"gridContinuation": {"items": [tile]}}})
+    recognized = read_page(response(tile(key, "MUSIC_PAGE_TYPE_PLAYLIST")), None, continuation)
+    assert [row.key for row in recognized.rows] == [key]
+    for page_type in (None, "MUSIC_PAGE_TYPE_ALBUM"):
+        with pytest.raises(MusicUnavailable):
+            read_page(response(tile(key, page_type)), None, continuation)
 
 
 def test_tracks_continuation_preserves_an_unavailable_row_and_rejects_unknown_shape():
