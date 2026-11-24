@@ -38,6 +38,7 @@ export interface TrackList {
   pending: boolean;
   error: string | null;
   omitted: number;
+  changesAvailable?: boolean;
 }
 interface LibraryState {
   generation: string | null;
@@ -128,8 +129,13 @@ export class MusicLibraryStore {
       } else {
         const likedChanged = status.likedRevision > this.state.likedRevision && this.provider === "youtube";
         this.patch(status);
-        if (likedChanged && this.state.selected === "LM" && !this.getList("LM").pending) {
-          void this.tracks(false, true, true);
+        if (likedChanged && this.state.selected === "LM") {
+          const likes = this.getList("LM");
+          if (!likes.pending && likes.items.length <= 100 && likes.scroll === 0) {
+            void this.tracks(false, true);
+          } else {
+            this.writeList("LM", { changesAvailable: true });
+          }
         } else if (likedChanged && this.state.selected !== "LM" && this.state.lists.LM) {
           const lists = { ...this.state.lists };
           delete lists.LM;
@@ -200,7 +206,7 @@ export class MusicLibraryStore {
     if (this.state.selected) this.writeList(this.state.selected, { query: value, scroll: 0 });
   }
 
-  async tracks(more = false, refresh = false, preserveScroll = false) {
+  async tracks(more = false, refresh = false) {
     const { generation, selected } = this.state;
     const list = this.getList(selected);
     if (!generation || !selected || list.pending || (more && !list.next)) return;
@@ -221,7 +227,8 @@ export class MusicLibraryStore {
       this.writeList(selected, {
         items: items.slice(drop), next: page.next, observedAt: page.observedAt,
         omitted: (more ? previous.omitted : 0) + drop,
-        scroll: more || preserveScroll ? Math.max(0, previous.scroll - drop * MUSIC_ROW_HEIGHT) : 0
+        scroll: more ? Math.max(0, previous.scroll - drop * MUSIC_ROW_HEIGHT) : 0,
+        changesAvailable: more ? previous.changesAvailable : false
       });
     } catch (error) {
       if (!controller.signal.aborted && generation === this.state.generation) {

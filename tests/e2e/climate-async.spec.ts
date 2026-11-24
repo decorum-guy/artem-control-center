@@ -22,23 +22,23 @@ for (const view of ["home", "overview"]) {
         climate: { state: "cool", targetTemperature: action.temperature, fanMode: "one" } } });
     });
     await page.goto(`/${view}?scenario=home-climate-healthy&motion=reduced`);
-    const plus = page.getByTestId(`climate-temperature-increase-${view}`);
+    const minus = page.getByTestId(`climate-temperature-decrease-${view}`);
     const ok = page.getByTestId(`climate-temperature-confirm-${view}`);
     const value = page.getByTestId(`climate-temperature-value-${view}`);
-    await expect(plus).toBeEnabled();
+    await expect(minus).toBeEnabled();
     const original = Number((await value.innerText()).match(/\d+/)?.[0]);
-    expect(original).toBeLessThan(29);
-    await plus.click();
+    expect(original).toBeGreaterThan(19);
+    await minus.click();
     await ok.click();
     await expect.poll(() => posted.length).toBe(1);
-    await plus.click();
+    await minus.click();
     await ok.click();
-    await plus.click(); // This third draft is intentionally left unconfirmed.
-    expect(posted).toEqual([original + 1]);
+    await minus.click(); // This third draft is intentionally left unconfirmed.
+    expect(posted).toEqual([original - 1]);
     initialDone();
     await expect.poll(() => posted.length).toBe(2);
     await expect(page.getByText(/Home Assistant не подтвердил/)).toBeVisible();
-    await expect(value).toContainText(String(original + 3));
-    expect(posted).toEqual([original + 1, original + 2]);
+    await expect(value).toContainText(String(original - 3));
+    expect(posted).toEqual([original - 1, original - 2]);
   });
 }

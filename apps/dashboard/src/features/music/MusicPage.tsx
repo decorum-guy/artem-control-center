@@ -222,7 +222,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
     </div>
     <p className="music-library__notice" role="status">{active ? "Ждём Станцию…"
       : result ? <>{result.message} <strong>{result.record.title}</strong></>
-      : errorText || (list.omitted ? "Показаны последние загруженные позиции." : list.next ? "Список загружен частично" : "")}</p>
+      : errorText || (list.changesAvailable ? "Есть изменения. Обновите список, когда закончите просмотр." : list.omitted ? "Показаны последние загруженные позиции." : list.next ? "Список загружен частично" : "")}</p>
     <div className="music-tracks" ref={listNode} tabIndex={0} role="region" aria-label={`Треки · ${labels[provider]}`}
       onScroll={event => {
         const node = event.currentTarget;
