@@ -1,4 +1,4 @@
-"""Read-only Station Mini 2 connection, with server-side cover retrieval."""
+"""Shared Station Mini 2 connection and server-side cover retrieval."""
 
 from __future__ import annotations
 
@@ -48,13 +48,44 @@ class StationReplyUnavailable(RuntimeError):
 
 
 class StationReplies:
-    """One explicit list request per connection, with the existing reader owning recv()."""
+    """Correlate explicit requests while the Station collector owns recv()."""
 
     def __init__(self, ws, token: str):
         self.ws = ws
         self.token = token
         self.request_id: str | None = None
         self.pending: asyncio.Future[dict] | None = None
+        self.speech: tuple[str, asyncio.Future[bool]] | None = None
+
+    async def repeat_phrase(self, phrase: str, may_send: Callable[[], bool]) -> bool:
+        if self.speech is not None or not may_send():
+            return False
+        request_id = str(uuid.uuid4())
+        pending = asyncio.get_running_loop().create_future()
+        self.speech = request_id, pending
+        try:
+            async with asyncio.timeout(4):
+                await self.ws.send(json.dumps({
+                    "conversationToken": self.token,
+                    "id": request_id,
+                    "sentTime": round(time.time() * 1000),
+                    "payload": {
+                        "command": "serverAction",
+                        "serverActionEventPayload": {
+                            "type": "server_action", "name": "update_form",
+                            "payload": {"form_update": {
+                                "name": "personal_assistant.scenarios.quasar.iot.repeat_phrase",
+                                "slots": [{"type": "string", "name": "phrase_to_repeat", "value": phrase}],
+                            }, "resubmit": True},
+                        },
+                    },
+                }, ensure_ascii=False))
+                return await pending
+        except (OSError, TimeoutError, WebSocketException):
+            return False
+        finally:
+            pending.cancel()
+            self.speech = None
 
     async def reminder_list(self) -> dict:
         if self.pending is not None:
@@ -77,6 +108,10 @@ class StationReplies:
             self.request_id, self.pending = None, None
 
     def receive(self, frame: dict) -> None:
+        if self.speech is not None:
+            request_id, speech = self.speech
+            if frame.get("requestId") == request_id and not speech.done() and "status" in frame:
+                speech.set_result(str(frame["status"]).lower() in {"success", "ok", "200"})
         pending = self.pending
         if pending is None or pending.done() or frame.get("requestId") != self.request_id:
             return
@@ -90,6 +125,8 @@ class StationReplies:
             pending.set_exception(StationReplyUnavailable())
 
     def close(self) -> None:
+        if self.speech is not None and not self.speech[1].done():
+            self.speech[1].set_result(False)
         if self.pending is not None and not self.pending.done():
             self.pending.set_exception(StationReplyUnavailable())
 
@@ -453,6 +490,12 @@ class StationPlaybackCollector:
         finally:
             waiter.cancel()
             self._track_waiter = None
+
+    async def repeat_phrase(self, phrase: str, may_send: Callable[[], bool]) -> bool:
+        link = self._replies
+        if link is None or self.state is None or self.state.status in {"stale", "auth_required"}:
+            return False
+        return await link.repeat_phrase(phrase, may_send)
 
     async def request_reminder_list(self) -> dict:
         """Explicit diagnostic request that may speak. No browser route or periodic calls."""

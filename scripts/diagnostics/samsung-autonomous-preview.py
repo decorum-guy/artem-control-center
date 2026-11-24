@@ -68,6 +68,7 @@ os.environ.update(
     PANEL_STATION_PLAYBACK_HOST=lease["host"],
     PANEL_STATION_PLAYBACK_CERT_SHA256=lease["fingerprint"],
     PANEL_STATION_PLAYBACK_DEVICE_ID=lease["device_id"],
+    PANEL_STATION_PLAYBACK_VOICE_ENTITY=lease["station_entity"],
     PANEL_STATION_RETENTION_ENABLED="true",
     PANEL_STATION_REMINDER_CREDENTIAL_FILE=str(oauth_file.with_name("reminders.dpapi")),
     PANEL_LIGHT_STRIP_PROVIDER="both",

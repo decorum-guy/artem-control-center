@@ -30,6 +30,7 @@ SCENARIOS = frozenset({
     "Панель · Сохранить трек в YouTube Music",
 })
 CHOICE_SECONDS = 90
+VOICE_MAX_AGE_SECONDS = 30
 
 
 def _music_scenario(data: object) -> bool:
@@ -47,6 +48,7 @@ class Operation:
     track: Track | None = None
     session: MusicSession | None = None
     changed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    requested_at: datetime | None = None
 
 
 class MusicSave:
@@ -73,7 +75,14 @@ class MusicSave:
     def _state(self, op: Operation, status: str) -> None:
         op.status, op.changed_at = status, self.clock()
         if self.feedback is not None:
-            self.feedback.announce(self.target, f"music.{status}", self.allowed)
+            def may_speak() -> bool:
+                self._prune()
+                return (self.operation is op and op.status == status
+                        and op.requested_at is not None
+                        and (self.clock() - op.requested_at).total_seconds() <= VOICE_MAX_AGE_SECONDS
+                        and self.allowed())
+
+            self.feedback.announce(self.target, f"music.{status}", may_speak)
 
     def _prune(self) -> None:
         if self.session is not None and self.provider is not None and not self.provider.is_current(self.session):
@@ -130,7 +139,7 @@ class MusicSave:
             return
         # Snapshot context synchronously before authorization and any network await.
         tracks = self.station.capture_tracks(now)
-        op = self.operation = Operation(source_options=tracks, changed_at=now)
+        op = self.operation = Operation(source_options=tracks, changed_at=now, requested_at=fired)
         if not self.allowed():
             self._state(op, "blocked")
         elif not tracks:
@@ -240,6 +249,7 @@ class MusicSave:
             choice = next((item for item in op.versions if item.video_id == choice_id), None)
             if choice is None:
                 raise HTTPException(422, "invalid_music_choice")
+        op.requested_at = self.clock()
         self._state(op, "working")
         self.task = asyncio.create_task(self._run(op, choice), name="music-save-choice")
 

@@ -72,3 +72,44 @@ def test_feedback_skips_busy_results_rechecks_policy_and_closes():
         assert feedback.task is None and sent == [(STATION, "Лайк подтверждён.")]
 
     asyncio.run(check())
+
+
+def test_local_music_does_not_retry_or_switch_to_ha_and_checks_deadline():
+    async def check():
+        now = 100.0
+        sent = []
+        ha = []
+        started = asyncio.Event()
+        proceed = asyncio.Event()
+
+        async def speak(entity, phrase):
+            ha.append((entity, phrase))
+
+        async def local(phrase, may_send):
+            started.set()
+            await proceed.wait()
+            if may_send():
+                sent.append(phrase)
+            return False
+
+        feedback = AliceVoiceFeedback(speak, local_music_entity=STATION, speak_local=local, clock=lambda: now)
+        feedback.announce(STATION, "music.youtube_like", lambda: True)
+        await started.wait()
+        first = feedback.task
+        feedback.announce(STATION, "music.no_track", lambda: True)
+        assert feedback.task is first
+        now += 6
+        proceed.set()
+        await first
+        assert not sent and not ha
+
+        feedback.announce(STATION, "music.youtube_like", lambda: True)
+        await feedback.task
+        assert sent == ["У этой песни теперь есть лайк."] and not ha
+
+        feedback.announce(STATION, "tv.screen-off.screen-confirmed", lambda: True)
+        await feedback.task
+        assert ha == [(STATION, "Экран погашен.")]
+        await feedback.close()
+
+    asyncio.run(check())

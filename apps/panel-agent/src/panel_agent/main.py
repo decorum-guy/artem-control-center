@@ -265,7 +265,11 @@ access_policy = AccessPolicyStore.from_environment(
     temporary_minutes=SETTINGS.access_temporary_minutes,
 )
 voice_feedback = (
-    AliceVoiceFeedback(runtime.home_assistant.speak_on_station)
+    AliceVoiceFeedback(
+        runtime.home_assistant.speak_on_station,
+        local_music_entity=os.getenv("PANEL_STATION_PLAYBACK_VOICE_ENTITY", "").strip(),
+        speak_local=station_playback.repeat_phrase if station_settings else None,
+    )
     if os.getenv("PANEL_ALICE_VOICE_FEEDBACK_ENABLED", "").strip().lower() == "true"
     else None
 )

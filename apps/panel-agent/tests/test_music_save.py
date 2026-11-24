@@ -224,3 +224,31 @@ def test_voice_feedback_distinguishes_confirmed_like_from_music_membership(tmp_p
         await feedback.close()
 
     asyncio.run(check())
+
+
+def test_unconfirmed_speech_never_repeats_confirmed_like(tmp_path):
+    async def check():
+        station, provider, bridge, time, _ = setup(tmp_path)
+        utterances = []
+
+        async def speak(*_):
+            raise AssertionError("Uncertain local speech cannot be retried through HA")
+
+        async def local(phrase, allowed):
+            assert allowed()
+            utterances.append(phrase)
+            return False
+
+        feedback = bridge.feedback = AliceVoiceFeedback(speak, local_music_entity=bridge.target, speak_local=local)
+        await station.update("playing", CATALOG.title, CATALOG.artist, track_key="one", duration=202)
+        bridge.handle(event(time[0]))
+        await bridge.task
+        await feedback.task
+        bridge.handle(event(time[0]))
+        assert provider.rates == 1
+        assert len(utterances) == 1
+        assert bridge.operation.status == "in_music"
+        await feedback.close()
+        await bridge.close()
+
+    asyncio.run(check())

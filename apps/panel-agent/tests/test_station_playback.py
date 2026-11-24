@@ -372,3 +372,38 @@ def test_music_vault_renews_glagol_lease_without_account_token():
     assert "fixture-music" not in repr(protected)
     with pytest.raises(ValueError):
         StationCredentials.parse(b'{"music_token":"x","expires_at":"2027-01-01"}')
+
+
+def test_repeat_phrase_uses_correlated_reply_with_existing_receiver():
+    from panel_agent.station_playback import StationReplies
+
+    async def check():
+        frames = []
+
+        class Socket:
+            async def send(self, encoded):
+                frame = json.loads(encoded)
+                frames.append(frame)
+                replies.receive({"requestId": "other", "status": "error"})
+                replies.receive({"requestId": frame["id"], "status": "success"})
+
+        replies = StationReplies(Socket(), "test-token")
+        assert not await replies.repeat_phrase("Готово.", lambda: False)
+        assert await replies.repeat_phrase("Готово.", lambda: True)
+        assert len(frames) == 1
+        assert frames[0]["payload"] == {
+            "command": "serverAction",
+            "serverActionEventPayload": {
+                "type": "server_action", "name": "update_form",
+                "payload": {
+                    "form_update": {
+                        "name": "personal_assistant.scenarios.quasar.iot.repeat_phrase",
+                        "slots": [{"type": "string", "name": "phrase_to_repeat", "value": "Готово."}],
+                    },
+                    "resubmit": True,
+                },
+            },
+        }
+        assert replies.speech is None
+
+    asyncio.run(check())
