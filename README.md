@@ -50,8 +50,9 @@
 - [`AGENTS.md`](AGENTS.md) — обязательные правила для Codex и других разработчиков.
 - [`docs/INFRASTRUCTURE_ACCESS.md`](docs/INFRASTRUCTURE_ACCESS.md) — SSH с Mac: Samsung `control-panel-pc`, HA `ha-vps`, зарубежный прокси `kz-bot`, датированное состояние и проверка актуальности.
 - [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта исходников и различие основной панели, кандидата и планируемых функций.
-- [`docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md`](docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md) — архив задания и последующие результаты кандидата PR #372; озвучка принята, push на iPhone открыт.
-- [`docs/plans/ALICE_IPHONE_PUSH_2026_11_24.md`](docs/plans/ALICE_IPHONE_PUSH_2026_11_24.md) — текущий приоритет владельца: нативный push напоминаний на iPhone, различия официального приложения и панели, проверка origin/client context и живая приёмка.
+- [`docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md`](docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md) — архив задания и последующие результаты кандидата PR #372; актуальное ограниченное подтверждение push — в отчёте от 25.11 ниже.
+- [`docs/plans/ALICE_IPHONE_PUSH_2026_11_24.md`](docs/plans/ALICE_IPHONE_PUSH_2026_11_24.md) — исторический протокол push и актуальная отметка остановки живых тестов владельцем.
+- [`docs/plans/ALICE_PUSH_REVIEW_AND_RELEASE_2026_11_25.md`](docs/plans/ALICE_PUSH_REVIEW_AND_RELEASE_2026_11_25.md) — один подтверждённый native push, границы результата, аудит #376/#377 и общий кандидат выпуска #375–#377.
 - [`docs/plans/GOOGLE_LOGIN_UX_AND_NEXT_RELEASE_2026_11_24.md`](docs/plans/GOOGLE_LOGIN_UX_AND_NEXT_RELEASE_2026_11_24.md) — приёмка `ae376d22`: прежние замечания закрыты; обычный вход Google из панели, решение об установке и следующий небольшой UX-раунд.
 - [`docs/plans/YOUTUBE_CONNECTION_REVIEW_375_2026_11_24.md`](docs/plans/YOUTUBE_CONNECTION_REVIEW_375_2026_11_24.md) — исходные замечания к #375, последующий отчёт реализации и актуальный статус их закрытия.
 - [`docs/plans/YOUTUBE_CONNECTION_AND_RELEASE_2026_11_24.md`](docs/plans/YOUTUBE_CONNECTION_AND_RELEASE_2026_11_24.md) — исходный план подключения без JSON и совокупного выпуска; читать с последующим статусом.
