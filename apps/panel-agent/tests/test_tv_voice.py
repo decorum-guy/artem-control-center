@@ -134,7 +134,8 @@ def test_event_ingress_keeps_reader_free_and_drops_busy_duplicate_stale_and_tts(
     asyncio.run(check())
 
 
-def test_youtube_scenario_aliases_share_deduplication(tmp_path):
+@pytest.mark.parametrize("scenario_name", ["Панель ТВ · YouTube коротко", "Панель ТВ · Ютьюб"])
+def test_youtube_scenario_aliases_share_deduplication(tmp_path, scenario_name):
     async def check():
         executor = Executor([
             (200, {"availability": "online", "screen": "on", "apps": [{"id": "youtube"}]}),
@@ -147,7 +148,7 @@ def test_youtube_scenario_aliases_share_deduplication(tmp_path):
         assert bridge.task is None
 
         short = event("youtube", "short")
-        short["data"]["scenario_name"] = "Панель ТВ · YouTube коротко"
+        short["data"]["scenario_name"] = scenario_name
         bridge.handle(short)
         task = bridge.task
         assert task is not None

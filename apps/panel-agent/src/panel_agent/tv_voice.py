@@ -18,6 +18,7 @@ SCENARIOS = {
     "Панель ТВ · Выключение": "screen-off",
     "Панель ТВ · YouTube": "youtube",
     "Панель ТВ · YouTube коротко": "youtube",
+    "Панель ТВ · Ютьюб": "youtube",
 }
 MAX_EVENT_AGE_SECONDS = 12
 DUPLICATE_WINDOW_SECONDS = 6
