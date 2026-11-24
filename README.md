@@ -51,7 +51,8 @@
 - [`docs/INFRASTRUCTURE_ACCESS.md`](docs/INFRASTRUCTURE_ACCESS.md) — SSH с Mac: Samsung `control-panel-pc`, HA `ha-vps`, зарубежный прокси `kz-bot`, временные ограничения и проверка актуальности.
 - [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта исходников и различие основной панели, кандидата и планируемых функций.
 - [`docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md`](docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md) — архив задания и последующие результаты кандидата PR #372; озвучка принята, push на iPhone открыт.
-- [`docs/plans/MUSIC_LIBRARY_ROUND3_REVIEW_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND3_REVIEW_2026_11_24.md) — озвучка «Сохраняю» и плейлисты Яндекса приняты в проверенном объёме; текущий блокер — браузерное чтение YouTube Music и неверное распознавание пустого каталога.
+- [`docs/plans/YOUTUBE_CONNECTION_AND_RELEASE_2026_11_24.md`](docs/plans/YOUTUBE_CONNECTION_AND_RELEASE_2026_11_24.md) — YouTube восстановлен в preview; main и штатный киоск ещё старые. Подключение без ручного JSON, единый выпуск и проверенный остаток работ.
+- [`docs/plans/MUSIC_LIBRARY_ROUND3_REVIEW_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND3_REVIEW_2026_11_24.md) — аудит третьего раунда и исходный блокер YouTube; последующее исправление отмечено в начале.
 - [`docs/plans/MUSIC_LIBRARY_ROUND2_REVIEW_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND2_REVIEW_2026_11_24.md) — приёмка R1–R5 и исходное задание третьего раунда; читать с последующим статусом в начале документа.
 - [`docs/plans/MUSIC_LIBRARY_ROUND2_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND2_2026_11_24.md) — исходный аудит `8df311a` и сценарии R1–R5; последующий статус указан в начале документа.
 - [`docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md`](docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md) — исходное задание реализованного кандидата #374: отдельная страница «Музыка», новый компактный плеер, плейлисты и асинхронные кнопки кондиционера; читать с учётом последующего аудита.
