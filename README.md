@@ -51,7 +51,8 @@
 - [`docs/INFRASTRUCTURE_ACCESS.md`](docs/INFRASTRUCTURE_ACCESS.md) — SSH с Mac: Samsung `control-panel-pc`, HA `ha-vps`, зарубежный прокси `kz-bot`, временные ограничения и проверка актуальности.
 - [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта исходников и различие основной панели, кандидата и планируемых функций.
 - [`docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md`](docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md) — архив задания и последующие результаты кандидата PR #372; озвучка принята, push на iPhone открыт.
-- [`docs/plans/MUSIC_LIBRARY_ROUND2_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND2_2026_11_24.md) — проверка кандидата PR #374 и следующий раунд: кэши больших списков, обновление каталога, состояние страницы, отмена climate-очереди и CI без выгрузки тяжёлых артефактов.
+- [`docs/plans/MUSIC_LIBRARY_ROUND2_REVIEW_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND2_REVIEW_2026_11_24.md) — проверка исправлений #374: R1–R5 приняты, CI подтверждён; следующий раунд — слышимый ответ Алисы, диагностика изменения вентилятора и плейлисты Яндекса.
+- [`docs/plans/MUSIC_LIBRARY_ROUND2_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND2_2026_11_24.md) — исходный аудит `8df311a` и сценарии R1–R5; последующий статус указан в начале документа.
 - [`docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md`](docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md) — исходное задание реализованного кандидата #374: отдельная страница «Музыка», новый компактный плеер, плейлисты и асинхронные кнопки кондиционера; читать с учётом последующего аудита.
 - [`docs/YOUTUBE_CURRENT_TRACK.md`](docs/YOUTUBE_CURRENT_TRACK.md) — архив исходного исследования сохранения уже играющей песни и ссылки на реализованный кандидат PR #373; читать с учётом последнего отчёта.
 - [`docs/CODEX_INITIALIZATION_PROMPT.md`](docs/CODEX_INITIALIZATION_PROMPT.md) — исторический стартовый prompt первоначального discovery/MVP; для текущих задач использовать AGENTS, Playbook и карту доступа.
