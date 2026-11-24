@@ -67,3 +67,67 @@ for (const size of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }])
     expect(await page.locator("body").evaluate(node => node.scrollWidth)).toBeLessThanOrEqual(size.width);
   });
 }
+
+test("Music keeps the selected view on a late response and recovers a failed continuation", async ({ page }) => {
+  const nextGeneration = "d".repeat(32);
+  let currentGeneration = generation;
+  let continued = 0;
+  let earlierStarted = false;
+  let releaseEarlier!: () => void;
+  const earlier = new Promise<void>(resolve => { releaseEarlier = resolve; });
+  await page.route("**/api/v1/music/**", async route => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.split("/music/")[1];
+    const pageData = (items: unknown[], next: string | null = null) => ({
+      ...samplePage(items, next), generation: currentGeneration
+    });
+    if (path.endsWith("/status")) return route.fulfill({ json: { ...status, generation: currentGeneration } });
+    if (path === "yandex/catalog") return route.fulfill({ json: pageData([]) });
+    if (path === "youtube/catalog") return route.fulfill({ json: pageData(currentGeneration === generation ? [
+      { key: "LM", title: "Понравившаяся музыка", kind: "liked", cover: null, count: null },
+      { key: "PLtest", title: "Другой плейлист", kind: "playlist", cover: null, count: null }
+    ] : [{ key: "LM", title: "Понравившаяся музыка", kind: "liked", cover: null, count: null }]) });
+    if (path === "youtube/tracks/PLtest") {
+      earlierStarted = true;
+      await earlier;
+      return route.fulfill({ json: pageData([row(333)]) }).catch(() => {});
+    }
+    if (url.searchParams.has("cursor")) {
+      if (++continued === 1) return route.fulfill({ status: 503, json: { detail: "source_unavailable" } });
+      return route.fulfill({ json: pageData([row(444)]) });
+    }
+    return route.fulfill({ json: pageData([row(currentGeneration === generation ? 100 : 555)], "next-test") });
+  });
+
+  await page.goto("/music");
+  const yt = page.getByRole("region", { name: "YouTube Music", exact: true });
+  const pane = yt.getByRole("region", { name: "Треки · YouTube Music" });
+  await yt.getByRole("button", { name: "Другой плейлист" }).click();
+  await expect.poll(() => earlierStarted).toBe(true);
+  await yt.getByRole("button", { name: "Понравившаяся музыка" }).click();
+  await expect(pane.getByText("Трек 100", { exact: true })).toBeVisible();
+  releaseEarlier();
+  await expect(pane.getByText("Трек 333", { exact: true })).toHaveCount(0);
+  const geometry = () => pane.evaluate(node => {
+    const box = node.getBoundingClientRect();
+    const panel = node.closest(".music-library")!.getBoundingClientRect();
+    return { y: box.top - panel.top, width: box.width, height: box.height };
+  });
+  const before = await geometry();
+  const more = yt.getByRole("button", { name: "Загрузить ещё" });
+  await more.click();
+  await expect(yt.getByRole("status")).not.toHaveText("Список загружен частично");
+  await expect(more).toBeEnabled();
+  expect(await geometry()).toEqual(before);
+  await expect(pane.getByText("Трек 100", { exact: true })).toBeVisible();
+  await more.click();
+  await expect(pane.getByText("Трек 444", { exact: true })).toBeVisible();
+  expect(await geometry()).toEqual(before);
+
+  currentGeneration = nextGeneration;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(yt.getByRole("button", { name: "Понравившаяся музыка" })).toHaveAttribute("aria-pressed", "false");
+  await expect(pane.getByText("Трек 100", { exact: true })).toHaveCount(0);
+  await yt.getByRole("button", { name: "Понравившаяся музыка" }).click();
+  await expect(pane.getByText("Трек 555", { exact: true })).toBeVisible();
+});
