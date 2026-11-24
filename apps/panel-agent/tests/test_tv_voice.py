@@ -6,6 +6,7 @@ from threading import Event
 import pytest
 
 from panel_agent.access_policy import AccessPolicyStore
+from panel_agent.alice_voice_feedback import AliceVoiceFeedback
 from panel_agent.tv_voice import SCENARIOS, TVVoiceBridge
 
 NOW = datetime(2026, 11, 24, tzinfo=timezone.utc)
@@ -158,5 +159,28 @@ def test_youtube_scenario_aliases_share_deduplication(tmp_path, scenario_name):
         assert bridge.task is task
         assert executor.calls == [("status", None), ("open-app", "youtube")]
         await bridge.close()
+
+    asyncio.run(check())
+
+def test_voice_feedback_follows_confirmed_tv_outcome(tmp_path):
+    async def check():
+        sent = []
+
+        async def speak(entity, phrase):
+            sent.append((entity, phrase))
+
+        executor = Executor([(200, {"outcome": "confirmed", "screen": "on"}),
+                             (502, {"outcome": "unconfirmed"})])
+        bridge, _ = bridge_for(tmp_path, executor)
+        feedback = bridge.feedback = AliceVoiceFeedback(speak)
+        bridge.handle(event("screen-on", "on"))
+        await bridge.task
+        await feedback.task
+        bridge.handle(event("screen-off", "off"))
+        await bridge.task
+        await feedback.task
+        assert sent == [(STATION, "Телевизор включён."), (STATION, "Не удалось подтвердить результат.")]
+        await bridge.close()
+        await feedback.close()
 
     asyncio.run(check())

@@ -33,6 +33,7 @@ import { useDeviceVisibility } from "../../DeviceVisibility";
 import { useInterfaceCopy } from "../../interfaceCopy";
 import { useProjectRegistry, type ProjectRegistryController } from "../../ProjectRegistry";
 import { StationRetentionSettings } from "./StationRetentionSettings";
+import { MusicSaveSettings } from "./MusicSaveSettings";
 import "./settingsV2.css";
 
 import { v3VisualSkinEnabled } from "../../visualShellConfig";
@@ -158,6 +159,7 @@ export function SettingsV2Page({
 
       <SystemControlsSettings />
       {stationRetention && <StationRetentionSettings retention={stationRetention} />}
+      <MusicSaveSettings />
 
       <div className="settings-v2-summary-grid">
         <SettingsSummaryColumn>

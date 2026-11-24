@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
@@ -128,6 +129,26 @@ class HomeAssistantAdapter:
                 "/api/events/yandex_intent_response",
                 json={"text": text, "end_session": True},
             )
+            response.raise_for_status()
+
+    async def speak_on_station(self, entity: str, phrase: str) -> None:
+        """Say a server-selected confirmation through the Station integration."""
+        if (not self.configured or not re.fullmatch(r"media_player\.[a-z0-9_]+", entity)
+                or not 0 < len(phrase) <= 90 or "://" in phrase):
+            raise ValueError("Invalid Station confirmation")
+        async with httpx.AsyncClient(
+            base_url=self._settings.ha_url,
+            headers={"Authorization": f"Bearer {self._settings.ha_token}"},
+            timeout=4,
+            follow_redirects=False,
+            trust_env=False,
+            transport=self._transport,
+        ) as client:
+            response = await client.post("/api/services/media_player/play_media", json={
+                "entity_id": entity,
+                "media_content_type": "text",
+                "media_content_id": phrase,
+            })
             response.raise_for_status()
 
     async def start(self) -> None:
@@ -799,7 +820,7 @@ class HomeAssistantAdapter:
             self._yandex_intent_subscribed = False
             self._yandex_intent_status = "disabled"
         self._yandex_scenario_subscribed = False
-        scenario_requested = self._settings.tv_voice_enabled and self._yandex_scenario_handler is not None
+        scenario_requested = self._yandex_scenario_handler is not None
         if scenario_requested:
             await socket.send(json.dumps({
                 "id": _YANDEX_SCENARIO_SUBSCRIPTION_ID,

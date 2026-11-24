@@ -24,6 +24,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
 from .contracts import StationPlayback
+from .music_matching import Track
 from .station_credentials import StationCredentialFile
 
 GLAGOL_TOKEN_URL = "https://quasar.yandex.net/glagol/token"
@@ -246,6 +247,9 @@ class StationPlaybackCollector:
         self.covers: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
         self.cover_lock: asyncio.Lock | None = None
         self._replies: StationReplies | None = None
+        self.track: Track | None = None
+        self.previous_track: Track | None = None
+        self.generation = 0
 
     def start(self) -> None:
         if self.settings is not None and self.task is None:
@@ -260,7 +264,9 @@ class StationPlaybackCollector:
                 self.on_state("stale", None)
 
     async def update(self, status: str, title: str | None = None, artist: str | None = None,
-                     cover: str | None = None, track_key: str | None = None) -> None:
+                     cover: str | None = None, track_key: str | None = None,
+                     *, duration: int | None = None, album: str | None = None) -> None:
+        self._observe_track(status, title, artist, track_key, duration, album)
         identity = track_key if track_key is not None or title is None else repr((title, artist))
         retention_changed = self.on_state(status, identity) if self.on_state else False
         self.cover_url = cover
@@ -273,6 +279,34 @@ class StationPlaybackCollector:
         self.state = StationPlayback.model_validate({**content, "observedAt": observed_at})
         if self.on_change is not None and (playback_changed or retention_changed):
             await self.on_change()
+
+    def _observe_track(
+        self, status: str, title: str | None, artist: str | None, key: str | None,
+        duration: int | None, album: str | None,
+    ) -> None:
+        if status != "playing" or not title:
+            self.track = self.previous_track = None
+            return
+        now = self._clock()
+        active = self.track
+        same = active is not None and (active.generation, active.source_id, active.title, active.artist) == (
+            self.generation, key, title, artist
+        )
+        if same and active is not None:
+            self.track = replace(active, observed_at=now, duration=duration or active.duration, album=album or active.album)
+        else:
+            self.previous_track = active if active is not None and active.generation == self.generation else None
+            self.track = Track(key, title, artist, duration, album, self.generation, now, now)
+
+    def capture_tracks(self, now: datetime) -> tuple[Track, ...]:
+        current = self.track
+        if current is None or (now - current.observed_at).total_seconds() > STATE_TIMEOUT_SECONDS:
+            return ()
+        previous = self.previous_track
+        if (previous is not None and (now - current.started_at).total_seconds() <= 8
+                and (current.started_at - previous.observed_at).total_seconds() <= STATE_TIMEOUT_SECONDS):
+            return (previous, current)
+        return (current,)
 
     async def _run(self, settings: StationPlaybackSettings) -> None:
         if settings.credential_path is None:
@@ -346,6 +380,8 @@ class StationPlaybackCollector:
             await ws.send(json.dumps({"conversationToken": token, "id": str(uuid.uuid4()),
                                       "payload": {"command": "softwareVersion"},
                                       "sentTime": round(time.time() * 1000)}))
+            self.generation += 1
+            self.track = self.previous_track = None
             replies = StationReplies(ws, token)
             self._replies = replies
             try:
@@ -364,7 +400,10 @@ class StationPlaybackCollector:
                             raise StationAuthRequired
                         continue
                     deadline = time.monotonic() + STATE_TIMEOUT_SECONDS
-                    await self.update(*normalized)
+                    player = data["state"].get("playerState")
+                    duration = player.get("duration") if isinstance(player, dict) else None
+                    length = int(duration) if type(duration) in (int, float) and 0 < duration < 14_400 else None
+                    await self.update(*normalized, duration=length)
             finally:
                 self._replies = None
                 replies.close()
