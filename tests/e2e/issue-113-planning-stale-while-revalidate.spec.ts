@@ -230,41 +230,15 @@ async function installTaskRead(page: Page, options: { delayView?: "overdue"; del
   return { get requests() { return requestCount; }, release, startBackground: () => { backgroundMode = true; }, get backgroundReads() { return backgroundReads; }, getTemplate: () => template };
 }
 
-async function installReminderRead(page: Page, options: { delayView?: "delivery"; delaySecond?: boolean; lateBackground?: boolean; hasMore?: boolean } = {}): Promise<{ requests: number; release: Deferred; startBackground: () => void; getTemplate: () => Record<string, unknown> | null }> {
-  let requestCount = 0;
-  let template: Record<string, unknown> | null = null;
-  const release = deferred();
-  let backgroundMode = false;
-  let backgroundRequestStarted = false;
-  await page.route("**/api/v1/planning/reminders/view**", async (route) => {
-    if (route.request().method() !== "GET") return route.fallback();
-    requestCount += 1;
-    const url = new URL(route.request().url());
-    const view = url.searchParams.get("view");
-    if ((options.delayView && view === options.delayView) || (options.delaySecond && backgroundMode && !backgroundRequestStarted)) {
-      backgroundRequestStarted = true;
-      await release.promise;
-    }
-    const response = await route.fetch();
-    const payload = await response.json() as Record<string, unknown>;
-    if (!template) template = listItems(payload)[0];
-    const items = options.lateBackground && backgroundRequestStarted && requestCount === 2
-        ? ["Поздний старый ответ 1", "Поздний старый ответ 2"]
-        : (backgroundRequestStarted || (options.delayView && view === options.delayView)
-          ? ["Новое напоминание 1", "Новое напоминание 2"]
-          : ["Старое напоминание 1", "Старое напоминание 2"]);
-    payload.items = items.map((title, index) => ({
-      ...template,
-      ...(view === "delivery" ? { status: "due", deliveryState: "failed" } : {}),
-      id: `00000000-0000-4000-8000-${String(920 + index).padStart(12, "0")}`,
-      title
-    }));
-    payload.count = items.length;
-    payload.offset = Number(url.searchParams.get("offset") ?? "0");
-    payload.hasMore = options.hasMore ?? false;
-    await route.fulfill({ response, body: JSON.stringify(payload) });
-  });
-  return { get requests() { return requestCount; }, release, startBackground: () => { backgroundMode = true; }, getTemplate: () => template };
+function nativeReminders(title: string) {
+  return {
+    status: "fresh", observedAt: "2026-11-24T05:00:00Z", canCreate: true, canReschedule: true,
+    items: [{ id: "fixture", title, dueAt: "2026-11-25T14:00:00Z", timezone: "Europe/Moscow", repeats: false }]
+  };
+}
+
+function refreshNativeReminders(page: Page) {
+  return page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
 }
 
 test.describe("Issue #113 planning stale-while-revalidate", () => {
@@ -467,83 +441,89 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
     await expect(page.getByText("Задача страницы 2")).toBeVisible();
   });
 
-  test("Reminders preserve rows for a background snapshot refresh", async ({ page }) => {
-    const { setRevision } = await preparePage(page);
-    const reminders = await installReminderRead(page, { delaySecond: true });
-    await page.goto("/reminders");
-    await expect(page.getByText("Старое напоминание 1")).toBeVisible();
-
-    reminders.startBackground();
-    setRevision(2);
-    await emitRevision(page, 2);
-    await expect.poll(() => reminders.requests).toBeGreaterThanOrEqual(2);
-    await expect(page.getByText("Старое напоминание 1")).toBeVisible();
-    await expect(page.getByTestId("planning-route-loading")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-health")).toContainText("Обновляем…");
-    reminders.release.resolve();
-    await expect(page.getByText("Новое напоминание 1")).toBeVisible();
-    await expect(page.getByText("Старое напоминание 1")).toHaveCount(0);
-  });
-
-  test("Reminders view and page identity changes do not carry Upcoming rows", async ({ page }) => {
+  test("Alice reminders preserve rows while a background read is pending", async ({ page }) => {
     await preparePage(page);
-    const reminders = await installReminderRead(page, { delayView: "delivery", hasMore: true });
-    await page.goto("/reminders");
-    await expect(page.getByText("Старое напоминание 1")).toBeVisible();
-
-    await page.getByRole("button", { name: "Доставка", exact: true }).tap();
-    await expect.poll(() => reminders.requests).toBeGreaterThanOrEqual(2);
-    await expect(page.getByText("Старое напоминание 1")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-loading")).toBeVisible();
-    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
-    reminders.release.resolve();
-    await expect(page.getByText("Новое напоминание 1")).toBeVisible();
-
-    const nextPage = deferred();
-    await page.unroute("**/api/v1/planning/reminders/view**");
-    await page.route("**/api/v1/planning/reminders/view**", async (route) => {
-      if (route.request().method() !== "GET") return route.fallback();
-      const offset = new URL(route.request().url()).searchParams.get("offset");
-      if (offset !== "0") await nextPage.promise;
-      const response = await route.fetch();
-      const payload = await response.json() as Record<string, unknown>;
-      const template = reminders.getTemplate();
-      if (!template) throw new Error("Reminder pagination fixture did not capture a canonical template");
-      payload.items = [{
-        ...template,
-        status: "due",
-        deliveryState: "failed",
-        id: "00000000-0000-4000-8000-000000009991",
-        title: "Напоминание страницы 2"
-      }];
-      payload.count = 1;
-      payload.offset = Number(offset ?? "0");
-      payload.hasMore = false;
-      await route.fulfill({ response, body: JSON.stringify(payload) });
+    const held = deferred();
+    let hold = false;
+    let waiting = false;
+    await page.route("**/api/v1/station/reminders", async route => {
+      if (hold) {
+        waiting = true;
+        await held.promise;
+        return route.fulfill({ json: nativeReminders("Новое напоминание 1") });
+      }
+      return route.fulfill({ json: nativeReminders("Старое напоминание 1") });
     });
-    await page.getByRole("button", { name: "Ещё" }).click();
-    await expect(page.getByText("Новое напоминание 1")).toHaveCount(0);
-    await expect(page.getByTestId("planning-route-loading")).toBeVisible();
-    await expect(page.getByTestId("planning-route-health")).toHaveCount(0);
-    nextPage.resolve();
-    await expect(page.getByText("Напоминание страницы 2")).toBeVisible();
+    await page.goto("/reminders");
+    const section = page.getByTestId("alice-reminders");
+    const before = section.getByText("Старое напоминание 1");
+    await expect(before).toBeVisible();
+    const initial = await before.boundingBox();
+    hold = true;
+    try {
+      await refreshNativeReminders(page);
+      await expect.poll(() => waiting).toBe(true);
+      await expect(before).toBeVisible();
+      expect(await before.boundingBox()).toEqual(initial);
+      await expect(section).toHaveAttribute("data-status", "fresh");
+    } finally {
+      held.resolve();
+    }
+    await expect(section.getByText("Новое напоминание 1")).toBeVisible();
+    await expect(before).toHaveCount(0);
   });
 
-  test("An obsolete background response cannot overwrite a newly selected Reminders query", async ({ page }) => {
-    const { setRevision } = await preparePage(page);
-    const reminders = await installReminderRead(page, { delaySecond: true, lateBackground: true });
+  test("an unavailable Alice authorization clears previous reminders and their editor", async ({ page }) => {
+    await preparePage(page);
+    let authorizationLost = false;
+    let legacyRequests = 0;
+    await page.route("**/api/v1/planning/reminders/**", route => { legacyRequests++; return route.fallback(); });
+    await page.route("**/api/v1/station/reminders", route => route.fulfill({ json: authorizationLost
+      ? { status: "auth_required", observedAt: null, items: [] }
+      : nativeReminders("Старое напоминание 1") }));
     await page.goto("/reminders");
-    await expect(page.getByText("Старое напоминание 1")).toBeVisible();
+    const section = page.getByTestId("alice-reminders");
+    await expect(section.getByText("Старое напоминание 1")).toBeVisible();
+    await section.getByRole("button", { name: "Добавить" }).click();
+    await expect(page.getByTestId("alice-reminder-editor")).toBeVisible();
+    authorizationLost = true;
+    await refreshNativeReminders(page);
+    await expect(section.getByRole("status")).toContainText("Нужно восстановить вход в Яндекс");
+    await expect(section.getByText("Старое напоминание 1")).toHaveCount(0);
+    await expect(page.getByTestId("alice-reminder-editor")).toHaveCount(0);
+    await expect(page.getByTestId("alice-reminders-empty")).toHaveCount(0);
+    expect(legacyRequests).toBe(0);
+  });
 
-    reminders.startBackground();
-    setRevision(2);
-    await emitRevision(page, 2);
-    await expect.poll(() => reminders.requests).toBeGreaterThanOrEqual(2);
-
-    await page.getByRole("button", { name: "Доставка", exact: true }).tap();
-    await expect(page.getByText("Новое напоминание 1")).toBeVisible();
-    reminders.release.resolve();
-    await expect(page.getByText("Новое напоминание 1")).toBeVisible();
-    await expect(page.getByText("Поздний старый ответ 1")).toHaveCount(0);
+  test("a response from the old reminders view cannot replace the new view", async ({ page }) => {
+    await preparePage(page);
+    const held = deferred();
+    let phase: "initial" | "hold" | "new" = "initial";
+    let waiting = false;
+    await page.route("**/api/v1/station/reminders", async route => {
+      if (phase === "hold") {
+        waiting = true;
+        await held.promise;
+        return route.fulfill({ json: nativeReminders("Поздний старый ответ 1") }).catch(() => {});
+      }
+      return route.fulfill({ json: nativeReminders(phase === "initial" ? "Старое напоминание 1" : "Новое напоминание 1") });
+    });
+    await page.goto("/reminders");
+    const section = page.getByTestId("alice-reminders");
+    await expect(section.getByText("Старое напоминание 1")).toBeVisible();
+    phase = "hold";
+    try {
+      await refreshNativeReminders(page);
+      await expect.poll(() => waiting).toBe(true);
+      await page.locator('a[href="/tasks"]').first().evaluate((link: HTMLAnchorElement) => link.click());
+      await expect(page.getByTestId("route-tasks")).toBeVisible();
+      phase = "new";
+      await page.goBack();
+      await expect(section.getByText("Новое напоминание 1")).toBeVisible();
+    } finally {
+      held.resolve();
+    }
+    await expect(section.getByText("Новое напоминание 1")).toBeVisible();
+    await expect(section.getByText("Поздний старый ответ 1")).toHaveCount(0);
   });
 });
