@@ -297,3 +297,50 @@ test("a confirmed YouTube recording stays highlighted across playlists and route
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await expect(playing).toHaveCount(0);
 });
+
+for (const size of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
+  test(`Yandex Music switches playlists and plays the exact selected row at ${size.width}px`, async ({ page }) => {
+    await page.setViewportSize(size);
+    const reads: string[] = [];
+    const played: unknown[] = [];
+    const own = playlist("ya_12_4", "Мой плейлист");
+    const liked = { ...playlist("ya_34_4", "Плейлист другого автора"), cover };
+    await page.route("**/api/v1/music/**", async route => {
+      const path = new URL(route.request().url()).pathname.split("/music/")[1];
+      if (path.startsWith("artwork/")) return route.fulfill({ status: 404 });
+      if (path.endsWith("/status")) return route.fulfill({ json: status });
+      if (path === "youtube/catalog") return route.fulfill({ json: samplePage([]) });
+      if (path === "yandex/catalog") {
+        return route.fulfill({ json: samplePage([
+          { ...playlist("likes", "Мне нравится"), kind: "liked" }, own, liked
+        ]) });
+      }
+      if (path.includes("/tracks/")) {
+        const source = path.split("/").at(-1)!;
+        reads.push(source);
+        return route.fulfill({ json: samplePage([row(source === "likes" ? 5 : source === own.key ? 12 : 34)]) });
+      }
+      played.push(route.request().postDataJSON());
+      return route.fulfill({ json: { status: "playing", stationTrackId: "34" } });
+    });
+
+    await page.goto("/music");
+    const yandex = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+    const tracks = yandex.getByRole("region", { name: "Треки · Яндекс Музыка" });
+    await expect(tracks.getByText("Трек 5", { exact: true })).toBeVisible();
+    expect(reads).toEqual(["likes"]);
+    await yandex.getByRole("button", { name: own.title, exact: true }).click();
+    await expect(tracks.getByText("Трек 12", { exact: true })).toBeVisible();
+    await yandex.getByRole("button", { name: liked.title, exact: true }).click();
+    await expect(tracks.getByText("Трек 34", { exact: true })).toBeVisible();
+    await page.locator('a[href="/overview"]').first().evaluate(link => (link as HTMLElement).click());
+    await expect(page.getByTestId("route-music")).toHaveCount(0);
+    await page.goBack();
+    await expect(yandex.getByRole("button", { name: liked.title, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(tracks.getByText("Трек 34", { exact: true })).toBeVisible();
+    expect(played).toHaveLength(0);
+    await tracks.getByRole("button", { name: "Включить на Станции · Трек 34", exact: true }).click();
+    await expect(yandex.getByRole("status")).toContainText("Станция подтвердила воспроизведение");
+    expect(played).toEqual([{ generation, source: liked.key, row: row(34).key }]);
+  });
+}

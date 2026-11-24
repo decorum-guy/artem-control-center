@@ -230,14 +230,15 @@ class StationSessionTokens:
         return token
 
 
-def normalize_cover(value: object) -> str | None:
+def normalize_cover(value: object, *, playlist: bool = False) -> str | None:
     if not isinstance(value, str) or not 1 <= len(value) <= 1024:
         return None
     normalized = value.replace("%%", "200x200")
     if "://" not in normalized:
         normalized = "https://" + normalized
     url = _allowed_https(normalized, COVER_HOSTS)
-    if url and not url.query and url.path.startswith("/get-music-content/"):
+    prefixes = ("/get-music-content/", "/get-music-user-playlist/") if playlist else ("/get-music-content/",)
+    if url and not url.query and url.path.startswith(prefixes):
         return url.geturl()
     return None
 

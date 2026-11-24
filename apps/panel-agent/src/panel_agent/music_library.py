@@ -25,7 +25,7 @@ from .access_policy import AccessPolicyStore
 from .music_library_types import Continuation, Playlist, ProviderPage, Recording
 from .music_matching import Candidate, Track, match
 from .station_playback import StationPlaybackCollector
-from .yandex_library import YandexLibrary
+from .yandex_library import YandexLibrary, YandexPageExpired
 from .youtube_library import YouTubeLibrary
 from .youtube_music import MusicAuthRequired, MusicUnavailable, YOUTUBE_PROXY
 
@@ -244,6 +244,9 @@ class MusicLibrary:
                         page = await self._refresh_catalog(feed.provider)
                     else:
                         page = await feed.provider.catalog(continuation)
+                except YandexPageExpired as exc:
+                    feed.discard_pages(source)
+                    raise HTTPException(409, "page_expired") from exc
                 except MusicAuthRequired as exc:
                     if feed.sync() == epoch and feed.status != "auth_required":
                         feed.invalidate("auth_required")

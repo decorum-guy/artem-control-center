@@ -6,7 +6,10 @@ import asyncio
 import json
 import re
 import time
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import httpx
 
@@ -17,12 +20,53 @@ from .youtube_music import MusicAuthRequired, MusicUnavailable
 
 API_URL = "https://api.music.yandex.net"
 BATCH_SIZE = 40  # Verified against the account's live index on Samsung.
+MAX_INDEXES = 8
+INDEX_BYTES = 6_291_456
+PLAYLIST_ID = re.compile(r"ya_([0-9]{1,20})_([0-9]{1,20})")
 TRACK_ID = re.compile(r"[0-9]{1,20}")
 
 
 def identity(value: object) -> str | None:
     candidate = str(value) if type(value) in (int, str) else ""
     return candidate if TRACK_ID.fullmatch(candidate) else None
+
+
+@dataclass(frozen=True)
+class PlaylistIndex:
+    version: str
+    positions: tuple[tuple[str | None, str | None], ...]
+
+
+class YandexPageExpired(Exception):
+    """A continuation belongs to an index that was refreshed or evicted."""
+
+
+def playlist_metadata(item: object) -> Playlist | None:
+    if not isinstance(item, dict):
+        return None
+    owner = item.get("owner")
+    owner_uid = identity(owner.get("uid")) if isinstance(owner, dict) else None
+    owner_uid = owner_uid or identity(item.get("uid"))
+    kind = identity(item.get("kind"))
+    title = text(item.get("title"))
+    if not owner_uid or not kind or not title:
+        return None
+    cover = item.get("cover")
+    cover_uri = cover.get("uri") if isinstance(cover, dict) else None
+    count = item.get("trackCount")
+    return Playlist(f"ya_{owner_uid}_{kind}", title, "playlist",
+                    normalize_cover(cover_uri, playlist=True) or normalize_cover(item.get("ogImage"), playlist=True),
+                    count if type(count) is int and count >= 0 else None)
+
+
+def track_position(row: object) -> tuple[str | None, str | None]:
+    if not isinstance(row, dict):
+        return None, None
+    track = row.get("id")
+    if isinstance(track, str) and ":" in track:
+        track, _, album = track.partition(":")
+        return identity(track), identity(album)
+    return identity(track), identity(row.get("albumId"))
 
 
 def recording(row: dict, *, track_id: str | None = None, album_id: str | None = None) -> Recording:
@@ -52,14 +96,15 @@ class YandexLibrary:
         self.context: tuple | None = None
         self.token: str | None = None
         self.uid: str | None = None
-        self.index: tuple[tuple[str | None, str | None], ...] | None = None
+        self.indexes: OrderedDict[str, PlaylistIndex] = OrderedDict()
         self.expires = 0.0
 
     def version(self) -> tuple | None:
         return self.file.version()
 
     def reset(self) -> None:
-        self.context = self.token = self.uid = self.index = None
+        self.context = self.token = self.uid = None
+        self.indexes.clear()
         self.expires = 0
 
     async def _authorize(self) -> None:
@@ -121,33 +166,76 @@ class YandexLibrary:
                 raise MusicAuthRequired
         return self.uid
 
-    async def catalog(self, _continuation: Continuation | None) -> ProviderPage:
-        await self._account()
-        return ProviderPage((Playlist("likes", "Мне нравится", "liked"),))
+    async def catalog(self, continuation: Continuation | None) -> ProviderPage:
+        if continuation is not None:
+            raise YandexPageExpired
+        uid = await self._account()
+        own = await self._request("GET", f"/users/{uid}/playlists/list")
+        liked = await self._request("GET", f"/users/{uid}/likes/playlists")
+        if not isinstance(own, list) or not isinstance(liked, list):
+            raise MusicUnavailable
+        sources = {"likes": Playlist("likes", "Мне нравится", "liked")}
+        for item in (*own, *(like.get("playlist") for like in liked if isinstance(like, dict))):
+            if metadata := playlist_metadata(item):
+                sources.setdefault(metadata.key, metadata)
+        return ProviderPage(tuple(sources.values()))
+
+    async def _read_index(self, uid: str, playlist: str) -> PlaylistIndex:
+        if playlist == "likes":
+            response = await self._request("GET", f"/users/{uid}/likes/tracks", limit=INDEX_BYTES,
+                                           params={"if-modified-since-revision": 0})
+            rows = response.get("library", {}).get("tracks") if isinstance(response, dict) else None
+        elif match := PLAYLIST_ID.fullmatch(playlist):
+            owner, kind = match.groups()
+            response = await self._request("GET", f"/users/{owner}/playlists/{kind}", limit=INDEX_BYTES,
+                                           params={"rich-tracks": "false"})
+            rows = response.get("tracks") if isinstance(response, dict) else None
+        else:
+            raise MusicUnavailable
+        if not isinstance(rows, list):
+            raise MusicUnavailable
+        return PlaylistIndex(uuid4().hex, tuple(map(track_position, rows)))
 
     async def tracks(self, playlist: str, continuation: Continuation | None) -> ProviderPage:
-        if playlist != "likes":
-            raise MusicUnavailable
         uid = await self._account()
-        if self.index is None or continuation is None:
-            response = await self._request("GET", f"/users/{uid}/likes/tracks", limit=6_291_456,
-                                           params={"if-modified-since-revision": 0})
-            rows = response.get("library", {}).get("tracks")
-            if not isinstance(rows, list):
-                raise MusicUnavailable
-            self.index = tuple((identity(row.get("id")), identity(row.get("albumId")))
-                               if isinstance(row, dict) else (None, None) for row in rows)
-        start = int(continuation.value) if continuation else 0
-        positions = self.index[start:start + BATCH_SIZE]
-        ids = [f"{track}:{album}" if album else track for track, album in positions if track]
+        if continuation is None:
+            index = await self._read_index(uid, playlist)
+            start = 0
+        else:
+            index = self.indexes.get(playlist)
+            start_value = str(continuation.value)
+            if index is None or continuation.kind != index.version or not start_value.isdecimal():
+                raise YandexPageExpired
+            start = int(start_value)
+            if not 0 < start < len(index.positions):
+                raise YandexPageExpired
+
+        positions = index.positions[start:start + BATCH_SIZE]
+        ids = dict.fromkeys(f"{track}:{album}" if album else track for track, album in positions if track)
         records = await self._request("POST", "/tracks", data={"track-ids": ",".join(ids), "with-positions": "False"}) if ids else []
         if not isinstance(records, list):
             raise MusicUnavailable
-        by_id = {str(item.get("id")): item for item in records if isinstance(item, dict)}
+        by_track: dict[str, dict] = {}
+        by_album: dict[tuple[str, str], dict] = {}
+        for row in records:
+            if not isinstance(row, dict) or not (track := identity(row.get("id"))):
+                continue
+            by_track.setdefault(track, row)
+            for album in row.get("albums") or []:
+                if isinstance(album, dict) and (album_id := identity(album.get("id"))):
+                    by_album.setdefault((track, album_id), row)
+
+        # Publish the index only after the associated metadata page succeeds.
+        self.indexes[playlist] = index
+        self.indexes.move_to_end(playlist)
+        if len(self.indexes) > MAX_INDEXES:
+            self.indexes.popitem(last=False)
         next_index = start + len(positions)
-        return ProviderPage(tuple(recording(by_id.get(track, {}), track_id=track, album_id=album)
-                                  for track, album in positions),
-                            Continuation(next_index, "offset") if next_index < len(self.index) else None)
+        return ProviderPage(
+            tuple(recording((by_album.get((track, album), {}) if album else by_track.get(track, {})),
+                            track_id=track, album_id=album) for track, album in positions),
+            Continuation(next_index, index.version) if next_index < len(index.positions) else None,
+        )
 
     async def lookup(self, track_id: str) -> Recording | None:
         if identity(track_id) is None:
