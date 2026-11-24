@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+test.skip(process.env.VITE_V2_VISUAL_SHELL !== "true" || process.env.VITE_OVERVIEW_V2_ENABLED !== "true",
+  "The interactive climate cards are enabled by the accepted panel profile.");
+
 const cap = "home.climate.";
 function availability() {
   return { schemaVersion: 1, actions: Object.fromEntries([
