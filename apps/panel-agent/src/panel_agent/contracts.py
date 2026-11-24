@@ -727,6 +727,7 @@ class CalendarDisplayPreferencesResponse(BaseModel):
 
 
 OwnerFacingDeviceKey = Literal["kettle"]
+OverviewLightStripId = Literal["living-room-light-strip", "bedroom-ble-light-strip"]
 
 
 class DeviceVisibilityPatch(BaseModel):
@@ -735,6 +736,13 @@ class DeviceVisibilityPatch(BaseModel):
     expectedRevision: int = Field(ge=0, le=2_147_483_647)
     deviceKey: OwnerFacingDeviceKey
     visible: bool
+
+
+class OverviewLightStripPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expectedRevision: int = Field(ge=0, le=2_147_483_647)
+    overviewLightStripId: Optional[OverviewLightStripId]
 
 
 class DeviceVisibilityState(BaseModel):
@@ -753,6 +761,7 @@ class DeviceVisibilitySettingsResponse(BaseModel):
     revision: int = Field(ge=0)
     updatedAt: str
     devices: List[DeviceVisibilityState] = Field(default_factory=list, max_length=16)
+    overviewLightStripId: Optional[OverviewLightStripId] = None
     available: bool
     warnings: List[Literal["stored_device_visibility_unavailable"]] = Field(default_factory=list, max_length=1)
     writesEnabled: bool = False

@@ -9,12 +9,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any, Mapping
+from typing import Any, Mapping, get_args
 
 from .contracts import (
     DeviceVisibilityPatch,
     DeviceVisibilitySettingsResponse,
     DeviceVisibilityState,
+    OverviewLightStripId,
+    OverviewLightStripPatch,
     OwnerFacingDeviceKey,
 )
 
@@ -71,6 +73,7 @@ def _empty_document() -> dict[str, Any]:
         "revision": 0,
         "updatedAt": _utc_now(),
         "visibility": {},
+        "overviewLightStripId": None,
     }
 
 
@@ -97,11 +100,13 @@ class DeviceVisibilitySettingsStore:
         revision = raw.get("revision")
         updated_at = raw.get("updatedAt")
         visibility = raw.get("visibility")
+        light_strip = raw.get("overviewLightStripId")
         if (
             type(revision) is not int
             or revision < 0
             or not isinstance(updated_at, str)
             or not isinstance(visibility, dict)
+            or (light_strip is not None and light_strip not in get_args(OverviewLightStripId))
         ):
             return None
         if any(key not in _BY_KEY or type(value) is not bool for key, value in visibility.items()):
@@ -111,6 +116,7 @@ class DeviceVisibilitySettingsStore:
             "revision": revision,
             "updatedAt": updated_at,
             "visibility": dict(visibility),
+            "overviewLightStripId": light_strip,
         }
 
     def _response(self, *, document: Mapping[str, Any], available: bool, warning: bool = False) -> DeviceVisibilitySettingsResponse:
@@ -128,6 +134,7 @@ class DeviceVisibilitySettingsStore:
                 )
                 for definition in OWNER_FACING_DEVICE_REGISTRY
             ],
+            overviewLightStripId=document["overviewLightStripId"],
             available=available,
             warnings=["stored_device_visibility_unavailable"] if warning else [],
             writesEnabled=self.writes_enabled,
@@ -144,8 +151,8 @@ class DeviceVisibilitySettingsStore:
             )
         return self._response(document=canonical, available=True)
 
-    def write(self, patch: DeviceVisibilityPatch) -> DeviceVisibilitySettingsResponse:
-        if patch.deviceKey not in _BY_KEY:
+    def write(self, patch: DeviceVisibilityPatch | OverviewLightStripPatch) -> DeviceVisibilitySettingsResponse:
+        if isinstance(patch, DeviceVisibilityPatch) and patch.deviceKey not in _BY_KEY:
             raise DeviceVisibilityStoreError("device_visibility_key_unknown")
         with self._write_lock:
             current = self.read()
@@ -156,13 +163,13 @@ class DeviceVisibilitySettingsStore:
             document = {
                 **_empty_document(),
                 "revision": patch.expectedRevision + 1,
-                "visibility": {
-                    device.key: device.visible
-                    for device in current.devices
-                    if device.key != patch.deviceKey
-                },
+                "visibility": {device.key: device.visible for device in current.devices},
+                "overviewLightStripId": current.overviewLightStripId,
             }
-            document["visibility"][patch.deviceKey] = patch.visible
+            if isinstance(patch, OverviewLightStripPatch):
+                document["overviewLightStripId"] = patch.overviewLightStripId
+            else:
+                document["visibility"][patch.deviceKey] = patch.visible
             self._atomic_write(document)
             return self._response(document=document, available=True)
 

@@ -33,6 +33,7 @@ from .contracts import (
     CalendarEventMarkerStylePatch,
     CalendarDisplayPreferencesResponse,
     DeviceVisibilityPatch,
+    OverviewLightStripPatch,
     DeviceVisibilitySettingsResponse,
     CapabilityPatch,
     DashboardSnapshot,
@@ -810,7 +811,7 @@ def get_device_visibility(response: Response) -> DeviceVisibilitySettingsRespons
     response_model=DeviceVisibilitySettingsResponse,
 )
 def patch_device_visibility(
-    patch: DeviceVisibilityPatch,
+    patch: DeviceVisibilityPatch | OverviewLightStripPatch,
     response: Response,
 ) -> DeviceVisibilitySettingsResponse:
     if not _device_visibility_write_allowed():

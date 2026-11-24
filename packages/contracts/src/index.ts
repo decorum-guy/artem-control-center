@@ -731,6 +731,7 @@ export interface CalendarDisplayPreferences {
 
 /** Source-owned presentation visibility; this is intentionally not a device-management API. */
 export type OwnerFacingDeviceKey = "kettle";
+export type OverviewLightStripId = "living-room-light-strip" | "bedroom-ble-light-strip";
 
 export interface DeviceVisibilityState {
   key: OwnerFacingDeviceKey;
@@ -744,6 +745,7 @@ export interface DeviceVisibilitySettings {
   revision: number;
   updatedAt: string;
   devices: DeviceVisibilityState[];
+  overviewLightStripId: OverviewLightStripId | null;
   available: boolean;
   warnings: "stored_device_visibility_unavailable"[];
   writesEnabled: boolean;
