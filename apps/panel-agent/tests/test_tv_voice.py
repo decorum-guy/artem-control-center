@@ -132,3 +132,30 @@ def test_event_ingress_keeps_reader_free_and_drops_busy_duplicate_stale_and_tts(
         assert bridge.task is None
 
     asyncio.run(check())
+
+
+def test_youtube_scenario_aliases_share_deduplication(tmp_path):
+    async def check():
+        executor = Executor([
+            (200, {"availability": "online", "screen": "on", "apps": [{"id": "youtube"}]}),
+            (200, {"outcome": "app-open"}),
+        ])
+        bridge, _ = bridge_for(tmp_path, executor)
+        unknown = event("youtube", "unknown")
+        unknown["data"]["scenario_name"] = "Панель ТВ · YouTube другое"
+        bridge.handle(unknown)
+        assert bridge.task is None
+
+        short = event("youtube", "short")
+        short["data"]["scenario_name"] = "Панель ТВ · YouTube коротко"
+        bridge.handle(short)
+        task = bridge.task
+        assert task is not None
+        await task
+
+        bridge.handle(event("youtube", "canonical"))
+        assert bridge.task is task
+        assert executor.calls == [("status", None), ("open-app", "youtube")]
+        await bridge.close()
+
+    asyncio.run(check())

@@ -1,4 +1,4 @@
-"""Route three allow-listed HA scenario events to the installed TV executor."""
+"""Route allow-listed HA scenario events to the installed TV executor."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ SCENARIOS = {
     "Панель ТВ · Включение": "screen-on",
     "Панель ТВ · Выключение": "screen-off",
     "Панель ТВ · YouTube": "youtube",
+    "Панель ТВ · YouTube коротко": "youtube",
 }
 MAX_EVENT_AGE_SECONDS = 12
 DUPLICATE_WINDOW_SECONDS = 6
