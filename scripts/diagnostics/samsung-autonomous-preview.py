@@ -72,9 +72,10 @@ import uvicorn
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.ble_strip import build_ble_strip_router
 from panel_agent.capabilities import CapabilityOverrideStore
-from panel_agent.main import app, ble_strip, runtime, startup_lifecycle, station_playback
+from panel_agent.main import app, ble_strip, runtime, startup_lifecycle, station_playback, station_reminders
 from panel_agent.static_dashboard import install_dashboard_routes
 from panel_agent.station_playback import RECONNECT_SECONDS, StationAuthRequired
+from panel_agent.station_reminders import StationRemindersWriter
 from panel_agent.tv_api import TVExecutorClient
 from panel_agent.tv_voice import TVVoiceBridge
 
@@ -124,6 +125,13 @@ bridge = TVVoiceBridge(
     access=access, write_enabled=lambda: allowed("PANEL_WRITES_ENABLED"),
 )
 runtime.home_assistant.set_yandex_scenario_handler(bridge.handle)
+from panel_agent.main import station_reminders
+
+if station_reminders is not None:
+    station_reminders.writer = StationRemindersWriter(
+        station_reminders, access=access, write_enabled=lambda: allowed("PANEL_WRITES_ENABLED"),
+    )
+
 
 
 @app.get("/__acceptance")

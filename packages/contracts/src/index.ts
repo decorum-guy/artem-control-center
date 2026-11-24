@@ -902,12 +902,15 @@ export interface StationRetention {
 export interface StationReminderList {
   status: "loading" | "fresh" | "partial" | "stale" | "auth_required";
   observedAt: string | null;
+  canCreate?: boolean;
+  canReschedule?: boolean;
   items: {
     id: string;
     title: string;
     dueAt: string;
     timezone: string;
     repeats: boolean;
+    version?: string | null;
   }[];
 }
 

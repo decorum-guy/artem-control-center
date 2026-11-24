@@ -139,3 +139,97 @@ def test_rejects_cookie_injection_and_credential_fields():
     for cookies in ({"Session_id": "x; tracker=abc"}, {"Session_id": "x", "other": "y"}):
         with pytest.raises(ValueError):
             reminders.reminder_session(json.dumps({"client_uuid": "f" * 32, "cookies": cookies}).encode())
+
+
+def test_writer_requires_local_intent_profile_and_new_version(tmp_path, monkeypatch):
+    from panel_agent.access_policy import AccessPolicyStore
+
+    store = AccessPolicyStore(tmp_path / "access.json")
+    store.set_profile("read_only")
+    collector = reminders.StationRemindersCollector(tmp_path / "unused")
+    headers = {"Cookie": "Session_id=fixture"}
+    monkeypatch.setattr(collector, "_headers", lambda: headers)
+    collector.writer = reminders.StationRemindersWriter(
+        collector, access=lambda: store, write_enabled=lambda: True
+    )
+
+    real_client = httpx.AsyncClient
+    writes = []
+    item = {
+        **note(schedule="DTSTART;TZID=Europe/Moscow:20411201T160000"),
+        "status": "INCOMPLETE",
+    }
+
+    def yandex(request):
+        name = request.url.path.rsplit("/", 1)[-1]
+        if name == "get_calendar_notes":
+            return httpx.Response(200, json=payload(item))
+        assert name == "update_note"
+        request_note = json.loads(request.content)["note"]
+        writes.append(name)
+        assert set(request_note) == {"note_id", "status", "schedule"}
+        assert request_note["note_id"] == item["note_id"]
+        item.update(schedule=request_note["schedule"])
+        return httpx.Response(200, json={"note": {"note_id": request_note["note_id"]}})
+
+    monkeypatch.setattr(reminders.httpx, "AsyncClient",
+                        lambda **kwargs: real_client(transport=httpx.MockTransport(yandex), **kwargs))
+    app = FastAPI()
+    app.include_router(reminders.build_station_reminders_router(collector))
+    exposed = reminders.normalize_reminder_list(payload(item))[0][0]
+    endpoint = "/api/v1/station/reminders/" + exposed.id
+    intent = {"Origin": "http://localhost", "X-Panel-Intent": "station-reminders"}
+    change = {"attemptId": "78f80cdf-942e-4c61-a713-1fbfc914dfad",
+              "dueLocal": "2041-12-01T16:15", "expectedVersion": exposed.version}
+
+    with TestClient(app, base_url="http://localhost") as client:
+        assert client.patch(endpoint, json=change, headers=intent).status_code == 403
+        store.set_profile("standard")
+        assert client.patch(endpoint, json=change).status_code == 403
+        assert client.patch(endpoint, json=change, headers={**intent, "Origin": "https://unrelated.test"}).status_code == 403
+        assert client.patch(endpoint, json={**change, "expectedVersion": "c" * 64}, headers=intent).status_code == 409
+        assert not writes
+        changed = client.patch(endpoint, json=change, headers=intent)
+        assert changed.status_code == 200
+        projected, = changed.json()["items"]
+        assert projected["dueAt"] == "2041-12-01T16:15:00+03:00"
+        assert projected["version"] != exposed.version
+        assert projected["id"] == exposed.id
+        assert client.patch(endpoint, json=change, headers=intent).json()["detail"] == "already_submitted"
+        assert writes == ["update_note"]
+
+
+def test_uncertain_creation_never_repeats_the_provider_post(tmp_path, monkeypatch):
+    from panel_agent.access_policy import AccessPolicyStore
+
+    store = AccessPolicyStore(tmp_path / "access.json")
+    store.set_profile("standard")
+    collector = reminders.StationRemindersCollector(tmp_path / "unused")
+    monkeypatch.setattr(collector, "_headers", lambda: {"Cookie": "Session_id=fixture"})
+    collector.writer = reminders.StationRemindersWriter(
+        collector, access=lambda: store, write_enabled=lambda: True
+    )
+    real_client = httpx.AsyncClient
+    writes = []
+
+    def yandex(request):
+        if request.url == httpx.URL(reminders.NOTES_URL):
+            return httpx.Response(200, json=payload())
+        writes.append(json.loads(request.content)["note"])
+        raise httpx.ReadTimeout("provider result unknown", request=request)
+
+    monkeypatch.setattr(reminders.httpx, "AsyncClient",
+                        lambda **kwargs: real_client(transport=httpx.MockTransport(yandex), **kwargs))
+    app = FastAPI()
+    app.include_router(reminders.build_station_reminders_router(collector))
+    endpoint = "/api/v1/station/reminders"
+    intent = {"Origin": "http://localhost", "X-Panel-Intent": "station-reminders"}
+    change = {"attemptId": "78f80cdf-942e-4c61-a713-1fbfc914dfad",
+              "dueLocal": "2041-12-01T16:15", "title": "Тестовая запись"}
+
+    with TestClient(app, base_url="http://localhost") as client:
+        assert client.post(endpoint, json=change, headers=intent).json()["detail"] == "unconfirmed"
+        assert client.post(endpoint, json=change, headers=intent).json()["detail"] == "already_submitted"
+    assert writes == [{"title": "Тестовая запись", "doable": True, "status": "INCOMPLETE",
+                       "schedule": "DTSTART;TZID=Europe/Moscow:20411201T161500",
+                       "reminders": [{"offset_seconds": "0"}]}]

@@ -2129,7 +2129,11 @@ function ReminderRow({ reminder, sourceStatus, now, onOpen }: { reminder: Planni
   );
 }
 
-export function RemindersPage({ snapshot }: PlanningRouteProps) {
+export function RemindersPage(props: PlanningRouteProps) {
+  return <AliceRemindersSection fallback={<PlanningRemindersPage {...props} />} />;
+}
+
+function PlanningRemindersPage({ snapshot }: PlanningRouteProps) {
   const [view, setView] = useState<"upcoming" | "overdue" | "delivery">("upcoming");
   const [page, setPage] = useState(0);
   const [selectedReminder, setSelectedReminder] = useState<PlanningReminder | null>(null);
@@ -2448,7 +2452,6 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       futureAction={canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать напоминание</button> : undefined}
       testId="route-reminders"
     >
-      <AliceRemindersSection />
       <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && visibleItems.length === 0)} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
         {envelope && (
           <>

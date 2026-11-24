@@ -625,3 +625,47 @@
   padding: 0;
   list-style: none;
 }
+
+.planning-alice-reminders-heading,
+.planning-alice-reminders-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planning-alice-reminders-heading h2,
+.planning-alice-reminders-form p {
+  margin: 0;
+}
+
+.planning-alice-reminders-form {
+  display: grid;
+  gap: 16px;
+}
+
+.planning-alice-reminders-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.planning-alice-reminders-form input {
+  width: 100%;
+  min-height: 48px;
+}
+
+.planning-alice-reminders-time > label {
+  flex: 1;
+}
+
+.planning-alice-reminders-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.planning-alice-reminders-presets button[aria-pressed="true"] {
+  border-color: var(--cc-accent);
+  color: var(--cc-accent);
+}

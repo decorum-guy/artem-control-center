@@ -67,7 +67,7 @@ from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
 from .ble_strip import ADDRESS as BLE_ADDRESS, BleStripManager, build_ble_strip_router
 from .station_playback import StationPlaybackCollector, StationPlaybackSettings, build_station_playback_router
-from .station_reminders import StationRemindersCollector, build_station_reminders_router
+from .station_reminders import StationRemindersCollector, StationRemindersWriter, build_station_reminders_router
 from .station_retention import configured_retention
 from .station_actions import StationActionExecutor, build_station_action_router
 from .snapshot import SnapshotPublisher
@@ -379,6 +379,13 @@ if MODE != "production":
     ))
 app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(build_station_playback_router(station_playback))
+if MODE == "production" and station_reminders is not None:
+    station_reminders.writer = StationRemindersWriter(
+        station_reminders, access=lambda: access_policy,
+        write_enabled=lambda: SETTINGS.writes_enabled
+        and startup_lifecycle.phase == "ready"
+        and os.getenv("PANEL_STATION_REMINDER_WRITES_ENABLED", "").strip().lower() == "true",
+    )
 app.include_router(build_station_reminders_router(station_reminders))
 if ble_strip is not None and MODE == "production":
     app.include_router(build_ble_strip_router(
