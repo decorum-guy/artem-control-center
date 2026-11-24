@@ -7,6 +7,7 @@ on:
       - codex/samsung-autonomous-2026-11-24
       - codex/current-track-youtube-music
       - codex/youtube-music-release
+      - codex/google-login-overview-strip
   push:
     branches: [main]
   workflow_dispatch:
@@ -362,6 +363,16 @@ jobs:
           B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
           ISSUE_116_ARTIFACT_DIR: artifacts/issue-116-owner-copy-review
         run: npm run test:e2e -- tests/e2e/issue-116-owner-facing-copy.spec.ts
+
+      - name: Validate native Alice reminder form and quiet synchronization
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_V3_VISUAL_SKIN: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+          B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/b4-planning-reminders.spec.ts
 
       - name: Run focused PR9 Planning foundation gate
         if: runner.os == 'Linux'

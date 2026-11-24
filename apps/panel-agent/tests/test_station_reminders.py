@@ -141,7 +141,8 @@ def test_rejects_cookie_injection_and_credential_fields():
             reminders.reminder_session(json.dumps({"client_uuid": "f" * 32, "cookies": cookies}).encode())
 
 
-def test_writer_requires_local_intent_profile_and_new_version(tmp_path, monkeypatch):
+@pytest.mark.parametrize("changed_route", [None, "origin", "home", "zero_offset_encoding"])
+def test_writer_requires_local_intent_profile_and_unchanged_delivery(tmp_path, monkeypatch, changed_route):
     from panel_agent.access_policy import AccessPolicyStore
 
     store = AccessPolicyStore(tmp_path / "access.json")
@@ -157,8 +158,9 @@ def test_writer_requires_local_intent_profile_and_new_version(tmp_path, monkeypa
     writes = []
     item = {
         **note(schedule="DTSTART;TZID=Europe/Moscow:20411201T160000"),
-        "status": "INCOMPLETE",
+        "status": "INCOMPLETE", "is_personal": True, "public_home_ids": [],
     }
+    item["reminders"][0]["play_settings"] = {"send_push": {"state": "Enabled"}}
 
     def yandex(request):
         name = request.url.path.rsplit("/", 1)[-1]
@@ -170,6 +172,12 @@ def test_writer_requires_local_intent_profile_and_new_version(tmp_path, monkeypa
         assert set(request_note) == {"note_id", "status", "schedule"}
         assert request_note["note_id"] == item["note_id"]
         item.update(schedule=request_note["schedule"])
+        if changed_route == "origin":
+            item["reminders"][0].pop("origin_device_id")
+        elif changed_route == "home":
+            item.update(is_personal=False, public_home_ids=["other-home"])
+        elif changed_route == "zero_offset_encoding":
+            item["reminders"][0]["offset_seconds"] = 0
         return httpx.Response(200, json={"note": {"note_id": request_note["note_id"]}})
 
     monkeypatch.setattr(reminders.httpx, "AsyncClient",
@@ -190,7 +198,12 @@ def test_writer_requires_local_intent_profile_and_new_version(tmp_path, monkeypa
         assert client.patch(endpoint, json={**change, "expectedVersion": "c" * 64}, headers=intent).status_code == 409
         assert not writes
         changed = client.patch(endpoint, json=change, headers=intent)
-        assert changed.status_code == 200
+        if changed_route in {"origin", "home"}:
+            assert changed.status_code == 502 and changed.json()["detail"] == "unconfirmed"
+            assert client.patch(endpoint, json=change, headers=intent).json()["detail"] == "already_submitted"
+            assert writes == ["update_note"]
+            return
+        assert changed.status_code == 200 and "private-device-id" not in changed.text
         projected, = changed.json()["items"]
         assert projected["dueAt"] == "2041-12-01T16:15:00+03:00"
         assert projected["version"] != exposed.version

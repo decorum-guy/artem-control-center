@@ -7,6 +7,7 @@ on:
       - codex/samsung-autonomous-2026-11-24
       - codex/current-track-youtube-music
       - codex/youtube-music-release
+      - codex/google-login-overview-strip
   workflow_dispatch:
 
 permissions:
