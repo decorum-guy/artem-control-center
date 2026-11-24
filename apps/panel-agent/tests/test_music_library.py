@@ -7,6 +7,7 @@ from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.music_library import MusicLibrary, PlaySelection
 from panel_agent.music_library_types import Continuation, Playlist, ProviderPage, Recording
 from panel_agent.youtube_library_credentials import capture_headers
+from panel_agent.youtube_music import MusicUnavailable
 
 TRACK = Recording("12345", "Studio song", ("Artist",), "Record", 180)
 
@@ -126,3 +127,89 @@ def test_browser_capture_accepts_only_the_music_origin_and_required_headers():
     assert b"content-length" not in parsed
     with pytest.raises(ValueError):
         capture_headers(body.replace(b"music.youtube.com", b"www.youtube.com"))
+
+
+class LargeSource(Source):
+    async def catalog(self, continuation):
+        return ProviderPage(tuple(Playlist(key, key, "playlist") for key in ("A", "B", "C", "D")))
+
+    async def tracks(self, source, continuation):
+        count = 2400 if source == "A" else 2200
+        start = int(continuation.value) if continuation else 0
+        end = min(start + 100, count)
+        return ProviderPage(
+            tuple(Recording(str(index + 1), f"Track {index}", ("Artist",)) for index in range(start, end)),
+            Continuation(end, "tracks") if end < count else None,
+        )
+
+
+def test_playing_a_visible_row_survives_repeated_page_and_row_eviction(tmp_path, monkeypatch):
+    monkeypatch.setattr("panel_agent.music_library.PAGE_CACHE", 22)
+    async def run():
+        library, _, station = setup(tmp_path)
+        library.feeds["yandex"].provider = LargeSource()
+
+        async def collect(source):
+            page = first = await library.page("yandex", source, None)
+            while page["next"]:
+                page = await library.page("yandex", source, page["next"])
+            return first
+
+        await library.page("yandex", "", None)
+        first = await collect("A")
+        row = first["items"][0]["key"]
+        selection = PlaySelection(generation=first["generation"], source="A", row=row)
+        for other in ("B", "C", "D"):
+            await collect(other)
+            assert ("A", None) not in library.feeds["yandex"].pages
+            again = await library.page("yandex", "A", None)
+            assert (await library.play("yandex", selection))["stationTrackId"] == "1"
+            assert (await library.play("yandex", selection.model_copy(update={"row": again["items"][0]["key"]})))["stationTrackId"] == "1"
+        for denied in (selection.model_copy(update={"source": "B"}),
+                       selection.model_copy(update={"row": row[:-1] + ("0" if row[-1] != "0" else "1")})):
+            with pytest.raises(HTTPException, match="row_expired"):
+                await library.play("yandex", denied)
+        assert station.sent == ["1"] * 6
+
+    asyncio.run(run())
+
+
+def test_catalog_refresh_replaces_names_and_invalidates_old_continuations(tmp_path):
+    async def run():
+        library, source, _ = setup(tmp_path)
+        source.catalog = original_catalog
+
+        first = await library.page("yandex", "", None)
+        assert first["next"]
+        await library.page("yandex", "", first["next"])
+        source.catalog = interrupted_catalog
+        with pytest.raises(HTTPException, match="source_unavailable"):
+            await library.page("yandex", "", None, refresh=True)
+        assert (await library.page("yandex", "", None)) is first
+
+        source.catalog = changed_catalog
+        fresh = await library.page("yandex", "", None, refresh=True)
+        assert [(row["key"], row["title"]) for row in fresh["items"]] == [
+            ("A", "Renamed"), ("C", "Created"), ("D", "Second page"),
+        ]
+        assert fresh["next"] is None
+        with pytest.raises(HTTPException, match="page_expired"):
+            await library.page("yandex", "", first["next"])
+        with pytest.raises(HTTPException, match="unknown_playlist"):
+            await library.page("yandex", "B", None)
+
+    async def original_catalog(continuation):
+        return (ProviderPage((Playlist("B", "Removed", "playlist"),)) if continuation
+                else ProviderPage((Playlist("A", "Original", "playlist"),), Continuation("old", "catalog")))
+
+    async def interrupted_catalog(continuation):
+        if continuation:
+            raise MusicUnavailable
+        return ProviderPage((Playlist("C", "Partial", "playlist"),), Continuation("new", "catalog"))
+
+    async def changed_catalog(continuation):
+        return (ProviderPage((Playlist("D", "Second page", "playlist"),)) if continuation
+                else ProviderPage((Playlist("A", "Renamed", "playlist"), Playlist("C", "Created", "playlist")),
+                                  Continuation("new", "catalog")))
+
+    asyncio.run(run())

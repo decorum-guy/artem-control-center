@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
+import hmac
+import json
 import re
+import secrets
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -18,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .access_policy import AccessPolicyStore
-from .music_library_types import Continuation, Playlist, Recording
+from .music_library_types import Continuation, Playlist, ProviderPage, Recording
 from .music_matching import Candidate, Track, match
 from .station_playback import StationPlaybackCollector
 from .yandex_library import YandexLibrary
@@ -34,6 +38,9 @@ ARTWORK_HOSTS = {
 }
 PAGE_CACHE = 112
 CURSOR_CACHE = 220
+CATALOG_LIMIT = 500
+CATALOG_PAGES = 16
+MAX_ROW_KEY = 18_000
 
 
 def keep(mapping: OrderedDict, key, value, size: int) -> None:
@@ -48,20 +55,20 @@ class Feed:
         self.provider = provider
         self.version = None
         self.generation = uuid4().hex
+        self.row_signing_key = secrets.token_bytes(32)
         self.status = "auth_required" if provider else "not_configured"
         self.lock = asyncio.Lock()
         self.waiters = 0
         self.pages: OrderedDict[tuple[str, str | None], dict] = OrderedDict()
         self.sources: OrderedDict[str, Playlist] = OrderedDict()
-        self.rows: OrderedDict[str, tuple[str, Recording]] = OrderedDict()
         self.cursors: OrderedDict[str, tuple[str, Continuation]] = OrderedDict()
 
     def invalidate(self, status: str) -> None:
         self.generation = uuid4().hex
+        self.row_signing_key = secrets.token_bytes(32)
         self.status = status
         self.pages.clear()
         self.sources.clear()
-        self.rows.clear()
         self.cursors.clear()
         if self.provider:
             self.provider.reset()
@@ -72,6 +79,34 @@ class Feed:
             self.version = version
             self.invalidate("connecting" if version else "auth_required")
         return self.generation
+
+    def row_key(self, source: str, row: Recording) -> str:
+        # Each position stays distinct, including repeated tracks in a playlist.
+        fields = (uuid4().hex, source, row.track_id, row.title, row.artists, row.album,
+                  row.duration, row.playable, row.explicit)
+        payload = base64.urlsafe_b64encode(json.dumps(fields, ensure_ascii=False, separators=(",", ":")).encode()).rstrip(b"=")
+        proof = hmac.new(self.row_signing_key, payload, "sha256").hexdigest()
+        return f"{payload.decode()}.{proof}"
+
+    def resolve_row(self, source: str, key: str) -> Recording:
+        payload, _, proof = key.encode().partition(b".")
+        expected = hmac.new(self.row_signing_key, payload, "sha256").hexdigest().encode()
+        if not hmac.compare_digest(expected, proof) or source not in self.sources:
+            raise HTTPException(409, "row_expired")
+        _, issued_source, track, title, artists, album, duration, playable, explicit = json.loads(
+            base64.urlsafe_b64decode(payload + b"=" * (-len(payload) % 4))
+        )
+        if issued_source != source:
+            raise HTTPException(409, "row_expired")
+        return Recording(track, title, tuple(artists), album, duration, playable=playable, explicit=explicit)
+
+    def discard_pages(self, source: str) -> None:
+        for key in tuple(self.pages):
+            if key[0] == source:
+                del self.pages[key]
+        for key, entry in tuple(self.cursors.items()):
+            if entry[0] == source:
+                del self.cursors[key]
 
 
 class Artwork:
@@ -139,7 +174,7 @@ class PlaySelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     generation: str = Field(pattern=r"^[a-f0-9]{32}$")
     source: str = Field(min_length=1, max_length=148, pattern=r"^[a-zA-Z0-9_-]+$")
-    row: str = Field(pattern=r"^[a-f0-9]{32}$")
+    row: str = Field(min_length=32, max_length=MAX_ROW_KEY, pattern=r"^[a-zA-Z0-9_.-]+$")
     choice: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
@@ -175,7 +210,8 @@ class MusicLibrary:
     def status(self, provider: Provider) -> dict:
         feed = self.feeds[provider]
         return {"generation": feed.sync(), "status": feed.status, "canPlay": self.can_play(),
-                "likedRevision": self.liked_revision if provider == "youtube" else 0}
+                "likedRevision": self.liked_revision if provider == "youtube" else 0,
+                "yandexGeneration": self.feeds["yandex"].sync()}
 
     async def page(self, provider: Provider, source: str, cursor: str | None, refresh: bool = False) -> dict:
         feed = self.feeds[provider]
@@ -191,19 +227,21 @@ class MusicLibrary:
             async with feed.lock:
                 if feed.sync() != epoch:
                     raise HTTPException(409, "account_changed")
+                if cursor and (cursor not in feed.cursors or feed.cursors[cursor][0] != source):
+                    raise HTTPException(409, "page_expired")
+                if source and source not in feed.sources:
+                    raise HTTPException(404, "unknown_playlist")
                 key = (source, cursor)
                 cached = feed.pages.get(key)
                 if cached and not refresh:
                     feed.pages.move_to_end(key)
                     return cached
-                if cursor and (cursor not in feed.cursors or feed.cursors[cursor][0] != source):
-                    raise HTTPException(409, "page_expired")
-                if source and source not in feed.sources:
-                    raise HTTPException(404, "unknown_playlist")
                 continuation = feed.cursors[cursor][1] if cursor else None
                 try:
                     if source:
                         page = await feed.provider.tracks(source, continuation)
+                    elif refresh:
+                        page = await self._refresh_catalog(feed.provider)
                     else:
                         page = await feed.provider.catalog(continuation)
                 except MusicAuthRequired as exc:
@@ -215,15 +253,16 @@ class MusicLibrary:
                     raise HTTPException(503, "source_unavailable") from exc
                 if feed.sync() != epoch:
                     raise HTTPException(409, "account_changed")
-                if len(page.rows) > 220 or (continuation is not None and page.continuation == continuation):
+                limit = CATALOG_LIMIT if refresh and not source else 220
+                if len(page.rows) > limit or (continuation is not None and page.continuation == continuation):
                     raise HTTPException(503, "invalid_page")
                 if refresh:
-                    for entry in tuple(feed.pages):
-                        if entry[0] == source:
-                            del feed.pages[entry]
-                    for handle, entry in tuple(feed.cursors.items()):
-                        if entry[0] == source:
-                            del feed.cursors[handle]
+                    feed.discard_pages(source)
+                    if not source:
+                        refreshed = {row.key for row in page.rows if isinstance(row, Playlist)}
+                        for removed in feed.sources.keys() - refreshed:
+                            feed.discard_pages(removed)
+                        feed.sources.clear()
                 items = [self._project(provider, feed, source, row) for row in page.rows]
                 next_page = uuid4().hex if page.continuation else None
                 if next_page:
@@ -236,13 +275,39 @@ class MusicLibrary:
         finally:
             feed.waiters -= 1
 
+    @staticmethod
+    async def _refresh_catalog(provider: YandexLibrary | YouTubeLibrary) -> ProviderPage:
+        playlists: dict[str, Playlist] = {}
+        continuation = None
+        seen: set[Continuation] = set()
+        try:
+            async with asyncio.timeout(20):
+                for _ in range(CATALOG_PAGES):
+                    page = await provider.catalog(continuation)
+                    for row in page.rows:
+                        if isinstance(row, Playlist):
+                            playlists[row.key] = row
+                    if len(playlists) > CATALOG_LIMIT:
+                        break
+                    continuation = page.continuation
+                    if continuation is None:
+                        return ProviderPage(tuple(playlists.values()))
+                    if continuation in seen:
+                        break
+                    seen.add(continuation)
+        except TimeoutError as exc:
+            raise MusicUnavailable from exc
+        # Only a complete catalogue may replace known sources.
+        raise MusicUnavailable
+
     def _project(self, provider: Provider, feed: Feed, source: str, row: Playlist | Recording) -> dict:
         artwork = self.art.register(provider, feed.generation, row.artwork)
         if isinstance(row, Playlist):
-            keep(feed.sources, row.key, row, 500)
+            keep(feed.sources, row.key, row, CATALOG_LIMIT)
             return {"key": row.key, "title": row.title, "kind": row.kind, "cover": artwork, "count": row.count}
-        key = uuid4().hex
-        keep(feed.rows, key, (source, row), 4500)
+        key = feed.row_key(source, row)
+        if len(key) > MAX_ROW_KEY:
+            return {**self._track_dict(row, uuid4().hex, artwork), "playable": False}
         return self._track_dict(row, key, artwork)
 
     @staticmethod
@@ -258,16 +323,14 @@ class MusicLibrary:
         feed = self.feeds[provider]
         if feed.sync() != request.generation:
             raise HTTPException(409, "account_changed")
-        source_row = feed.rows.get(request.row)
-        if not source_row or source_row[0] != request.source:
-            raise HTTPException(409, "row_expired")
-        row = source_row[1]
+        row = feed.resolve_row(request.source, request.row)
         if not row.track_id or not row.playable or self.yandex is None:
             return {"status": "unavailable"}
         ya_feed = self.feeds["yandex"]
         ya_epoch = ya_feed.sync()
         def permitted():
-            return (self.can_play() and feed.sync() == request.generation and ya_feed.sync() == ya_epoch)
+            return (self.can_play() and feed.sync() == request.generation and request.source in feed.sources
+                    and ya_feed.sync() == ya_epoch)
 
         try:
             async with self.play_lock:
@@ -302,7 +365,10 @@ class MusicLibrary:
                 if provider == "youtube" and outcome in {"playing", "already_playing"} and permitted():
                     keep(self.matches, match_key, target, 128)
                 self.access().audit_capability(PLAY_CAPABILITY, result=outcome)
-                return {"status": outcome, "stationTrackId": target if outcome in {"playing", "already_playing"} else None}
+                result = {"status": outcome, "stationTrackId": target if outcome in {"playing", "already_playing"} else None}
+                if provider == "youtube":
+                    result["yandexGeneration"] = ya_epoch
+                return result
         except MusicAuthRequired:
             return {"status": "auth_required"}
         except MusicUnavailable:
@@ -344,9 +410,10 @@ def build_music_library_router(library: MusicLibrary) -> APIRouter:
         return library.status(provider)
 
     @router.get("/{provider}/catalog")
-    async def catalog(provider: Provider, response: Response, cursor: str | None = None):
+    async def catalog(provider: Provider, response: Response, cursor: str | None = None,
+                      refresh: bool = False):
         response.headers["Cache-Control"] = "no-store"
-        return await library.page(provider, "", cursor)
+        return await library.page(provider, "", cursor, refresh and cursor is None)
 
     @router.get("/{provider}/tracks/{source}")
     async def tracks(provider: Provider, response: Response, source: str, cursor: str | None = None,
