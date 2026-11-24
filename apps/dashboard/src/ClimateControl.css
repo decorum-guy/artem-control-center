@@ -65,3 +65,8 @@
   .climate-control { padding: 12px 12px 18px; }
   .climate-control__controls { gap: 8px; }
 }
+
+.climate-control__select-label[aria-busy="true"] > span::after {
+  content: " · …";
+  color: var(--cc-accent, currentColor);
+}

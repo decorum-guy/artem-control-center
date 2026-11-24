@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ServiceSnapshot } from "@artem/contracts";
 import { AccessProvider } from "./AccessControls";
-import { ClimateControl } from "./ClimateControl";
+import { ClimateControl, coalesceClimate } from "./ClimateControl";
+import { HOME_CLIMATE_POWER_OFF, HOME_CLIMATE_SET_FAN_MODE, HOME_CLIMATE_SET_MODE, HOME_CLIMATE_SET_TEMPERATURE } from "./homeAssistantControlApi";
 import { InteractionLockProvider } from "./InteractionLock";
 import { NoticeCenterProvider } from "./NoticeCenter";
 
@@ -80,5 +81,17 @@ describe("ClimateControl compact presentation", () => {
 
   it("does not add an integration kicker to the Overview header", () => {
     expect(markup(climate(), "overview")).not.toContain("Дом · Home Assistant");
+  });
+});
+
+describe("climate waiting intentions", () => {
+  it("keeps different parameters and discards commands behind a new shutdown", () => {
+    const temperature = (value: number) => ({ id: HOME_CLIMATE_SET_TEMPERATURE, temperature: value });
+    const fan = { id: HOME_CLIMATE_SET_FAN_MODE, fanMode: "two" as const };
+    const mode = { id: HOME_CLIMATE_SET_MODE, mode: "heat" as const };
+    const off = { id: HOME_CLIMATE_POWER_OFF };
+    expect(coalesceClimate([temperature(21), fan], temperature(24))).toEqual([fan, temperature(24)]);
+    expect(coalesceClimate([temperature(21), mode], temperature(24))).toEqual([temperature(21), mode, temperature(24)]);
+    expect(coalesceClimate([fan, temperature(24), mode], off)).toEqual([off]);
   });
 });

@@ -1354,3 +1354,36 @@ def test_light_strip_rejects_unadvertised_effect_and_invalid_values(tmp_path: Pa
         run(executor.execute(request("home.light_strip.set_effect", effect="Unknown")))
     assert failure.value.detail == "ha_invalid_state"
     assert server.calls == []
+
+
+def test_climate_revoked_profile_is_rechecked_after_queued_wait(tmp_path):
+    stub, _, policy, executor = make_stack(tmp_path)
+
+    async def verify():
+        async with executor._lock_for("home.climate.set_mode"):
+            queued = asyncio.create_task(executor.execute(request("home.climate.set_mode", mode="cool")))
+            await asyncio.sleep(0)
+            assert not queued.done()
+            policy.set_profile("read_only")
+        with pytest.raises(HTTPException) as rejected:
+            await queued
+        assert rejected.value.detail == "profile_blocked"
+        assert stub.calls == []
+
+    asyncio.run(verify())
+
+
+def test_climate_rechecks_before_post_after_fresh_read(tmp_path):
+    stub, _, policy, executor = make_stack(tmp_path)
+    fresh = executor._fresh
+
+    async def revoke(entity_id):
+        state = await fresh(entity_id)
+        policy.set_profile("read_only")
+        return state
+
+    executor._fresh = revoke
+    with pytest.raises(HTTPException) as rejected:
+        asyncio.run(executor.execute(request("home.climate.set_temperature", temperature=24)))
+    assert rejected.value.detail == "profile_blocked"
+    assert stub.calls == []
