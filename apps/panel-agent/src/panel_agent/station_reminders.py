@@ -388,7 +388,7 @@ class StationRemindersCollector:
             return self.state
         return self.state.model_copy(update={
             "canCreate": self.writer.allowed(CREATE_CAPABILITY),
-            "voiceTargetConfigured": self.writer.device_id is not None,
+            "voiceTargetConfigured": self.writer.has_voice_target,
             "canReschedule": self.writer.allowed(EDIT_CAPABILITY),
         })
 
@@ -464,16 +464,22 @@ class StationRemindersWriter:
         self, collector: StationRemindersCollector, *, access: Callable[[], AccessPolicyStore],
         write_enabled: Callable[[], bool],
         device_id: str = "",
+        home_id: str = "",
     ) -> None:
         self.collector = collector
         self.device_id = device_id if re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", device_id) else None
+        self.home_id = home_id if re.fullmatch(r"[a-zA-Z0-9_-]{1,128}", home_id) else None
         self.access = access
         self.write_enabled = write_enabled
         self._attempts: deque[UUID] = deque(maxlen=128)
         self._busy = asyncio.Lock()
 
+    @property
+    def has_voice_target(self) -> bool:
+        return self.device_id is not None and self.home_id is not None
+
     def allowed(self, capability: str) -> bool:
-        return (capability != CREATE_CAPABILITY or self.device_id is not None) and self.access().authorize(
+        return (capability != CREATE_CAPABILITY or self.has_voice_target) and self.access().authorize(
             capability, gate_enabled=self.write_enabled(),
         ).allowed
 
@@ -484,7 +490,7 @@ class StationRemindersWriter:
             if not _local_intent(request):
                 raise HTTPException(403, "local_panel_required")
             self.access().require(capability, gate_enabled=self.write_enabled())
-            if capability == CREATE_CAPABILITY and self.device_id is None:
+            if capability == CREATE_CAPABILITY and not self.has_voice_target:
                 raise HTTPException(409, "voice_target_required")
             if self._busy.locked():
                 raise HTTPException(409, "busy")
@@ -518,12 +524,9 @@ class StationRemindersWriter:
                     else:
                         path = "create_note"
                         voice = {"play_location": {"selected_devices": {"selected_device_ids": [self.device_id]}}}
-                        reminder = {"offset_seconds": "0", "play_settings": voice}
-                        identity_header = session.headers.get("X-Ya-Uuid")
-                        if identity_header:
-                            reminder["origin_device_id"] = identity_header
                         note = {"title": change.title, "doable": True, "status": "INCOMPLETE",
-                                "schedule": schedule, "reminders": [reminder]}
+                                "schedule": schedule, "is_personal": False, "public_home_ids": [self.home_id],
+                                "reminders": [{"offset_seconds": "0", "play_settings": voice}]}
                     self.access().require(capability, gate_enabled=self.write_enabled())
                     if not self.collector.is_current(session):
                         raise HTTPException(409, "auth_required")
@@ -567,7 +570,10 @@ class StationRemindersWriter:
                     playback = _playback_settings(latest)
                     if path == "create_note":
                         expected_voice = note["reminders"][0]["play_settings"]["play_location"]
-                        if len(playback) == 1 and isinstance(playback[0], dict) and playback[0].get("play_location") == expected_voice:
+                        if (len(playback) == 1 and isinstance(playback[0], dict)
+                                and playback[0].get("play_location") == expected_voice
+                                and latest.get("is_personal") is False
+                                and latest.get("public_home_ids") == [self.home_id]):
                             return
                     elif playback == expected_playback:
                         return

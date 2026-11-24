@@ -134,7 +134,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
     await unlockTouchLockIfNeeded(page);
     const section = page.getByTestId("alice-reminders");
     const empty = page.getByTestId("alice-reminders-empty");
-    const status = section.getByRole("status");
+    const status = section.locator("[role=status]");
     const add = section.getByRole("button", { name: "Добавить" });
     await expect(empty).toHaveText("Активных напоминаний Алисы нет.");
     const position = async (target: typeof empty) => target.evaluate((el) => el.getBoundingClientRect().top);

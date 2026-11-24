@@ -120,6 +120,8 @@ function ReminderEditor({ item, writable, onClose, onSave }: {
               onChange={(event) => { setTime(event.target.value); setSelectedPreset(null); }} />
           </label>
         </div>
+        {!item && <p className="planning-route-note">Напоминание прозвучит на выбранной Станции и будет видно участникам дома.</p>}
+        {!writable && <p role="status" className="planning-route-note">Храним введённые данные. Сохранение временно недоступно.</p>}
         {error && <p role="alert">{error}</p>}
         <button type="submit" className="planning-primary-button" aria-disabled={!writable || undefined}
           disabled={saving || unconfirmed || !title.trim()}>
