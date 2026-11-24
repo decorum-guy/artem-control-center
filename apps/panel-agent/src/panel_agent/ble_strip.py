@@ -107,6 +107,7 @@ class BleStripManager:
         self.checked_at: str | None = None
         self._probe: asyncio.Task | None = None
         self._wake = asyncio.Event()
+        self._next_probe_at = 0.0
 
     def start(self) -> None:
         if self._probe is None:
@@ -126,23 +127,24 @@ class BleStripManager:
             await self.changed()
 
     async def _watch(self) -> None:
+        clock = asyncio.get_running_loop().time
         while True:
             async with self.lock:
                 self._wake.clear()
-                try:
-                    await self.transport(self.address, None, lambda: None)
-                except Exception:
-                    await self._link(False)
-                else:
-                    await self._link(True)
-            delay = HEALTHY_PROBE_SECONDS if self.available else RETRY_SECONDS
+                if clock() >= self._next_probe_at:
+                    try:
+                        await self.transport(self.address, None, lambda: None)
+                    except Exception:
+                        await self._link(False)
+                    else:
+                        await self._link(True)
+                    delay = HEALTHY_PROBE_SECONDS if self.available else RETRY_SECONDS
+                    self._next_probe_at = clock() + delay
+                delay = max(0.0, self._next_probe_at - clock())
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=delay)
             except TimeoutError:
                 pass
-            else:
-                # The previous command failed; leave the controller time to recover.
-                await asyncio.sleep(RETRY_SECONDS)
 
     async def command(self, command: BleStripCommand, allow: Callable[[bool], None]) -> dict:
         allow(self.lock.locked())
@@ -152,6 +154,7 @@ class BleStripManager:
             except HTTPException:
                 raise
             except Exception:
+                self._next_probe_at = asyncio.get_running_loop().time() + RETRY_SECONDS
                 await self._link(False)
                 self._wake.set()
                 raise

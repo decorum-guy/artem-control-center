@@ -80,6 +80,13 @@ class SnapshotPublisher:
             self._lock_loop = loop
         async with self._lock:
             if self._snapshot is not None and fingerprint == self._fingerprint:
+                # BLE probes can advance their observation without changing the
+                # published content or waking SSE subscribers.
+                observed = {service.id: service.data.get("observedAt") for service in services
+                            if service.dataContract == "home.light-strip.v1" and service.data.get("provider") == "ble"}
+                for service in self._snapshot.services:
+                    if service.id in observed:
+                        service.data["observedAt"] = observed[service.id]
                 snapshot = self.snapshot
                 assert snapshot is not None
                 return snapshot

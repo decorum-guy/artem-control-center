@@ -113,3 +113,60 @@ def test_controller_gate_rejection_does_not_mark_link_down():
         assert manager.available
 
     asyncio.run(scenario())
+
+
+def test_probe_waiting_for_command_respects_new_retry_deadline(monkeypatch):
+    monkeypatch.setattr(ble_strip, "RETRY_SECONDS", 0.08)
+
+    async def run():
+        attempted = asyncio.Event()
+        release = asyncio.Event()
+        probed = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        timestamps = {}
+
+        async def transport(_address, packet, _allow):
+            if packet is not None:
+                attempted.set()
+                await release.wait()
+                timestamps["failed"] = loop.time()
+                raise DeliveryUncertain()
+            timestamps.setdefault("probe", loop.time())
+            probed.set()
+
+        manager = BleStripManager(TARGET, transport=transport)
+        command = asyncio.create_task(manager.command(BleStripCommand(operation="off"), lambda _busy: None))
+        await attempted.wait()
+        manager.start()
+        await asyncio.sleep(0)
+        release.set()
+        try:
+            with pytest.raises(DeliveryUncertain):
+                await command
+            await asyncio.wait_for(probed.wait(), 1)
+            assert timestamps["probe"] - timestamps["failed"] >= ble_strip.RETRY_SECONDS
+        finally:
+            await manager.close()
+
+    asyncio.run(run())
+
+
+def test_ble_probes_refresh_snapshot_without_revision_or_event(monkeypatch):
+    from panel_agent.snapshot import SnapshotPublisher
+
+    async def run():
+        manager = BleStripManager(TARGET)
+        publisher = SnapshotPublisher(mode="read_only", services_builder=lambda: [manager.snapshot()])
+        manager.changed = publisher.rebuild
+        await manager._link(True)
+        first = publisher.snapshot
+        assert first and first.services[0].data["observedAt"]
+        async with publisher.subscribe() as queue:
+            await asyncio.sleep(0.002)
+            await manager._link(True)
+            latest = publisher.snapshot
+            assert latest and latest.revision == first.revision
+            assert latest.services[0].data["observedAt"] > first.services[0].data["observedAt"]
+            assert queue.empty()
+
+    asyncio.run(run())
