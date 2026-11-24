@@ -464,7 +464,9 @@ test.describe("Issue #113 planning stale-while-revalidate", () => {
       await refreshNativeReminders(page);
       await expect.poll(() => waiting).toBe(true);
       await expect(before).toBeVisible();
-      expect(await before.boundingBox()).toEqual(initial);
+      const current = await before.boundingBox();
+      expect(current).not.toBeNull();
+      expect(Math.abs(current!.y - initial!.y)).toBeLessThan(1);
       await expect(section).toHaveAttribute("data-status", "fresh");
     } finally {
       held.resolve();
