@@ -74,7 +74,7 @@ from panel_agent.ble_strip import build_ble_strip_router
 from panel_agent.capabilities import CapabilityOverrideStore
 from panel_agent.main import app, ble_strip, runtime, startup_lifecycle, station_playback
 from panel_agent.static_dashboard import install_dashboard_routes
-from panel_agent.station_playback import RECONNECT_SECONDS, StationAuthRequired, StationReplyUnavailable
+from panel_agent.station_playback import RECONNECT_SECONDS, StationAuthRequired
 from panel_agent.tv_api import TVExecutorClient
 from panel_agent.tv_voice import TVVoiceBridge
 
@@ -153,18 +153,7 @@ async def serve():
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=PORT, proxy_headers=False, access_log=False))
 
     async def maintenance():
-        probe = ROOT / "read-reminders-once"
         while time.time() < min(STARTED + FINAL_HOURS * 3600, lease["expiresAt"]) and not (ROOT / "stop").exists():
-            if probe.is_file():
-                probe.unlink()
-                try:
-                    response = await station_playback.request_reminder_list()
-                    safe = {field: type(response[field]).__name__ for field in
-                            ("card", "cards", "output_speech", "text", "is_streaming") if field in response}
-                    result = {"result": "response_envelope", "knownFields": safe}
-                except StationReplyUnavailable:
-                    result = {"result": "no_correlated_content"}
-                (ROOT / "reminder-check.json").write_text(json.dumps(result), encoding="utf-8")
             await asyncio.sleep(1)
         server.should_exit = True
 
