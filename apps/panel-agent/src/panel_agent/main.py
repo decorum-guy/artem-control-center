@@ -311,6 +311,8 @@ if MODE in {"production", "read_only"} and os.getenv("PANEL_MUSIC_LIBRARY_ENABLE
         and _write_allowed(SETTINGS.alice_station_actions_enabled),
         paired_track=music_save.paired_track if music_save else lambda _: None,
     )
+    if music_save is not None:
+        music_save.on_new_like = music_library.invalidate_youtube_likes
 
 system_controls = WindowsSystemControls()
 backup_source = PanelConfigSource.from_store_paths(

@@ -57,6 +57,7 @@ class MusicSave:
         self.station, self.provider, self.target = station, provider, target
         self.access, self.writes, self.clock = access, writes, clock
         self.feedback = feedback
+        self.on_new_like: Callable[[], None] | None = None
         self.session: MusicSession | None = None
         self.operation: Operation | None = None
         self.task: asyncio.Task | None = None
@@ -213,6 +214,8 @@ class MusicSave:
         self.provider.require_current(session)
         state = "already_in_music" if already_liked and in_music else "in_music" if in_music else "youtube_like"
         self._state(op, state)
+        if not already_liked and self.on_new_like is not None:
+            self.on_new_like()
         self.access().audit_capability(CAPABILITY, result=state)
         if op.track.source_id:
             key = (session.generation, op.track.source_id)

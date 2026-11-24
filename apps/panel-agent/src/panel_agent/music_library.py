@@ -163,13 +163,19 @@ class MusicLibrary:
         self.play_lock = asyncio.Lock()
         self.choices: OrderedDict[str, Options] = OrderedDict()
         self.matches: OrderedDict[tuple[str, str, str], str] = OrderedDict()
+        self.liked_revision = 0
+
+    def invalidate_youtube_likes(self) -> None:
+        self.liked_revision += 1
+        self.feeds["youtube"].pages.pop(("LM", None), None)
 
     def can_play(self) -> bool:
         return self.access().authorize(PLAY_CAPABILITY, gate_enabled=self.writes()).allowed
 
     def status(self, provider: Provider) -> dict:
         feed = self.feeds[provider]
-        return {"generation": feed.sync(), "status": feed.status, "canPlay": self.can_play()}
+        return {"generation": feed.sync(), "status": feed.status, "canPlay": self.can_play(),
+                "likedRevision": self.liked_revision if provider == "youtube" else 0}
 
     async def page(self, provider: Provider, source: str, cursor: str | None, refresh: bool = False) -> dict:
         feed = self.feeds[provider]

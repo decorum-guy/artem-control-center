@@ -43,6 +43,7 @@ interface LibraryState {
   generation: string | null;
   status: string;
   canPlay: boolean;
+  likedRevision: number;
   playlists: Playlist[];
   catalogNext: string | null;
   catalogPending: boolean;
@@ -55,7 +56,7 @@ const emptyList: TrackList = {
   items: [], next: null, scroll: 0, query: "", observedAt: null, pending: false, error: null, omitted: 0
 };
 const initial: LibraryState = {
-  generation: null, status: "connecting", canPlay: false, playlists: [], catalogNext: null, catalogPending: false,
+  generation: null, status: "connecting", canPlay: false, likedRevision: 0, playlists: [], catalogNext: null, catalogPending: false,
   catalogError: null, selected: null, lists: {}
 };
 
@@ -117,7 +118,7 @@ export class MusicLibraryStore {
 
   private async checkStatus() {
     try {
-      const status = await request<Pick<LibraryState, "generation" | "status" | "canPlay">>(
+      const status = await request<Pick<LibraryState, "generation" | "status" | "canPlay" | "likedRevision">>(
         `${root}${this.provider}/status`);
       if (this.state.generation !== status.generation) {
         this.listRequests.forEach(controller => controller.abort());
@@ -125,7 +126,15 @@ export class MusicLibraryStore {
         this.loadedCatalog = false;
         this.patch({ ...initial, ...status });
       } else {
+        const likedChanged = status.likedRevision > this.state.likedRevision && this.provider === "youtube";
         this.patch(status);
+        if (likedChanged && this.state.selected === "LM" && !this.getList("LM").pending) {
+          void this.tracks(false, true, true);
+        } else if (likedChanged && this.state.selected !== "LM" && this.state.lists.LM) {
+          const lists = { ...this.state.lists };
+          delete lists.LM;
+          this.patch({ lists });
+        }
       }
       if (status.status !== "auth_required" && status.status !== "not_configured" && !this.loadedCatalog) {
         await this.catalog();
@@ -191,7 +200,7 @@ export class MusicLibraryStore {
     if (this.state.selected) this.writeList(this.state.selected, { query: value, scroll: 0 });
   }
 
-  async tracks(more = false, refresh = false) {
+  async tracks(more = false, refresh = false, preserveScroll = false) {
     const { generation, selected } = this.state;
     const list = this.getList(selected);
     if (!generation || !selected || list.pending || (more && !list.next)) return;
@@ -212,7 +221,7 @@ export class MusicLibraryStore {
       this.writeList(selected, {
         items: items.slice(drop), next: page.next, observedAt: page.observedAt,
         omitted: (more ? previous.omitted : 0) + drop,
-        scroll: more ? Math.max(0, previous.scroll - drop * MUSIC_ROW_HEIGHT) : 0
+        scroll: more || preserveScroll ? Math.max(0, previous.scroll - drop * MUSIC_ROW_HEIGHT) : 0
       });
     } catch (error) {
       if (!controller.signal.aborted && generation === this.state.generation) {

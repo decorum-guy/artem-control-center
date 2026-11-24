@@ -107,11 +107,15 @@ def allowed(key: str) -> bool:
     if startup_lifecycle.phase != "ready" or (current.get("PANEL_WRITES_ENABLED") or "").lower() not in toggle:
         return False
     enabled = (current.get(key) or "").lower() in toggle
-    if key == "PANEL_LIGHT_STRIP_ACTIONS_ENABLED":
+    override_key = {
+        "PANEL_LIGHT_STRIP_ACTIONS_ENABLED": "light_strip_actions",
+        "PANEL_HOME_CLIMATE_ACTIONS_ENABLED": "home_climate_actions",
+    }.get(key)
+    if override_key:
         overrides = Path(current.get("PANEL_CAPABILITY_OVERRIDES_PATH") or LIVE / "capability-overrides.json")
         saved, valid = CapabilityOverrideStore(overrides).read()
         if valid:
-            enabled = saved["overrides"].get("light_strip_actions", enabled)
+            enabled = saved["overrides"].get(override_key, enabled)
     return enabled
 
 
