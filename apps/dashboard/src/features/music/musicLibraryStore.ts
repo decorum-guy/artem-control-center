@@ -18,7 +18,7 @@ export interface Recording {
   cover: string | null;
   playable: boolean;
 }
-interface Page<T> { items: T[]; next: string | null; generation: string; observedAt: string }
+interface Page<T> { items: T[]; next: string | null; generation: string; sessionRevision?: number; observedAt: string }
 export interface PlayResult {
   status: string;
   stationTrackId?: string | null;
@@ -56,6 +56,8 @@ type TrackList = TrackData & TrackView;
 
 interface LibraryState {
   generation: string | null;
+  viewIdentity: string | null;
+  sessionRevision: number;
   status: string;
   canPlay: boolean;
   yandexGeneration: string | null;
@@ -76,7 +78,8 @@ const emptyData: TrackData = {
 };
 const emptyView: TrackView = { scroll: 0, query: "" };
 const initial: LibraryState = {
-  generation: null, status: "connecting", canPlay: false, yandexGeneration: null, matches: {}, likedRevision: 0,
+  generation: null, viewIdentity: null, sessionRevision: 0, status: "connecting", canPlay: false,
+  yandexGeneration: null, matches: {}, likedRevision: 0,
   playlists: [], catalogNext: null, catalogPending: false, catalogRefreshing: false,
   catalogError: null, catalogRemoved: false, selected: null, lists: {}
 };
@@ -146,16 +149,28 @@ export class MusicLibraryStore {
 
   private async checkStatus() {
     try {
-      const status = await request<Pick<LibraryState, "generation" | "status" | "canPlay" | "likedRevision" | "yandexGeneration">>(
-        `${root}${this.provider}/status`);
+      const projection = await request<Pick<LibraryState,
+        "generation" | "status" | "canPlay" | "likedRevision" | "yandexGeneration"> &
+        Partial<Pick<LibraryState, "sessionRevision" | "viewIdentity">>>(`${root}${this.provider}/status`);
+      const status = { sessionRevision: 0, viewIdentity: null, ...projection };
       if (this.state.generation !== status.generation) {
-        this.listRequests.forEach(controller => controller.abort());
-        this.listRequests.clear();
-        this.views.clear();
-        this.catalogRequest?.abort();
-        this.catalogRequest = null;
-        this.loadedCatalog = false;
+        this.abortReads();
+        if (status.viewIdentity && status.viewIdentity === this.state.viewIdentity) {
+          // Opaque provider cursors are owned by the previous process.
+          for (const [source, view] of [...this.views]) {
+            const depth = Math.min(view.bookmark?.depth ?? 1, 12);
+            this.remember(source, { bookmark: { cursor: null, depth, omitted: 0 } });
+          }
+        } else {
+          this.views.clear();
+        }
         this.patch({ ...initial, ...status });
+      } else if (this.state.sessionRevision !== status.sessionRevision) {
+        this.abortReads();
+        const lists = Object.fromEntries(Object.entries(this.state.lists).map(([source, list]) => [
+          source, { ...list, observedAt: null, pending: false }
+        ]));
+        this.patch({ ...status, lists, catalogPending: false, catalogRefreshing: false });
       } else {
         const likedChanged = status.likedRevision > this.state.likedRevision && this.provider === "youtube";
         this.patch({ ...status, matches: status.yandexGeneration === this.state.yandexGeneration ? this.state.matches : {} });
@@ -173,15 +188,25 @@ export class MusicLibraryStore {
         }
       }
       if (status.status !== "auth_required" && status.status !== "not_configured" && !this.loadedCatalog) {
-        await this.catalog();
+        await this.catalog(false, this.state.playlists.length > 0);
+        const list = this.getList(this.state.selected);
+        if (this.loadedCatalog && this.state.selected && !list.observedAt && !list.pending) void this.tracks();
       }
     } catch (error) {
       this.patch({ status: errorCode(error) === "not_configured" ? "not_configured" : "unavailable" });
     }
   }
 
+  private abortReads() {
+    this.listRequests.forEach(controller => controller.abort());
+    this.listRequests.clear();
+    this.catalogRequest?.abort();
+    this.catalogRequest = null;
+    this.loadedCatalog = false;
+  }
+
   async catalog(more = false, refresh = false) {
-    const { generation, catalogPending, catalogNext } = this.state;
+    const { generation, viewIdentity, sessionRevision, catalogPending, catalogNext } = this.state;
     if (!generation || (!refresh && catalogPending) || (more && !catalogNext)) return;
     this.catalogRequest?.abort();
     const controller = new AbortController();
@@ -195,7 +220,7 @@ export class MusicLibraryStore {
       const page = await request<Page<Playlist>>(`${root}${this.provider}/catalog?${params}`, {
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(24_000)])
       });
-      if (!current() || page.generation !== generation) return;
+      if (!current() || page.generation !== generation || (page.sessionRevision ?? 0) !== sessionRevision) return;
       const previous = more ? this.state.playlists : [];
       const keys = new Set(previous.map(item => item.key));
       const playlists = previous.concat(page.items.filter(item => !keys.has(item.key)));
@@ -206,11 +231,11 @@ export class MusicLibraryStore {
         this.views.delete(selection);
         const lists = { ...this.state.lists };
         delete lists[selection];
-        saveSelection(this.provider, generation, null);
+        saveSelection(this.provider, viewIdentity ?? generation, null);
         this.patch({ selected: null, lists, catalogRemoved: true });
       }
       this.patch({ playlists, catalogNext: page.next, status: "ready" });
-      const restored = savedSelection(this.provider, generation);
+      const restored = savedSelection(this.provider, viewIdentity ?? generation);
       if (!this.state.selected && (this.provider === "yandex" || (restored && playlists.some(item => item.key === restored)))) {
         this.select(restored ?? playlists[0]?.key);
       }
@@ -262,7 +287,8 @@ export class MusicLibraryStore {
       this.writeData(previous, { pending: false });
     }
     this.patch({ selected: source, catalogRemoved: false });
-    if (this.state.generation) saveSelection(this.provider, this.state.generation, source);
+    const viewKey = this.state.viewIdentity ?? this.state.generation;
+    if (viewKey) saveSelection(this.provider, viewKey, source);
     if (this.getList(source).observedAt) this.writeData(source, {});
     else void this.tracks();
   }
@@ -284,7 +310,7 @@ export class MusicLibraryStore {
   }
 
   async tracks(more = false, refresh = false) {
-    const { generation, selected } = this.state;
+    const { generation, selected, sessionRevision } = this.state;
     const list = this.getList(selected);
     if (!generation || !selected || list.pending || (more && !list.next)) return;
     const controller = new AbortController();
@@ -318,7 +344,7 @@ export class MusicLibraryStore {
         page = await load(this.provider, null);
       }
       for (let index = 0; index < depth; index++) {
-        if (!current() || page.generation !== generation) return;
+        if (!current() || page.generation !== generation || (page.sessionRevision ?? 0) !== sessionRevision) return;
         segments.push({ cursor, size: page.items.length });
         items.push(...page.items);
         cursor = page.next;
@@ -367,14 +393,15 @@ export class MusicLibraryStore {
   }
 
   async play(record: Recording, choice?: string): Promise<PlayResult> {
-    const { generation, selected } = this.state;
+    const { generation, selected, sessionRevision } = this.state;
     if (!generation || !selected) return { status: "unavailable" };
     const result = await request<PlayResult>(`${root}${this.provider}/play`, {
       method: "POST", headers: { "Content-Type": "application/json", "X-Panel-Intent": "music-library" },
       body: JSON.stringify({ generation, source: selected, row: record.key, choice })
     });
     if (this.provider === "youtube" && record.trackId && result.stationTrackId && result.yandexGeneration
-        && generation === this.state.generation && result.yandexGeneration === this.state.yandexGeneration) {
+        && generation === this.state.generation && sessionRevision === this.state.sessionRevision
+        && result.yandexGeneration === this.state.yandexGeneration) {
       const matches = { ...this.state.matches };
       delete matches[record.trackId];
       matches[record.trackId] = result.stationTrackId;

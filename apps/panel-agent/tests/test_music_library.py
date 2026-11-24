@@ -8,7 +8,8 @@ from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.music_library import MusicLibrary, PlaySelection
 from panel_agent.music_library_types import Continuation, Playlist, ProviderPage, Recording
 from panel_agent.youtube_library_credentials import browser_headers, capture_headers
-from panel_agent.youtube_music import MusicUnavailable
+from panel_agent.youtube_library import BrowserChannelMismatch, YouTubeLibrary
+from panel_agent.youtube_music import MusicAuthRequired, MusicUnavailable
 
 TRACK = Recording("12345", "Studio song", ("Artist",), "Record", 180)
 
@@ -101,6 +102,81 @@ def test_old_account_cannot_publish_or_dispatch(tmp_path):
         with pytest.raises(HTTPException):
             await library.play("yandex", PlaySelection(generation=old["generation"], source="likes", row="a" * 32))
         assert not station.sent
+
+    asyncio.run(run())
+
+
+class BrowserSource(Source, YouTubeLibrary):
+    def __init__(self):
+        super().__init__()
+        self.channel = "channelA"
+        self.failure = None
+
+    def account_identity(self):
+        return self.channel
+
+    async def catalog(self, _):
+        if self.failure:
+            raise self.failure
+        return ProviderPage((Playlist("likes", "Likes", "liked"),))
+
+
+def test_same_channel_rotation_preserves_cursors_and_rekeys_rows(tmp_path):
+    async def run():
+        library, _, station = setup(tmp_path)
+        source = BrowserSource()
+        feed = library.feeds["youtube"]
+        feed.provider = source
+        await library.page("youtube", "", None)
+        first = await library.page("youtube", "likes", None)
+        second = await library.page("youtube", "likes", first["next"])
+        before = library.status("youtube")
+        source.held = asyncio.Event()
+        waiting = asyncio.create_task(library.page("youtube", "likes", None, refresh=True))
+        await source.entered.wait()
+        source.epoch = (2,)
+        after = library.status("youtube")
+        assert after["generation"] == before["generation"]
+        assert after["viewIdentity"] == before["viewIdentity"]
+        assert after["sessionRevision"] == before["sessionRevision"] + 1
+        source.held.set()
+        with pytest.raises(HTTPException) as late:
+            await waiting
+        assert late.value.detail == "account_changed"
+        await library.page("youtube", "", None, refresh=True)
+        updated = await library.page("youtube", "likes", first["next"])
+        assert updated["sessionRevision"] == after["sessionRevision"]
+        assert updated["items"][0]["trackId"] == second["items"][0]["trackId"]
+        assert updated["items"][0]["key"] != second["items"][0]["key"]
+        with pytest.raises(HTTPException) as expired:
+            await library.play("youtube", PlaySelection(generation=before["generation"], source="likes",
+                                                        row=second["items"][0]["key"]))
+        assert expired.value.detail == "row_expired"
+        assert station.sent == []
+        source.channel = "channelB"
+        status = library.status("youtube")
+        assert status["generation"] != before["generation"] and status["viewIdentity"] != before["viewIdentity"]
+        assert not feed.sources and not feed.cursors and not feed.pages
+
+    asyncio.run(run())
+
+
+def test_only_explicit_sign_out_starts_recovery_and_keeps_last_catalog(tmp_path):
+    async def run():
+        library, _, _ = setup(tmp_path)
+        source = BrowserSource()
+        feed = library.feeds["youtube"]
+        feed.provider = source
+        recoveries = []
+        library.browser = type("Browser", (), {"recover": lambda self: recoveries.append(True)})()
+        old = await library.page("youtube", "", None)
+        for error, status in ((MusicUnavailable(), 503), (BrowserChannelMismatch(), 401), (MusicAuthRequired(), 401)):
+            source.failure = error
+            with pytest.raises(HTTPException) as failed:
+                await library.page("youtube", "", None, refresh=True)
+            assert failed.value.status_code == status
+            assert feed.pages["", None] == old
+        assert recoveries == [True]
 
     asyncio.run(run())
 

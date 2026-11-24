@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 MAX_CREDENTIAL_BYTES = 16_384
 ACCOUNT_KEYS = {"x_token", "music_client_id", "music_client_secret"}
@@ -36,6 +38,24 @@ def dpapi(data: bytes, *, decrypt: bool) -> bytes:
         free.argtypes = [ctypes.c_void_p]
         free.restype = ctypes.c_void_p
         free(result.data)
+
+
+def write_protected(target: Path, plaintext: bytes) -> None:
+    """Atomically replace a file in the already protected credential directory."""
+    encrypted = dpapi(plaintext, decrypt=False)
+    if not plaintext or len(encrypted) > MAX_CREDENTIAL_BYTES:
+        raise ValueError("Invalid protected credential size")
+    staged = None
+    try:
+        with NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+            staged = Path(handle.name)
+            handle.write(encrypted)
+            handle.flush()
+            os.fsync(handle.fileno())
+        staged.replace(target)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)

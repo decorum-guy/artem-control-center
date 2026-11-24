@@ -4,6 +4,7 @@ fastapi>=0.116,<1
 httpx>=0.28,<1
 icalendar>=6.3,<8
 Pillow>=11.3,<12
+playwright==1.55.0; sys_platform == "win32" and python_version >= "3.9"
 pydantic>=2.11,<3
 pytest>=8.4,<9
 PyYAML>=6,<7

@@ -58,6 +58,7 @@ os.environ.update(
     PANEL_DIAGNOSTIC_LIVE_STATION="true" if lease.get("music_library") else "false",
     PANEL_ALICE_BASE_URL=config.get("PANEL_ALICE_BASE_URL") or "",
     PANEL_MUSIC_LIBRARY_ENABLED="true" if lease.get("music_library") else "false",
+    PANEL_YOUTUBE_BROWSER_CONNECT_ENABLED="true" if lease.get("music_library") else "false",
     PANEL_YOUTUBE_LIBRARY_CREDENTIAL_FILE=str(ROOT / "station-credentials" / "youtube-library.dpapi"),
     PANEL_YOUTUBE_MUSIC_ENABLED="true" if lease.get("youtube_music_preview") else "false",
     PANEL_YOUTUBE_MUSIC_STATION_ENTITY=lease["station_entity"],
@@ -84,7 +85,8 @@ from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.ble_strip import build_ble_strip_router
 from panel_agent.capabilities import CapabilityOverrideStore
 from panel_agent.main import (
-    app, ble_strip, music_library, music_save, runtime, startup_lifecycle, station_playback, station_reminders, voice_feedback, SETTINGS,
+    app, ble_strip, music_browser, music_library, music_save, runtime, startup_lifecycle, station_playback,
+    station_reminders, voice_feedback, SETTINGS,
 )
 from panel_agent.music_save import dispatch_scenario
 from panel_agent.static_dashboard import install_dashboard_routes
@@ -150,6 +152,12 @@ if music_save is not None:
 if music_library is not None:
     music_library.access = access
     music_library.writes = lambda: allowed("PANEL_ALICE_STATION_ACTIONS_ENABLED")
+if music_browser is not None:
+    from panel_agent.youtube_browser_connect import CONNECT_CAPABILITY
+
+    music_browser.allowed = lambda: (startup_lifecycle.phase == "ready" and access().authorize(
+        CONNECT_CAPABILITY, gate_enabled=allowed("PANEL_WRITES_ENABLED"),
+    ).allowed)
 if lease.get("music_library"):
     from panel_agent.home_assistant_actions import HomeAssistantActionExecutor, build_home_assistant_action_router
     from panel_agent.station_actions import StationActionExecutor, build_station_action_router

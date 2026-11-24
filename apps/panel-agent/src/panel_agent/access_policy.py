@@ -46,6 +46,7 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "home.climate.set_fan_mode": "standard",
     "home.television.voice": "standard",
     "media.youtube.save_current": "standard",
+    "media.youtube.connect_browser": "standard",
     "media.station.play_library": "standard",
     "home.light_strip.power_on": "standard",
     "home.light_strip.power_off": "standard",

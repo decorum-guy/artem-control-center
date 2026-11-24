@@ -26,7 +26,8 @@ from .music_library_types import Continuation, Playlist, ProviderPage, Recording
 from .music_matching import Candidate, Track, match
 from .station_playback import StationPlaybackCollector
 from .yandex_library import YandexLibrary, YandexPageExpired
-from .youtube_library import YouTubeLibrary
+from .youtube_browser_connect import MusicBrowserConnector
+from .youtube_library import BrowserChannelMismatch, YouTubeLibrary
 from .youtube_music import MusicAuthRequired, MusicUnavailable, YOUTUBE_PROXY
 
 Provider = Literal["yandex", "youtube"]
@@ -54,7 +55,10 @@ class Feed:
     def __init__(self, provider: YandexLibrary | YouTubeLibrary | None):
         self.provider = provider
         self.version = None
+        self.account = None
         self.generation = uuid4().hex
+        self.session_revision = 0
+        self.needs_session_probe = False
         self.row_signing_key = secrets.token_bytes(32)
         self.status = "auth_required" if provider else "not_configured"
         self.catalog_failed = False
@@ -66,6 +70,8 @@ class Feed:
 
     def invalidate(self, status: str) -> None:
         self.generation = uuid4().hex
+        self.session_revision = 0
+        self.needs_session_probe = False
         self.row_signing_key = secrets.token_bytes(32)
         self.status = status
         self.catalog_failed = False
@@ -77,16 +83,44 @@ class Feed:
 
     def sync(self) -> str:
         version = self.provider.version() if self.provider else None
-        if version != self.version:
+        account = self.provider.account_identity() if isinstance(self.provider, YouTubeLibrary) else None
+        if version != self.version or account != self.account:
+            same_account = account is not None and account == self.account
             self.version = version
-            self.invalidate("connecting" if version else "auth_required")
+            self.account = account
+            status = "connecting" if version else "auth_required"
+            if same_account:
+                self.rotate_session(status)
+            else:
+                self.invalidate(status)
         return self.generation
+
+    def stamp(self) -> tuple[str, int]:
+        return self.sync(), self.session_revision
+
+    def rotate_session(self, status: str) -> None:
+        self.session_revision += 1
+        self.row_signing_key = secrets.token_bytes(32)
+        self.status = status
+        self.needs_session_probe = True
+        assert self.provider is not None
+        self.provider.reset()
+        # Keep the provider order and server-owned cursors. Existing row
+        # permissions expire, including those held by requests in flight.
+        for key, page in self.pages.items():
+            source, _ = key
+            rows = [{**row, "key": self.sign(row["key"].split(".", 1)[0].encode())}
+                    for row in page["items"]] if source else page["items"]
+            self.pages[key] = {**page, "items": rows, "sessionRevision": self.session_revision}
 
     def row_key(self, source: str, row: Recording) -> str:
         # Each position stays distinct, including repeated tracks in a playlist.
         fields = (uuid4().hex, source, row.track_id, row.title, row.artists, row.album,
                   row.duration, row.playable, row.explicit)
         payload = base64.urlsafe_b64encode(json.dumps(fields, ensure_ascii=False, separators=(",", ":")).encode()).rstrip(b"=")
+        return self.sign(payload)
+
+    def sign(self, payload: bytes) -> str:
         proof = hmac.new(self.row_signing_key, payload, "sha256").hexdigest()
         return f"{payload.decode()}.{proof}"
 
@@ -191,11 +225,13 @@ class Options:
 class MusicLibrary:
     def __init__(self, station: StationPlaybackCollector, yandex: YandexLibrary | None,
                  youtube: YouTubeLibrary | None, *, access: Callable[[], AccessPolicyStore],
-                 writes: Callable[[], bool], paired_track: Callable[[str], str | None]):
+                 writes: Callable[[], bool], paired_track: Callable[[str], str | None],
+                 browser: MusicBrowserConnector | None = None):
         self.station, self.yandex = station, yandex
         self.feeds: dict[Provider, Feed] = {"yandex": Feed(yandex), "youtube": Feed(youtube)}
         self.access, self.writes = access, writes
         self.paired_track = paired_track
+        self.browser = browser
         self.art = Artwork()
         self.play_lock = asyncio.Lock()
         self.choices: OrderedDict[str, Options] = OrderedDict()
@@ -212,12 +248,14 @@ class MusicLibrary:
     def status(self, provider: Provider) -> dict:
         feed = self.feeds[provider]
         return {"generation": feed.sync(), "status": feed.status, "canPlay": self.can_play(),
+                "sessionRevision": feed.session_revision,
+                "viewIdentity": hashlib.sha256(("music-view:" + feed.account).encode()).hexdigest() if feed.account else None,
                 "likedRevision": self.liked_revision if provider == "youtube" else 0,
                 "yandexGeneration": self.feeds["yandex"].sync()}
 
     async def page(self, provider: Provider, source: str, cursor: str | None, refresh: bool = False) -> dict:
         feed = self.feeds[provider]
-        epoch = feed.sync()
+        epoch, revision = stamp = feed.stamp()
         if feed.provider is None:
             raise HTTPException(404, "not_configured")
         if feed.version is None:
@@ -227,7 +265,7 @@ class MusicLibrary:
         feed.waiters += 1
         try:
             async with feed.lock:
-                if feed.sync() != epoch:
+                if feed.stamp() != stamp:
                     raise HTTPException(409, "account_changed")
                 if cursor and (cursor not in feed.cursors or feed.cursors[cursor][0] != source):
                     raise HTTPException(409, "page_expired")
@@ -235,7 +273,7 @@ class MusicLibrary:
                     raise HTTPException(404, "unknown_playlist")
                 key = (source, cursor)
                 cached = feed.pages.get(key)
-                if cached and not refresh:
+                if cached and not refresh and not feed.needs_session_probe and feed.status != "auth_required":
                     feed.pages.move_to_end(key)
                     return cached
                 continuation = feed.cursors[cursor][1] if cursor else None
@@ -247,18 +285,29 @@ class MusicLibrary:
                     else:
                         page = await feed.provider.catalog(continuation)
                 except YandexPageExpired as exc:
+                    if feed.stamp() != stamp:
+                        raise HTTPException(409, "account_changed") from exc
                     feed.discard_pages(source)
                     raise HTTPException(409, "page_expired") from exc
                 except MusicAuthRequired as exc:
-                    if feed.sync() == epoch and feed.status != "auth_required":
+                    if feed.stamp() != stamp:
+                        raise HTTPException(409, "account_changed") from exc
+                    if provider == "youtube":
+                        feed.status = "auth_required"
+                        feed.needs_session_probe = True
+                        if self.browser and not isinstance(exc, BrowserChannelMismatch):
+                            self.browser.recover()
+                    elif feed.status != "auth_required":
                         feed.invalidate("auth_required")
                     raise HTTPException(401, "auth_required") from exc
                 except MusicUnavailable as exc:
+                    if feed.stamp() != stamp:
+                        raise HTTPException(409, "account_changed") from exc
                     if not source:
                         feed.catalog_failed = True
                     feed.status = "unavailable"
                     raise HTTPException(503, "source_unavailable") from exc
-                if feed.sync() != epoch:
+                if feed.stamp() != stamp:
                     raise HTTPException(409, "account_changed")
                 limit = CATALOG_LIMIT if refresh and not source else 220
                 if len(page.rows) > limit or (continuation is not None and page.continuation == continuation):
@@ -275,10 +324,12 @@ class MusicLibrary:
                 if next_page:
                     keep(feed.cursors, next_page, (source, page.continuation), CURSOR_CACHE)
                 result = {"items": items, "next": next_page, "generation": epoch,
+                          "sessionRevision": revision,
                           "observedAt": datetime.now(timezone.utc).isoformat()}
                 keep(feed.pages, key, result, PAGE_CACHE)
                 if not source:
                     feed.catalog_failed = False
+                feed.needs_session_probe = False
                 feed.status = "unavailable" if feed.catalog_failed else "ready"
                 return result
         finally:
@@ -330,15 +381,19 @@ class MusicLibrary:
         if self.play_lock.locked():
             return {"status": "busy"}
         feed = self.feeds[provider]
-        if feed.sync() != request.generation:
+        stamp = feed.stamp()
+        if stamp[0] != request.generation:
             raise HTTPException(409, "account_changed")
+        if feed.status in {"auth_required", "connecting"}:
+            return {"status": feed.status if feed.status == "auth_required" else "unavailable"}
         row = feed.resolve_row(request.source, request.row)
         if not row.track_id or not row.playable or self.yandex is None:
             return {"status": "unavailable"}
         ya_feed = self.feeds["yandex"]
         ya_epoch = ya_feed.sync()
         def permitted():
-            return (self.can_play() and feed.sync() == request.generation and request.source in feed.sources
+            return (self.can_play() and feed.stamp() == stamp and feed.status not in {"auth_required", "connecting"}
+                    and request.source in feed.sources
                     and ya_feed.sync() == ya_epoch)
 
         try:
@@ -404,6 +459,18 @@ class MusicLibrary:
         return (candidate.video_id, []) if candidate else (None, [usable[item.video_id] for item in choices])
 
 
+def require_music_origin(request: Request, intent: str) -> None:
+    try:
+        origin = urlsplit(request.headers.get("origin", ""))
+    except ValueError as exc:
+        raise HTTPException(403, "local_panel_required") from exc
+    if (request.headers.get("x-panel-intent") != intent
+            or request.headers.get("sec-fetch-site") == "cross-site"
+            or origin.scheme not in {"http", "https"} or origin.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or origin.netloc != request.headers.get("host")):
+        raise HTTPException(403, "local_panel_required")
+
+
 def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
     router = APIRouter(prefix="/api/v1/music")
 
@@ -417,6 +484,28 @@ def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
 
     if library is None:
         return router
+
+    @router.get("/youtube/connection")
+    async def connection(response: Response):
+        if library.browser is None:
+            raise HTTPException(404, "not_configured")
+        response.headers["Cache-Control"] = "no-store"
+        return {**library.browser.projection(), "libraryStatus": library.status("youtube")["status"]}
+
+    @router.post("/youtube/connection/{action}")
+    async def change_connection(action: Literal["connect", "cancel"], request: Request, response: Response):
+        browser = library.browser
+        if browser is None:
+            raise HTTPException(404, "not_configured")
+        require_music_origin(request, "youtube-connect")
+        # Cancellation remains available if access was restricted after launch.
+        if action == "cancel":
+            await browser.cancel()
+        elif not browser.allowed():
+            raise HTTPException(403, "connect_blocked")
+        elif not browser.start(manual=True):
+            raise HTTPException(409, "busy")
+        return await connection(response)
 
     @router.get("/artwork/{key}")
     async def artwork(key: str):
@@ -438,15 +527,7 @@ def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
 
     @router.post("/{provider}/play")
     async def play(provider: Provider, request: Request, body: PlaySelection):
-        try:
-            origin = urlsplit(request.headers.get("origin", ""))
-        except ValueError as exc:
-            raise HTTPException(403, "local_panel_required") from exc
-        if (request.headers.get("x-panel-intent") != "music-library"
-                or request.headers.get("sec-fetch-site") == "cross-site"
-                or origin.scheme not in {"http", "https"} or origin.hostname not in {"127.0.0.1", "localhost", "::1"}
-                or origin.netloc != request.headers.get("host")):
-            raise HTTPException(403, "local_panel_required")
+        require_music_origin(request, "music-library")
         return await library.play(provider, body)
 
     return router

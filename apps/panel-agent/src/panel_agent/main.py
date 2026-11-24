@@ -109,6 +109,7 @@ from .music_save import MusicSave, build_music_save_router, dispatch_scenario
 from .music_library import MusicLibrary, build_music_library_router
 from .station_credentials import StationCredentialFile
 from .yandex_library import YandexLibrary
+from .youtube_browser_connect import CONNECT_CAPABILITY, MusicBrowserConnector
 from .youtube_library import YouTubeLibrary
 from .alice_voice_feedback import AliceVoiceFeedback
 from .youtube_music import YouTubeMusic
@@ -302,6 +303,7 @@ if tv_voice is not None or music_save is not None:
     )
 
 music_library = None
+music_browser = None
 if MODE in {"production", "read_only"} and os.getenv("PANEL_MUSIC_LIBRARY_ENABLED", "").lower() == "true":
     yandex_library = (YandexLibrary(StationCredentialFile(station_settings.credential_path))
                       if station_settings and station_settings.credential_path else None)
@@ -309,11 +311,18 @@ if MODE in {"production", "read_only"} and os.getenv("PANEL_MUSIC_LIBRARY_ENABLE
     youtube_library = (YouTubeLibrary(Path(youtube_browser), Path(music_credentials),
                                       os.getenv("PANEL_YOUTUBE_MUSIC_HTTP_PROXY", ""))
                        if youtube_browser and music_credentials else None)
+    music_browser = MusicBrowserConnector.from_environment(
+        youtube_library, lambda: access_policy.authorize(
+            CONNECT_CAPABILITY, gate_enabled=MODE == "production" and startup_lifecycle.phase == "ready"
+            and _write_allowed(True),
+        ).allowed,
+    )
     music_library = MusicLibrary(
         station_playback, yandex_library, youtube_library, access=lambda: access_policy,
         writes=lambda: MODE == "production" and startup_lifecycle.phase == "ready"
         and _write_allowed(SETTINGS.alice_station_actions_enabled),
         paired_track=music_save.paired_track if music_save else lambda _: None,
+        browser=music_browser,
     )
     if music_save is not None:
         music_save.on_new_like = music_library.invalidate_youtube_likes
@@ -397,6 +406,8 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         startup_lifecycle.mark_stopping()
+        if music_browser is not None:
+            await music_browser.close()
         await station_playback.close()
         if station_reminders is not None:
             await station_reminders.close()

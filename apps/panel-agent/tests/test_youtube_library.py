@@ -232,7 +232,7 @@ def test_account_is_checked_on_start_after_ttl_and_on_new_client_instance(monkey
     monkeypatch.setattr(youtube_library, "read_browser_vault", lambda path: json.dumps(
         HEADERS if path == Path("browser") else vars(ACCOUNT)
     ).encode())
-    monkeypatch.setattr(YouTubeLibrary, "version", lambda self: (1,))
+    monkeypatch.setattr(YouTubeLibrary, "credential_revision", lambda self: ((1,), (1,)))
 
     def provider():
         return YouTubeLibrary(Path("browser"), Path("oauth"), YOUTUBE_PROXY)

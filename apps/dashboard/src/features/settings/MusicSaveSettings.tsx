@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useInteractionLock } from "../../InteractionLock";
+import { YouTubeConnectionSettings } from "./YouTubeConnectionSettings";
 
 interface MusicOption {
   id: string;
@@ -99,10 +100,11 @@ export function MusicSaveSettings() {
     }
   }
 
-  if (!state) return null;
+  if (!state) return <YouTubeConnectionSettings />;
   const result = state.operation;
   return <details className="station-retention-settings" data-testid="music-save-settings" ref={details}>
     <summary>YouTube Music</summary>
+    <YouTubeConnectionSettings />
     <p>{connectionLabels[state.connection]}{state.channel && ` · ${state.channel}`}</p>
     <p>Сохранение в «{state.destination}» по фразе «Алиса, панель, сохрани трек».</p>
     {state.connection !== "connected" &&

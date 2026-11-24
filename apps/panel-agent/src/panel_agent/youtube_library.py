@@ -20,6 +20,10 @@ PLAYLIST_KEY = re.compile(r"[A-Za-z0-9_-]{2,147}")
 PLAYLIST_ID = re.compile(r"(?:PL|RD|OLA|VL|FL|LL|LM)[a-zA-Z0-9_-]{0,145}")
 
 
+class BrowserChannelMismatch(MusicAuthRequired):
+    pass
+
+
 def thumbnail(value: object) -> str | None:
     if not isinstance(value, list):
         return None
@@ -77,11 +81,33 @@ class YouTubeLibrary:
         self.official_path = official_path
         self.proxy = proxy
         self.validated: tuple[tuple, float] | None = None
+        self.official: tuple[tuple, GoogleCredential] | None = None
+
+    def credential_revision(self) -> tuple:
+        return StationCredentialFile(self.path).version(), StationCredentialFile(self.official_path).version()
 
     def version(self) -> tuple | None:
-        browser = StationCredentialFile(self.path).version()
-        official = StationCredentialFile(self.official_path).version()
+        browser, official = self.credential_revision()
         return (browser, official) if browser and official else None
+
+    def official_account(self) -> GoogleCredential:
+        _, revision = self.credential_revision()
+        if revision is None:
+            raise MusicAuthRequired
+        if self.official and self.official[0] == revision:
+            return self.official[1]
+        try:
+            account = GoogleCredential.parse(read_browser_vault(self.official_path))
+        except ValueError as exc:
+            raise MusicAuthRequired from exc
+        self.official = revision, account
+        return account
+
+    def account_identity(self) -> str | None:
+        try:
+            return self.official_account().channel_id
+        except MusicAuthRequired:
+            return None
 
     def reset(self) -> None:
         self.validated = None
@@ -98,7 +124,7 @@ class YouTubeLibrary:
             raise MusicAuthRequired
         try:
             auth = browser_headers(read_browser_vault(self.path))
-            account = GoogleCredential.parse(read_browser_vault(self.official_path))
+            account = self.official_account()
         except ValueError as exc:
             raise MusicAuthRequired from exc
         diagnostics = MusicReadDiagnostics()
@@ -156,7 +182,7 @@ def verify_browser_account(client, account: GoogleCredential, diagnostics: Music
     matches = active.casefold() == account.channel_handle.casefold()
     diagnostics.schema("activeAccountHeaderRenderer", account_match=matches)
     if not matches:
-        raise MusicAuthRequired
+        raise BrowserChannelMismatch
 
 
 def _catalog_rows(entries: list, diagnostics: MusicReadDiagnostics | None) -> tuple[Playlist, ...]:
