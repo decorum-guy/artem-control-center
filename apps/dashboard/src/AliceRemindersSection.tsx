@@ -134,7 +134,7 @@ function ReminderEditor({ item, writable, voiceReady, onClose, onSave }: {
             </div>
           </fieldset>
           <p className="planning-route-note">{delivery === "phone"
-            ? "Личное уведомление придёт в «Дом с Алисой», если разрешены push."
+            ? "Панель передаст Яндексу запрос на личный push. Доставка на телефон пока не подтверждена."
             : "Запись с озвучкой на Станции видна участникам дома."}</p>
         </>}
         {!writable && <p role="status" className="planning-route-note">Храним введённые данные. Сохранение временно недоступно.</p>}
