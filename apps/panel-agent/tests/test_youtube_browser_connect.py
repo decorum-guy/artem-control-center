@@ -39,9 +39,15 @@ def test_interactive_sign_in_uses_normal_edge_and_cancels_only_its_tree(tmp_path
         monkeypatch.setattr(browser_module.asyncio, "create_subprocess_exec", launch)
         monkeypatch.setattr(browser_module.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
         states = []
-        command = asyncio.create_task(browser_module.sign_in_normally(tmp_path, states.append))
+        focused = []
+        async def show_on_open():
+            focused.append(window.process.pid)
+
+        window = SimpleNamespace(process=None, show_on_open=show_on_open)
+        command = asyncio.create_task(browser_module.sign_in_normally(tmp_path, states.append, window))
         await entered.wait()
         assert states == ["sign_in"]
+        assert focused == [process.pid]
         assert f"--user-data-dir={tmp_path}" in calls[0]
         assert f"--proxy-server={YOUTUBE_PROXY}" in calls[0]
         assert not any("automation" in arg or "debugging" in arg for arg in calls[0])
@@ -54,6 +60,7 @@ def test_interactive_sign_in_uses_normal_edge_and_cancels_only_its_tree(tmp_path
             closed.set()
             await command
         assert len(calls) == (2 if cancel else 1)
+        assert window.process is None
 
     asyncio.run(run())
 

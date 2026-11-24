@@ -5,6 +5,7 @@ import { libraries } from "../music/musicLibraryStore";
 interface Connection {
   active: boolean;
   canConnect: boolean;
+  canFocus: boolean;
   libraryStatus: string;
   state: string;
 }
@@ -26,7 +27,7 @@ const labels: Record<string, string> = {
 export function YouTubeConnectionSettings() {
   const [connection, setConnection] = useState<Connection>();
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string>();
   const { guardMutation } = useInteractionLock();
 
   useEffect(() => {
@@ -62,10 +63,10 @@ export function YouTubeConnectionSettings() {
     if (connection?.state === "connected" && !connection.active) void libraries.youtube.sync();
   }, [connection?.state, connection?.active]);
 
-  async function act(action: "connect" | "cancel") {
-    if (pending || (action === "connect" && !guardMutation())) return;
+  async function act(action: "connect" | "cancel" | "focus") {
+    if (pending || (action !== "cancel" && !guardMutation())) return;
     setPending(true);
-    setError(false);
+    setError(undefined);
     try {
       const response = await fetch(`${endpoint}/${action}`, {
         method: "POST",
@@ -75,7 +76,7 @@ export function YouTubeConnectionSettings() {
       if (!response.ok) throw new Error();
       setConnection(await response.json() as Connection);
     } catch {
-      setError(true);
+      setError(action === "focus" ? "Не удалось показать окно входа." : "Не удалось выполнить действие.");
     } finally {
       setPending(false);
     }
@@ -93,6 +94,8 @@ export function YouTubeConnectionSettings() {
       onClick={() => void act(connection.active ? "cancel" : "connect")}>
       {connection.active ? "Отменить" : connectLabel}
     </button>
-    {error && <p role="alert">Не удалось выполнить действие.</p>}
+    {connection.canFocus && <button className="planning-secondary-button" type="button" disabled={pending}
+      onClick={() => void act("focus")}>Показать окно входа</button>}
+    {error && <p role="alert">{error}</p>}
   </div>;
 }

@@ -8,12 +8,14 @@ import os
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable
+from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from .station_credentials import write_protected
 from .youtube_library import BrowserChannelMismatch, YouTubeLibrary, read_page, verify_browser_account
 from .youtube_library_credentials import VISITOR_VALUE, browser_headers
+from .youtube_login_window import YouTubeLoginWindow
 from .youtube_music import MusicAuthRequired, MusicReadDiagnostics, MusicUnavailable, YOUTUBE_PROXY, music_http
 
 ORIGIN = "https://music.youtube.com"
@@ -72,18 +74,23 @@ def installed_edge() -> Path:
     raise MusicUnavailable
 
 
-async def sign_in_normally(profile: Path, report: Callable[[str], None]) -> None:
+async def sign_in_normally(
+    profile: Path, report: Callable[[str], None], window: YouTubeLoginWindow,
+) -> None:
     # No automation/debugging session during interactive Google sign-in.
     browser = await asyncio.create_subprocess_exec(
         str(installed_edge()), f"--user-data-dir={profile}", f"--proxy-server={YOUTUBE_PROXY}",
         "--disable-quic", "--disable-background-mode", "--no-first-run", "--new-window",
         ORIGIN + "/", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
     )
+    window.process = browser
     report("sign_in")
     try:
+        await window.show_on_open()
         if await browser.wait() != 0:
             raise MusicUnavailable
     finally:
+        window.process = None
         if browser.returncode is None:
             # This PID belongs to the isolated Edge instance we just opened.
             cleanup = await asyncio.create_subprocess_exec(
@@ -100,11 +107,13 @@ async def browse_for_session(
     manual: bool,
     approve: Callable[[bytes], Awaitable[bool]],
     report: Callable[[str], None],
+    *,
+    window: YouTubeLoginWindow,
 ) -> None:
     from playwright.async_api import Error as BrowserError, async_playwright
 
     if manual:
-        await sign_in_normally(profile, report)
+        await sign_in_normally(profile, report, window)
     report("verifying")
     async with async_playwright() as driver:
         context = await driver.chromium.launch_persistent_context(
@@ -150,10 +159,11 @@ async def browse_for_session(
 
 class MusicBrowserConnector:
     def __init__(self, library: YouTubeLibrary, allowed: Callable[[], bool], *,
-                 browser=browse_for_session):
+                 browser=None):
         self.library = library
         self.allowed = allowed
-        self.browser = browser
+        self.window = YouTubeLoginWindow(lambda: self.allowed() and not self.closed)
+        self.browser = browser if browser is not None else partial(browse_for_session, window=self.window)
         self.profile = library.path.parent / PROFILE_DIRECTORY
         self.task: asyncio.Task | None = None
         self.state = "idle"
@@ -169,7 +179,11 @@ class MusicBrowserConnector:
     def projection(self) -> dict:
         return {"available": not self.closed, "state": self.state,
                 "active": self.task is not None and not self.task.done(),
-                "canConnect": self.allowed() and not self.closed}
+                "canConnect": self.allowed() and not self.closed,
+                "canFocus": not self.closed and self.allowed() and self.window.find() is not None}
+
+    def focus(self) -> bool:
+        return not self.closed and self.window.show()
 
     def recover(self) -> None:
         versions = self.library.version()

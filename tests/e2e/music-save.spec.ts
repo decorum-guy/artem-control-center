@@ -50,27 +50,39 @@ test("music settings separate the source track, recording choice and YouTube con
   await expect(card.getByRole("status")).not.toContainText("Песня появилась в понравившейся музыке");
 });
 
-test("Music settings starts and cancels one browser connection without transferring credentials", async ({ page }) => {
-  const endpoint = "**/api/v1/music/youtube/connection";
-  let current = { state: "idle", active: false, canConnect: true, libraryStatus: "auth_required" };
-  await page.route("**/api/v1/station/music-save", route => route.fulfill({ json: {
-    connection: "connected", channel: "@test", destination: "Понравившаяся музыка", canChoose: true, busyEvents: 0
-  } }));
-  await page.route(endpoint, route => route.fulfill({ json: current }));
-  await page.route(endpoint + "/*", async route => {
-    const request = route.request();
-    expect(request.method()).toBe("POST");
-    expect(request.headers()["x-panel-intent"]).toBe("youtube-connect");
-    expect(request.postData()).toBeNull();
-    const connect = request.url().endsWith("/connect");
-    current = { ...current, state: connect ? "sign_in" : "cancelled", active: connect };
-    await route.fulfill({ json: current });
+for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
+  test(`Music settings reuses the login window and cancels at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const endpoint = "**/api/v1/music/youtube/connection";
+    let current = { state: "idle", active: false, canConnect: true, canFocus: false, libraryStatus: "auth_required" };
+    await page.route("**/api/v1/station/music-save", route => route.fulfill({ json: {
+      connection: "connected", channel: "@test", destination: "Понравившаяся музыка", canChoose: true, busyEvents: 0
+    } }));
+    const actions: string[] = [];
+    await page.route(endpoint, route => route.fulfill({ json: current }));
+    await page.route(endpoint + "/*", async route => {
+      const request = route.request();
+      expect(request.method()).toBe("POST");
+      expect(request.headers()["x-panel-intent"]).toBe("youtube-connect");
+      expect(request.postData()).toBeNull();
+      const action = request.url().split("/").at(-1) ?? "";
+      actions.push(action);
+      if (action === "connect") current = { ...current, state: "sign_in", active: true, canFocus: true };
+      if (action === "cancel") current = { ...current, state: "cancelled", active: false, canFocus: false };
+      await route.fulfill({ json: current });
+    });
+    await page.goto("/settings");
+    await page.getByTestId("music-save-settings").locator("summary").click();
+    const connection = page.getByTestId("youtube-browser-connection");
+    await connection.getByRole("button", { name: "Подключить YouTube Music" }).click();
+    await expect(connection.getByRole("status")).toContainText("Войди в Google");
+    const show = connection.getByRole("button", { name: "Показать окно входа" });
+    await show.click();
+    await show.click();
+    await expect(connection.getByRole("status")).toContainText("закрой окно Edge");
+    await connection.getByRole("button", { name: "Отменить" }).click();
+    await expect(connection.getByRole("status")).toHaveText("Подключение отменено.");
+    await expect(show).toHaveCount(0);
+    expect(actions).toEqual(["connect", "focus", "focus", "cancel"]);
   });
-  await page.goto("/settings");
-  await page.getByTestId("music-save-settings").locator("summary").click();
-  const connection = page.getByTestId("youtube-browser-connection");
-  await connection.getByRole("button", { name: "Подключить YouTube Music" }).click();
-  await expect(connection.getByRole("status")).toContainText("Войди в Google");
-  await connection.getByRole("button", { name: "Отменить" }).click();
-  await expect(connection.getByRole("status")).toHaveText("Подключение отменено.");
-});
+}

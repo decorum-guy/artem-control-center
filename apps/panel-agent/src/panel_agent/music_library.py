@@ -495,7 +495,7 @@ def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
         return router
 
     @router.post("/youtube/connection/{action}")
-    async def change_connection(action: Literal["connect", "cancel"], request: Request, response: Response):
+    async def change_connection(action: Literal["connect", "cancel", "focus"], request: Request, response: Response):
         browser = library.browser
         if browser is None:
             raise HTTPException(404, "not_configured")
@@ -505,6 +505,9 @@ def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
             await browser.cancel()
         elif not browser.allowed():
             raise HTTPException(403, "connect_blocked")
+        elif action == "focus":
+            if not browser.focus():
+                raise HTTPException(409, "window_unavailable")
         elif not browser.start(manual=True):
             raise HTTPException(409, "busy")
         return await connection(response)
