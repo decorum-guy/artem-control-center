@@ -360,6 +360,7 @@ for (const dimensions of [{ width: 1280, height: 720 }, { width: 720, height: 12
     const failed = page.waitForResponse(response => response.url().includes("youtube/catalog?refresh=true") && response.status() === 503);
     await wake();
     await failed;
+    await expect(yt.locator(".music-library__notice")).toHaveText("Источник временно недоступен.");
     await expect(filter).toBeDisabled();
     expect(fullReads).toEqual([activeGeneration]);
 
