@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 
-from panel_agent.youtube_music import CHANNEL_ID, DATA_API, SCOPE, TOKEN_URL
+from panel_agent.youtube_music import CHANNEL_ID, DATA_API, SCOPE, TOKEN_URL, YOUTUBE_PROXY
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 
@@ -64,7 +64,7 @@ def authorize(client: dict[str, str]) -> dict[str, str]:
     if "code" not in received:
         raise RuntimeError("Authorization not completed")
 
-    with httpx.Client(trust_env=False, follow_redirects=False, timeout=8) as http:
+    with httpx.Client(proxy=YOUTUBE_PROXY, trust_env=False, follow_redirects=False, timeout=8) as http:
         response = http.post(TOKEN_URL, data={
             "grant_type": "authorization_code", "code": received["code"], "code_verifier": verifier,
             "redirect_uri": redirect, "client_id": client["client_id"], "client_secret": client["client_secret"],

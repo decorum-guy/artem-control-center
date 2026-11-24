@@ -19,6 +19,7 @@ from .station_credentials import MAX_CREDENTIAL_BYTES, dpapi
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 DATA_API = "https://www.googleapis.com/youtube/v3/"
 SCOPE = "https://www.googleapis.com/auth/youtube"
+YOUTUBE_PROXY = "http://127.0.0.1:10809"
 CHANNEL_ID = re.compile(r"UC[A-Za-z0-9_-]{22}")
 
 
@@ -79,7 +80,7 @@ def _candidate(row: object) -> Candidate | None:
 class YouTubeMusic:
     def __init__(self, credential_path: Path, proxy: str = "") -> None:
         self.path = credential_path
-        self.proxy = proxy if proxy == "http://127.0.0.1:10809" else None
+        self.proxy = YOUTUBE_PROXY if proxy in {"", YOUTUBE_PROXY} else None
         self._cached: MusicSession | None = None
 
     def _encrypted(self) -> bytes:
@@ -128,15 +129,17 @@ class YouTubeMusic:
         except (OSError, ValueError, TypeError) as exc:
             raise MusicAuthRequired from exc
 
-    async def verify_music(self, session: MusicSession) -> None:
-        await asyncio.to_thread(self._music_read, session, "account", "")
-        self.require_current(session)
-
     async def search(self, session: MusicSession, track: Track) -> list[Candidate]:
         return await asyncio.to_thread(self._music_read, session, "search", f"{track.title} {track.artist or ''}")
 
     async def verify_song(self, session: MusicSession, video_id: str) -> bool:
-        return await asyncio.to_thread(self._music_read, session, "song", video_id)
+        if await asyncio.to_thread(self._music_read, session, "song", video_id):
+            return True
+        # The public player may answer LOGIN_REQUIRED on a music catalog row.
+        # Verify the exact ID and the Music category before authorizing a rating.
+        result = await self._data(session, "GET", "videos", {"part": "snippet", "id": video_id})
+        rows = result.get("items", [])
+        return any(row.get("id") == video_id and row.get("snippet", {}).get("categoryId") == "10" for row in rows)
 
     async def liked(self, session: MusicSession, video_id: str) -> bool:
         return await asyncio.to_thread(self._music_read, session, "liked", video_id)
@@ -163,31 +166,37 @@ class YouTubeMusic:
         self.require_current(session)
         return result
 
-    @staticmethod
-    async def _google(method: str, url: str, **kwargs) -> dict:
+    async def _google(self, method: str, url: str, **kwargs) -> dict:
+        if self.proxy is None:
+            raise MusicUnavailable
         try:
-            async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=5) as client:
-                async with client.stream(method, url, **kwargs) as response:
-                    if response.status_code in (401, 403) or (url == TOKEN_URL and response.status_code == 400):
-                        raise MusicAuthRequired
-                    if response.status_code == 204:
-                        return {}
-                    response.raise_for_status()
-                    body = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        body.extend(chunk)
-                        if len(body) > 524_288:
-                            raise MusicUnavailable
-                    value = json.loads(body)
-                    if not isinstance(value, dict):
-                        raise MusicUnavailable
-                    return value
-        except (httpx.HTTPError, ValueError) as exc:
+            return await asyncio.wait_for(self._google_request(method, url, **kwargs), timeout=9)
+        except (httpx.HTTPError, ValueError, asyncio.TimeoutError) as exc:
             raise MusicUnavailable from exc
+
+    async def _google_request(self, method: str, url: str, **kwargs) -> dict:
+        async with httpx.AsyncClient(proxy=self.proxy, trust_env=False, follow_redirects=False, timeout=5) as client:
+            async with client.stream(method, url, **kwargs) as response:
+                if response.status_code in (401, 403) or (url == TOKEN_URL and response.status_code == 400):
+                    raise MusicAuthRequired
+                if response.status_code == 204:
+                    return {}
+                response.raise_for_status()
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 524_288:
+                        raise MusicUnavailable
+                value = json.loads(body)
+                if not isinstance(value, dict):
+                    raise MusicUnavailable
+                return value
 
     def _music_read(self, session: MusicSession, operation: str, value: str):
         # The pinned package is loaded on use so older Python installations
         # keep their normal startup even without this optional feature.
+        if self.proxy is None:
+            raise MusicUnavailable
         try:
             import requests
             from ytmusicapi import YTMusic
@@ -221,13 +230,14 @@ class YouTubeMusic:
         try:
             with BudgetedSession() as http:
                 http.trust_env = False
+                authenticated = operation == "liked"
                 headers = {"Authorization": f"Bearer {session.token}", "Content-Type": "application/json"}
-                client = YTMusic(json.dumps(headers), requests_session=http, proxies={"https": self.proxy} if self.proxy else None)
-                profile = client.get_account_info()
-                if (profile.get("channelHandle") or "").casefold() != session.handle.casefold():
-                    raise MusicAuthRequired
-                if operation == "account":
-                    return None
+                client = YTMusic(json.dumps(headers) if authenticated else None, requests_session=http,
+                                 proxies={"https": self.proxy})
+                if authenticated:
+                    profile = client.get_account_info()
+                    if (profile.get("channelHandle") or "").casefold() != session.handle.casefold():
+                        raise MusicAuthRequired
                 if operation == "search":
                     records = client.search(value, filter="songs", limit=8, ignore_spelling=True)
                     return [match for result in records[:16] if (match := _candidate(result)) is not None]

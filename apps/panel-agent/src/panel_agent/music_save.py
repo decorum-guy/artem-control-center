@@ -184,7 +184,7 @@ class MusicSave:
                 return
         try:
             in_music = await self.provider.liked(session, candidate.video_id)
-        except MusicUnavailable:
+        except (MusicUnavailable, MusicAuthRequired):
             in_music = False
         self.provider.require_current(session)
         state = "already_in_music" if already_liked and in_music else "in_music" if in_music else "youtube_like"
@@ -229,7 +229,6 @@ class MusicSave:
         assert self.provider is not None
         try:
             session = await self.provider.sign_in()
-            await self.provider.verify_music(session)
             self.session, self.connection = session, "connected"
         except MusicAuthRequired:
             self.connection, self.session = "auth_required", None
