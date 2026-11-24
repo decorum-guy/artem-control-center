@@ -1,6 +1,10 @@
 # Codex Initialization Prompt
 
-Use this prompt for the first Codex session in the local clone.
+Исторический стартовый промпт этапа первоначального discovery/MVP. Проект уже содержит рабочий runtime; этот документ не следует запускать заново как обязательное задание каждой новой сессии.
+
+Для текущей работы сначала прочитай [AGENTS.md](../AGENTS.md), [RULES.md](../RULES.md), [AGENT_PLAYBOOK.md](AGENT_PLAYBOOK.md) и [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md). На Mac владельца уже настроены `ssh control-panel-pc`, `ssh ha-vps` и `ssh kz-bot`; роли и актуальность находятся в карте доступа. Scope конкретной сессии определяется новым поручением владельца; исторические задания по bootstrap ниже не означают необходимость пересоздавать scaffold или повторять все discovery.
+
+Сохранённый исходный промпт:
 
 ---
 
@@ -388,3 +392,4 @@ Mac success не является Windows acceptance. Для hardware-dependent 
 Начинай с safety preflight и чтения `AGENTS.md`. Не начинай с написания UI наугад до discovery Home Assistant и существующей структуры проекта.
 
 ---
+

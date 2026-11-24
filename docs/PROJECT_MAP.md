@@ -4,22 +4,46 @@
 
 ## 1. Быстрая модель
 
-```text
-Windows Samsung (production)
-  Chromium/Edge kiosk: React + TypeScript + Vite
-      ↓ localhost HTTP/SSE
-  FastAPI Panel Agent (127.0.0.1:8787)
-      ├── Home Assistant state/actions
-      │     └── private SSH local forward → ha-vps / Home Assistant
-      ├── Planning/calendar/reminders
-      │     └── private SSH local forward → ha-vps / AliceTG_Bot
-      ├── Todoist tasks (opt-in)
-      │     └── direct outbound HTTPS → api.todoist.com
-      ├── ROG G703GI health/actions (configured HTTP companion or pinned SSH)
-      └── project/service monitoring, backups, settings, snapshot
+Инфраструктурные узлы и SSH alias описаны в [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md).
+
+```mermaid
+flowchart TD
+    Mac["Mac: разработка и диагностика"]
+    Samsung["Samsung: kiosk и Panel Agent"]
+    VPS["ha-vps: HA и AliceTG_Bot"]
+    Proxy["kz-bot: зарубежный прокси"]
+    TV["Android TV"]
+    Telegram["Telegram"]
+    Providers["Прямые внешние API"]
+    Mac -->|"ssh control-panel-pc"| Samsung
+    Mac -->|"ssh ha-vps"| VPS
+    Mac -->|"ssh kz-bot"| Proxy
+    Samsung -->|"приватные HA / Planning forwards"| VPS
+    Samsung -->|"штатный TV Executor и ADB"| TV
+    Samsung -->|"например, Todoist HTTPS"| Providers
+    VPS -->|"известный потребитель: Telegram-бот"| Proxy
+    Proxy --> Telegram
 ```
 
-Не путать сеть с источником истины. HA — authority физических устройств; AliceTG_Bot Planning — календаря/наследуемых задач/напоминаний; Todoist — отдельной вкладки `/tasks` при включённом provider. В Overview карточка «Дела» остаётся Planning-based, см. [TODOIST_TASKS.md](TODOIST_TASKS.md). Сетевая связность Samsung→VPS и Samsung→Todoist — независимые пути.
+Схема объединяет документированную топологию и сведения владельца; она не является текущим health-снимком. Временное отключение прокси отмечается только в датированной заметке карты доступа.
+
+Не путать сеть с источником истины. HA — authority устройств его интеграций; AliceTG_Bot Planning — календаря/наследуемых задач/напоминаний; Todoist — отдельной вкладки `/tasks` при включённом provider. Кандидат PR #372 добавляет независимые источники: локальный Glagol для музыки, Calendar Notes для нативных напоминаний и BLE для ленты спальни. В Overview карточка «Дела» остаётся Planning-based, см. [TODOIST_TASKS.md](TODOIST_TASKS.md). Сетевая связность Samsung→VPS и Samsung→Todoist — независимые пути.
+
+### Основная панель, кандидат и следующая функция
+
+По [отчёту PR #372](https://github.com/decorum-guy/artem-control-center/blob/e787ce4a258b8bd09858db44b3192398ec623fa6/docs/plans/SAMSUNG_AUTONOMOUS_RESULTS_2026_11_24.md) и повторной проверке кода 24.11.2026:
+
+| Объект | Последнее документированное состояние |
+| --- | --- |
+| Основной Samsung runtime | `2b361918f11b`, основной loopback-порт `8787`; новая аппаратная проверка при подготовке этой карты не выполнялась. |
+| Изолированный кандидат #372 | Preview `89f08c2725a5825a7fe904f2ad37890cb546651d`, порт `8797`, без автозапуска, с ограничением жизни 48 часов. Не считать процесс ещё работающим без проверки. |
+| Аудированный код | `e787ce4a258b8bd09858db44b3192398ec623fa6`; после preview изменены тесты и документы, код приложения совпадает. После аудита документационный коммит `75c474137e4e8be8625171fc20d8752af65264e3` уточнил передачу TV voice и статус внешнего пульта. Текущее состояние PR проверять на GitHub. |
+| Завершение кандидата | Исправления напоминаний и BLE проверены по коду и синтетическим тестам. Физическое включение ленты после recovery подтверждено владельцем в отчёте. Открыта озвучка напоминания на Мини 2; `EXPIRED` её не доказывает. [Архив задания и итог](plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md). |
+| YouTube Music | [Исследование и план](YOUTUBE_CURRENT_TRACK.md). Команда относится только к уже играющей песне; OAuth и сохранение не реализованы этим документационным изменением. |
+
+До установки кандидата не описывать его модули как уже работающие в основной панели. Для кодовых ссылок на эти модули использовать ревизию кандидата, а не предполагать их наличие в `main`.
+
+При разрешённом переходе preview → основной runtime сначала проверить основную панель с выключенным TV voice handler, затем остановить получатель preview и только после этого включить единственный основной получатель. Подробный порядок и откат — в отчёте кандидата. Публикация этого документа не выполняет установку.
 
 ## 2. Корень проекта
 
@@ -69,12 +93,13 @@ Windows Samsung (production)
 - Приватные local forwards по действующему design: `127.0.0.1:18123` → VPS HA, `127.0.0.1:18088` → VPS AliceTG_Bot. Это не публичные API через Caddy.
 - Публичный Caddy, HA и AliceTG_Bot находятся за границей данного репозитория и имеют отдельную процедуру изменения.
 - ASUS может использовать HTTP companion либо pinned SSH; какой выбран сейчас, определять по защищённой production config без вывода secrets.
-- Пользовательский SSH alias `control-panel-pc` и alias `ha-vps` — способы подключения, которые агент проверяет лишь при явно предоставленном доступе. Они не гарантированно существуют в его runtime.
+- На Mac владельца подтверждены alias `control-panel-pc`, `ha-vps`, `kz-bot`. Использование и ограничения: [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md). В облачном runtime нельзя предполагать наличие Mac SSH config/ключей.
 
 ## 5. С чего начать агенту
 
-1. [AGENT_PLAYBOOK.md](AGENT_PLAYBOOK.md) — пошаговое onboarding и delivery.
+1. [AGENT_PLAYBOOK.md](AGENT_PLAYBOOK.md) и [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md) — onboarding, доступы и delivery.
 2. [RULES.md](../RULES.md) — безопасность, границы записи, truthfulness.
 3. [PRODUCTION_DIAGNOSTICS.md](PRODUCTION_DIAGNOSTICS.md) — read-only диагностика Samsung/VPS/Planning и отличие refresh от sync.
 4. `npm run check` и подходящий `tests/e2e/*` — проверка кода до PR.
 5. Physical acceptance — отдельно и после review; результаты CI не доказывают состояние железа.
+

@@ -28,7 +28,7 @@
 - **Backups:** резервная копия создаётся зарегистрированным profile, скачивается на ноутбук и при выбранной policy дополнительно синхронизируется с cloud drive и/или будущим внешним HDD/SSD.
 - **Home Assistant:** текущий удалённый HA остаётся authoritative на первом этапе. `AliceTG_Bot` — отдельный Git-репозиторий Telegram-бота внутри HA-стека, а не репозиторий самого Home Assistant.
 - **HA hosting — fixed:** Samsung laptop не будет Home Assistant host или permanent HA primary. Долгосрочный локальный HA размещается на отдельном компактном сервере; ноутбук остаётся UI, edge-node, monitoring и backup-target.
-- **Proxy server:** отдельного Git-репозитория сейчас нет; конфигурация и сервисы находятся непосредственно на сервере и подключаются через restricted host agent.
+- **Proxy server:** отдельный зарубежный сервер `kz-bot`; известный потребитель — Telegram-бот на `ha-vps`. Доступ, актуальность и границы диагностики: [docs/INFRASTRUCTURE_ACCESS.md](docs/INFRASTRUCTURE_ACCESS.md).
 - **Безопасность:** браузер не получает SSH-ключи, административные токены или возможность выполнять произвольные команды. Panel Agent не публикуется напрямую в Internet.
 
 ## Главные разделы панели
@@ -36,7 +36,7 @@
 1. **Overview** — часы, дата, погода, ближайшие события, задачи, состояние дома, backups и общий статус сервисов.
 2. **Home** — приоритетный HA-виджет кофемашины, чайник, свет, розетки, климат, сцены и критичные локальные действия.
 3. **Services** — автоматически сформированный каталог проектов/services, health, latency, incidents, deployment state и только разрешённые actions.
-4. **Calendar & Tasks** — календарь iPhone/iCloud/Google/Exchange через адаптер источника и задачи TickTick.
+4. **Calendar & Tasks** — календарь через Planning и адаптеры источников; `/tasks` использует отдельный opt-in Todoist provider. Нативные напоминания Алисы подготовлены в кандидате PR #372; установленный runtime сверяется отдельно.
 5. **Automations** — запуск n8n, checks, scheduled maintenance и других зарегистрированных workflows.
 6. **Backups** — ручные и плановые резервные копии, destinations, retention, checksums и restore-test status.
 7. **Apps** — запуск Android-карты лояльности и других полноэкранных приложений.
@@ -48,7 +48,11 @@
 Ключевые документы:
 
 - [`AGENTS.md`](AGENTS.md) — обязательные правила для Codex и других разработчиков.
-- [`docs/CODEX_INITIALIZATION_PROMPT.md`](docs/CODEX_INITIALIZATION_PROMPT.md) — готовый стартовый prompt для первой Codex-сессии с read-only discovery внешних проектов.
+- [`docs/INFRASTRUCTURE_ACCESS.md`](docs/INFRASTRUCTURE_ACCESS.md) — SSH с Mac: Samsung `control-panel-pc`, HA `ha-vps`, зарубежный прокси `kz-bot`, временные ограничения и проверка актуальности.
+- [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта исходников и различие основной панели, кандидата и планируемых функций.
+- [`docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md`](docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md) — архив задания и итог повторной проверки кандидата PR #372; открыта приёмка озвучки напоминания.
+- [`docs/YOUTUBE_CURRENT_TRACK.md`](docs/YOUTUBE_CURRENT_TRACK.md) — исследование команды сохранения уже играющей песни в YouTube Music; реализация ещё не выполнена.
+- [`docs/CODEX_INITIALIZATION_PROMPT.md`](docs/CODEX_INITIALIZATION_PROMPT.md) — исторический стартовый prompt первоначального discovery/MVP; для текущих задач использовать AGENTS, Playbook и карту доступа.
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — продуктовая спецификация и UX.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты и границы ответственности.
 - [`docs/PROJECT_ONBOARDING.md`](docs/PROJECT_ONBOARDING.md) — capability-based подключение, отключение и настройка проектов.
@@ -76,7 +80,7 @@
 - [`config/widgets.example.yaml`](config/widgets.example.yaml) — widget definitions, instances и auto-materialization policy.
 - [`config/layouts.example.yaml`](config/layouts.example.yaml) — default layouts и будущие drag/resize capabilities.
 - [`config/widget-user-presets.example.yaml`](config/widget-user-presets.example.yaml) — поздняя no-code модель безопасных пользовательских widgets.
-- [GitHub Issues](../../issues) — исполнимый backlog по реализации, widgets, integrations, health, backups, security и миграции ОС.
+- [GitHub Issues](https://github.com/decorum-guy/artem-control-center/issues) — исполнимый backlog по реализации, widgets, integrations, health, backups, security и миграции ОС.
 
 ## Базовый принцип
 
@@ -119,3 +123,4 @@ Production runtime раздаёт собранный dashboard через Panel 
 через Task Scheduler и хранит конфигурацию/логи в
 `%LOCALAPPDATA%\ArtemControlCenter`. Полные инструкции и rollback находятся в
 [`docs/WINDOWS_PRODUCTION_RUNTIME.md`](docs/WINDOWS_PRODUCTION_RUNTIME.md).
+
