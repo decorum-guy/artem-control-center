@@ -126,8 +126,9 @@ def test_browser_capture_accepts_only_the_music_origin_and_required_headers():
         "content-length":"fake"}, "method":"POST"});'''
     parsed = capture_headers(body)
     assert b"content-length" not in parsed
-    with_visitor = body.replace(b'"content-length":"fake"', b'"x-goog-visitor-id":"known-fixture"')
-    assert browser_headers(capture_headers(with_visitor))["x-goog-visitor-id"] == "known-fixture"
+    visitor = "fixture" * 84
+    with_visitor = body.replace(b'"content-length":"fake"', b'"x-goog-visitor-id":' + json.dumps(visitor).encode())
+    assert browser_headers(capture_headers(with_visitor))["x-goog-visitor-id"] == visitor
     request_body = json.dumps({"context": {"client": {"visitorData": "body-fixture"}}})
     body_visitor = body.replace(b'"method":"POST"', b'"body":' + json.dumps(request_body).encode())
     assert browser_headers(capture_headers(body_visitor))["x-goog-visitor-id"] == "body-fixture"

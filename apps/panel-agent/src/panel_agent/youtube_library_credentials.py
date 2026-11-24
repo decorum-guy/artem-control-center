@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 REQUIRED = {"cookie", "authorization", "x-goog-authuser"}
 VISITOR = "x-goog-visitor-id"
 ALLOWED = REQUIRED | {VISITOR}
+VISITOR_VALUE = re.compile(r"[A-Za-z0-9_%+=/-]{1,2048}")
 
 
 def browser_headers(value: bytes) -> dict[str, str]:
@@ -21,7 +22,7 @@ def browser_headers(value: bytes) -> dict[str, str]:
             or not re.fullmatch(r"SAPISIDHASH [\w ]+(?:[ -][\w-]+)*", source["authorization"])
             or len(source["authorization"]) > 1024
             or not re.fullmatch(r"[0-9]{1,3}", source["x-goog-authuser"])
-            or (VISITOR in source and not re.fullmatch(r"[A-Za-z0-9_%+=/-]{1,512}", source[VISITOR]))):
+            or (VISITOR in source and not VISITOR_VALUE.fullmatch(source[VISITOR]))):
         raise ValueError("Invalid Music browser headers")
     return {**source, "accept": "*/*", "content-type": "application/json",
             "origin": "https://music.youtube.com", "x-origin": "https://music.youtube.com"}
@@ -53,7 +54,7 @@ def capture_headers(content: bytes) -> bytes:
             try:
                 encoded_body, _ = json.JSONDecoder().raw_decode(body[option.end():])
                 hint = json.loads(encoded_body)["context"]["client"]["visitorData"]
-                if isinstance(hint, str) and re.fullmatch(r"[A-Za-z0-9_%+=/-]{1,512}", hint):
+                if isinstance(hint, str) and VISITOR_VALUE.fullmatch(hint):
                     selected[VISITOR] = hint
             except (TypeError, ValueError, KeyError):
                 pass
