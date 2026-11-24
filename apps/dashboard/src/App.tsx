@@ -132,6 +132,7 @@ export function App() {
   const [coffeeDelayedStartPending, setCoffeeDelayedStartPending] = useState(false);
   const [coffeeDelayedStartDialogOpen, setCoffeeDelayedStartDialogOpen] = useState(false);
   const snapshotCoordinator = useRef<SnapshotCoordinator | null>(null);
+  const themeTransition = useRef<ViewTransition | null>(null);
 
   useEffect(() => {
     const coordinator = new SnapshotCoordinator({
@@ -195,7 +196,10 @@ export function App() {
   }, [refreshCoffeeDelayedStart, snapshot]);
 
   useEffect(() => {
-    const onPopState = () => setRoute(routeFromLocation());
+    const onPopState = () => {
+      themeTransition.current?.skipTransition();
+      setRoute(routeFromLocation());
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -274,7 +278,13 @@ export function App() {
     }
     if (v3VisualSkinEnabled && motion === "full" && !document.hidden
       && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && document.startViewTransition) {
-      document.startViewTransition(() => flushSync(() => setTheme(next)));
+      themeTransition.current?.skipTransition();
+      const transition = document.startViewTransition(() => flushSync(() => setTheme(next)));
+      themeTransition.current = transition;
+      const clear = () => {
+        if (themeTransition.current === transition) themeTransition.current = null;
+      };
+      void transition.finished.then(clear, clear);
     } else {
       setTheme(next);
     }
@@ -292,6 +302,7 @@ export function App() {
 
   function navigate(target: ShellNavigationTarget) {
     const nextRoute = typeof target === "string" ? target : target.path;
+    if (nextRoute !== route) themeTransition.current?.skipTransition();
     const query = new URLSearchParams(import.meta.env.DEV ? window.location.search : "");
     if (typeof target !== "string") {
       const targetQuery = new URLSearchParams(target.search);
