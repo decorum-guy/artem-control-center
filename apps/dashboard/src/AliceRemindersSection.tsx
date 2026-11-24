@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { StationReminderList } from "@artem/contracts";
 import { DEFAULT_PLANNING_TIME_ZONE } from "./calendarRange";
+import { useNoticeCenter } from "./NoticeCenter";
 import { useInteractionLock } from "./InteractionLock";
 import { PlanningSheet } from "./PlanningRoutePrimitives";
 import { RouteHeader } from "./ShellPrimitives";
 import { pageTitleField, useInterfaceCopy } from "./interfaceCopy";
+import { useOwnerWarningDwell } from "./planningWarningDwell";
 
 const dateTime = new Intl.DateTimeFormat("ru-RU", {
   dateStyle: "medium",
@@ -29,10 +31,16 @@ const statusText: Record<StationReminderList["status"], string> = {
   stale: "Нет свежих данных",
   auth_required: "Нужно восстановить вход в Яндекс"
 };
+const syncText = {
+  connection: "Не удалось обновить список",
+  partial: statusText.partial,
+  stale: statusText.stale
+};
 const writeErrors: Record<string, string> = {
   time_must_be_future: "Выберите время в будущем.",
   invalid_time: "Проверьте дату и время.",
   auth_required: "Нужно восстановить вход в Яндекс.",
+  voice_target_required: "Выберите колонку для озвучивания в настройках подключения.",
   incomplete_source: "Сохранение недоступно, пока Яндекс не вернёт полный список.",
   source_unavailable: "Яндекс недоступен. Повторите после восстановления связи.",
   reminder_changed: "Запись уже изменилась. Закройте окно и откройте её снова.",
@@ -47,8 +55,9 @@ function fields(date: Date) {
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
 }
 
-function ReminderEditor({ item, onClose, onSave }: {
+function ReminderEditor({ item, writable, onClose, onSave }: {
   item: Reminder | null;
+  writable: boolean;
   onClose: () => void;
   onSave: (title: string, dueLocal: string) => Promise<void>;
 }) {
@@ -64,7 +73,7 @@ function ReminderEditor({ item, onClose, onSave }: {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending.current) return;
+    if (pending.current || !writable) return;
     pending.current = true;
     setSaving(true);
     setError(null);
@@ -112,7 +121,8 @@ function ReminderEditor({ item, onClose, onSave }: {
           </label>
         </div>
         {error && <p role="alert">{error}</p>}
-        <button type="submit" className="planning-primary-button" disabled={saving || unconfirmed || !title.trim()}>
+        <button type="submit" className="planning-primary-button" aria-disabled={!writable || undefined}
+          disabled={saving || unconfirmed || !title.trim()}>
           {saving ? "Проверяем в Алисе…" : "Сохранить"}
         </button>
       </form>
@@ -124,39 +134,71 @@ export function AliceRemindersSection() {
   const [list, setList] = useState<StationReminderList>();
   const [readFailed, setReadFailed] = useState(false);
   const [editor, setEditor] = useState<Reminder | "new" | null>(null);
-  const [notice, setNotice] = useState("");
+  const { showNotice } = useNoticeCenter();
   const { guardMutation } = useInteractionLock();
   const { copy } = useInterfaceCopy();
   const readEpoch = useRef(0);
+  const status = list?.status ?? "loading";
+  const confirmed = Boolean(list?.observedAt);
+  const syncProblem = readFailed ? "connection" : status === "stale" || status === "partial" ? status : null;
+  const delayedProblem = useOwnerWarningDwell(confirmed ? syncProblem : null);
+  const visibleProblem = confirmed ? delayedProblem : syncProblem;
+  const label = visibleProblem
+    ? visibleProblem === "connection" && !confirmed ? "Не удалось связаться с панелью" : syncText[visibleProblem]
+    : status === "fresh" && list?.voiceTargetConfigured === false
+      ? "Колонка для озвучивания не настроена"
+      : syncProblem && confirmed ? "" : statusText[status];
+  const writable = status === "fresh" && !readFailed;
+  const showEmpty = list?.items.length === 0 && (status === "fresh" || confirmed);
 
   useEffect(() => {
     const controller = new AbortController();
     let timer: number | undefined;
+    let inFlight = false;
     async function read() {
+      if (inFlight) return;
+      inFlight = true;
+      window.clearTimeout(timer);
       const epoch = readEpoch.current;
       try {
         const response = await fetch("/api/v1/station/reminders", {
           cache: "no-store",
-          signal: controller.signal
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)])
         });
         if (!response.ok && response.status !== 404) throw new Error("Could not read Alice reminders");
         const result: StationReminderList | null = response.status === 404 ? null : await response.json();
         if (!controller.signal.aborted && epoch === readEpoch.current) {
-          setList(result ?? { status: "not_configured", observedAt: null, items: [] });
+          const next = result ?? { status: "not_configured", observedAt: null, items: [] } as const;
+          if (!Object.hasOwn(statusText, next.status) || !Array.isArray(next.items)) {
+            throw new Error("Unexpected Alice reminder projection");
+          }
+          setList((previous) => {
+            // The agent retains a checked list on source failure. Keep its
+            // controls mounted for focus, with writes blocked while degraded.
+            if ((next.status === "partial" || next.status === "stale")
+              && next.observedAt && next.observedAt === previous?.observedAt) {
+              return { ...next, canCreate: previous.canCreate, canReschedule: previous.canReschedule };
+            }
+            return next;
+          });
+          if (next.status === "auth_required" || next.status === "not_configured") setEditor(null);
           setReadFailed(false);
         }
       } catch {
         if (!controller.signal.aborted && epoch === readEpoch.current) {
           setReadFailed(true);
-          setList((previous) => previous && { ...previous, status: "stale", canCreate: false, canReschedule: false });
         }
       } finally {
+        inFlight = false;
         if (!controller.signal.aborted) timer = window.setTimeout(read, 10_000);
       }
     }
 
+    const onVisibilityChange = () => { if (!document.hidden) void read(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
     void read();
     return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       controller.abort();
       window.clearTimeout(timer);
     };
@@ -165,6 +207,7 @@ export function AliceRemindersSection() {
   async function save(title: string, dueLocal: string) {
     if (!editor || !guardMutation()) throw new Error("Панель заблокирована.");
     const editing = editor !== "new";
+    if (!writable || !(editing ? list?.canReschedule : list?.canCreate)) throw new Error(writeErrors.source_unavailable);
     const endpoint = "/api/v1/station/reminders";
     const base = { attemptId: crypto.randomUUID(), dueLocal };
     readEpoch.current += 1;
@@ -180,7 +223,13 @@ export function AliceRemindersSection() {
         throw new Error(writeErrors[detail] ?? "Алиса не приняла изменение. Сверьтесь со списком.");
       }
       setList(result as StationReminderList);
-      setNotice(editing ? "Время обновилось в Алисе." : "Напоминание добавлено в Алису.");
+      setReadFailed(false);
+      showNotice({
+        id: "station-reminders-saved",
+        severity: "success",
+        title: editing ? "Время обновилось в Алисе." : "Напоминание добавлено в Алису.",
+        detail: "Изменение подтверждено повторным чтением."
+      });
       setEditor(null);
     } catch (error) {
       if (error instanceof TypeError || error instanceof SyntaxError) throw new Error(writeErrors.unconfirmed);
@@ -194,21 +243,23 @@ export function AliceRemindersSection() {
     <div className="planning-route-page" data-testid="route-reminders">
       <RouteHeader title={copy(pageTitleField("reminders"))} description="" />
       <section className="planning-card planning-alice-reminders" aria-labelledby="alice-reminders-title"
-        data-testid="alice-reminders" data-status={list?.status}>
+        data-testid="alice-reminders" data-status={readFailed ? "transport_error" : status}>
         <div className="planning-alice-reminders-heading">
           <h2 id="alice-reminders-title">Напоминания Алисы</h2>
           {list?.canCreate && (
-            <button className="planning-primary-button" type="button" onClick={() => setEditor("new")}>Добавить</button>
+            <button className="planning-primary-button" type="button" aria-disabled={!writable || undefined}
+              onClick={() => { if (writable) setEditor("new"); }}>Добавить</button>
           )}
         </div>
-        <p className="planning-route-note" role="status">
-          {list ? statusText[list.status] : readFailed ? "Не удалось связаться с панелью" : statusText.loading}
-          {list?.observedAt && <>
-            {list.status !== "fresh" && " · "}Проверено <time dateTime={list.observedAt}>{dateTime.format(new Date(list.observedAt))}</time>
-          </>}
-        </p>
-        {notice && <p role="status">{notice}</p>}
-        {list?.status === "fresh" && list.items.length === 0 && <p>Активных напоминаний Алисы нет.</p>}
+        <div className="planning-route-note planning-alice-reminders-sync">
+          <span role="status" aria-atomic="true">{label}</span>
+          {list?.observedAt && (
+            <span>Проверено <time dateTime={list.observedAt}>{dateTime.format(new Date(list.observedAt))}</time></span>
+          )}
+        </div>
+        {showEmpty && <p data-testid="alice-reminders-empty">
+          {writable ? "Активных напоминаний Алисы нет." : "В последнем списке напоминаний не было."}
+        </p>}
         {Boolean(list?.items.length) && (
           <ul className="planning-route-list">
             {list?.items.map((item) => (
@@ -221,14 +272,17 @@ export function AliceRemindersSection() {
                   <strong>{item.title}</strong>
                 </div>
                 {list.canReschedule && item.version && item.dueAt && (
-                  <button type="button" className="planning-secondary-button" onClick={() => setEditor(item)}>Перенести</button>
+                  <button type="button" className="planning-secondary-button" aria-disabled={!writable || undefined}
+                    onClick={() => { if (writable) setEditor(item); }}>Перенести</button>
                 )}
               </li>
             ))}
           </ul>
         )}
       </section>
-      {editor && <ReminderEditor item={editor === "new" ? null : editor} onClose={() => setEditor(null)} onSave={save} />}
+      {editor && <ReminderEditor item={editor === "new" ? null : editor}
+        writable={writable && Boolean(editor === "new" ? list?.canCreate : list?.canReschedule)}
+        onClose={() => setEditor(null)} onSave={save} />}
     </div>
   );
 }

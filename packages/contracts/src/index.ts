@@ -903,6 +903,7 @@ export interface StationReminderList {
   status: "not_configured" | "loading" | "fresh" | "partial" | "stale" | "auth_required";
   observedAt: string | null;
   canCreate?: boolean;
+  voiceTargetConfigured?: boolean;
   canReschedule?: boolean;
   items: {
     id: string;

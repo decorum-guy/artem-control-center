@@ -113,3 +113,80 @@ test("states that the next occurrence is unknown for a recurring reminder", asyn
   await expect(row).toContainText("Ближайшее время неизвестно");
   await expect(row.locator("time")).toHaveCount(0);
 });
+
+for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
+  test(`keeps reminders anchored across repeated failures at ${viewport.width}×${viewport.height}`, async ({ page }) => {
+    const observedAt = "2026-11-24T02:30:00Z";
+    const sample = {
+      id: "geometry-fixture", title: "Тестовая строка", version: "a".repeat(64),
+      dueAt: "2026-11-25T03:00:00Z", timezone: "Europe/Moscow", repeats: false
+    };
+    let items: typeof sample[] = [];
+    let outcome: "fresh" | "stale" | "http" = "fresh";
+    await page.route("**/api/v1/station/reminders", (route) =>
+      outcome === "http" ? route.fulfill({ status: 503 }) : route.fulfill({
+        json: { status: outcome, observedAt, items, canCreate: outcome === "fresh", canReschedule: outcome === "fresh" }
+      }));
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize(viewport);
+    await page.clock.install();
+    await page.goto("/reminders");
+    await unlockTouchLockIfNeeded(page);
+    const section = page.getByTestId("alice-reminders");
+    const empty = page.getByTestId("alice-reminders-empty");
+    const status = section.getByRole("status");
+    const add = section.getByRole("button", { name: "Добавить" });
+    await expect(empty).toHaveText("Активных напоминаний Алисы нет.");
+    const position = async (target: typeof empty) => target.evaluate((el) => el.getBoundingClientRect().top);
+    const initialEmpty = await position(empty);
+    await add.focus();
+
+    outcome = "http";
+    await page.clock.fastForward(10_100);
+    await expect(section).toHaveAttribute("data-status", "transport_error");
+    await expect(add).toBeFocused();
+    await expect(add).toBeDisabled();
+    await expect(status).toBeEmpty();
+    await page.clock.fastForward(3_600);
+    await expect(status).toHaveText("Не удалось обновить список");
+    await expect(empty).toHaveText("В последнем списке напоминаний не было.");
+    expect(await position(empty)).toBe(initialEmpty);
+
+    await page.clock.fastForward(10_100);
+    await expect(status).toHaveText("Не удалось обновить список");
+    expect(await position(empty)).toBe(initialEmpty);
+    outcome = "fresh";
+    await page.clock.fastForward(10_100);
+    await expect(empty).toHaveText("Активных напоминаний Алисы нет.");
+    await page.clock.fastForward(1_900);
+    await expect(status).toBeEmpty();
+    expect(await position(empty)).toBe(initialEmpty);
+
+    items = [sample];
+    await page.clock.fastForward(10_100);
+    const row = section.locator("li");
+    await expect(row).toContainText(sample.title);
+    await row.getByRole("button", { name: "Перенести" }).click();
+    const editor = page.getByTestId("alice-reminder-editor");
+    const field = editor.getByLabel("Время (МСК)");
+    await field.fill("18:42");
+    await field.focus();
+    const initialRow = await position(row);
+    outcome = "stale";
+    await page.clock.fastForward(10_100);
+    await expect(section).toHaveAttribute("data-status", "stale");
+    await page.clock.fastForward(3_600);
+    await expect(status).toHaveText("Нет свежих данных");
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue("18:42");
+    await expect(editor.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    expect(await position(row)).toBe(initialRow);
+
+    outcome = "fresh";
+    await page.clock.fastForward(10_100);
+    await expect(section).toHaveAttribute("data-status", "fresh");
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue("18:42");
+    expect(await position(row)).toBe(initialRow);
+  });
+}

@@ -129,7 +129,8 @@ from panel_agent.main import station_reminders
 
 if station_reminders is not None:
     station_reminders.writer = StationRemindersWriter(
-        station_reminders, access=access, write_enabled=lambda: allowed("PANEL_WRITES_ENABLED"),
+        station_reminders, access=access, device_id=lease["device_id"],
+        write_enabled=lambda: allowed("PANEL_WRITES_ENABLED"),
     )
 
 

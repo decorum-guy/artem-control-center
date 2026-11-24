@@ -207,7 +207,7 @@ def test_uncertain_creation_never_repeats_the_provider_post(tmp_path, monkeypatc
     collector = reminders.StationRemindersCollector(tmp_path / "unused")
     monkeypatch.setattr(collector, "_current_session", lambda: reminders._ReminderSession(1, {"Cookie": "Session_id=fixture"}))
     collector.writer = reminders.StationRemindersWriter(
-        collector, access=lambda: store, write_enabled=lambda: True
+        collector, access=lambda: store, write_enabled=lambda: True, device_id="station-fixture"
     )
     real_client = httpx.AsyncClient
     writes = []
@@ -232,7 +232,9 @@ def test_uncertain_creation_never_repeats_the_provider_post(tmp_path, monkeypatc
         assert client.post(endpoint, json=change, headers=intent).json()["detail"] == "already_submitted"
     assert writes == [{"title": "Тестовая запись", "doable": True, "status": "INCOMPLETE",
                        "schedule": "DTSTART;TZID=Europe/Moscow:20411201T161500",
-                       "reminders": [{"offset_seconds": "0"}]}]
+                       "reminders": [{"offset_seconds": "0", "play_settings": {
+                           "play_location": {"selected_devices": {"selected_device_ids": ["station-fixture"]}}
+                       }}]}]
 
 
 def test_recurrence_without_next_deadline_has_no_due_time():

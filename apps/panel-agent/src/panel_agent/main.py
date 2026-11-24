@@ -382,6 +382,7 @@ app.include_router(build_station_playback_router(station_playback))
 if MODE == "production" and station_reminders is not None:
     station_reminders.writer = StationRemindersWriter(
         station_reminders, access=lambda: access_policy,
+        device_id=os.getenv("PANEL_STATION_REMINDER_DEVICE_ID", "").strip(),
         write_enabled=lambda: SETTINGS.writes_enabled
         and startup_lifecycle.phase == "ready"
         and os.getenv("PANEL_STATION_REMINDER_WRITES_ENABLED", "").strip().lower() == "true",

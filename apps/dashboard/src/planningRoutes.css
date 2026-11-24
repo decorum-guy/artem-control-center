@@ -634,6 +634,30 @@
   gap: 12px;
 }
 
+.planning-alice-reminders-heading {
+  min-block-size: 48px;
+}
+
+.planning-alice-reminders-sync {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  block-size: 1.5rem;
+}
+
+.planning-alice-reminders-sync > span {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planning-alice-reminders [aria-disabled="true"],
+.planning-alice-reminders-form [aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .planning-alice-reminders-heading h2,
 .planning-alice-reminders-form p {
   margin: 0;

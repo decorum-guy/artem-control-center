@@ -57,6 +57,7 @@ class StationReminderList(BaseModel):
     observedAt: str | None = None
     items: tuple[StationReminder, ...] = ()
     canCreate: bool = False
+    voiceTargetConfigured: bool = False
     canReschedule: bool = False
 
 
@@ -387,6 +388,7 @@ class StationRemindersCollector:
             return self.state
         return self.state.model_copy(update={
             "canCreate": self.writer.allowed(CREATE_CAPABILITY),
+            "voiceTargetConfigured": self.writer.device_id is not None,
             "canReschedule": self.writer.allowed(EDIT_CAPABILITY),
         })
 
@@ -453,19 +455,27 @@ def _note_for(payload: dict, reminder_id: str) -> dict | None:
     return None
 
 
+def _playback_settings(note: dict) -> list:
+    return [entry.get("play_settings") for entry in note["reminders"]]
+
+
 class StationRemindersWriter:
     def __init__(
         self, collector: StationRemindersCollector, *, access: Callable[[], AccessPolicyStore],
         write_enabled: Callable[[], bool],
+        device_id: str = "",
     ) -> None:
         self.collector = collector
+        self.device_id = device_id if re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", device_id) else None
         self.access = access
         self.write_enabled = write_enabled
         self._attempts: deque[UUID] = deque(maxlen=128)
         self._busy = asyncio.Lock()
 
     def allowed(self, capability: str) -> bool:
-        return self.access().authorize(capability, gate_enabled=self.write_enabled()).allowed
+        return (capability != CREATE_CAPABILITY or self.device_id is not None) and self.access().authorize(
+            capability, gate_enabled=self.write_enabled(),
+        ).allowed
 
     async def submit(self, request: Request, change: CreateReminder | RescheduleReminder, identity: str | None = None) -> StationReminderList:
         capability = EDIT_CAPABILITY if isinstance(change, RescheduleReminder) else CREATE_CAPABILITY
@@ -474,6 +484,8 @@ class StationRemindersWriter:
             if not _local_intent(request):
                 raise HTTPException(403, "local_panel_required")
             self.access().require(capability, gate_enabled=self.write_enabled())
+            if capability == CREATE_CAPABILITY and self.device_id is None:
+                raise HTTPException(409, "voice_target_required")
             if self._busy.locked():
                 raise HTTPException(409, "busy")
             async with self._busy, self.collector.lock:
@@ -492,6 +504,7 @@ class StationRemindersWriter:
                     if not complete:
                         raise HTTPException(409, "incomplete_source")
                     schedule = "DTSTART;TZID=Europe/Moscow:" + target.strftime("%Y%m%dT%H%M%S")
+                    expected_playback: list = []
                     if isinstance(change, RescheduleReminder):
                         original = _note_for(before, identity or "")
                         if original is None or _version(original) != change.expectedVersion:
@@ -499,18 +512,24 @@ class StationRemindersWriter:
                         if _time_of(original)[2]:
                             raise HTTPException(409, "recurring_reminder")
                         source_note_id = original["note_id"]
+                        expected_playback = _playback_settings(original)
                         path = "update_note"
                         note = {"note_id": source_note_id, "status": "INCOMPLETE", "schedule": schedule}
                     else:
                         path = "create_note"
+                        voice = {"play_location": {"selected_devices": {"selected_device_ids": [self.device_id]}}}
+                        reminder = {"offset_seconds": "0", "play_settings": voice}
+                        identity_header = session.headers.get("X-Ya-Uuid")
+                        if identity_header:
+                            reminder["origin_device_id"] = identity_header
                         note = {"title": change.title, "doable": True, "status": "INCOMPLETE",
-                                "schedule": schedule, "reminders": [{"offset_seconds": "0"}]}
+                                "schedule": schedule, "reminders": [reminder]}
                     self.access().require(capability, gate_enabled=self.write_enabled())
                     if not self.collector.is_current(session):
                         raise HTTPException(409, "auth_required")
                     self._attempts.append(change.attemptId)
                     result = "unconfirmed"
-                    await self._mutate(client, path, session, note, target)
+                    await self._mutate(client, path, session, note, target, expected_playback)
                     result = "confirmed"
                     return self.collector.projection()
         finally:
@@ -518,6 +537,7 @@ class StationRemindersWriter:
 
     async def _mutate(
         self, client: httpx.AsyncClient, path: str, session: _ReminderSession, note: dict, target: datetime,
+        expected_playback: list,
     ) -> None:
         headers = session.headers
         try:
@@ -544,7 +564,13 @@ class StationRemindersWriter:
                 self.collector.confirm(items)
                 latest = next((item for item in after["notes"] if item.get("note_id") == note_id), None)
                 if latest and latest.get("reminders") and _time_of(latest)[0] == target:
-                    return
+                    playback = _playback_settings(latest)
+                    if path == "create_note":
+                        expected_voice = note["reminders"][0]["play_settings"]["play_location"]
+                        if len(playback) == 1 and isinstance(playback[0], dict) and playback[0].get("play_location") == expected_voice:
+                            return
+                    elif playback == expected_playback:
+                        return
         raise HTTPException(502, "unconfirmed")
 
 
