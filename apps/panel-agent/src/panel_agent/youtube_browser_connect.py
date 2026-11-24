@@ -158,6 +158,13 @@ class MusicBrowserConnector:
         elif self.state == "idle":
             self.state = "auth_required"
 
+    def confirm_read(self, version: tuple | None) -> None:
+        # Candidate validation is part of the attempt. A subsequent provider
+        # read by the library closes the incident for that exact vault version.
+        if (version and self.recovery == version
+                and (self.state == "connected" or self.task is None or self.task.done())):
+            self.recovery = None
+
     def start(self, *, manual: bool) -> bool:
         if self.closed or not self.allowed() or (self.task is not None and not self.task.done()):
             return False

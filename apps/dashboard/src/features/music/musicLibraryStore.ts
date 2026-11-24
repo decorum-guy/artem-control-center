@@ -188,7 +188,9 @@ export class MusicLibraryStore {
         }
       }
       if (status.status !== "auth_required" && status.status !== "not_configured" && !this.loadedCatalog) {
-        await this.catalog(false, this.state.playlists.length > 0);
+        const viewKey = status.viewIdentity ?? status.generation;
+        const saved = viewKey && savedSelection(this.provider, viewKey);
+        await this.catalog(false, this.state.playlists.length > 0 || Boolean(saved));
         const list = this.getList(this.state.selected);
         if (this.loadedCatalog && this.state.selected && !list.observedAt && !list.pending) void this.tracks();
       }
@@ -224,18 +226,19 @@ export class MusicLibraryStore {
       const previous = more ? this.state.playlists : [];
       const keys = new Set(previous.map(item => item.key));
       const playlists = previous.concat(page.items.filter(item => !keys.has(item.key)));
-      const selection = this.state.selected;
+      const viewKey = viewIdentity ?? generation;
+      const selection = this.state.selected ?? savedSelection(this.provider, viewKey);
       this.loadedCatalog = true;
-      if (refresh && selection && !playlists.some(item => item.key === selection)) {
+      if (refresh && !page.next && selection && !playlists.some(item => item.key === selection)) {
         this.cancelTracks(selection);
         this.views.delete(selection);
         const lists = { ...this.state.lists };
         delete lists[selection];
-        saveSelection(this.provider, viewIdentity ?? generation, null);
+        saveSelection(this.provider, viewKey, null);
         this.patch({ selected: null, lists, catalogRemoved: true });
       }
       this.patch({ playlists, catalogNext: page.next, status: "ready" });
-      const restored = savedSelection(this.provider, viewIdentity ?? generation);
+      const restored = savedSelection(this.provider, viewKey);
       if (!this.state.selected && (this.provider === "yandex" || (restored && playlists.some(item => item.key === restored)))) {
         this.select(restored ?? playlists[0]?.key);
       }

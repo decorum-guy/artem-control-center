@@ -331,6 +331,8 @@ class MusicLibrary:
                     feed.catalog_failed = False
                 feed.needs_session_probe = False
                 feed.status = "unavailable" if feed.catalog_failed else "ready"
+                if provider == "youtube" and self.browser:
+                    self.browser.confirm_read(feed.version)
                 return result
         finally:
             feed.waiters -= 1

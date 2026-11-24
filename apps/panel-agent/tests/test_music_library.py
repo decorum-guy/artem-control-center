@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.music_library import MusicLibrary, PlaySelection
 from panel_agent.music_library_types import Continuation, Playlist, ProviderPage, Recording
+from panel_agent import youtube_browser_connect
 from panel_agent.youtube_library_credentials import browser_headers, capture_headers
 from panel_agent.youtube_library import BrowserChannelMismatch, YouTubeLibrary
 from panel_agent.youtube_music import MusicAuthRequired, MusicUnavailable
@@ -168,7 +169,9 @@ def test_only_explicit_sign_out_starts_recovery_and_keeps_last_catalog(tmp_path)
         feed = library.feeds["youtube"]
         feed.provider = source
         recoveries = []
-        library.browser = type("Browser", (), {"recover": lambda self: recoveries.append(True)})()
+        library.browser = type("Browser", (), {
+            "recover": lambda self: recoveries.append(True), "confirm_read": lambda self, version: None,
+        })()
         old = await library.page("youtube", "", None)
         for error, status in ((MusicUnavailable(), 503), (BrowserChannelMismatch(), 401), (MusicAuthRequired(), 401)):
             source.failure = error
@@ -177,6 +180,63 @@ def test_only_explicit_sign_out_starts_recovery_and_keeps_last_catalog(tmp_path)
             assert failed.value.status_code == status
             assert feed.pages["", None] == old
         assert recoveries == [True]
+
+    asyncio.run(run())
+
+
+def test_normal_provider_read_allows_the_next_independent_recovery(tmp_path, monkeypatch):
+    async def run():
+        library, _, _ = setup(tmp_path)
+        source = BrowserSource()
+        library.feeds["youtube"].provider = source
+        source.path = tmp_path / "station-credentials" / "test.dpapi"
+        source.path.parent.mkdir()
+        source.credential_revision = source.version
+        source.official_account = lambda: "test-channel"
+        source.proxy = "http://127.0.0.1:10809"
+        writes = []
+        launches = []
+        release = asyncio.Event()
+
+        def write(path, candidate):
+            assert path == source.path and candidate == b"verified"
+            writes.append(candidate)
+            source.epoch = (len(writes) + 1,)
+
+        async def browse(profile, manual, approve, report):
+            assert not manual
+            launches.append(source.version())
+            await release.wait()
+            assert await approve(b"verified")
+
+        monkeypatch.setattr(youtube_browser_connect, "write_protected", write)
+        connector = youtube_browser_connect.MusicBrowserConnector(source, lambda: True, browser=browse)
+        connector.profile.mkdir()
+        connector._validate = lambda payload, account: None
+        library.browser = connector
+
+        async def signed_out():
+            with pytest.raises(HTTPException) as failure:
+                await library.page("youtube", "", None, refresh=True)
+            assert failure.value.status_code == 401
+
+        source.failure = MusicAuthRequired()
+        await asyncio.gather(signed_out(), signed_out(), signed_out())
+        assert launches == [(1,)]
+        release.set()
+        await connector.task
+        assert source.version() == (2,) and len(writes) == 1
+        await signed_out()
+        assert launches == [(1,)]
+
+        source.failure = None
+        assert (await library.page("youtube", "", None, refresh=True))["items"]
+        source.failure = MusicAuthRequired()
+        await signed_out()
+        await connector.task
+        assert launches == [(1,), (2,)]
+        assert source.version() == (3,) and len(writes) == 2
+        await connector.close()
 
     asyncio.run(run())
 

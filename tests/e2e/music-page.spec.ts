@@ -304,6 +304,81 @@ test("YouTube session rotation keeps the filtered second page and a different ch
   await expect.poll(() => list.evaluate(node => node.scrollTop)).toBe(0);
 });
 
+for (const dimensions of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
+  test(`YouTube restores a playlist beyond the first catalogue page at ${dimensions.width}px`, async ({ page }) => {
+    await page.setViewportSize(dimensions);
+    const catalogue = Array.from({ length: 41 }, (_, index) => playlist("P" + (index + 1)));
+    let activeGeneration = generation;
+    let mode: "ready" | "offline" | "deleted" = "ready";
+    let playRequests = 0;
+    const fullReads: string[] = [];
+    await page.route("**/api/v1/music/**", async route => {
+      const { pathname, searchParams } = new URL(route.request().url());
+      const path = pathname.split("/music/")[1];
+      const payload = (items: unknown[], next: string | null = null) => ({
+        ...samplePage(items, next), generation: activeGeneration
+      });
+      if (path === "youtube/status") {
+        return route.fulfill({ json: { ...status, generation: activeGeneration, viewIdentity: "same-channel" } });
+      }
+      if (path === "youtube/catalog") {
+        if (searchParams.has("refresh")) {
+          fullReads.push(activeGeneration);
+          if (mode === "offline") return route.fulfill({ status: 503, json: { detail: "source_unavailable" } });
+          return route.fulfill({ json: payload(mode === "deleted" ? catalogue.filter(row => row.key !== "P40") : catalogue) });
+        }
+        if (searchParams.has("cursor")) return route.fulfill({ json: payload(catalogue.slice(25)) });
+        return route.fulfill({ json: payload(catalogue.slice(0, 25), "catalogue-next") });
+      }
+      if (path === "youtube/tracks/P40") {
+        const more = searchParams.has("cursor");
+        return route.fulfill({ json: payload(
+          Array.from({ length: 100 }, (_, index) => row(index + (more ? 101 : 1))),
+          more ? null : "tracks-next"
+        ) });
+      }
+      if (path === "youtube/play") playRequests++;
+      return route.fulfill({ json: path.endsWith("/status") ? status : samplePage([]) });
+    });
+
+    await page.goto("/music");
+    const yt = page.getByRole("region", { name: "YouTube Music", exact: true });
+    const tracks = yt.getByRole("region", { name: "Треки · YouTube Music" });
+    const filter = yt.getByRole("searchbox");
+    await yt.getByRole("button", { name: "Ещё плейлисты" }).click();
+    await yt.getByRole("button", { name: "P40", exact: true }).click();
+    await yt.getByRole("button", { name: "Загрузить ещё" }).click();
+    await expect(yt.getByText("Загружено: 200")).toBeVisible();
+    await filter.fill("Исполнитель");
+    await tracks.evaluate(node => { node.scrollTop = 6400; });
+    const scroll = () => tracks.evaluate(node => node.scrollTop);
+    await expect.poll(scroll).toBe(6400);
+
+    const wake = () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    mode = "offline";
+    activeGeneration = "d".repeat(32);
+    const failed = page.waitForResponse(response => response.url().includes("youtube/catalog?refresh=true") && response.status() === 503);
+    await wake();
+    await failed;
+    await expect(filter).toBeDisabled();
+    expect(fullReads).toEqual([activeGeneration]);
+
+    mode = "ready";
+    await wake();
+    await expect(yt.getByRole("button", { name: "P40", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(filter).toHaveValue("Исполнитель");
+    await expect(yt.getByText("Загружено: 200")).toBeVisible();
+    await expect.poll(scroll).toBe(6400);
+
+    mode = "deleted";
+    activeGeneration = "e".repeat(32);
+    await wake();
+    await expect(yt.getByText(/Плейлист больше недоступен/)).toBeVisible();
+    await expect(filter).toBeDisabled();
+    expect(playRequests).toBe(0);
+  });
+}
+
 test("a confirmed YouTube recording stays highlighted across playlists and routes until Station changes", async ({ page }) => {
   await page.addInitScript(() => {
     class FixtureEvents extends EventTarget {
