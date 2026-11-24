@@ -417,6 +417,7 @@ class ReminderChange(BaseModel):
 
 
 class CreateReminder(ReminderChange):
+    delivery: Literal["station", "phone", "both"] = "station"
     title: str = Field(min_length=1, max_length=200)
 
     @field_validator("title")
@@ -479,9 +480,7 @@ class StationRemindersWriter:
         return self.device_id is not None and self.home_id is not None
 
     def allowed(self, capability: str) -> bool:
-        return (capability != CREATE_CAPABILITY or self.has_voice_target) and self.access().authorize(
-            capability, gate_enabled=self.write_enabled(),
-        ).allowed
+        return self.access().authorize(capability, gate_enabled=self.write_enabled()).allowed
 
     async def submit(self, request: Request, change: CreateReminder | RescheduleReminder, identity: str | None = None) -> StationReminderList:
         capability = EDIT_CAPABILITY if isinstance(change, RescheduleReminder) else CREATE_CAPABILITY
@@ -490,7 +489,7 @@ class StationRemindersWriter:
             if not _local_intent(request):
                 raise HTTPException(403, "local_panel_required")
             self.access().require(capability, gate_enabled=self.write_enabled())
-            if capability == CREATE_CAPABILITY and not self.has_voice_target:
+            if isinstance(change, CreateReminder) and change.delivery != "phone" and not self.has_voice_target:
                 raise HTTPException(409, "voice_target_required")
             if self._busy.locked():
                 raise HTTPException(409, "busy")
@@ -523,10 +522,15 @@ class StationRemindersWriter:
                         note = {"note_id": source_note_id, "status": "INCOMPLETE", "schedule": schedule}
                     else:
                         path = "create_note"
-                        voice = {"play_location": {"selected_devices": {"selected_device_ids": [self.device_id]}}}
+                        has_voice = change.delivery != "phone"
+                        send_push = "Disabled" if change.delivery == "station" else "Enabled"
+                        playback: dict = {"send_push": {"state": send_push}}
+                        if has_voice:
+                            playback["play_location"] = {"selected_devices": {"selected_device_ids": [self.device_id]}}
                         note = {"title": change.title, "doable": True, "status": "INCOMPLETE",
-                                "schedule": schedule, "is_personal": False, "public_home_ids": [self.home_id],
-                                "reminders": [{"offset_seconds": "0", "play_settings": voice}]}
+                                "schedule": schedule, "is_personal": not has_voice,
+                                "public_home_ids": [self.home_id] if has_voice else [],
+                                "reminders": [{"offset_seconds": "0", "play_settings": playback}]}
                     self.access().require(capability, gate_enabled=self.write_enabled())
                     if not self.collector.is_current(session):
                         raise HTTPException(409, "auth_required")
@@ -569,11 +573,12 @@ class StationRemindersWriter:
                 if latest and latest.get("reminders") and _time_of(latest)[0] == target:
                     playback = _playback_settings(latest)
                     if path == "create_note":
-                        expected_voice = note["reminders"][0]["play_settings"]["play_location"]
+                        expected = note["reminders"][0]["play_settings"]
                         if (len(playback) == 1 and isinstance(playback[0], dict)
-                                and playback[0].get("play_location") == expected_voice
-                                and latest.get("is_personal") is False
-                                and latest.get("public_home_ids") == [self.home_id]):
+                                and playback[0].get("play_location") == expected.get("play_location")
+                                and playback[0].get("send_push") == expected["send_push"]
+                                and latest.get("is_personal") is note["is_personal"]
+                                and (latest.get("public_home_ids") or []) == note["public_home_ids"]):
                             return
                     elif playback == expected_playback:
                         return

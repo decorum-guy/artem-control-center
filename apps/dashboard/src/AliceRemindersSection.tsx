@@ -49,22 +49,25 @@ const writeErrors: Record<string, string> = {
   unconfirmed: "Яндекс не подтвердил результат. Сверьтесь со списком перед повторной попыткой."
 };
 type Reminder = StationReminderList["items"][number];
+type Delivery = "station" | "phone" | "both";
 
 function fields(date: Date) {
   const parts = Object.fromEntries(formTime.formatToParts(date).map(({ type, value }) => [type, value]));
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
 }
 
-function ReminderEditor({ item, writable, onClose, onSave }: {
+function ReminderEditor({ item, writable, voiceReady, onClose, onSave }: {
   item: Reminder | null;
   writable: boolean;
+  voiceReady: boolean;
   onClose: () => void;
-  onSave: (title: string, dueLocal: string) => Promise<void>;
+  onSave: (title: string, dueLocal: string, delivery: Delivery) => Promise<void>;
 }) {
   const initial = fields(item?.dueAt ? new Date(item.dueAt) : new Date(Date.now() + 30 * 60_000));
   const [title, setTitle] = useState(item?.title ?? "");
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
+  const [delivery, setDelivery] = useState<Delivery>(voiceReady ? "station" : "phone");
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +81,7 @@ function ReminderEditor({ item, writable, onClose, onSave }: {
     setSaving(true);
     setError(null);
     try {
-      await onSave(title, `${date}T${time}`);
+      await onSave(title, `${date}T${time}`, delivery);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : writeErrors.unconfirmed);
       if (!(reason instanceof Error) || reason.message === writeErrors.unconfirmed) setUnconfirmed(true);
@@ -120,7 +123,20 @@ function ReminderEditor({ item, writable, onClose, onSave }: {
               onChange={(event) => { setTime(event.target.value); setSelectedPreset(null); }} />
           </label>
         </div>
-        {!item && <p className="planning-route-note">Напоминание прозвучит на выбранной Станции и будет видно участникам дома.</p>}
+        {!item && <>
+          <fieldset className="planning-alice-reminders-destination">
+            <legend>Куда напомнить</legend>
+            <div className="planning-alice-reminders-presets">
+              {([["station", "На Станцию"], ["phone", "На телефон"], ["both", "На оба"]] as const).map(([mode, label]) => (
+                <button key={mode} type="button" className="planning-secondary-button" aria-pressed={delivery === mode}
+                  disabled={mode !== "phone" && !voiceReady} onClick={() => setDelivery(mode)}>{label}</button>
+              ))}
+            </div>
+          </fieldset>
+          <p className="planning-route-note">{delivery === "phone"
+            ? "Личное уведомление придёт в «Дом с Алисой», если разрешены push."
+            : "Запись с озвучкой на Станции видна участникам дома."}</p>
+        </>}
         {!writable && <p role="status" className="planning-route-note">Храним введённые данные. Сохранение временно недоступно.</p>}
         {error && <p role="alert">{error}</p>}
         <button type="submit" className="planning-primary-button" aria-disabled={!writable || undefined}
@@ -206,7 +222,7 @@ export function AliceRemindersSection() {
     };
   }, []);
 
-  async function save(title: string, dueLocal: string) {
+  async function save(title: string, dueLocal: string, delivery: Delivery) {
     if (!editor || !guardMutation()) throw new Error("Панель заблокирована.");
     const editing = editor !== "new";
     if (!writable || !(editing ? list?.canReschedule : list?.canCreate)) throw new Error(writeErrors.source_unavailable);
@@ -217,7 +233,7 @@ export function AliceRemindersSection() {
       const response = await fetch(editing ? `${endpoint}/${editor.id}` : endpoint, {
         method: editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json", "X-Panel-Intent": "station-reminders" },
-        body: JSON.stringify(editing ? { ...base, expectedVersion: editor.version } : { ...base, title })
+        body: JSON.stringify(editing ? { ...base, expectedVersion: editor.version } : { ...base, title, delivery })
       });
       const result = await response.json();
       if (!response.ok) {
@@ -284,6 +300,7 @@ export function AliceRemindersSection() {
       </section>
       {editor && <ReminderEditor item={editor === "new" ? null : editor}
         writable={writable && Boolean(editor === "new" ? list?.canCreate : list?.canReschedule)}
+        voiceReady={list?.voiceTargetConfigured !== false}
         onClose={() => setEditor(null)} onSave={save} />}
     </div>
   );

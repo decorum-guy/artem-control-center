@@ -234,7 +234,8 @@ def test_uncertain_creation_never_repeats_the_provider_post(tmp_path, monkeypatc
                        "schedule": "DTSTART;TZID=Europe/Moscow:20411201T161500",
                        "is_personal": False, "public_home_ids": ["home-fixture"],
                        "reminders": [{"offset_seconds": "0", "play_settings": {
-                           "play_location": {"selected_devices": {"selected_device_ids": ["station-fixture"]}}
+                           "play_location": {"selected_devices": {"selected_device_ids": ["station-fixture"]}},
+                           "send_push": {"state": "Disabled"},
                        }}]}]
 
 
