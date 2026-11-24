@@ -6,26 +6,29 @@ import json
 import re
 from urllib.parse import urlsplit
 
-KEYS = {"cookie", "authorization", "x-goog-authuser"}
+REQUIRED = {"cookie", "authorization", "x-goog-authuser"}
+VISITOR = "x-goog-visitor-id"
+ALLOWED = REQUIRED | {VISITOR}
 
 
 def browser_headers(value: bytes) -> dict[str, str]:
     source = json.loads(value)
-    if (not isinstance(source, dict) or source.keys() != KEYS
+    if (not isinstance(source, dict) or not REQUIRED <= source.keys() <= ALLOWED
             or any(not isinstance(field, str) or not field or "\r" in field or "\n" in field
                    for field in source.values())
             or len(source["cookie"]) > 13_000
             or not re.search(r"(?:^|;\s*)(?:SAPISID|__Secure-3PAPISID)=", source["cookie"])
             or not re.fullmatch(r"SAPISIDHASH [\w ]+(?:[ -][\w-]+)*", source["authorization"])
             or len(source["authorization"]) > 1024
-            or not re.fullmatch(r"[0-9]{1,3}", source["x-goog-authuser"])):
+            or not re.fullmatch(r"[0-9]{1,3}", source["x-goog-authuser"])
+            or (VISITOR in source and not re.fullmatch(r"[A-Za-z0-9_%+=/-]{1,512}", source[VISITOR]))):
         raise ValueError("Invalid Music browser headers")
     return {**source, "accept": "*/*", "content-type": "application/json",
             "origin": "https://music.youtube.com", "x-origin": "https://music.youtube.com"}
 
 
 def capture_headers(content: bytes) -> bytes:
-    """Extract only the three necessary fields from Chromium Copy as fetch (Node.js)."""
+    """Extract browser authorization and the optional visitor hint from a browse request."""
     if len(content) > 262_144:
         raise ValueError("Music browser capture exceeds its size limit")
     text = content.decode("utf-8").lstrip()
@@ -38,10 +41,22 @@ def capture_headers(content: bytes) -> bytes:
     options = re.search(r'"headers"\s*:\s*', text[match.end():])
     if options is None:
         raise ValueError("Headers missing")
-    raw, _ = json.JSONDecoder().raw_decode(text[match.end() + options.end():])
+    start = match.end() + options.end()
+    raw, consumed = json.JSONDecoder().raw_decode(text[start:])
     if not isinstance(raw, dict):
         raise ValueError("Invalid browser headers")
-    selected = {key.lower(): val for key, val in raw.items() if key.lower() in KEYS}
+    selected = {key.lower(): val for key, val in raw.items() if key.lower() in ALLOWED}
+    if VISITOR not in selected:
+        body = text[start + consumed:]
+        option = re.search(r'"body"\s*:\s*', body)
+        if option:
+            try:
+                encoded_body, _ = json.JSONDecoder().raw_decode(body[option.end():])
+                hint = json.loads(encoded_body)["context"]["client"]["visitorData"]
+                if isinstance(hint, str) and re.fullmatch(r"[A-Za-z0-9_%+=/-]{1,512}", hint):
+                    selected[VISITOR] = hint
+            except (TypeError, ValueError, KeyError):
+                pass
     encoded = json.dumps(selected, ensure_ascii=True).encode()
     browser_headers(encoded)
     return encoded

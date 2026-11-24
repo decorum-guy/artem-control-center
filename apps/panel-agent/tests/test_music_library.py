@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -6,7 +7,7 @@ from fastapi import HTTPException
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.music_library import MusicLibrary, PlaySelection
 from panel_agent.music_library_types import Continuation, Playlist, ProviderPage, Recording
-from panel_agent.youtube_library_credentials import capture_headers
+from panel_agent.youtube_library_credentials import browser_headers, capture_headers
 from panel_agent.youtube_music import MusicUnavailable
 
 TRACK = Recording("12345", "Studio song", ("Artist",), "Record", 180)
@@ -125,6 +126,11 @@ def test_browser_capture_accepts_only_the_music_origin_and_required_headers():
         "content-length":"fake"}, "method":"POST"});'''
     parsed = capture_headers(body)
     assert b"content-length" not in parsed
+    with_visitor = body.replace(b'"content-length":"fake"', b'"x-goog-visitor-id":"known-fixture"')
+    assert browser_headers(capture_headers(with_visitor))["x-goog-visitor-id"] == "known-fixture"
+    request_body = json.dumps({"context": {"client": {"visitorData": "body-fixture"}}})
+    body_visitor = body.replace(b'"method":"POST"', b'"body":' + json.dumps(request_body).encode())
+    assert browser_headers(capture_headers(body_visitor))["x-goog-visitor-id"] == "body-fixture"
     with pytest.raises(ValueError):
         capture_headers(body.replace(b"music.youtube.com", b"www.youtube.com"))
 
