@@ -51,8 +51,8 @@
 - [`docs/INFRASTRUCTURE_ACCESS.md`](docs/INFRASTRUCTURE_ACCESS.md) — SSH с Mac: Samsung `control-panel-pc`, HA `ha-vps`, зарубежный прокси `kz-bot`, временные ограничения и проверка актуальности.
 - [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта исходников и различие основной панели, кандидата и планируемых функций.
 - [`docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md`](docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md) — архив задания и последующие результаты кандидата PR #372; озвучка принята, push на iPhone открыт.
-- [`docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md`](docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md) — следующий этап: два списка понравившихся, визуал и точный запуск выбранной песни на Mini 2.
-- [`docs/YOUTUBE_CURRENT_TRACK.md`](docs/YOUTUBE_CURRENT_TRACK.md) — исследование команды сохранения уже играющей песни в YouTube Music; реализация ещё не выполнена.
+- [`docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md`](docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md) — следующий этап: отдельная вкладка «Музыка» с интеграциями Яндекса/YouTube и виджетом Алисы, запуск выбранной песни и асинхронные кнопки кондиционера.
+- [`docs/YOUTUBE_CURRENT_TRACK.md`](docs/YOUTUBE_CURRENT_TRACK.md) — архив исходного исследования сохранения уже играющей песни и ссылки на реализованный кандидат PR #373; читать с учётом последнего отчёта.
 - [`docs/CODEX_INITIALIZATION_PROMPT.md`](docs/CODEX_INITIALIZATION_PROMPT.md) — исторический стартовый prompt первоначального discovery/MVP; для текущих задач использовать AGENTS, Playbook и карту доступа.
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — продуктовая спецификация и UX.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты и границы ответственности.
