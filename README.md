@@ -55,6 +55,7 @@
 - [`docs/WIDGET_SYSTEM.md`](docs/WIDGET_SYSTEM.md) — автоматическое появление сервисов, widget plug-ins, layout system и no-code widgets.
 - [`docs/HOME_ASSISTANT_DEVICE_CONTRACT.md`](docs/HOME_ASSISTANT_DEVICE_CONTRACT.md) — HA device/timing authority, bot editor role и composite coffee model.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — разработка на Mac и финальная проверка на Windows/Linux.
+- [Приёмка #375 и следующий UX-раунд](docs/plans/GOOGLE_LOGIN_UX_AND_NEXT_RELEASE_2026_11_24.md) — вход Google и готовый кандидат Samsung.
 - [`docs/TV_CONTROL.md`](docs/TV_CONTROL.md) — виджет телевизора, веб-пульт, контракты API и отзыв сессий.
 - [`docs/WINDOWS_PRODUCTION_RUNTIME.md`](docs/WINDOWS_PRODUCTION_RUNTIME.md) — production runtime, автозапуск, обновление, rollback и Samsung acceptance.
 - [`docs/INTEGRATIONS_AND_HEALTH.md`](docs/INTEGRATIONS_AND_HEALTH.md) — реестр проектов, health-контракты и control actions.
