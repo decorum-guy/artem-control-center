@@ -143,7 +143,7 @@ test("Overview remembers the selected bedroom strip across reload and orientatio
     }
     await route.fulfill({ response, json: snapshot });
   });
-  await page.route("**/api/v1/overview/layout*", (route) => {
+  await page.route(/\/api\/v1\/overview\/layout(?:\/portrait)?$/, (route) => {
     const portrait = route.request().url().endsWith("/portrait");
     const layout = {
       schemaVersion: "overview.layout.v2", profileId: "samsung-control", presetId: "overview.default",
