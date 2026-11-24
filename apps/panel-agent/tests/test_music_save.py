@@ -7,7 +7,7 @@ import pytest
 
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.music_matching import Candidate, Track, match
-from panel_agent.music_save import MusicSave, SCENARIO, dispatch_scenario
+from panel_agent.music_save import MusicSave, SCENARIO, SCENARIOS, dispatch_scenario
 from panel_agent.station_playback import StationPlaybackCollector
 from panel_agent.youtube_music import MusicAuthRequired, MusicSession, MusicUnavailable
 
@@ -185,10 +185,15 @@ def test_account_rotation_and_policy_change_cancel_pending_write(tmp_path):
     asyncio.run(run())
 
 
-def test_dispatch_keeps_tv_and_music_independent(tmp_path):
+@pytest.mark.parametrize("scenario", sorted(SCENARIOS))
+def test_dispatch_keeps_tv_and_music_independent(tmp_path, scenario):
     station, provider, bridge, time, _ = setup(tmp_path)
     seen = []
-    dispatch_scenario(event(time[0], "music"), bridge, seen.append)
+    wrong_device = event(time[0], "music", scenario)
+    wrong_device["data"]["entity_id"] = "media_player.other"
+    dispatch_scenario(wrong_device, bridge, seen.append)
+    assert bridge.operation is None and not seen
+    dispatch_scenario(event(time[0], "music", scenario), bridge, seen.append)
     assert bridge.operation.status == "no_track" and not seen
     dispatch_scenario(event(time[0], "tv", "Панель ТВ · YouTube"), bridge, seen.append)
     assert len(seen) == 1

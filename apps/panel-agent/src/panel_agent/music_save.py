@@ -22,7 +22,18 @@ from .youtube_music import MusicAuthRequired, MusicSession, MusicUnavailable, Yo
 LOGGER = logging.getLogger(__name__)
 CAPABILITY = "media.youtube.save_current"
 SCENARIO = "Панель · Сохранить песню в YouTube Music"
+SCENARIOS = frozenset({
+    SCENARIO,
+    "Панель · Добавить трек в YouTube Music",
+    "Панель · Лайк в YouTube Music",
+    "Панель · Сохранить трек в YouTube Music",
+})
 CHOICE_SECONDS = 90
+
+
+def _music_scenario(data: object) -> bool:
+    name = data.get("scenario_name") if isinstance(data, dict) else None
+    return isinstance(name, str) and name in SCENARIOS
 
 
 @dataclass
@@ -86,8 +97,8 @@ class MusicSave:
     def handle(self, event: dict) -> None:
         data, context = event.get("data"), event.get("context")
         if (self.closed or event.get("event_type") != "yandex_scenario" or event.get("origin") != "LOCAL"
-                or not isinstance(data, dict) or not isinstance(context, dict)
-                or data.get("scenario_name") != SCENARIO or data.get("entity_id") != self.target
+                or not _music_scenario(data) or not isinstance(context, dict)
+                or data.get("entity_id") != self.target
                 or data.get("instance") != "text_action" or data.get("value") != "ничего не делай"):
             return
         event_id, fired = context.get("id"), parse_datetime(event.get("time_fired"))
@@ -253,7 +264,7 @@ class MusicChoice(BaseModel):
 
 def dispatch_scenario(event: dict, music: MusicSave | None, tv: Callable[[dict], None] | None) -> None:
     data = event.get("data")
-    if isinstance(data, dict) and data.get("scenario_name") == SCENARIO:
+    if _music_scenario(data):
         if music is not None:
             music.handle(event)
     elif tv is not None:
