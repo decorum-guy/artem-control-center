@@ -799,7 +799,7 @@ class HomeAssistantAdapter:
             self._yandex_intent_subscribed = False
             self._yandex_intent_status = "disabled"
         self._yandex_scenario_subscribed = False
-        scenario_requested = self._settings.tv_voice_enabled and self._yandex_scenario_handler is not None
+        scenario_requested = self._yandex_scenario_handler is not None
         if scenario_requested:
             await socket.send(json.dumps({
                 "id": _YANDEX_SCENARIO_SUBSCRIPTION_ID,

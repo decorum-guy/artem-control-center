@@ -105,6 +105,8 @@ from .ai_api import build_ai_router
 from .access_policy import AccessPolicyStore
 from .tv_api import TVExecutorClient, build_tv_router
 from .tv_voice import TVVoiceBridge
+from .music_save import MusicSave, build_music_save_router, dispatch_scenario
+from .youtube_music import YouTubeMusic
 from .backups import AvalarStageBackupEngine, BackupEngine, BackupService, PanelConfigSource, build_backup_router
 from .interface_copy import (
     FIXTURE_INTERFACE_COPY_SCENARIOS,
@@ -267,7 +269,21 @@ if (MODE == "production" and SETTINGS.tv_voice_enabled and tv_executor_token
         access=lambda: access_policy,
         write_enabled=lambda: startup_lifecycle.phase == "ready" and _write_allowed(SETTINGS.tv_voice_enabled),
     )
-    runtime.home_assistant.set_yandex_scenario_handler(tv_voice.handle)
+music_save = None
+music_target = os.getenv("PANEL_YOUTUBE_MUSIC_STATION_ENTITY", "").strip()
+music_credentials = os.getenv("PANEL_YOUTUBE_MUSIC_CREDENTIAL_FILE", "").strip()
+if (MODE in {"production", "read_only"} and os.getenv("PANEL_YOUTUBE_MUSIC_ENABLED", "").strip().lower() == "true"
+        and re.fullmatch(r"media_player\.[a-z0-9_]+", music_target)):
+    music_save = MusicSave(
+        station_playback,
+        YouTubeMusic(Path(music_credentials), os.getenv("PANEL_YOUTUBE_MUSIC_HTTP_PROXY", "")) if music_credentials else None,
+        target=music_target, access=lambda: access_policy,
+        writes=lambda: MODE == "production" and startup_lifecycle.phase == "ready" and _write_allowed(True),
+    )
+if tv_voice is not None or music_save is not None:
+    runtime.home_assistant.set_yandex_scenario_handler(
+        lambda event: dispatch_scenario(event, music_save, tv_voice.handle if tv_voice else None)
+    )
 
 system_controls = WindowsSystemControls()
 backup_source = PanelConfigSource.from_store_paths(
@@ -363,6 +379,8 @@ async def lifespan(_: FastAPI):
         await runtime.close()
         if tv_voice is not None:
             await tv_voice.close()
+        if music_save is not None:
+            await music_save.close()
         await snapshot_publisher.close()
 
 
@@ -379,6 +397,7 @@ if MODE != "production":
     ))
 app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(build_station_playback_router(station_playback))
+app.include_router(build_music_save_router(music_save))
 if MODE == "production" and station_reminders is not None:
     station_reminders.writer = StationRemindersWriter(
         station_reminders, access=lambda: access_policy,

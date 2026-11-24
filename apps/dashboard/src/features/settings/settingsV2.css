@@ -1436,3 +1436,18 @@
 }
 .station-retention-settings p,
 .station-retention-settings li { color: var(--cc-text-secondary); }
+
+.music-save-options {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.music-save-options button {
+  display: grid;
+  justify-items: start;
+  width: 100%;
+  min-block-size: 48px;
+  text-align: start;
+}

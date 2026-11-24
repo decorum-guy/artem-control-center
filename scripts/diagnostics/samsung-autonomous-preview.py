@@ -53,6 +53,10 @@ os.environ.update(
     LOCALAPPDATA=str(ROOT / "profile"),
     PANEL_AGENT_MODE="read_only",
     PANEL_TV_VOICE_ENABLED="true",
+    PANEL_YOUTUBE_MUSIC_ENABLED="true" if lease.get("youtube_music_preview") else "false",
+    PANEL_YOUTUBE_MUSIC_STATION_ENTITY=lease["station_entity"],
+    PANEL_YOUTUBE_MUSIC_CREDENTIAL_FILE=str(ROOT / "station-credentials" / "youtube-music.dpapi"),
+    PANEL_YOUTUBE_MUSIC_HTTP_PROXY="http://127.0.0.1:10809" if lease.get("youtube_music_happ") else "",
     PANEL_HA_URL=ha.geturl(),
     PANEL_HA_TOKEN=config.get("PANEL_HA_TOKEN") or "",
     PANEL_STATION_PLAYBACK_HOST=lease["host"],
@@ -72,7 +76,8 @@ import uvicorn
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.ble_strip import build_ble_strip_router
 from panel_agent.capabilities import CapabilityOverrideStore
-from panel_agent.main import app, ble_strip, runtime, startup_lifecycle, station_playback, station_reminders
+from panel_agent.main import app, ble_strip, music_save, runtime, startup_lifecycle, station_playback, station_reminders
+from panel_agent.music_save import dispatch_scenario
 from panel_agent.static_dashboard import install_dashboard_routes
 from panel_agent.station_playback import RECONNECT_SECONDS, StationAuthRequired
 from panel_agent.station_reminders import StationRemindersWriter
@@ -124,7 +129,10 @@ bridge = TVVoiceBridge(
     station_entity=lease["station_entity"], executor=executor,
     access=access, write_enabled=lambda: allowed("PANEL_WRITES_ENABLED"),
 )
-runtime.home_assistant.set_yandex_scenario_handler(bridge.handle)
+if music_save is not None:
+    music_save.access = access
+    music_save.writes = lambda: allowed("PANEL_WRITES_ENABLED")
+runtime.home_assistant.set_yandex_scenario_handler(lambda event: dispatch_scenario(event, music_save, bridge.handle))
 from panel_agent.main import station_reminders
 
 if station_reminders is not None:
