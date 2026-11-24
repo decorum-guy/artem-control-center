@@ -51,7 +51,8 @@
 - [`docs/INFRASTRUCTURE_ACCESS.md`](docs/INFRASTRUCTURE_ACCESS.md) — SSH с Mac: Samsung `control-panel-pc`, HA `ha-vps`, зарубежный прокси `kz-bot`, датированное состояние и проверка актуальности.
 - [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта исходников и различие основной панели, кандидата и планируемых функций.
 - [`docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md`](docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md) — архив задания и последующие результаты кандидата PR #372; озвучка принята, push на iPhone открыт.
-- [`docs/plans/YOUTUBE_CONNECTION_REVIEW_375_2026_11_24.md`](docs/plans/YOUTUBE_CONNECTION_REVIEW_375_2026_11_24.md) — проверка единого #375: подключение реализовано, повторный recovery и выбор после рестарта требуют точечных исправлений; первый вход и постоянный профиль остаются пунктами приёмки.
+- [`docs/plans/GOOGLE_LOGIN_UX_AND_NEXT_RELEASE_2026_11_24.md`](docs/plans/GOOGLE_LOGIN_UX_AND_NEXT_RELEASE_2026_11_24.md) — приёмка `ae376d22`: прежние замечания закрыты; обычный вход Google из панели, решение об установке и следующий небольшой UX-раунд.
+- [`docs/plans/YOUTUBE_CONNECTION_REVIEW_375_2026_11_24.md`](docs/plans/YOUTUBE_CONNECTION_REVIEW_375_2026_11_24.md) — исходные замечания к #375, последующий отчёт реализации и актуальный статус их закрытия.
 - [`docs/plans/YOUTUBE_CONNECTION_AND_RELEASE_2026_11_24.md`](docs/plans/YOUTUBE_CONNECTION_AND_RELEASE_2026_11_24.md) — исходный план подключения без JSON и совокупного выпуска; читать с последующим статусом.
 - [`docs/plans/MUSIC_LIBRARY_ROUND3_REVIEW_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND3_REVIEW_2026_11_24.md) — аудит третьего раунда и исходный блокер YouTube; последующее исправление отмечено в начале.
 - [`docs/plans/MUSIC_LIBRARY_ROUND2_REVIEW_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND2_REVIEW_2026_11_24.md) — приёмка R1–R5 и исходное задание третьего раунда; читать с последующим статусом в начале документа.
