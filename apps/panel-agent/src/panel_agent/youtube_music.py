@@ -211,7 +211,7 @@ class YouTubeMusic:
 
 
 @contextmanager
-def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2):
+def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2, byte_limit: int = 2_097_152):
     """Pin every InnerTube request to the approved HTTPS host and local proxy."""
     if proxy != YOUTUBE_PROXY:
         raise MusicUnavailable
@@ -224,7 +224,7 @@ def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2):
 
     class BudgetedSession(requests.Session):
         remaining = request_limit
-        bytes_left = 2_097_152
+        bytes_left = byte_limit
         deadline = time.monotonic() + 12
 
         def request(self, method, url, **kwargs):

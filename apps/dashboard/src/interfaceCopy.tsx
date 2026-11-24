@@ -15,6 +15,7 @@ export function copyFromCatalog(catalog: InterfaceCopyCatalog, field: InterfaceC
   switch (field) {
     case "navigation.overview": return catalog.navigation.overview;
     case "navigation.weather": return catalog.navigation.weather;
+    case "navigation.music": return catalog.navigation.music;
     case "navigation.home": return catalog.navigation.home;
     case "navigation.services": return catalog.navigation.services;
     case "navigation.calendar": return catalog.navigation.calendar;
@@ -29,7 +30,9 @@ export function copyFromCatalog(catalog: InterfaceCopyCatalog, field: InterfaceC
     case "page.overview.title": return catalog.page.overview.title;
     case "page.overview.subtitle": return catalog.page.overview.subtitle;
     case "page.weather.title": return catalog.page.weather.title;
+    case "page.music.title": return catalog.page.music.title;
     case "page.weather.subtitle": return catalog.page.weather.subtitle;
+    case "page.music.subtitle": return catalog.page.music.subtitle;
     case "page.home.title": return catalog.page.home.title;
     case "page.home.subtitle": return catalog.page.home.subtitle;
     case "page.services.title": return catalog.page.services.title;
@@ -65,6 +68,7 @@ export function copyOverrideValue(overrides: InterfaceCopyOverrides, field: Inte
   switch (field) {
     case "navigation.overview": return overrides.navigation.overview ?? null;
     case "navigation.weather": return overrides.navigation.weather ?? null;
+    case "navigation.music": return overrides.navigation.music ?? null;
     case "navigation.home": return overrides.navigation.home ?? null;
     case "navigation.services": return overrides.navigation.services ?? null;
     case "navigation.calendar": return overrides.navigation.calendar ?? null;
@@ -79,7 +83,9 @@ export function copyOverrideValue(overrides: InterfaceCopyOverrides, field: Inte
     case "page.overview.title": return overrides.page.overview.title ?? null;
     case "page.overview.subtitle": return overrides.page.overview.subtitle ?? null;
     case "page.weather.title": return overrides.page.weather.title ?? null;
+    case "page.music.title": return overrides.page.music.title ?? null;
     case "page.weather.subtitle": return overrides.page.weather.subtitle ?? null;
+    case "page.music.subtitle": return overrides.page.music.subtitle ?? null;
     case "page.home.title": return overrides.page.home.title ?? null;
     case "page.home.subtitle": return overrides.page.home.subtitle ?? null;
     case "page.services.title": return overrides.page.services.title ?? null;
@@ -114,7 +120,7 @@ function defaultSettings(): InterfaceCopySettings {
       navigation: {},
       navigationGroup: {},
       page: {
-        overview: {}, weather: {}, home: {}, services: {}, calendar: {}, tasks: {},
+        overview: {}, weather: {}, music: {}, home: {}, services: {}, calendar: {}, tasks: {},
         reminders: {}, coffeeDiary: {}, backups: {}, apps: {}, system: {}, settings: {}
       }
     },

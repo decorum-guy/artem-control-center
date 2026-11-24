@@ -98,7 +98,7 @@ class YouTubeLibrary:
             account = GoogleCredential.parse(read_browser_vault(self.official_path))
         except ValueError as exc:
             raise MusicAuthRequired from exc
-        with music_http(self.proxy, json.dumps(auth), request_limit=4) as client:
+        with music_http(self.proxy, json.dumps(auth), request_limit=4, byte_limit=10_485_760) as client:
             if self.validated is None or self.validated[0] != version or self.validated[1] < time.monotonic():
                 active = client.get_account_info().get("channelHandle")
                 if not isinstance(active, str) or active.casefold() != account.channel_handle.casefold():

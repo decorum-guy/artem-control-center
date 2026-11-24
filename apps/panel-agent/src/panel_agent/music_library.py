@@ -79,6 +79,7 @@ class Artwork:
         self.links: OrderedDict[str, tuple[Provider, str, str]] = OrderedDict()
         self.files: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
         self.slots = asyncio.Semaphore(3)
+        self.pending = 0
 
     def register(self, provider: Provider, generation: str, url: str | None) -> str | None:
         if url is None:
@@ -106,8 +107,9 @@ class Artwork:
             self.files.move_to_end(key)
             body, content_type = cached
         else:
-            if self.slots.locked():
+            if self.pending >= 15:
                 raise HTTPException(503)
+            self.pending += 1
             try:
                 async with asyncio.timeout(7), self.slots, httpx.AsyncClient(
                     proxy=YOUTUBE_PROXY if provider == "youtube" else None,
@@ -128,6 +130,8 @@ class Artwork:
                 keep(self.files, key, (body, content_type), 48)
             except (httpx.HTTPError, TimeoutError) as exc:
                 raise HTTPException(503) from exc
+            finally:
+                self.pending -= 1
         return Response(body, media_type=content_type, headers={"Cache-Control": "private, max-age=120"})
 
 

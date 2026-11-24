@@ -2,6 +2,7 @@
   "navigation": {
     "overview": "Обзор",
     "weather": "Погода",
+    "music": "Музыка",
     "home": "Дом",
     "services": "Сервисы",
     "calendar": "Календарь",
@@ -23,6 +24,10 @@
     },
     "weather": {
       "title": "Погода",
+      "subtitle": ""
+    },
+    "music": {
+      "title": "Музыка",
       "subtitle": ""
     },
     "home": {

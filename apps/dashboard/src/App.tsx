@@ -1,3 +1,4 @@
+import { MusicPage } from "./features/music/MusicPage";
 import { flushSync } from "react-dom";
 import { SelectField } from "./ui/SelectField";
 import { readAccent, persistAccent, readColorMode, persistColorMode, explicitlyStoredAppearance, loadAppearance, saveAppearance, type Appearance, type Accent } from "./skin/accent";
@@ -71,6 +72,7 @@ function persistJarvisVisible(visible: boolean): void {
 const userRoutes: ShellRoutePath[] = [
   "/overview",
   "/weather",
+  "/music",
   "/home",
   "/services",
   "/coffee-diary",
@@ -622,6 +624,7 @@ export function App() {
             )
           )}
           {route === "/weather" && <WeatherPage />}
+          {route === "/music" && <MusicPage playback={snapshot?.stationPlayback} />}
           {route === "/home" && (
             v2VisualShellEnabled ? (
               <HomeV2Page
@@ -681,7 +684,7 @@ export function App() {
           {route === "/tasks" && <TasksProviderBoundary fallback={planningRouteEnabled("/tasks") ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />} />}
           {route === "/calendar" && (planningRouteEnabled("/calendar") ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
           {route === "/reminders" && <AliceRemindersSection />}
-          {!["/overview", "/weather", "/home", "/services", "/coffee-diary", "/backups", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
+          {!["/overview", "/weather", "/music", "/home", "/services", "/coffee-diary", "/backups", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
             <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}
         </ProductShell>
