@@ -129,7 +129,7 @@ test("returning to an open V3 section does not replay the route entrance", async
 
 test("navigation drops the previous page's theme transition", async ({ page }) => {
   await page.goto("/overview?theme=night&motion=full");
-  await expect(page.getByTestId("route-overview")).toBeVisible();
+  await expect(page.locator("[data-testid^=route-overview]")).toBeVisible();
   await page.getByRole("navigation").getByRole("link", { name: "Настройки", exact: true }).click();
   await expect(page.getByTestId("settings-theme-day")).toBeVisible();
   const overlap = await page.evaluate(async () => {
@@ -143,7 +143,7 @@ test("navigation drops the previous page's theme transition", async ({ page }) =
     let oldPageFrames = 0;
     for (let i = 0; i < 14; i++) {
       await frame();
-      if (location.pathname === "/overview" && document.querySelector("[data-testid=route-overview]") && activeTheme().length) {
+      if (location.pathname === "/overview" && document.querySelector("[data-testid^=route-overview]") && activeTheme().length) {
         oldPageFrames++;
       }
     }

@@ -38,7 +38,6 @@ import {
   calendarEventsInRange,
   formatEventRange,
   formatTaskDueForRoute,
-  lifecycleLabels,
   priorityLabels,
   projectNameForTask,
   planningRouteReferenceTime,
