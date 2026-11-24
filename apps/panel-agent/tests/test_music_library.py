@@ -213,3 +213,26 @@ def test_catalog_refresh_replaces_names_and_invalidates_old_continuations(tmp_pa
                                   Continuation("new", "catalog")))
 
     asyncio.run(run())
+
+
+def test_disabled_music_reports_inactive_reads_without_enabling_actions():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from panel_agent.music_library import build_music_library_router
+    from panel_agent.music_save import build_music_save_router
+
+    app = FastAPI()
+    app.include_router(build_music_library_router(None))
+    app.include_router(build_music_save_router(None))
+    with TestClient(app) as client:
+        result = client.get("/api/v1/music/youtube/status")
+        assert result.status_code == 200
+        assert result.json()["status"] == "not_configured"
+        assert not result.json()["canPlay"]
+        assert client.post("/api/v1/music/youtube/play", json={}).status_code == 404
+
+        result = client.get("/api/v1/station/music-save")
+        assert result.status_code == 200
+        assert result.json() is None
+        assert result.headers["Cache-Control"] == "no-store"
+        assert client.post("/api/v1/station/music-save/verify").status_code == 404

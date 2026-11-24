@@ -307,10 +307,8 @@ def build_music_save_router(service: MusicSave | None) -> APIRouter:
 
     @router.get("")
     async def read(response: Response):
-        if service is None:
-            raise HTTPException(404)
         response.headers["Cache-Control"] = "no-store"
-        return service.projection()
+        return service.projection() if service is not None else None
 
     @router.post("/verify")
     async def verify(request: Request):

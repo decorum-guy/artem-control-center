@@ -61,7 +61,11 @@ export function MusicSaveSettings() {
       try {
         const response = await fetch(endpoint, { signal: controller.signal, cache: "no-store" });
         if (response.status === 404) return;
-        if (response.ok) setState(await response.json() as MusicProjection);
+        if (response.ok) {
+          const projection = await response.json() as MusicProjection | null;
+          if (projection === null || controller.signal.aborted) return;
+          setState(projection);
+        }
       } catch {
         // The last known operation remains visible.
       }

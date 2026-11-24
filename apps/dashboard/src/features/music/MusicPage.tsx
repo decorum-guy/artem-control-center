@@ -197,7 +197,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
       <div><h2>{labels[provider]}</h2>{subtitle && <p>{subtitle}</p>}</div>
       <button type="button" className="music-icon-button music-catalog-refresh"
         aria-label={`Обновить плейлисты · ${labels[provider]}`} title="Обновить каталог плейлистов"
-        aria-busy={state.catalogRefreshing} disabled={Boolean(active) || state.catalogRefreshing}
+        aria-busy={state.catalogRefreshing} disabled={Boolean(active) || !state.generation || state.catalogRefreshing}
         onClick={() => void library.catalog(false, true)}><Icon name="refresh" size={18} /></button>
     </header>
     <div className="music-picker" aria-label={`Плейлисты · ${labels[provider]}`}>

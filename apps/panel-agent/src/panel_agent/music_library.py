@@ -395,19 +395,25 @@ class MusicLibrary:
         return (candidate.video_id, []) if candidate else (None, [usable[item.video_id] for item in choices])
 
 
-def build_music_library_router(library: MusicLibrary) -> APIRouter:
+def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
     router = APIRouter(prefix="/api/v1/music")
+
+    @router.get("/{provider}/status")
+    async def status(provider: Provider, response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        if library is None:
+            return {"generation": None, "status": "not_configured", "canPlay": False,
+                    "likedRevision": 0, "yandexGeneration": None}
+        return library.status(provider)
+
+    if library is None:
+        return router
 
     @router.get("/artwork/{key}")
     async def artwork(key: str):
         if not re.fullmatch(r"[a-f0-9]{64}", key):
             raise HTTPException(404)
         return await library.art.get(key, library.feeds)
-
-    @router.get("/{provider}/status")
-    async def status(provider: Provider, response: Response):
-        response.headers["Cache-Control"] = "no-store"
-        return library.status(provider)
 
     @router.get("/{provider}/catalog")
     async def catalog(provider: Provider, response: Response, cursor: str | None = None,

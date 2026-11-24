@@ -429,8 +429,7 @@ if MODE != "production" and os.getenv("PANEL_DIAGNOSTIC_LIVE_STATION") != "true"
 app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(build_station_playback_router(station_playback))
 app.include_router(build_music_save_router(music_save))
-if music_library is not None:
-    app.include_router(build_music_library_router(music_library))
+app.include_router(build_music_library_router(music_library))
 if MODE == "production" and station_reminders is not None:
     station_reminders.writer = StationRemindersWriter(
         station_reminders, access=lambda: access_policy,
