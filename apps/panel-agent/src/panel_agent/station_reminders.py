@@ -126,7 +126,8 @@ def _version(note: dict) -> str | None:
         return None
     if note.get("status") != "INCOMPLETE":
         return None
-    raw = [note.get(key) for key in ("note_id", "note_hash", "title", "schedule", "reminders", "updated_date_time")]
+    raw = [note.get(key) for key in ("note_id", "note_hash", "title", "schedule", "reminders",
+                                         "is_personal", "public_home_ids", "updated_date_time")]
     return hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest()
 
 
@@ -456,8 +457,12 @@ def _note_for(payload: dict, reminder_id: str) -> dict | None:
     return None
 
 
-def _playback_settings(note: dict) -> list:
-    return [entry.get("play_settings") for entry in note["reminders"]]
+def _delivery_route(note: dict) -> tuple:
+    return (
+        note.get("is_personal"), note.get("public_home_ids") or [],
+        [(entry.get("origin_device_id"), entry.get("play_settings"))
+         for entry in note["reminders"]],
+    )
 
 
 class StationRemindersWriter:
@@ -509,7 +514,7 @@ class StationRemindersWriter:
                     if not complete:
                         raise HTTPException(409, "incomplete_source")
                     schedule = "DTSTART;TZID=Europe/Moscow:" + target.strftime("%Y%m%dT%H%M%S")
-                    expected_playback: list = []
+                    expected_route = None
                     if isinstance(change, RescheduleReminder):
                         original = _note_for(before, identity or "")
                         if original is None or _version(original) != change.expectedVersion:
@@ -517,7 +522,7 @@ class StationRemindersWriter:
                         if _time_of(original)[2]:
                             raise HTTPException(409, "recurring_reminder")
                         source_note_id = original["note_id"]
-                        expected_playback = _playback_settings(original)
+                        expected_route = _delivery_route(original)
                         path = "update_note"
                         note = {"note_id": source_note_id, "status": "INCOMPLETE", "schedule": schedule}
                     else:
@@ -536,7 +541,7 @@ class StationRemindersWriter:
                         raise HTTPException(409, "auth_required")
                     self._attempts.append(change.attemptId)
                     result = "unconfirmed"
-                    await self._mutate(client, path, session, note, target, expected_playback)
+                    await self._mutate(client, path, session, note, target, expected_route)
                     result = "confirmed"
                     return self.collector.projection()
         finally:
@@ -544,7 +549,7 @@ class StationRemindersWriter:
 
     async def _mutate(
         self, client: httpx.AsyncClient, path: str, session: _ReminderSession, note: dict, target: datetime,
-        expected_playback: list,
+        expected_route: tuple | None,
     ) -> None:
         headers = session.headers
         try:
@@ -571,16 +576,17 @@ class StationRemindersWriter:
                 self.collector.confirm(items)
                 latest = next((item for item in after["notes"] if item.get("note_id") == note_id), None)
                 if latest and latest.get("reminders") and _time_of(latest)[0] == target:
-                    playback = _playback_settings(latest)
                     if path == "create_note":
+                        routes = latest["reminders"]
+                        playback = routes[0].get("play_settings")
                         expected = note["reminders"][0]["play_settings"]
-                        if (len(playback) == 1 and isinstance(playback[0], dict)
-                                and playback[0].get("play_location") == expected.get("play_location")
-                                and playback[0].get("send_push") == expected["send_push"]
+                        if (len(routes) == 1 and isinstance(playback, dict)
+                                and playback.get("play_location") == expected.get("play_location")
+                                and playback.get("send_push") == expected["send_push"]
                                 and latest.get("is_personal") is note["is_personal"]
                                 and (latest.get("public_home_ids") or []) == note["public_home_ids"]):
                             return
-                    elif playback == expected_playback:
+                    elif _delivery_route(latest) == expected_route:
                         return
         raise HTTPException(502, "unconfirmed")
 
