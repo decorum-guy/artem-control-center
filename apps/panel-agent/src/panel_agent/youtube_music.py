@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -193,58 +194,65 @@ class YouTubeMusic:
                 return value
 
     def _music_read(self, session: MusicSession, operation: str, value: str):
-        # The pinned package is loaded on use so older Python installations
-        # keep their normal startup even without this optional feature.
-        if self.proxy is None:
-            raise MusicUnavailable
-        try:
-            import requests
-            from ytmusicapi import YTMusic
-        except ImportError as exc:
-            raise MusicUnavailable from exc
+        auth = json.dumps({"Authorization": f"Bearer {session.token}", "Content-Type": "application/json"}) if operation == "liked" else None
+        with music_http(self.proxy, auth, request_limit=8) as client:
+            if auth is not None:
+                profile = client.get_account_info()
+                if (profile.get("channelHandle") or "").casefold() != session.handle.casefold():
+                    raise MusicAuthRequired
+            if operation == "search":
+                records = client.search(value, filter="songs", limit=8, ignore_spelling=True)
+                return [match for result in records[:16] if (match := _candidate(result)) is not None]
+            if operation == "song":
+                payload = client.get_song(value)
+                return (payload.get("playabilityStatus", {}).get("status") == "OK"
+                        and payload.get("videoDetails", {}).get("videoId") == value)
+            return any(row.get("videoId") == value for row in client.get_liked_songs(limit=100).get("tracks", []))
 
-        class BudgetedSession(requests.Session):
-            remaining = 8
-            bytes_left = 2_097_152
-            deadline = time.monotonic() + 12
 
-            def request(self, method, url, **kwargs):
-                self.remaining -= 1
-                elapsed = self.deadline - time.monotonic()
-                if self.remaining < 0 or elapsed <= 0 or urlsplit(url).netloc != "music.youtube.com":
+@contextmanager
+def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2):
+    """Pin every InnerTube request to the approved HTTPS host and local proxy."""
+    if proxy != YOUTUBE_PROXY:
+        raise MusicUnavailable
+    try:
+        import requests
+        from ytmusicapi import YTMusic
+        from ytmusicapi.exceptions import YTMusicError
+    except ImportError as exc:
+        raise MusicUnavailable from exc
+
+    class BudgetedSession(requests.Session):
+        remaining = request_limit
+        bytes_left = 2_097_152
+        deadline = time.monotonic() + 12
+
+        def request(self, method, url, **kwargs):
+            self.remaining -= 1
+            elapsed = self.deadline - time.monotonic()
+            target = urlsplit(url)
+            if (self.remaining < 0 or elapsed <= 0 or target.scheme != "https"
+                    or target.netloc != "music.youtube.com"):
+                raise MusicUnavailable
+            kwargs.update(timeout=min(elapsed, 4), allow_redirects=False, stream=True,
+                          proxies={"https": proxy})
+            with super().request(method, url, **kwargs) as response:
+                if response.status_code in (401, 403):
+                    raise MusicAuthRequired
+                if response.status_code >= 300:
                     raise MusicUnavailable
-                kwargs.update(timeout=min(elapsed, 4), allow_redirects=False, stream=True)
-                with super().request(method, url, **kwargs) as response:
-                    if response.status_code in (401, 403):
-                        raise MusicAuthRequired
-                    response.raise_for_status()
-                    body = bytearray()
-                    for chunk in response.iter_content(65536):
-                        self.bytes_left -= len(chunk)
-                        if self.bytes_left < 0 or time.monotonic() > self.deadline:
-                            raise MusicUnavailable
-                        body.extend(chunk)
-                    response._content = bytes(body)
-                    return response
+                body = bytearray()
+                for chunk in response.iter_content(65536):
+                    self.bytes_left -= len(chunk)
+                    if self.bytes_left < 0 or time.monotonic() > self.deadline:
+                        raise MusicUnavailable
+                    body.extend(chunk)
+                response._content = bytes(body)
+                return response
 
-        try:
-            with BudgetedSession() as http:
-                http.trust_env = False
-                authenticated = operation == "liked"
-                headers = {"Authorization": f"Bearer {session.token}", "Content-Type": "application/json"}
-                client = YTMusic(json.dumps(headers) if authenticated else None, requests_session=http,
-                                 proxies={"https": self.proxy})
-                if authenticated:
-                    profile = client.get_account_info()
-                    if (profile.get("channelHandle") or "").casefold() != session.handle.casefold():
-                        raise MusicAuthRequired
-                if operation == "search":
-                    records = client.search(value, filter="songs", limit=8, ignore_spelling=True)
-                    return [match for result in records[:16] if (match := _candidate(result)) is not None]
-                if operation == "song":
-                    payload = client.get_song(value)
-                    return (payload.get("playabilityStatus", {}).get("status") == "OK"
-                            and payload.get("videoDetails", {}).get("videoId") == value)
-                return any(row.get("videoId") == value for row in client.get_liked_songs(limit=100).get("tracks", []))
-        except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
-            raise MusicUnavailable from exc
+    try:
+        with BudgetedSession() as http:
+            http.trust_env = False
+            yield YTMusic(auth, requests_session=http, proxies={"https": proxy})
+    except (requests.RequestException, YTMusicError, KeyError, IndexError, TypeError, ValueError) as exc:
+        raise MusicUnavailable from exc

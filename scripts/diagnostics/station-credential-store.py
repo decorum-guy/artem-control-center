@@ -12,6 +12,7 @@ from tempfile import NamedTemporaryFile
 from panel_agent.station_credentials import MAX_CREDENTIAL_BYTES, StationCredentials, dpapi
 from panel_agent.station_reminders import reminder_session
 from panel_agent.youtube_music import GoogleCredential
+from panel_agent.youtube_library_credentials import browser_headers
 
 ACL = r"""
 $ErrorActionPreference = 'Stop'
@@ -35,6 +36,8 @@ def provision(target: Path, plaintext: bytes) -> None:
         reminder_session(plaintext)
     elif target.name == "youtube-music.dpapi":
         GoogleCredential.parse(plaintext)
+    elif target.name == "youtube-library.dpapi":
+        browser_headers(plaintext)
     else:
         StationCredentials.parse(plaintext)
     encrypted = dpapi(plaintext, decrypt=False)
@@ -61,6 +64,7 @@ def main() -> int:
     kind = parser.add_mutually_exclusive_group()
     kind.add_argument("--reminders", action="store_true", help="Protect a separately authorized Calendar Notes session")
     kind.add_argument("--youtube-music", action="store_true", help="Protect the explicitly selected Google channel")
+    kind.add_argument("--youtube-library", action="store_true", help="Protect separate Music browser headers")
     args = parser.parse_args()
     root = args.directory
     if not root.is_absolute() or root.name != "station-credentials":
@@ -69,7 +73,9 @@ def main() -> int:
         source = sys.stdin.buffer.read(MAX_CREDENTIAL_BYTES + 1)
         if len(source) > MAX_CREDENTIAL_BYTES:
             raise ValueError
-        name = "reminders.dpapi" if args.reminders else "youtube-music.dpapi" if args.youtube_music else "oauth.dpapi"
+        name = "reminders.dpapi" if args.reminders else "youtube-music.dpapi" if args.youtube_music else (
+            "youtube-library.dpapi" if args.youtube_library else "oauth.dpapi"
+        )
         provision(root / name, source)
     except (OSError, ValueError, subprocess.SubprocessError):
         print("Station credential provisioning failed", file=sys.stderr)
