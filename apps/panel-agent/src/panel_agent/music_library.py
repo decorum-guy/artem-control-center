@@ -57,6 +57,7 @@ class Feed:
         self.generation = uuid4().hex
         self.row_signing_key = secrets.token_bytes(32)
         self.status = "auth_required" if provider else "not_configured"
+        self.catalog_failed = False
         self.lock = asyncio.Lock()
         self.waiters = 0
         self.pages: OrderedDict[tuple[str, str | None], dict] = OrderedDict()
@@ -67,6 +68,7 @@ class Feed:
         self.generation = uuid4().hex
         self.row_signing_key = secrets.token_bytes(32)
         self.status = status
+        self.catalog_failed = False
         self.pages.clear()
         self.sources.clear()
         self.cursors.clear()
@@ -252,6 +254,8 @@ class MusicLibrary:
                         feed.invalidate("auth_required")
                     raise HTTPException(401, "auth_required") from exc
                 except MusicUnavailable as exc:
+                    if not source:
+                        feed.catalog_failed = True
                     feed.status = "unavailable"
                     raise HTTPException(503, "source_unavailable") from exc
                 if feed.sync() != epoch:
@@ -273,7 +277,9 @@ class MusicLibrary:
                 result = {"items": items, "next": next_page, "generation": epoch,
                           "observedAt": datetime.now(timezone.utc).isoformat()}
                 keep(feed.pages, key, result, PAGE_CACHE)
-                feed.status = "ready"
+                if not source:
+                    feed.catalog_failed = False
+                feed.status = "unavailable" if feed.catalog_failed else "ready"
                 return result
         finally:
             feed.waiters -= 1

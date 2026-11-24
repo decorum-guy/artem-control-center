@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -210,8 +211,40 @@ class YouTubeMusic:
             return any(row.get("videoId") == value for row in client.get_liked_songs(limit=100).get("tracks", []))
 
 
+class MusicReadDiagnostics:
+    """Record fixed phases and response metadata without logging provider content."""
+
+    logger = logging.getLogger("panel_agent.youtube_music.read")
+
+    def __init__(self) -> None:
+        self.phase = "client_init"
+
+    @contextmanager
+    def step(self, phase: str):
+        self.phase = phase
+        started = time.monotonic()
+        try:
+            yield
+        except Exception as exc:
+            self.logger.warning("phase=%s result=error class=%s ms=%d",
+                                phase, type(exc).__name__, (time.monotonic() - started) * 1000)
+            raise
+        else:
+            self.logger.info("phase=%s result=ok ms=%d", phase, (time.monotonic() - started) * 1000)
+
+    def schema(self, container: str, *, count: int | None = None, account_match: bool | None = None) -> None:
+        self.logger.info("phase=%s container=%s count=%s account_match=%s",
+                         self.phase, container, count, account_match)
+
+    def http(self, *, code: str, status: int | None, media: str | None, milliseconds: int, size: int) -> None:
+        self.logger.log(logging.INFO if code == "ok" else logging.WARNING,
+                        "phase=%s code=%s status=%s media=%s ms=%d bytes=%d",
+                        self.phase, code, status, media, milliseconds, size)
+
+
 @contextmanager
-def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2, byte_limit: int = 2_097_152):
+def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2, byte_limit: int = 2_097_152,
+               diagnostics: MusicReadDiagnostics | None = None):
     """Pin every InnerTube request to the approved HTTPS host and local proxy."""
     if proxy != YOUTUBE_PROXY:
         raise MusicUnavailable
@@ -228,31 +261,57 @@ def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2, b
         deadline = time.monotonic() + 12
 
         def request(self, method, url, **kwargs):
+            started = time.monotonic()
             self.remaining -= 1
-            elapsed = self.deadline - time.monotonic()
+            elapsed = self.deadline - started
             target = urlsplit(url)
-            if (self.remaining < 0 or elapsed <= 0 or target.scheme != "https"
-                    or target.netloc != "music.youtube.com"):
-                raise MusicUnavailable("request budget or host")
-            kwargs.update(timeout=min(elapsed, 4), allow_redirects=False, stream=True,
-                          proxies={"https": proxy})
-            with super().request(method, url, **kwargs) as response:
-                if response.status_code in (401, 403):
-                    raise MusicAuthRequired
-                if response.status_code >= 300:
-                    raise MusicUnavailable(f"upstream HTTP {response.status_code}")
-                body = bytearray()
-                for chunk in response.iter_content(65536):
-                    self.bytes_left -= len(chunk)
-                    if self.bytes_left < 0 or time.monotonic() > self.deadline:
-                        raise MusicUnavailable("response budget")
-                    body.extend(chunk)
-                response._content = bytes(body)
-                return response
+            status, media, body = None, None, bytearray()
+            code = "transport"
+            try:
+                if (self.remaining < 0 or elapsed <= 0 or target.scheme != "https"
+                        or target.netloc != "music.youtube.com"):
+                    code = "request_budget_or_host"
+                    raise MusicUnavailable
+                kwargs.update(timeout=min(elapsed, 4), allow_redirects=False, stream=True,
+                              proxies={"https": proxy})
+                with super().request(method, url, **kwargs) as response:
+                    status = response.status_code
+                    content_type = response.headers.get("Content-Type", "").partition(";")[0].strip().lower()
+                    media = content_type if content_type in {"application/json", "text/html", "text/plain"} else "other"
+                    if status in (401, 403):
+                        code = "auth_http"
+                        raise MusicAuthRequired
+                    if status >= 300:
+                        redirect_host = urlsplit(response.headers.get("Location", "")).hostname if response.is_redirect else None
+                        if redirect_host in {"consent.youtube.com", "consent.google.com"}:
+                            code = "consent_redirect"
+                        elif redirect_host == "accounts.google.com":
+                            code = "sign_in_redirect"
+                            if diagnostics is not None:
+                                raise MusicAuthRequired
+                        else:
+                            code = "redirect" if response.is_redirect else "upstream_http"
+                        raise MusicUnavailable
+                    for chunk in response.iter_content(65536):
+                        self.bytes_left -= len(chunk)
+                        if self.bytes_left < 0 or time.monotonic() > self.deadline:
+                            code = "response_budget"
+                            raise MusicUnavailable
+                        body.extend(chunk)
+                    response._content = bytes(body)
+                    code = "ok"
+                    return response
+            finally:
+                if diagnostics is not None:
+                    diagnostics.http(code=code, status=status, media=media,
+                                     milliseconds=round((time.monotonic() - started) * 1000), size=len(body))
 
     try:
         with BudgetedSession() as http:
             http.trust_env = False
-            yield YTMusic(auth, requests_session=http, proxies={"https": proxy})
-    except (requests.RequestException, YTMusicError, KeyError, IndexError, TypeError, ValueError) as exc:
-        raise MusicUnavailable from exc
+            with diagnostics.step("client_init") if diagnostics else nullcontext():
+                client = YTMusic(auth, requests_session=http, proxies={"https": proxy})
+            yield client
+    except (requests.RequestException, YTMusicError, KeyError, IndexError, TypeError, ValueError):
+        # ytmusicapi may put the response or request URL in its exception text.
+        raise MusicUnavailable from None

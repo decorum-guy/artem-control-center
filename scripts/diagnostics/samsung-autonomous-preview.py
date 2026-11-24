@@ -95,6 +95,7 @@ from panel_agent.tv_voice import TVVoiceBridge
 
 logging.getLogger("panel_agent.tv_voice").setLevel(logging.INFO)
 logging.getLogger("panel_agent.alice_voice_feedback").setLevel(logging.INFO)
+logging.getLogger("panel_agent.youtube_music.read").setLevel(logging.INFO)
 logging.basicConfig(level=logging.WARNING)
 
 

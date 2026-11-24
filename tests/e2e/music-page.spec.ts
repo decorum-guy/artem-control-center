@@ -172,6 +172,7 @@ test("refreshing the catalogue retains renamed selections and rejects an old con
   await expect(yt.getByRole("button", { name: "B", exact: true })).toBeVisible();
   await refresh.click();
   await expect(yt.getByRole("status")).toContainText("Показан предыдущий каталог");
+  await expect(yt.getByRole("button", { name: "Новое имя", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(list.getByText("Трек 100")).toBeVisible();
   await refresh.click();
   await expect(yt.getByRole("status")).toContainText("Плейлист больше недоступен");

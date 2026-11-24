@@ -215,7 +215,10 @@ export class MusicLibraryStore {
         this.select(restored ?? playlists[0]?.key);
       }
     } catch (error) {
-      if (current()) this.patch({ catalogError: errorCode(error) });
+      if (current()) {
+        const catalogError = errorCode(error);
+        this.patch({ catalogError, status: catalogError === "auth_required" ? "auth_required" : "unavailable" });
+      }
     } finally {
       if (current()) {
         this.catalogRequest = null;
