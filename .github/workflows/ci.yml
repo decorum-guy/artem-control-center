@@ -124,7 +124,7 @@ jobs:
           VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
           PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/music-climate.json
         run: |
-          npm run test:e2e -- tests/e2e/music-page.spec.ts tests/e2e/climate-async.spec.ts --reporter=line,json
+          npm run test:e2e -- tests/e2e/music-page.spec.ts tests/e2e/music-save.spec.ts tests/e2e/climate-async.spec.ts --reporter=line,json
           node --input-type=module -e '
             import { appendFileSync, readFileSync } from "node:fs";
             const { expected, skipped } = JSON.parse(readFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE)).stats;

@@ -232,6 +232,78 @@ test("a playlist recovers its filtered position and second page after data evict
   await expect.poll(() => readsForA).toBe(4);
 });
 
+test("YouTube session rotation keeps the filtered second page and a different channel clears it", async ({ page }) => {
+  let sessionRevision = 1;
+  let viewIdentity = "first-channel";
+  let activeGeneration = generation;
+  let resultStatus = "ready";
+  const plays: Array<{ row: string }> = [];
+  await page.route("**/api/v1/music/**", async route => {
+    const { pathname, searchParams } = new URL(route.request().url());
+    const path = pathname.split("/music/")[1];
+    if (path === "youtube/status") {
+      return route.fulfill({ json: { ...status, generation: activeGeneration, status: resultStatus, viewIdentity, sessionRevision } });
+    }
+    if (path === "youtube/catalog") {
+      return route.fulfill({ json: { ...samplePage([playlist("A")]), generation: activeGeneration, sessionRevision } });
+    }
+    if (path === "youtube/play") {
+      plays.push(route.request().postDataJSON());
+      return route.fulfill({ json: { status: "playing" } });
+    }
+    if (path === "youtube/tracks/A") {
+      const more = searchParams.has("cursor");
+      const records = Array.from({ length: 100 }, (_, index) => row(index + (more ? 101 : 1)))
+        .map(record => ({ ...record, key: sessionRevision + ":" + record.key }));
+      return route.fulfill({ json: { ...samplePage(records, more ? null : "next"), generation: activeGeneration, sessionRevision } });
+    }
+    return route.fulfill({ json: path.endsWith("/status") ? status : samplePage([]) });
+  });
+
+  await page.goto("/music");
+  const yt = page.getByRole("region", { name: "YouTube Music", exact: true });
+  const list = yt.getByRole("region", { name: "Треки · YouTube Music" });
+  const search = yt.getByRole("searchbox");
+  await yt.getByRole("button", { name: "A", exact: true }).click();
+  await yt.getByRole("button", { name: "Загрузить ещё" }).click();
+  await expect(yt.getByText("Загружено: 200")).toBeVisible();
+  await search.fill("Исполнитель");
+  await list.evaluate(node => { node.scrollTop = 6464; });
+  await expect(list.getByText("Трек 102", { exact: true })).toBeVisible();
+
+  const wake = () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  resultStatus = "auth_required";
+  await wake();
+  await expect(yt.getByText("Трек 102", { exact: true })).toBeVisible();
+  sessionRevision = 2;
+  resultStatus = "connecting";
+  const loaded = page.waitForResponse(r => r.url().includes("/tracks/A?cursor=next"));
+  await wake();
+  await loaded;
+  await expect(search).toHaveValue("Исполнитель");
+  await expect.poll(() => list.evaluate(node => node.scrollTop)).toBe(6464);
+  await list.getByRole("listitem").filter({ hasText: /^Трек 102/ }).getByRole("button").click();
+  await expect.poll(() => plays[0]?.row.startsWith("2:")).toBe(true);
+
+  activeGeneration = "d".repeat(32);
+  sessionRevision = 0;
+  resultStatus = "connecting";
+  const restarted = page.waitForResponse(r => r.url().includes("/tracks/A?cursor=next"));
+  await wake();
+  await restarted;
+  await expect(search).toHaveValue("Исполнитель");
+  await expect.poll(() => list.evaluate(node => node.scrollTop)).toBe(6464);
+
+  activeGeneration = "e".repeat(32);
+  viewIdentity = "other-channel";
+  resultStatus = "ready";
+  await wake();
+  await expect(search).toBeDisabled();
+  await yt.getByRole("button", { name: "A", exact: true }).click();
+  await expect(search).toHaveValue("");
+  await expect.poll(() => list.evaluate(node => node.scrollTop)).toBe(0);
+});
+
 test("a confirmed YouTube recording stays highlighted across playlists and routes until Station changes", async ({ page }) => {
   await page.addInitScript(() => {
     class FixtureEvents extends EventTarget {

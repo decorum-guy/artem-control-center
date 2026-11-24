@@ -132,7 +132,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
   useEffect(() => {
     setResult(null);
     setChoose(null);
-  }, [state.selected, state.generation]);
+  }, [state.selected, state.generation, state.sessionRevision]);
 
   useLayoutEffect(() => {
     const node = listNode.current;
@@ -155,11 +155,15 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
   async function play(record: Recording, choice?: string) {
     if (gate.current || !guardMutation()) return;
     gate.current = true;
-    const { generation, selected } = library.read();
+    const { generation, selected, sessionRevision } = library.read();
     setActive(record.key);
     setChoose(null);
     setResult(null);
-    const currentSelection = () => presence.current && library.read().generation === generation && library.read().selected === selected;
+    const currentSelection = () => {
+      const current = library.read();
+      return presence.current && current.generation === generation && current.selected === selected
+        && current.sessionRevision === sessionRevision;
+    };
     try {
       const response = await library.play(record, choice);
       if (!currentSelection()) return;
