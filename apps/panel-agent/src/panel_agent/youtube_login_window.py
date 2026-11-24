@@ -56,6 +56,8 @@ class YouTubeLoginWindow:
         user.IsIconic.argtypes = (wintypes.HWND,)
         user.BringWindowToTop.argtypes = (wintypes.HWND,)
         user.SetForegroundWindow.argtypes = (wintypes.HWND,)
+        user.SetActiveWindow.argtypes = (wintypes.HWND,)
+        user.SetActiveWindow.restype = wintypes.HWND
         user.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
         user.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                       ctypes.c_int, ctypes.c_int, wintypes.UINT)
@@ -63,6 +65,19 @@ class YouTubeLoginWindow:
                                       wintypes.UINT, wintypes.UINT)
         if user.GetForegroundWindow() == handle:
             return True
+
+        # Win32 restores minimized windows asynchronously. Activating before
+        # restore completes can leave the kiosk in the foreground.
+        if user.IsIconic(handle):
+            user.ShowWindowAsync(handle, 9)  # SW_RESTORE
+            for _ in range(10):
+                if not user.IsIconic(handle):
+                    break
+                await asyncio.sleep(.04)
+            if not self.allowed() or self.find() != handle or user.IsIconic(handle):
+                return False
+            if user.GetForegroundWindow() == handle:
+                return True
 
         # AttachThreadInput requires the server thread to have a message queue.
         message = wintypes.MSG()
@@ -85,11 +100,10 @@ class YouTubeLoginWindow:
         promoted = False
         try:
             try:
-                if user.IsIconic(handle):
-                    user.ShowWindowAsync(handle, 9)  # SW_RESTORE
                 if not topmost:
                     promoted = bool(user.SetWindowPos(handle, -1, 0, 0, 0, 0, 0x43))
                 user.BringWindowToTop(handle)
+                user.SetActiveWindow(handle)
                 user.SetForegroundWindow(handle)
             finally:
                 for thread in reversed(attached):
