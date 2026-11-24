@@ -5,11 +5,6 @@ import { expect, test, type Page } from "@playwright/test";
 const artifactDirectory = (testInfo: { outputPath: (name: string) => string }) =>
   process.env.PR9_ARTIFACT_DIR ?? testInfo.outputPath("v2-planning-foundation-review");
 const taskMutationsEnabled = process.env.VITE_PLANNING_TASK_MUTATIONS_ENABLED === "true";
-const planningMutationControlsEnabled = [
-  "VITE_PLANNING_TASK_MUTATIONS_ENABLED",
-  "VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED",
-  "VITE_PLANNING_REMINDER_MUTATIONS_ENABLED"
-].some((name) => process.env[name] === "true");
 
 async function mutatePlanningRoute(page: Page, routePath: string, mutate: (payload: Record<string, unknown>) => void) {
   await page.route(`**${routePath}*`, async (route) => {
@@ -69,6 +64,69 @@ test.describe("PR9 Planning visual/module foundation", () => {
     await expect(overlap).toContainText("Пересекается");
     await expect(overlap).not.toContainText("Синхронизация: Синхронизировано");
     await expect(overlap).not.toContainText("Europe/Moscow");
+
+    await page.goto("/reminders?theme=day");
+    await expect(page.getByTestId("alice-reminders")).toContainText("Источник Алисы не настроен");
+    await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
+  });
+
+  test("captures the bounded PR9 review matrix", async ({ page }, testInfo) => {
+    const directory = artifactDirectory(testInfo);
+    await mkdir(directory, { recursive: true });
+
+    await page.goto("/tasks?theme=day");
+    await expect(page.getByTestId("planning-task-list")).toBeVisible();
+    await capture(page, directory, "planning-tasks-default");
+
+    await mutatePlanningRoute(page, "/api/v1/planning/tasks", (payload) => { payload.sourceStatus = "stale"; });
+    await page.goto("/tasks?theme=day");
+    await page.clock.fastForward(3_600);
+    await expect(page.getByTestId("planning-route-health")).toContainText("Данные могут быть устаревшими");
+    await capture(page, directory, "planning-tasks-stale");
+    await page.unroute("**/api/v1/planning/tasks**");
+
+    await failPlanningRoute(page, "/api/v1/planning/tasks");
+    await page.goto("/tasks?theme=night");
+    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
+    await capture(page, directory, "planning-tasks-offline");
+    await page.unroute("**/api/v1/planning/tasks**");
+
+    await mutatePlanningRoute(page, "/api/v1/planning/tasks", (payload) => {
+      payload.items = [];
+      payload.count = 0;
+      payload.hasMore = false;
+    });
+    await page.goto("/tasks?theme=day");
+    await expect(page.getByTestId("planning-route-empty")).toBeVisible();
+    await capture(page, directory, "planning-tasks-empty");
+    await page.unroute("**/api/v1/planning/tasks**");
+
+    await page.goto("/calendar?theme=day");
+    await expect(page.getByTestId("planning-calendar-event-row")).toHaveCount(6);
+    await capture(page, directory, "planning-calendar-default");
+    await capture(page, directory, "planning-calendar-all-day");
+    await capture(page, directory, "planning-calendar-overlap");
+
+    await mutatePlanningRoute(page, "/api/v1/planning/events", (payload) => {
+      const items = payload.items as Array<Record<string, unknown>>;
+      items[0].calendarIdentity = {
+        providerId: "calendar-provider",
+        providerLabel: "Calendar provider",
+        calendarId: "personal",
+        calendarLabel: "Личный"
+      };
+      items[1].calendarIdentity = {
+        providerId: "calendar-provider",
+        providerLabel: "Calendar provider",
+        calendarId: "work",
+        calendarLabel: "Рабочий"
+      };
+    });
+    await page.goto("/calendar?theme=day");
+    await expect(page.getByTestId("planning-calendar-identity").filter({ hasText: "Личный" })).toBeVisible();
+    await expect(page.getByTestId("planning-calendar-identity").filter({ hasText: "Рабочий" })).toBeVisible();
+    await capture(page, directory, "planning-calendar-multiple-identities");
+    await page.unroute("**/api/v1/planning/events**");
 
     await page.goto("/reminders?theme=day");
     await expect(page.getByTestId("alice-reminders")).toContainText("Источник Алисы не настроен");
