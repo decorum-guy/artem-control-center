@@ -53,6 +53,7 @@ os.environ.update(
     LOCALAPPDATA=str(ROOT / "profile"),
     PANEL_AGENT_MODE="read_only",
     PANEL_TV_VOICE_ENABLED="true",
+    PANEL_ALICE_VOICE_FEEDBACK_ENABLED="true" if lease.get("voice_feedback") else "false",
     PANEL_YOUTUBE_MUSIC_ENABLED="true" if lease.get("youtube_music_preview") else "false",
     PANEL_YOUTUBE_MUSIC_STATION_ENTITY=lease["station_entity"],
     PANEL_YOUTUBE_MUSIC_CREDENTIAL_FILE=str(ROOT / "station-credentials" / "youtube-music.dpapi"),
@@ -76,7 +77,9 @@ import uvicorn
 from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.ble_strip import build_ble_strip_router
 from panel_agent.capabilities import CapabilityOverrideStore
-from panel_agent.main import app, ble_strip, music_save, runtime, startup_lifecycle, station_playback, station_reminders
+from panel_agent.main import (
+    app, ble_strip, music_save, runtime, startup_lifecycle, station_playback, station_reminders, voice_feedback,
+)
 from panel_agent.music_save import dispatch_scenario
 from panel_agent.static_dashboard import install_dashboard_routes
 from panel_agent.station_playback import RECONNECT_SECONDS, StationAuthRequired
@@ -85,6 +88,7 @@ from panel_agent.tv_api import TVExecutorClient
 from panel_agent.tv_voice import TVVoiceBridge
 
 logging.getLogger("panel_agent.tv_voice").setLevel(logging.INFO)
+logging.getLogger("panel_agent.alice_voice_feedback").setLevel(logging.INFO)
 logging.basicConfig(level=logging.WARNING)
 
 
@@ -127,7 +131,7 @@ app.include_router(build_ble_strip_router(ble_strip, access, lambda: allowed("PA
 executor = TVExecutorClient(Path(config["PANEL_TV_EXECUTOR_TOKEN_FILE"]))
 bridge = TVVoiceBridge(
     station_entity=lease["station_entity"], executor=executor,
-    access=access, write_enabled=lambda: allowed("PANEL_WRITES_ENABLED"),
+    access=access, write_enabled=lambda: allowed("PANEL_WRITES_ENABLED"), feedback=voice_feedback,
 )
 if music_save is not None:
     music_save.access = access

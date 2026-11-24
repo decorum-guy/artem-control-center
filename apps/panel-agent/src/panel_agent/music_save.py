@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .access_policy import AccessPolicyStore, parse_datetime
+from .alice_voice_feedback import AliceVoiceFeedback
 from .music_matching import Candidate, Track, match
 from .station_playback import StationPlaybackCollector
 from .youtube_music import MusicAuthRequired, MusicSession, MusicUnavailable, YouTubeMusic
@@ -51,9 +52,11 @@ class Operation:
 class MusicSave:
     def __init__(self, station: StationPlaybackCollector, provider: YouTubeMusic | None, *, target: str,
                  access: Callable[[], AccessPolicyStore], writes: Callable[[], bool],
+                 feedback: AliceVoiceFeedback | None = None,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> None:
         self.station, self.provider, self.target = station, provider, target
         self.access, self.writes, self.clock = access, writes, clock
+        self.feedback = feedback
         self.session: MusicSession | None = None
         self.operation: Operation | None = None
         self.task: asyncio.Task | None = None
@@ -68,6 +71,8 @@ class MusicSave:
 
     def _state(self, op: Operation, status: str) -> None:
         op.status, op.changed_at = status, self.clock()
+        if self.feedback is not None:
+            self.feedback.announce(self.target, f"music.{status}", self.allowed)
 
     def _prune(self) -> None:
         if self.session is not None and self.provider is not None and not self.provider.is_current(self.session):

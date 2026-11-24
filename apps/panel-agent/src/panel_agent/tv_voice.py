@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .access_policy import AccessPolicyStore, parse_datetime
+from .alice_voice_feedback import AliceVoiceFeedback
 from .tv_api import TVCommand, TVExecutorClient
 
 LOGGER = logging.getLogger(__name__)
@@ -27,12 +28,14 @@ DUPLICATE_WINDOW_SECONDS = 6
 class TVVoiceBridge:
     def __init__(self, *, station_entity: str, executor: TVExecutorClient,
                  access: Callable[[], AccessPolicyStore], write_enabled: Callable[[], bool],
+                 feedback: AliceVoiceFeedback | None = None,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> None:
         self.station_entity = station_entity
         self.executor = executor
         self.access = access
         self.write_enabled = write_enabled
         self.clock = clock
+        self.feedback = feedback
         self.task: asyncio.Task | None = None
         self._closed = False
         self._seen: OrderedDict[str, None] = OrderedDict()
@@ -79,6 +82,10 @@ class TVVoiceBridge:
             LOGGER.info("TV voice %s %s", action, outcome)
         except Exception:
             LOGGER.warning("TV voice command failed")
+            outcome = "unconfirmed"
+        if self.feedback is not None:
+            cue = f"tv.{action}.{outcome}" if outcome in {"screen-confirmed", "app-open"} else f"tv.{outcome}"
+            self.feedback.announce(self.station_entity, cue, self._allowed)
 
     def _execute(self, action: str) -> str:
         if not self._allowed():

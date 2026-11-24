@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from panel_agent.access_policy import AccessPolicyStore
+from panel_agent.alice_voice_feedback import AliceVoiceFeedback
 from panel_agent.music_matching import Candidate, Track, match
 from panel_agent.music_save import MusicSave, SCENARIO, SCENARIOS, dispatch_scenario
 from panel_agent.station_playback import StationPlaybackCollector
@@ -199,3 +200,24 @@ def test_dispatch_keeps_tv_and_music_independent(tmp_path, scenario):
     assert len(seen) == 1
     dispatch_scenario(event(time[0], "music", SCENARIO), None, seen.append)
     assert len(seen) == 1
+
+def test_voice_feedback_distinguishes_confirmed_like_from_music_membership(tmp_path):
+    async def check():
+        station, provider, bridge, time, _ = setup(tmp_path)
+        sent = []
+
+        async def speak(entity, phrase):
+            sent.append((entity, phrase))
+
+        feedback = bridge.feedback = AliceVoiceFeedback(speak)
+        provider.in_music = False
+        await station.update("playing", CATALOG.title, CATALOG.artist, track_key="one", duration=202)
+        bridge.handle(event(time[0]))
+        await bridge.task
+        await feedback.task
+        assert provider.rates == 1
+        assert sent == [("media_player.mini", "Лайк подтверждён.")]
+        await bridge.close()
+        await feedback.close()
+
+    asyncio.run(check())
