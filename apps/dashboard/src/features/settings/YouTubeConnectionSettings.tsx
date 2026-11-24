@@ -38,7 +38,11 @@ export function YouTubeConnectionSettings() {
         const response = await fetch(endpoint, { cache: "no-store", signal: controller.signal });
         if (response.status === 404) return;
         if (response.ok && !controller.signal.aborted) {
-          const next = await response.json() as Connection;
+          const next = await response.json() as Connection | null;
+          if (next === null) {
+            setConnection(undefined);
+            return;
+          }
           active = next.active;
           setConnection(next);
         }

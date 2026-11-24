@@ -313,6 +313,11 @@ def test_disabled_music_reports_inactive_reads_without_enabling_actions():
         assert result.json()["status"] == "not_configured"
         assert not result.json()["canPlay"]
         assert client.post("/api/v1/music/youtube/play", json={}).status_code == 404
+        connection = client.get("/api/v1/music/youtube/connection")
+        assert connection.status_code == 200
+        assert connection.json() is None
+        assert connection.headers["Cache-Control"] == "no-store"
+        assert client.post("/api/v1/music/youtube/connection/connect").status_code == 404
 
         result = client.get("/api/v1/station/music-save")
         assert result.status_code == 200

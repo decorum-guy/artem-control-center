@@ -482,15 +482,15 @@ def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
                     "likedRevision": 0, "yandexGeneration": None}
         return library.status(provider)
 
-    if library is None:
-        return router
-
     @router.get("/youtube/connection")
     async def connection(response: Response):
-        if library.browser is None:
-            raise HTTPException(404, "not_configured")
         response.headers["Cache-Control"] = "no-store"
+        if library is None or library.browser is None:
+            return None
         return {**library.browser.projection(), "libraryStatus": library.status("youtube")["status"]}
+
+    if library is None:
+        return router
 
     @router.post("/youtube/connection/{action}")
     async def change_connection(action: Literal["connect", "cancel"], request: Request, response: Response):
