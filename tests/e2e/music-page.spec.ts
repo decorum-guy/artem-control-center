@@ -131,3 +131,169 @@ test("Music keeps the selected view on a late response and recovers a failed con
   await yt.getByRole("button", { name: "Понравившаяся музыка" }).click();
   await expect(pane.getByText("Трек 555", { exact: true })).toBeVisible();
 });
+
+const playlist = (key: string, title = key) => ({ key, title, kind: "playlist", cover: null, count: null });
+
+test("refreshing the catalogue retains renamed selections and rejects an old continuation", async ({ page }) => {
+  let edition = 0;
+  let continuing = false;
+  let finishOld!: () => void;
+  const old = new Promise<void>(resolve => { finishOld = resolve; });
+  await page.route("**/api/v1/music/**", async route => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.split("/music/")[1];
+    if (path.endsWith("/status")) return route.fulfill({ json: status });
+    if (path.startsWith("yandex/")) return route.fulfill({ json: samplePage([]) });
+    if (path === "youtube/catalog") {
+      if (url.searchParams.has("cursor")) {
+        continuing = true;
+        await old;
+        return route.fulfill({ json: samplePage([playlist("late")]) }).catch(() => {});
+      }
+      if (!url.searchParams.has("refresh")) return route.fulfill({ json: samplePage([playlist("A")], "previous") });
+      edition++;
+      if (edition === 2) return route.fulfill({ status: 503, json: { detail: "source_unavailable" } });
+      return route.fulfill({ json: samplePage(edition === 1 ? [playlist("A", "Новое имя"), playlist("B")] : [playlist("B")]) });
+    }
+    return route.fulfill({ json: samplePage([row(100)]) });
+  });
+  await page.goto("/music");
+  const yt = page.getByRole("region", { name: "YouTube Music", exact: true });
+  const list = yt.getByRole("region", { name: "Треки · YouTube Music" });
+  await yt.getByRole("button", { name: "A", exact: true }).click();
+  await expect(list.getByText("Трек 100")).toBeVisible();
+  const refresh = yt.getByRole("button", { name: "Обновить плейлисты · YouTube Music" });
+  await yt.getByRole("button", { name: "Ещё плейлисты" }).click();
+  await expect.poll(() => continuing).toBe(true);
+  await refresh.click();
+  await expect(yt.getByRole("button", { name: "Новое имя", exact: true })).toHaveAttribute("aria-pressed", "true");
+  finishOld();
+  await expect(yt.getByRole("button", { name: "late", exact: true })).toHaveCount(0);
+  await expect(yt.getByRole("button", { name: "B", exact: true })).toBeVisible();
+  await refresh.click();
+  await expect(yt.getByRole("status")).toContainText("Показан предыдущий каталог");
+  await expect(list.getByText("Трек 100")).toBeVisible();
+  await refresh.click();
+  await expect(yt.getByRole("status")).toContainText("Плейлист больше недоступен");
+  await expect(list.getByText("Трек 100")).toHaveCount(0);
+});
+
+test("a playlist recovers its filtered position and second page after data eviction", async ({ page }) => {
+  let readsForA = 0;
+  await page.route("**/api/v1/music/**", async route => {
+    const { pathname, searchParams } = new URL(route.request().url());
+    const path = pathname.split("/music/")[1];
+    if (path.endsWith("/status")) return route.fulfill({ json: status });
+    if (path.startsWith("yandex/")) return route.fulfill({ json: samplePage([]) });
+    if (path === "youtube/catalog") return route.fulfill({ json: samplePage([..."ABCDEF"].map(key => playlist(key))) });
+    if (path !== "youtube/tracks/A") return route.fulfill({ json: samplePage([row(9999)]) });
+    readsForA++;
+    const more = searchParams.has("cursor");
+    return route.fulfill({
+      json: samplePage(Array.from({ length: 100 }, (_, index) => row(index + (more ? 101 : 1))), more ? null : "second")
+    });
+  });
+
+  await page.goto("/music");
+  const yt = page.getByRole("region", { name: "YouTube Music", exact: true });
+  const list = yt.getByRole("region", { name: "Треки · YouTube Music" });
+  const search = yt.getByRole("searchbox");
+  const select = (key: string) => yt.getByRole("button", { name: key, exact: true }).click();
+  await select("A");
+  await yt.getByRole("button", { name: "Загрузить ещё" }).click();
+  await expect(yt.getByText("Загружено: 200")).toBeVisible();
+  await search.fill("Исполнитель");
+  await list.evaluate(node => { node.scrollTop = 6464; });
+  await expect(list.getByText("Трек 102", { exact: true })).toBeVisible();
+  for (const key of "BCD") {
+    await select(key);
+    await expect(list.getByText("Трек 9999")).toBeVisible();
+  }
+  await select("A");
+  await expect(search).toHaveValue("Исполнитель");
+  expect(readsForA).toBe(2);
+  for (const key of "EF") {
+    await select(key);
+    await expect(list.getByText("Трек 9999")).toBeVisible();
+  }
+  await select("A");
+  await expect(search).toHaveValue("Исполнитель");
+  await expect(list.getByText("Трек 102", { exact: true })).toBeVisible();
+  await expect.poll(() => list.evaluate(node => node.scrollTop)).toBe(6464);
+  expect(await list.getByRole("listitem").count()).toBeLessThan(26);
+  for (const key of "BCDE") {
+    await select(key);
+    await expect(list.getByText("Трек 9999")).toBeVisible();
+  }
+  await select("A");
+  await expect(search).toHaveValue("Исполнитель");
+  await expect(list.getByText("Трек 102", { exact: true })).toBeVisible();
+  await expect.poll(() => readsForA).toBe(4);
+});
+
+test("a confirmed YouTube recording stays highlighted across playlists and routes until Station changes", async ({ page }) => {
+  await page.addInitScript(() => {
+    class FixtureEvents extends EventTarget {
+      private readonly forward = (event: Event) => {
+        this.dispatchEvent(new MessageEvent("snapshot", { data: JSON.stringify({ revision: (event as CustomEvent).detail }) }));
+      };
+      constructor() {
+        super();
+        document.addEventListener("music-snapshot", this.forward);
+        queueMicrotask(() => this.dispatchEvent(new Event("connected")));
+      }
+      close() { document.removeEventListener("music-snapshot", this.forward); }
+    }
+    Object.defineProperty(window, "EventSource", { value: FixtureEvents });
+  });
+  const yandexGeneration = "a".repeat(32);
+  let yandexAccount = yandexGeneration;
+  let revision = 2;
+  let stationTrack = "45";
+  await page.route("**/api/v1/snapshot?*", async route => {
+    const upstream = await route.fetch();
+    await route.fulfill({ response: upstream, json: { ...await upstream.json(), revision,
+      stationPlayback: { status: "playing", title: "Одна запись", artist: "Исполнитель",
+        trackId: stationTrack, observedAt: now, coverPath: null } } });
+  });
+  await page.route("**/api/v1/music/**", async route => {
+    const path = new URL(route.request().url()).pathname.split("/music/")[1];
+    if (path.endsWith("/status")) return route.fulfill({ json: { ...status, yandexGeneration: yandexAccount } });
+    if (path.startsWith("yandex/")) return route.fulfill({ json: samplePage([]) });
+    if (path === "youtube/catalog") return route.fulfill({ json: samplePage([playlist("A"), playlist("B")]) });
+    if (path === "youtube/play") return route.fulfill({ json: {
+      status: "playing", stationTrackId: "45", yandexGeneration
+    } });
+    return route.fulfill({ json: samplePage([
+      { ...row(path.endsWith("/A") ? 100 : 300), trackId: "AAAAAAAAAAA", title: "Та же запись" },
+      { ...row(200), trackId: "BBBBBBBBBBB", title: "Та же запись" }
+    ]) });
+  });
+
+  async function state(trackId: string) {
+    stationTrack = trackId;
+    const response = page.waitForResponse(r => r.url().includes("/api/v1/snapshot?"));
+    await page.evaluate(value => document.dispatchEvent(new CustomEvent("music-snapshot", { detail: value })), ++revision);
+    await response;
+  }
+
+  await page.goto("/music");
+  const yt = page.getByRole("region", { name: "YouTube Music", exact: true });
+  const playing = yt.locator(".music-track[data-playing=true]");
+  await yt.getByRole("button", { name: "A", exact: true }).click();
+  await yt.getByRole("button", { name: "Включить на Станции · Та же запись" }).first().click();
+  await expect(playing).toHaveCount(1);
+  await yt.getByRole("button", { name: "B", exact: true }).click();
+  await expect(playing).toHaveCount(1);
+  await page.locator('a[href="/overview"]').first().evaluate((link: HTMLAnchorElement) => link.click());
+  await expect(page.getByTestId("route-music")).toHaveCount(0);
+  await page.goBack();
+  await expect(playing).toHaveCount(1);
+  await state("46");
+  await expect(playing).toHaveCount(0);
+  await state("45");
+  await expect(playing).toHaveCount(1);
+  yandexAccount = "b".repeat(32);
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(playing).toHaveCount(0);
+});

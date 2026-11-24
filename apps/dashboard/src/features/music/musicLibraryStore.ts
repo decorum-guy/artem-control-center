@@ -23,43 +23,68 @@ export interface PlayResult {
   status: string;
   stationTrackId?: string | null;
   options?: Recording[];
+  yandexGeneration?: string;
 }
 
 const root = "/api/v1/music/";
 const MAX_ROWS = 2400;
 const KEPT_PLAYLISTS = 4;
+const KEPT_VIEWS = 500;
+const KEPT_MATCHES = 128;
+const MAX_WINDOW_PAGES = 64;
 
-export interface TrackList {
+interface Segment { cursor: string | null; size: number }
+interface TrackView {
+  query: string;
+  scroll: number;
+  bookmark?: { cursor: string | null; depth: number; omitted: number };
+  anchor?: { trackId: string; index: number };
+}
+
+interface TrackData {
   items: Recording[];
   next: string | null;
-  scroll: number;
-  query: string;
+  segments: Segment[];
   observedAt: string | null;
   pending: boolean;
   error: string | null;
   omitted: number;
   changesAvailable?: boolean;
+  movedToStart?: boolean;
 }
+type TrackList = TrackData & TrackView;
+
 interface LibraryState {
   generation: string | null;
   status: string;
   canPlay: boolean;
+  yandexGeneration: string | null;
+  matches: Record<string, string>;
   likedRevision: number;
   playlists: Playlist[];
   catalogNext: string | null;
   catalogPending: boolean;
+  catalogRefreshing: boolean;
   catalogError: string | null;
+  catalogRemoved: boolean;
   selected: string | null;
-  lists: Record<string, TrackList>;
+  lists: Record<string, TrackData>;
 }
 
-const emptyList: TrackList = {
-  items: [], next: null, scroll: 0, query: "", observedAt: null, pending: false, error: null, omitted: 0
+const emptyData: TrackData = {
+  items: [], next: null, segments: [], observedAt: null, pending: false, error: null, omitted: 0
 };
+const emptyView: TrackView = { scroll: 0, query: "" };
 const initial: LibraryState = {
-  generation: null, status: "connecting", canPlay: false, likedRevision: 0, playlists: [], catalogNext: null, catalogPending: false,
-  catalogError: null, selected: null, lists: {}
+  generation: null, status: "connecting", canPlay: false, yandexGeneration: null, matches: {}, likedRevision: 0,
+  playlists: [], catalogNext: null, catalogPending: false, catalogRefreshing: false,
+  catalogError: null, catalogRemoved: false, selected: null, lists: {}
 };
+
+export function filterTracks(items: Recording[], query: string) {
+  const term = query.trim().toLocaleLowerCase("ru");
+  return term ? items.filter(item => `${item.title} ${item.artist}`.toLocaleLowerCase("ru").includes(term)) : items;
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(24_000), ...init });
@@ -84,7 +109,7 @@ function savedSelection(provider: Provider, generation: string) {
   }
 }
 
-function saveSelection(provider: Provider, generation: string, source: string) {
+function saveSelection(provider: Provider, generation: string, source: string | null) {
   try {
     sessionStorage.setItem(`panel.music.${provider}`, JSON.stringify({ generation, source }));
   } catch {
@@ -96,6 +121,8 @@ export class MusicLibraryStore {
   private state: LibraryState = initial;
   private listeners = new Set<() => void>();
   private listRequests = new Map<string, AbortController>();
+  private views = new Map<string, TrackView>();
+  private catalogRequest: AbortController | null = null;
   private statusRequest: Promise<void> | null = null;
   private loadedCatalog = false;
 
@@ -119,22 +146,25 @@ export class MusicLibraryStore {
 
   private async checkStatus() {
     try {
-      const status = await request<Pick<LibraryState, "generation" | "status" | "canPlay" | "likedRevision">>(
+      const status = await request<Pick<LibraryState, "generation" | "status" | "canPlay" | "likedRevision" | "yandexGeneration">>(
         `${root}${this.provider}/status`);
       if (this.state.generation !== status.generation) {
         this.listRequests.forEach(controller => controller.abort());
         this.listRequests.clear();
+        this.views.clear();
+        this.catalogRequest?.abort();
+        this.catalogRequest = null;
         this.loadedCatalog = false;
         this.patch({ ...initial, ...status });
       } else {
         const likedChanged = status.likedRevision > this.state.likedRevision && this.provider === "youtube";
-        this.patch(status);
+        this.patch({ ...status, matches: status.yandexGeneration === this.state.yandexGeneration ? this.state.matches : {} });
         if (likedChanged && this.state.selected === "LM") {
           const likes = this.getList("LM");
           if (!likes.pending && likes.items.length <= 100 && likes.scroll === 0) {
             void this.tracks(false, true);
           } else {
-            this.writeList("LM", { changesAvailable: true });
+            this.writeData("LM", { changesAvailable: true });
           }
         } else if (likedChanged && this.state.selected !== "LM" && this.state.lists.LM) {
           const lists = { ...this.state.lists };
@@ -150,60 +180,104 @@ export class MusicLibraryStore {
     }
   }
 
-  async catalog(more = false) {
+  async catalog(more = false, refresh = false) {
     const { generation, catalogPending, catalogNext } = this.state;
-    if (!generation || catalogPending || (more && !catalogNext)) return;
-    this.patch({ catalogPending: true, catalogError: null });
+    if (!generation || (!refresh && catalogPending) || (more && !catalogNext)) return;
+    this.catalogRequest?.abort();
+    const controller = new AbortController();
+    this.catalogRequest = controller;
+    this.patch({ catalogPending: true, catalogRefreshing: refresh, catalogError: null });
+    const params = new URLSearchParams();
+    if (more && catalogNext) params.set("cursor", catalogNext);
+    if (refresh) params.set("refresh", "true");
+    const current = () => this.catalogRequest === controller && this.state.generation === generation;
     try {
-      const page = await request<Page<Playlist>>(
-        `${root}${this.provider}/catalog${more ? "?cursor=" + encodeURIComponent(catalogNext!) : ""}`);
-      if (generation !== this.state.generation || page.generation !== generation) return;
+      const page = await request<Page<Playlist>>(`${root}${this.provider}/catalog?${params}`, {
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(24_000)])
+      });
+      if (!current() || page.generation !== generation) return;
       const previous = more ? this.state.playlists : [];
       const keys = new Set(previous.map(item => item.key));
       const playlists = previous.concat(page.items.filter(item => !keys.has(item.key)));
+      const selection = this.state.selected;
       this.loadedCatalog = true;
+      if (refresh && selection && !playlists.some(item => item.key === selection)) {
+        this.cancelTracks(selection);
+        this.views.delete(selection);
+        const lists = { ...this.state.lists };
+        delete lists[selection];
+        saveSelection(this.provider, generation, null);
+        this.patch({ selected: null, lists, catalogRemoved: true });
+      }
       this.patch({ playlists, catalogNext: page.next, status: "ready" });
       const restored = savedSelection(this.provider, generation);
       if (!this.state.selected && (this.provider === "yandex" || (restored && playlists.some(item => item.key === restored)))) {
         this.select(restored ?? playlists[0]?.key);
       }
     } catch (error) {
-      if (this.state.generation === generation) this.patch({ catalogError: errorCode(error) });
+      if (current()) this.patch({ catalogError: errorCode(error) });
     } finally {
-      if (this.state.generation === generation) this.patch({ catalogPending: false });
+      if (current()) {
+        this.catalogRequest = null;
+        this.patch({ catalogPending: false, catalogRefreshing: false });
+      }
     }
   }
 
-  getList(source: string | null) {
-    return source ? this.state.lists[source] ?? emptyList : emptyList;
+  getList(source: string | null): TrackList {
+    return source ? { ...(this.state.lists[source] ?? emptyData), ...(this.views.get(source) ?? emptyView) }
+      : { ...emptyData, ...emptyView };
   }
 
-  private writeList(source: string, next: Partial<TrackList>) {
-    const lists = { ...this.state.lists, [source]: { ...this.getList(source), ...next } };
-    const victim = Object.keys(lists).find(key => key !== source && key !== this.state.selected && !lists[key].pending);
-    if (Object.keys(lists).length > KEPT_PLAYLISTS && victim) delete lists[victim];
+  private remember(source: string, patch: Partial<TrackView>) {
+    const view = { ...(this.views.get(source) ?? emptyView), ...patch };
+    this.views.delete(source);
+    this.views.set(source, view);
+    if (this.views.size > KEPT_VIEWS) this.views.delete(this.views.keys().next().value!);
+  }
+
+  private writeData(source: string, patch: Partial<TrackData>) {
+    const lists = { ...this.state.lists };
+    const updated = { ...(lists[source] ?? emptyData), ...patch };
+    delete lists[source];
+    lists[source] = updated;
+    const oldest = Object.keys(lists).find(key => key !== source && key !== this.state.selected && !lists[key].pending);
+    if (Object.keys(lists).length > KEPT_PLAYLISTS && oldest) delete lists[oldest];
     this.patch({ lists });
+  }
+
+  private cancelTracks(source: string) {
+    this.listRequests.get(source)?.abort();
+    this.listRequests.delete(source);
   }
 
   select(source: string | undefined) {
     if (!source || !this.state.playlists.some(item => item.key === source)) return;
-    if (source !== this.state.selected && this.state.selected) {
-      const previous = this.state.selected;
-      this.listRequests.get(previous)?.abort();
-      this.listRequests.delete(previous);
-      this.writeList(previous, { pending: false });
+    const previous = this.state.selected;
+    if (source !== previous && previous && this.listRequests.has(previous)) {
+      this.cancelTracks(previous);
+      this.writeData(previous, { pending: false });
     }
-    this.patch({ selected: source });
+    this.patch({ selected: source, catalogRemoved: false });
     if (this.state.generation) saveSelection(this.provider, this.state.generation, source);
-    if (!this.getList(source).observedAt) void this.tracks();
+    if (this.getList(source).observedAt) this.writeData(source, {});
+    else void this.tracks();
   }
 
-  scroll(value: number) {
-    if (this.state.selected) this.writeList(this.state.selected, { scroll: value });
+  scroll(value: number, trackId: string | null | undefined) {
+    const { selected } = this.state;
+    if (!selected) return;
+    const list = this.getList(selected);
+    if (list.scroll === value) return;
+    const index = Math.floor(value / MUSIC_ROW_HEIGHT);
+    this.remember(selected, { scroll: value, anchor: trackId ? { trackId, index } : undefined });
+    this.patch({});
   }
 
   search(value: string) {
-    if (this.state.selected) this.writeList(this.state.selected, { query: value, scroll: 0 });
+    if (!this.state.selected) return;
+    this.remember(this.state.selected, { query: value, scroll: 0, anchor: undefined });
+    this.patch({});
   }
 
   async tracks(more = false, refresh = false) {
@@ -212,33 +286,79 @@ export class MusicLibraryStore {
     if (!generation || !selected || list.pending || (more && !list.next)) return;
     const controller = new AbortController();
     this.listRequests.set(selected, controller);
-    this.writeList(selected, { pending: true, error: null });
-    const search = new URLSearchParams();
-    if (more && list.next) search.set("cursor", list.next);
-    if (refresh) search.set("refresh", "true");
+    this.writeData(selected, { pending: true, error: null, movedToStart: false });
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(24_000)]);
+    function load(provider: Provider, cursor: string | null, refreshFirst = false) {
+      const search = new URLSearchParams();
+      if (cursor) search.set("cursor", cursor);
+      if (refreshFirst) search.set("refresh", "true");
+      return request<Page<Recording>>(`${root}${provider}/tracks/${selected}?${search}`, { signal });
+    }
+    const bookmark = !more && !refresh && !list.observedAt ? list.bookmark : undefined;
+    let cursor = more ? list.next : bookmark?.cursor ?? null;
+    let depth = bookmark?.depth ?? 1;
+    let omitted = more ? list.omitted : bookmark?.omitted ?? 0;
+    let movedToStart = false;
     try {
-      const page = await request<Page<Recording>>(`${root}${this.provider}/tracks/${selected}?${search}`, {
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(24_000)])
+      const items = more ? [...list.items] : [];
+      const segments = more ? [...list.segments] : [];
+      const current = () => this.listRequests.get(selected) === controller && generation === this.state.generation;
+      let page;
+      try {
+        page = await load(this.provider, cursor, refresh);
+      } catch (error) {
+        if (!bookmark || !cursor || errorCode(error) !== "page_expired") throw error;
+        cursor = null;
+        depth = 1;
+        omitted = 0;
+        movedToStart = true;
+        page = await load(this.provider, null);
+      }
+      for (let index = 0; index < depth; index++) {
+        if (!current() || page.generation !== generation) return;
+        segments.push({ cursor, size: page.items.length });
+        items.push(...page.items);
+        cursor = page.next;
+        if (!cursor || index + 1 === depth) break;
+        page = await load(this.provider, cursor);
+      }
+      let drop = 0;
+      while (segments.length > 1 && (items.length - drop > MAX_ROWS || segments.length > MAX_WINDOW_PAGES)) {
+        drop += segments.shift()!.size;
+      }
+      const view = this.getList(selected);
+      const removedVisible = filterTracks(items.slice(0, drop), view.query).length;
+      const nextItems = items.slice(drop);
+      let scroll = Math.max(0, (more || (bookmark && !movedToStart) ? view.scroll : 0) - removedVisible * MUSIC_ROW_HEIGHT);
+      let anchor = more ? view.anchor : undefined;
+      if (bookmark && !movedToStart && view.anchor) {
+        // A refreshed provider page may move a track. Use the nearest occurrence of its ID.
+        const { trackId, index } = view.anchor;
+        let nearest = -1;
+        filterTracks(nextItems, view.query).forEach((item, offset) => {
+          if (item.trackId === trackId && (nearest < 0 || Math.abs(offset - index) < Math.abs(nearest - index))) nearest = offset;
+        });
+        if (nearest >= 0) {
+          scroll = nearest * MUSIC_ROW_HEIGHT + view.scroll % MUSIC_ROW_HEIGHT;
+          anchor = { trackId, index: nearest };
+        }
+      }
+      this.remember(selected, {
+        scroll, anchor, bookmark: { cursor: segments[0]?.cursor ?? null, depth: segments.length, omitted: omitted + drop }
       });
-      if (controller.signal.aborted || generation !== this.state.generation || page.generation !== generation) return;
-      const previous = this.getList(selected);
-      const items = more ? previous.items.concat(page.items) : page.items;
-      const drop = Math.max(0, items.length - MAX_ROWS);
-      this.writeList(selected, {
-        items: items.slice(drop), next: page.next, observedAt: page.observedAt,
-        omitted: (more ? previous.omitted : 0) + drop,
-        scroll: more ? Math.max(0, previous.scroll - drop * MUSIC_ROW_HEIGHT) : 0,
-        changesAvailable: more ? previous.changesAvailable : false
+      this.writeData(selected, {
+        items: nextItems, segments, next: cursor, observedAt: page.observedAt, omitted: omitted + drop,
+        changesAvailable: more ? list.changesAvailable : false, movedToStart
       });
     } catch (error) {
       if (!controller.signal.aborted && generation === this.state.generation) {
-        this.writeList(selected, { error: errorCode(error) });
+        this.writeData(selected, { error: errorCode(error) });
         if (["auth_required", "account_changed"].includes(errorCode(error))) void this.sync();
       }
     } finally {
       if (this.listRequests.get(selected) === controller) {
         this.listRequests.delete(selected);
-        this.writeList(selected, { pending: false });
+        this.writeData(selected, { pending: false });
       }
     }
   }
@@ -246,10 +366,20 @@ export class MusicLibraryStore {
   async play(record: Recording, choice?: string): Promise<PlayResult> {
     const { generation, selected } = this.state;
     if (!generation || !selected) return { status: "unavailable" };
-    return request<PlayResult>(`${root}${this.provider}/play`, {
+    const result = await request<PlayResult>(`${root}${this.provider}/play`, {
       method: "POST", headers: { "Content-Type": "application/json", "X-Panel-Intent": "music-library" },
       body: JSON.stringify({ generation, source: selected, row: record.key, choice })
     });
+    if (this.provider === "youtube" && record.trackId && result.stationTrackId && result.yandexGeneration
+        && generation === this.state.generation && result.yandexGeneration === this.state.yandexGeneration) {
+      const matches = { ...this.state.matches };
+      delete matches[record.trackId];
+      matches[record.trackId] = result.stationTrackId;
+      const keys = Object.keys(matches);
+      if (keys.length > KEPT_MATCHES) delete matches[keys[0]];
+      this.patch({ matches });
+    }
+    return result;
   }
 }
 

@@ -7,7 +7,7 @@ import { Sheet } from "../../Sheet";
 import { PageHeader } from "../../ui/PageHeader";
 import { executeStationAction, fetchStationAvailability, type StationActionAvailability, type StationActionId } from "../../stationActionsApi";
 import { useCommandSeries } from "../../useCommandSeries";
-import { MUSIC_ROW_HEIGHT, useMusicLibrary, type Provider, type Recording } from "./musicLibraryStore";
+import { filterTracks, MUSIC_ROW_HEIGHT, useMusicLibrary, type Provider, type Recording } from "./musicLibraryStore";
 import "./musicPage.css";
 
 const labels: Record<Provider, string> = { yandex: "Яндекс Музыка", youtube: "YouTube Music" };
@@ -118,7 +118,6 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
   const gate = useRef(false);
   const [result, setResult] = useState<{ message: string; record: Recording } | null>(null);
   const [choose, setChoose] = useState<{ original: Recording; options: Recording[] } | null>(null);
-  const [matched, setMatched] = useState<{ key: string; stationId: string } | null>(null);
   const presence = useRef(true);
 
   useEffect(() => {
@@ -133,7 +132,6 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
   useEffect(() => {
     setResult(null);
     setChoose(null);
-    setMatched(null);
   }, [state.selected, state.generation]);
 
   useLayoutEffect(() => {
@@ -149,10 +147,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
     if (listNode.current && Math.abs(listNode.current.scrollTop - list.scroll) >= 1) listNode.current.scrollTop = list.scroll;
   }, [state.selected, list.scroll, list.items.length]);
 
-  const filtered = useMemo(() => {
-    const term = list.query.trim().toLocaleLowerCase("ru");
-    return term ? list.items.filter(item => `${item.title} ${item.artist}`.toLocaleLowerCase("ru").includes(term)) : list.items;
-  }, [list.items, list.query]);
+  const filtered = useMemo(() => filterTracks(list.items, list.query), [list.items, list.query]);
   const from = Math.max(0, Math.floor(list.scroll / MUSIC_ROW_HEIGHT) - 4);
   const to = Math.min(filtered.length, from + Math.ceil(height / MUSIC_ROW_HEIGHT) + 9);
   const visible = filtered.slice(from, to);
@@ -172,7 +167,6 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
         setChoose({ original: record, options: response.options });
       } else {
         setResult({ message: outcomes[response.status] ?? "Запуск не подтверждён.", record });
-        if (response.stationTrackId) setMatched({ key: record.key, stationId: response.stationTrackId });
       }
     } catch (error) {
       if (currentSelection()) setResult({
@@ -185,7 +179,8 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
   }
 
   const errors = state.catalogError || list.error || (["auth_required", "not_configured", "unavailable"].includes(state.status) ? state.status : null);
-  const errorText = errors ? libraryErrors[errors] ?? libraryErrors.source_unavailable : "";
+  const errorText = state.catalogError && state.playlists.length ? "Каталог не обновился. Показан предыдущий каталог."
+    : errors ? libraryErrors[errors] ?? libraryErrors.source_unavailable : "";
   const emptyText = state.catalogPending || list.pending ? "Загрузка…"
     : errors && !list.observedAt ? "Данные пока недоступны."
     : state.selected ? list.query ? "Среди загруженных записей совпадений нет." : "В списке пока нет записей."
@@ -193,13 +188,17 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
   const subtitle = provider === "youtube" ? "На Станции играет версия из Яндекс Музыки" : "";
   const retry = () => {
     if (state.selected) void library.tracks(false, true);
-    else void library.sync().then(() => library.catalog());
+    else void library.catalog(false, true);
   };
 
   return <section className="music-library" data-provider={provider} aria-label={labels[provider]}>
     <header className="music-library__head">
       <span className="music-library__badge" aria-hidden="true"><Icon name={provider === "youtube" ? "play" : "music"} size={18} /></span>
       <div><h2>{labels[provider]}</h2>{subtitle && <p>{subtitle}</p>}</div>
+      <button type="button" className="music-icon-button music-catalog-refresh"
+        aria-label={`Обновить плейлисты · ${labels[provider]}`} title="Обновить каталог плейлистов"
+        aria-busy={state.catalogRefreshing} disabled={Boolean(active) || state.catalogRefreshing}
+        onClick={() => void library.catalog(false, true)}><Icon name="refresh" size={18} /></button>
     </header>
     <div className="music-picker" aria-label={`Плейлисты · ${labels[provider]}`}>
       {state.playlists.map(playlist => <button type="button" key={playlist.key}
@@ -215,18 +214,19 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
       <input type="search" value={list.query} maxLength={90} disabled={!state.selected}
         aria-label={`Поиск · ${labels[provider]}`} placeholder="Среди загруженных треков"
         onChange={event => library.search(event.currentTarget.value)} />
-      <button type="button" className="music-icon-button" aria-label={`Обновить · ${labels[provider]}`}
-        title="Обновить список" disabled={Boolean(active) || state.catalogPending || list.pending} onClick={retry}>
+      <button type="button" className="music-icon-button" aria-label={`Обновить треки · ${labels[provider]}`}
+        title="Обновить треки" disabled={Boolean(active) || !state.selected || list.pending} onClick={retry}>
         <Icon name="refresh" size={18} />
       </button>
     </div>
     <p className="music-library__notice" role="status">{active ? "Ждём Станцию…"
       : result ? <>{result.message} <strong>{result.record.title}</strong></>
-      : errorText || (list.changesAvailable ? "Есть изменения. Обновите список, когда закончите просмотр." : list.omitted ? "Показаны последние загруженные позиции." : list.next ? "Список загружен частично" : "")}</p>
+      : errorText || (state.catalogRemoved ? "Плейлист больше недоступен. Выберите другой."
+        : list.movedToStart ? "Позиция устарела. Список открыт с начала." : list.changesAvailable ? "Есть изменения. Обновите список, когда закончите просмотр." : list.omitted ? "Показаны последние загруженные позиции." : list.next ? "Список загружен частично" : "")}</p>
     <div className="music-tracks" ref={listNode} tabIndex={0} role="region" aria-label={`Треки · ${labels[provider]}`}
       onScroll={event => {
         const node = event.currentTarget;
-        library.scroll(node.scrollTop);
+        if (list.observedAt) library.scroll(node.scrollTop, filtered[Math.floor(node.scrollTop / MUSIC_ROW_HEIGHT)]?.trackId);
         if (!list.query && node.scrollTop > 0 && node.scrollHeight - node.scrollTop - node.clientHeight < MUSIC_ROW_HEIGHT * 4
             && list.next && !list.error) void library.tracks(true);
       }}>
@@ -234,7 +234,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
         <div aria-hidden="true" style={{ height: from * MUSIC_ROW_HEIGHT }} />
         {visible.map(track => {
           const selected = Boolean(current && (provider === "yandex" ? current === track.trackId
-            : matched?.key === track.key && current === matched.stationId));
+            : track.trackId && current === state.matches[track.trackId]));
           return <div className="music-track" role="listitem" key={track.key} data-playing={selected}>
             <Artwork url={track.cover} />
             <div className="music-track__meta">
