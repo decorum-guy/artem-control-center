@@ -59,6 +59,7 @@ os.environ.update(
     PANEL_STATION_PLAYBACK_CERT_SHA256=lease["fingerprint"],
     PANEL_STATION_PLAYBACK_DEVICE_ID=lease["device_id"],
     PANEL_STATION_RETENTION_ENABLED="true",
+    PANEL_STATION_REMINDER_CREDENTIAL_FILE=str(oauth_file.with_name("reminders.dpapi")),
     PANEL_LIGHT_STRIP_PROVIDER="both",
     PANEL_BLE_STRIP_ADDRESS=lease["ble_address"],
     PANEL_TV_EXECUTOR_TOKEN_FILE=config.get("PANEL_TV_EXECUTOR_TOKEN_FILE") or "",

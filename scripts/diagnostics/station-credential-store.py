@@ -10,6 +10,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from panel_agent.station_credentials import MAX_CREDENTIAL_BYTES, StationCredentials, dpapi
+from panel_agent.station_reminders import reminder_session
 
 ACL = r"""
 $ErrorActionPreference = 'Stop'
@@ -29,7 +30,10 @@ Set-Acl -LiteralPath $root -AclObject $acl
 
 
 def provision(target: Path, plaintext: bytes) -> None:
-    StationCredentials.parse(plaintext)
+    if target.name == "reminders.dpapi":
+        reminder_session(plaintext)
+    else:
+        StationCredentials.parse(plaintext)
     encrypted = dpapi(plaintext, decrypt=False)
     target.parent.mkdir(exist_ok=True, parents=True)
     env = dict(os.environ, PANEL_CREDENTIAL_STAGING_DIR=str(target.parent))
@@ -51,6 +55,7 @@ def provision(target: Path, plaintext: bytes) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path, help="An absolute dedicated Station vault directory")
+    parser.add_argument("--reminders", action="store_true", help="Protect a separately authorized Calendar Notes session")
     args = parser.parse_args()
     root = args.directory
     if not root.is_absolute() or root.name != "station-credentials":
@@ -59,7 +64,7 @@ def main() -> int:
         source = sys.stdin.buffer.read(MAX_CREDENTIAL_BYTES + 1)
         if len(source) > MAX_CREDENTIAL_BYTES:
             raise ValueError
-        provision(root / "oauth.dpapi", source)
+        provision(root / ("reminders.dpapi" if args.reminders else "oauth.dpapi"), source)
     except (OSError, ValueError, subprocess.SubprocessError):
         print("Station credential provisioning failed", file=sys.stderr)
         return 1

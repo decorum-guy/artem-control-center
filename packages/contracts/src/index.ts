@@ -899,6 +899,18 @@ export interface StationRetention {
   }[];
 }
 
+export interface StationReminderList {
+  status: "loading" | "fresh" | "partial" | "stale" | "auth_required";
+  observedAt: string | null;
+  items: {
+    id: string;
+    title: string;
+    dueAt: string;
+    timezone: string;
+    repeats: boolean;
+  }[];
+}
+
 export interface DashboardSnapshot {
   revision: number;
   generatedAt: string;

@@ -66,6 +66,7 @@ from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
 from .ble_strip import ADDRESS as BLE_ADDRESS, BleStripManager, build_ble_strip_router
 from .station_playback import StationPlaybackCollector, StationPlaybackSettings, build_station_playback_router
+from .station_reminders import StationRemindersCollector, build_station_reminders_router
 from .station_retention import configured_retention
 from .station_actions import StationActionExecutor, build_station_action_router
 from .snapshot import SnapshotPublisher
@@ -191,6 +192,12 @@ diagnostics_collector = DiagnosticsCollector(SETTINGS)
 station_settings = StationPlaybackSettings.from_environment() if MODE in {"production", "read_only"} else None
 station_retention = configured_retention() if station_settings else None
 station_playback = StationPlaybackCollector(station_settings, on_state=station_retention.observe if station_retention else None)
+reminder_credentials = os.getenv("PANEL_STATION_REMINDER_CREDENTIAL_FILE", "").strip()
+station_reminders = (
+    StationRemindersCollector(Path(reminder_credentials))
+    if reminder_credentials and MODE in {"production", "read_only"}
+    else None
+)
 ble_strip = (
     BleStripManager(SETTINGS.ble_strip_address)
     if MODE in {"production", "read_only", "integration_test"} and SETTINGS.light_strip_provider in {"ble", "both"}
@@ -332,6 +339,8 @@ async def lifespan(_: FastAPI):
         name="panel-agent-bootstrap",
     )
     station_playback.start()
+    if station_reminders is not None:
+        station_reminders.start()
     if ble_strip is not None:
         ble_strip.start()
     try:
@@ -339,6 +348,8 @@ async def lifespan(_: FastAPI):
     finally:
         startup_lifecycle.mark_stopping()
         await station_playback.close()
+        if station_reminders is not None:
+            await station_reminders.close()
         if ble_strip is not None:
             await ble_strip.close()
         bootstrap_task = startup_lifecycle.bootstrap_task
@@ -367,6 +378,7 @@ if MODE != "production":
     ))
 app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(build_station_playback_router(station_playback))
+app.include_router(build_station_reminders_router(station_reminders))
 if ble_strip is not None and MODE == "production":
     app.include_router(build_ble_strip_router(
         ble_strip, lambda: access_policy,

@@ -610,3 +610,18 @@
   .calendar-event-row__badges { justify-self: end; min-width: 0; max-width: 110px; }
   .planning-detail-field { grid-template-columns: 1fr; gap: 4px; }
 }
+
+.planning-alice-reminders {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.planning-alice-reminders > :is(h2, p, ul) {
+  margin: 0;
+}
+
+.planning-alice-reminders > ul {
+  padding: 0;
+  list-style: none;
+}

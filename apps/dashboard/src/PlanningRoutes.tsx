@@ -71,6 +71,7 @@ import {
   planningTasksRouteEnabled
 } from "./planningRouteConfig";
 import { planningModuleForRoute } from "./planningModuleRegistry";
+import { AliceRemindersSection } from "./AliceRemindersSection";
 import { calendarIdentityForEvent, calendarIdentityLabel } from "./planningIdentity";
 import { useNoticeCenter } from "./NoticeCenter";
 import { calendarSourceRefreshPresentation } from "./calendarRefreshPresentation";
@@ -2447,6 +2448,7 @@ export function RemindersPage({ snapshot }: PlanningRouteProps) {
       futureAction={canCreate ? <button type="button" className="planning-primary-button" onClick={() => setMutationSheet("create")}>Создать напоминание</button> : undefined}
       testId="route-reminders"
     >
+      <AliceRemindersSection />
       <PlanningRouteState loading={routeRead.loading} empty={Boolean(envelope && visibleItems.length === 0)} error={routeError} preview={preview} onRetry={() => setRetry((value) => value + 1)}>
         {envelope && (
           <>

@@ -395,3 +395,34 @@ test.describe("B4 Phase 1 reminder mutations", () => {
     expect(mutations).toEqual(["PATCH"]);
   });
 });
+
+test("native Alice reminders move and disappear on the opened page", async ({ page }) => {
+  test.skip(!remindersRouteEnabled, "Enable the planning reminders route.");
+  const target = {
+    id: "synthetic-alice-reminder",
+    title: "Тестовое напоминание Алисы",
+    dueAt: "2026-11-26T16:00:00+03:00",
+    timezone: "Europe/Moscow",
+    repeats: false
+  };
+  let items = [target];
+  const methods: string[] = [];
+  await page.route("**/api/v1/station/reminders", (route) => {
+    methods.push(route.request().method());
+    return route.fulfill({ json: { status: "fresh", observedAt: "2026-11-24T00:35:00Z", items } });
+  });
+  await page.clock.install();
+  await page.goto("/reminders");
+  const alice = page.getByRole("region", { name: "Напоминания Алисы" });
+  await expect(alice.getByText(target.title)).toBeVisible();
+  await expect(alice.getByText("16:00", { exact: false })).toBeVisible();
+
+  items = [{ ...target, dueAt: "2026-11-26T16:15:00+03:00" }];
+  await page.clock.fastForward(11_000);
+  await expect(alice.getByText("16:15", { exact: false })).toBeVisible();
+  items = [];
+  await page.clock.fastForward(11_000);
+  await expect(alice.getByText(target.title)).toHaveCount(0);
+  await expect(alice.getByText("Активных напоминаний Алисы нет.")).toBeVisible();
+  expect(methods).toEqual(["GET", "GET", "GET"]);
+});
