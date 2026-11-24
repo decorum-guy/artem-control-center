@@ -14,9 +14,18 @@
 | Снимок интерфейса ТВ | `screencap` на выбранном ТВ через существующий ADB-доступ; получение файла на Mac |
 | Живое изображение и управление | Существующий `tv-mirror` / `scrcpy` с Mac; параметры транспорта определить по установленному wrapper |
 | Пользовательские команды | Веб-пульт или Panel Agent → штатный сервис/TV Executor на Samsung → ADB → ТВ |
+| Внешний пульт iPhone | Авторизованный HTTPS-пульт → существующий relay → SSH-туннель Samsung → локальный TV Executor |
 | Работа без Mac | Постоянный исполнитель остаётся на Samsung; Mac используется для разработки, наблюдения и проверки |
 
 Через штатный исполнитель уже организованы кнопки пульта, громкость, управление подсветкой и открытие ссылок. Контракты действий и подтверждений описаны в [TV_CONTROL.md](TV_CONTROL.md). Исходники отдельного исполнителя и его документацию искать в [home-tv-control](https://github.com/decorum-guy/home-tv-control); изменение внешнего проекта требует соответствующего разрешения.
+
+## Внешний пульт iPhone
+
+Владелец уже подтвердил открытие пульта по мобильной сети и кнопку «Домой». При аудите relay на VPS вернул HTTP 200 от origin Samsung. Пульт использует существующую авторизацию. Панель и административные маршруты Panel Agent по-прежнему привязаны к localhost.
+
+Windows запускает `%LOCALAPPDATA%\HomeTvControl\domain-origin\start-domain-tunnel.ps1` из каталога владельца отдельной задачей `Home TV Domain Tunnel` от SYSTEM. После выхода SSH launcher делает паузу от 5 до 60 секунд перед следующей попыткой и сбрасывает её после устойчивого соединения. SHA-256 установленного файла — `eb9f9ea18251214d6032caf2faffe131bf6ad84a8892cbf1742cd1bf446674a4`. [Исходник на точном коммите home-tv-control](https://github.com/decorum-guy/home-tv-control/blob/ed723c0969445b084a2c2bd72b607e440bc368c0/scripts/windows/start-domain-tunnel.ps1)
+
+Для обслуживания использовать только зарегистрированную задачу: `Start-ScheduledTask -TaskName 'Home TV Domain Tunnel'`. Для отката остановить её командой `Stop-ScheduledTask` с тем же именем, восстановить `start-domain-tunnel.ps1` из `start-domain-tunnel.before-bounded-retry.ps1` в том же каталоге с прежним ACL и снова запустить задачу. Проверить origin на VPS и защищённый пульт. Настройки SSH, HA, реле и TV Executor при таком откате сохраняются. [Порядок восстановления в репозитории исполнителя](https://github.com/decorum-guy/home-tv-control/blob/ed723c0969445b084a2c2bd72b607e440bc368c0/docs/TV_DOMAIN_TUNNEL_RECONNECT.md)
 
 ## Как агенту войти в существующий доступ
 
