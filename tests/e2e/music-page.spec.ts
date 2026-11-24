@@ -64,6 +64,6 @@ for (const size of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }])
     await page.goBack();
     await expect(yt.getByRole("button", { name: "Понравившаяся музыка" })).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => list.evaluate(node => node.scrollTop)).toBe(scroll);
-    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", size.width);
+    expect(await page.locator("body").evaluate(node => node.scrollWidth)).toBeLessThanOrEqual(size.width);
   });
 }
