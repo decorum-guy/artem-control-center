@@ -26,11 +26,11 @@ def test_feedback_uses_text_playback_and_varies_confirmations():
         for _ in range(3):
             feedback.announce(STATION, "tv.screen-off.screen-confirmed", lambda: True)
             await feedback.task
-        feedback.announce(STATION, "music.youtube_like", lambda: True)
+        feedback.announce(STATION, "music.working", lambda: True)
         await feedback.task
         assert received == [
             {"entity_id": STATION, "media_content_type": "text", "media_content_id": phrase}
-            for phrase in ("Экран погашен.", "Экран выключен.", "Экран погашен.", "Лайк подтверждён.")
+            for phrase in ("Экран погашен.", "Экран выключен.", "Экран погашен.")
         ]
         await feedback.close()
 
@@ -53,15 +53,15 @@ def test_feedback_skips_busy_results_rechecks_policy_and_closes():
             return permitted
 
         feedback = AliceVoiceFeedback(speak)
-        feedback.announce(STATION, "music.working", allowed)
-        assert feedback.task is None
         feedback.announce(STATION, "music.in_music", allowed)
+        assert feedback.task is None
+        feedback.announce(STATION, "tv.screen-off.screen-confirmed", allowed)
         permitted = False
         await feedback.task
         assert not sent
 
         permitted = True
-        feedback.announce(STATION, "music.youtube_like", allowed)
+        feedback.announce(STATION, "tv.screen-off.screen-confirmed", allowed)
         await started.wait()
         in_progress = feedback.task
         feedback.announce(STATION, "tv.offline", allowed)
@@ -69,7 +69,7 @@ def test_feedback_skips_busy_results_rechecks_policy_and_closes():
         await feedback.close()
         assert in_progress.cancelled()
         feedback.announce(STATION, "tv.unconfirmed", allowed)
-        assert feedback.task is None and sent == [(STATION, "Лайк подтверждён.")]
+        assert feedback.task is None and sent == [(STATION, "Экран выключен.")]
 
     asyncio.run(check())
 
@@ -93,7 +93,7 @@ def test_local_music_does_not_retry_or_switch_to_ha_and_checks_deadline():
             return False
 
         feedback = AliceVoiceFeedback(speak, local_music_entity=STATION, speak_local=local, clock=lambda: now)
-        feedback.announce(STATION, "music.youtube_like", lambda: True)
+        feedback.announce(STATION, "music.working", lambda: True)
         await started.wait()
         first = feedback.task
         feedback.announce(STATION, "music.no_track", lambda: True)
@@ -103,9 +103,9 @@ def test_local_music_does_not_retry_or_switch_to_ha_and_checks_deadline():
         await first
         assert not sent and not ha
 
-        feedback.announce(STATION, "music.youtube_like", lambda: True)
+        feedback.announce(STATION, "music.working", lambda: True)
         await feedback.task
-        assert sent == ["У этой песни теперь есть лайк."] and not ha
+        assert sent == ["Сохраняю."] and not ha
 
         feedback.announce(STATION, "tv.screen-off.screen-confirmed", lambda: True)
         await feedback.task

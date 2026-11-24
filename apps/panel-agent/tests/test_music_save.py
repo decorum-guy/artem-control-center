@@ -204,22 +204,67 @@ def test_dispatch_keeps_tv_and_music_independent(tmp_path, scenario):
     dispatch_scenario(event(time[0], "music", SCENARIO), None, seen.append)
     assert len(seen) == 1
 
-def test_voice_feedback_distinguishes_confirmed_like_from_music_membership(tmp_path):
+def test_voice_acknowledges_before_search_finishes_and_keeps_outcome_on_panel(tmp_path):
+    async def check():
+        station, provider, bridge, time, _ = setup(tmp_path)
+        sent = []
+        release = asyncio.Event()
+        original_search = provider.search
+
+        async def search(session, track):
+            await release.wait()
+            return await original_search(session, track)
+
+        async def speak(*_):
+            raise AssertionError("Music must use the configured Glagol connection")
+
+        async def local(phrase, allowed):
+            assert allowed()
+            sent.append(phrase)
+            return True
+
+        provider.search = search
+        provider.in_music = False
+        feedback = bridge.feedback = AliceVoiceFeedback(speak, local_music_entity=bridge.target, speak_local=local)
+        await station.update("playing", CATALOG.title, CATALOG.artist, track_key="one", duration=202)
+        bridge.handle(event(time[0]))
+        await feedback.task
+        assert sent == ["Сохраняю."]
+        assert bridge.operation.status == "working"
+        assert provider.rates == 0
+        release.set()
+        await bridge.task
+        assert provider.rates == 1
+        assert bridge.operation.status == "youtube_like"
+        assert sent == ["Сохраняю."]
+
+        await bridge.close()
+        await feedback.close()
+
+    asyncio.run(check())
+
+
+def test_old_voice_event_can_save_without_interrupting_music_with_late_ack(tmp_path):
     async def check():
         station, provider, bridge, time, _ = setup(tmp_path)
         sent = []
 
-        async def speak(entity, phrase):
-            sent.append((entity, phrase))
+        async def local(phrase, allowed):
+            if allowed():
+                sent.append(phrase)
+            return True
 
-        feedback = bridge.feedback = AliceVoiceFeedback(speak)
-        provider.in_music = False
+        async def speak(*_):
+            raise AssertionError("Music must use the configured Glagol connection")
+
+        feedback = bridge.feedback = AliceVoiceFeedback(speak, local_music_entity=bridge.target, speak_local=local)
         await station.update("playing", CATALOG.title, CATALOG.artist, track_key="one", duration=202)
-        bridge.handle(event(time[0]))
+        bridge.handle(event(time[0] - timedelta(seconds=3)))
         await bridge.task
         await feedback.task
         assert provider.rates == 1
-        assert sent == [("media_player.mini", "Лайк подтверждён.")]
+        assert not sent
+
         await bridge.close()
         await feedback.close()
 

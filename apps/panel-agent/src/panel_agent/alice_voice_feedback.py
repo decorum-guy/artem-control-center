@@ -19,16 +19,8 @@ PHRASES = {
     "tv.app-unavailable": ("Приложение недоступно.",),
     "tv.busy": ("Телевизор занят.",),
     "tv.unconfirmed": ("Не удалось подтвердить результат.",),
-    "music.in_music": ("Песня добавлена в избранное.", "Готово, песня в избранном."),
-    "music.already_in_music": ("Эта песня уже в избранном.",),
-    "music.youtube_like": ("Лайк подтверждён.", "У этой песни теперь есть лайк."),
-    "music.choose_source": ("Уточни песню на панели.",),
-    "music.choose_version": ("Выбери версию на панели.",),
+    "music.working": ("Сохраняю.",),
     "music.no_track": ("Сейчас музыка не играет.",),
-    "music.no_match": ("Подходящая запись не нашлась.",),
-    "music.auth_required": ("Нужно подключить Ютуб в настройках панели.",),
-    "music.unavailable": ("Не удалось связаться с Ютубом.",),
-    "music.unconfirmed": ("Не удалось подтвердить лайк.",),
 }
 
 
@@ -58,7 +50,10 @@ class AliceVoiceFeedback:
     async def _announce(self, entity: str, cue: str, phrase: str, may_send: Callable[[], bool]) -> None:
         if not may_send():
             return
-        local = self.speak_local if cue.startswith("music.") and entity == self.local_music_entity else None
+        is_music = cue.startswith("music.")
+        local = self.speak_local if is_music and entity == self.local_music_entity else None
+        if is_music and local is None:
+            return
         try:
             async with asyncio.timeout(FEEDBACK_SECONDS):
                 if local is not None:
