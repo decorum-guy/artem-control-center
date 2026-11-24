@@ -93,7 +93,7 @@
 }
 @keyframes cc-skin-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 html[data-skin="v3"][data-motion="full"] .v2-route-content[data-route-transition="enter"] { animation: cc-skin-enter 220ms var(--cc-motion-ease) both; }
-html[data-skin="v3"][data-motion="full"] .v2-route-content > :first-child > :nth-child(-n+6) { animation: cc-skin-enter 220ms var(--cc-motion-ease) backwards; }
+html[data-skin="v3"][data-motion="full"] .v2-route-content[data-route-transition="enter"] > :first-child > :nth-child(-n+6) { animation: cc-skin-enter 220ms var(--cc-motion-ease) backwards; }
 html[data-skin="v3"] .v2-route-content[data-route-transition] > :first-child > :nth-child(2) { animation-delay: 40ms; }
 html[data-skin="v3"] .v2-route-content[data-route-transition] > :first-child > :nth-child(3) { animation-delay: 80ms; }
 html[data-skin="v3"] .v2-route-content[data-route-transition] > :first-child > :nth-child(4) { animation-delay: 120ms; }
