@@ -2,6 +2,8 @@
 
 **Purpose:** read-only investigation before changing code or production. The checks below describe the repository's expected architecture; actual host, runtime SHA, environment and failure must be verified live. Cross-reference [PROJECT_MAP.md](PROJECT_MAP.md), [WINDOWS_PRODUCTION_RUNTIME.md](WINDOWS_PRODUCTION_RUNTIME.md) and [PRIVATE_PRODUCTION_CONNECTIVITY.md](PRIVATE_PRODUCTION_CONNECTIVITY.md).
 
+Карта существующих SSH alias с Mac и датированная информация о прокси: [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md). `control-panel-pc`, `ha-vps` и `kz-bot` имеют разные роли; доступность одного не подтверждает остальные.
+
 ## 1. Не смешивать четыре разных процесса
 
 | Что видит пользователь | Где читать контракт | Что это НЕ доказывает |
@@ -15,7 +17,7 @@
 
 ## 2. Read-only обследование Samsung
 
-При предоставленном пользователем SSH-доступе:
+На Mac владельца используется уже подтверждённый alias; из другого окружения сначала установи, доступен ли этот маршрут:
 
 ```text
 ssh control-panel-pc
@@ -40,7 +42,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\status
 
 ## 3. Read-only обследование VPS
 
-При явно предоставленном доступе:
+Для порученной диагностики HA используй существующий Mac alias:
 
 ```text
 ssh ha-vps
@@ -59,10 +61,19 @@ ssh ha-vps
 
 **AVALAR**, **«Планы Тёмы»** и другие названия источников — лишь наблюдения пользователя, их provider IDs/URLs/health и действующие подключения надо выяснить по текущему снимку. Не скрывать и не отключать эти источники для устранения предупреждения.
 
+### 3.1. Зарубежный прокси и Telegram
+
+По сообщению владельца от 24.11.2026 Telegram-бот на `ha-vps` использует зарубежный прокси `kz-bot`. О временной остановке и ожидаемом продлении см. единственную датированную запись в [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md#временное-состояние-kz-bot).
+
+Для релевантного инцидента разделяй: доступ по `ssh ha-vps`, состояние контейнера бота, его локальный Planning API, настроенный исходящий маршрут через proxy и доставку Telegram. Точную proxy-службу/протокол/порты выясняй по установленной конфигурации без вывода credentials. Из названия alias их вывести нельзя.
+
+При диагностике не отправляй тестовое сообщение владельцу или в новый канал без соответствующего поручения. Недоступный proxy классифицируй как внешнюю зависимость конкретного маршрута. HA и локальный API бота могут иметь иное состояние; проверяй их отдельно. Не меняй глобальный proxy, firewall или туннели ради маскировки этой причины.
+
 ## 4. Критерии классификации
 
 - **Network/tunnel:** запрос с Samsung до AliceTG не проходит, а локально на VPS проходит; проверить SSH forward и network status, но не менять конфиг автоматически.
 - **VPS service:** loopback API на VPS не отвечает/ошибается.
+- **Outbound proxy:** сервис на VPS доступен, но его подтверждённый исходящий маршрут через `kz-bot` недоступен. Не распространять этот вывод на все API сервиса.
 - **External provider:** Planning route работает, но providerSource/status и логи на VPS подтверждают stale/error iCloud или внешнего календаря.
 - **Panel cache/contract:** VPS отдаёт свежий valid response, а Panel Agent отдаёт stale/error либо неверно нормализует его.
 - **UI presentation:** Panel Agent действительно current, а React/route продолжает показывать warning.
@@ -96,3 +107,4 @@ B. «Обновить источники и перечитать события�
 Сдать таблицу `layer → status → evidence time/source → cause or NOT PROVEN → action`; отдельно `Calendar`, `Дела`, `refresh`, `ASUS/other services only if relevant`, `portrait`.
 
 Если доказана ошибка кода — отдельный branch/PR с focused regression tests; если внешняя проблема — не менять инфраструктуру без разрешения и не мешать исправлению portrait. Результат в CI не означает физическое устранение сбоя до проверки Samsung.
+

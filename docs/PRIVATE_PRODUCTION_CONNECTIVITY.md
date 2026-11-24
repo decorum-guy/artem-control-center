@@ -14,6 +14,21 @@ The VPS ports must be published only on `127.0.0.1`. They must not bind to
 Mac administration key and has no shell, PTY, agent forwarding, X11 forwarding
 or access to arbitrary destinations.
 
+## Administration aliases and outbound proxy
+
+The owner's Mac has three existing SSH aliases: `control-panel-pc` (Samsung),
+`ha-vps` (HA/AliceTG VPS), and `kz-bot` (foreign outbound proxy).
+See [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md) for ownership,
+provenance, and the dated temporary proxy outage. Mac administration aliases
+are separate from the restricted Windows tunnel identity described above.
+
+The owner identified the Telegram bot on `ha-vps` as a consumer of `kz-bot`.
+That outbound dependency is distinct from Samsung's private HA/Planning
+forwards. Do not infer that HA state, the bot's local Planning API, the TV
+remote tunnel, or every outbound request traverses the proxy. Verify the
+actual consumer configuration and report credentials only as set/missing.
+The proxy's temporary outage does not authorize a network reconfiguration.
+
 ## Coffee Diary phone upload ingress
 
 The Panel Agent remains bound only to `127.0.0.1:8787`. The Coffee Diary QR
@@ -176,3 +191,4 @@ values are never copied into logs.
 Do not delete the dedicated private key during routine rollback. Rotate it by
 removing the marked authorized-key entry on the VPS, deleting the local key pair
 and rerunning the connectivity installer.
+

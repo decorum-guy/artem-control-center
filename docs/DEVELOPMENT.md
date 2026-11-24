@@ -8,6 +8,15 @@ Codex/developers must be able to run, inspect and test the frontend and most Pan
 
 The Mac mode is a development environment, not production acceptance for touch, kiosk, power, BlueStacks/Waydroid or target-device performance.
 
+### Existing remote access from the Mac
+
+The owner has configured `ssh control-panel-pc` (Samsung), `ssh ha-vps`
+(Home Assistant/AliceTG VPS), and `ssh kz-bot` (foreign outbound proxy).
+Use [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md) for roles, provenance,
+and the dated proxy interruption. These Mac aliases are not guaranteed to
+exist in a cloud executor. Existing SSH/TV viewing access should be used for
+assigned diagnostics before asking the owner to run commands or take screenshots.
+
 ## 2. Supported development hosts
 
 ### macOS — primary developer convenience mode
@@ -326,7 +335,12 @@ The command writes review-only screenshots to the parent workspace
 
 ## 9. Target-device handoff checklist
 
-After Mac tests pass, hardware-dependent changes produce a concise checklist for the owner to run on Windows.
+After Mac tests pass, hardware-dependent changes produce a concise Windows
+checklist. The executor performs available diagnostics and UI observations
+through the existing Samsung SSH and screen-access tools within the assigned
+scope. Ask the owner only for required sign-in/2FA, physical observations, or
+interactions the executor cannot obtain. Mac-only fixture results remain
+separate from real Windows evidence.
 
 The checklist must state:
 
@@ -394,3 +408,4 @@ A frontend/Panel Agent feature is development-complete when:
 - production-only actions remain disabled locally by default;
 - hardware-dependent validation is explicitly marked pending or completed on Windows;
 - documentation and configuration schemas are updated.
+

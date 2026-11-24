@@ -28,7 +28,7 @@
 - **Backups:** резервная копия создаётся зарегистрированным profile, скачивается на ноутбук и при выбранной policy дополнительно синхронизируется с cloud drive и/или будущим внешним HDD/SSD.
 - **Home Assistant:** текущий удалённый HA остаётся authoritative на первом этапе. `AliceTG_Bot` — отдельный Git-репозиторий Telegram-бота внутри HA-стека, а не репозиторий самого Home Assistant.
 - **HA hosting — fixed:** Samsung laptop не будет Home Assistant host или permanent HA primary. Долгосрочный локальный HA размещается на отдельном компактном сервере; ноутбук остаётся UI, edge-node, monitoring и backup-target.
-- **Proxy server:** отдельного Git-репозитория сейчас нет; конфигурация и сервисы находятся непосредственно на сервере и подключаются через restricted host agent.
+- **Proxy server:** отдельный зарубежный сервер `kz-bot`; известный потребитель — Telegram-бот на `ha-vps`. Доступ, актуальность и границы диагностики: [docs/INFRASTRUCTURE_ACCESS.md](docs/INFRASTRUCTURE_ACCESS.md).
 - **Безопасность:** браузер не получает SSH-ключи, административные токены или возможность выполнять произвольные команды. Panel Agent не публикуется напрямую в Internet.
 
 ## Главные разделы панели
@@ -36,7 +36,7 @@
 1. **Overview** — часы, дата, погода, ближайшие события, задачи, состояние дома, backups и общий статус сервисов.
 2. **Home** — приоритетный HA-виджет кофемашины, чайник, свет, розетки, климат, сцены и критичные локальные действия.
 3. **Services** — автоматически сформированный каталог проектов/services, health, latency, incidents, deployment state и только разрешённые actions.
-4. **Calendar & Tasks** — календарь iPhone/iCloud/Google/Exchange через адаптер источника и задачи TickTick.
+4. **Calendar & Tasks** — календарь через Planning и адаптеры источников; `/tasks` использует отдельный opt-in Todoist provider. Нативные напоминания Алисы подготовлены в кандидате PR #372; установленный runtime сверяется отдельно.
 5. **Automations** — запуск n8n, checks, scheduled maintenance и других зарегистрированных workflows.
 6. **Backups** — ручные и плановые резервные копии, destinations, retention, checksums и restore-test status.
 7. **Apps** — запуск Android-карты лояльности и других полноэкранных приложений.
@@ -48,7 +48,20 @@
 Ключевые документы:
 
 - [`AGENTS.md`](AGENTS.md) — обязательные правила для Codex и других разработчиков.
-- [`docs/CODEX_INITIALIZATION_PROMPT.md`](docs/CODEX_INITIALIZATION_PROMPT.md) — готовый стартовый prompt для первой Codex-сессии с read-only discovery внешних проектов.
+- [`docs/INFRASTRUCTURE_ACCESS.md`](docs/INFRASTRUCTURE_ACCESS.md) — SSH с Mac: Samsung `control-panel-pc`, HA `ha-vps`, зарубежный прокси `kz-bot`, датированное состояние и проверка актуальности.
+- [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) — карта исходников и различие основной панели, кандидата и планируемых функций.
+- [`docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md`](docs/plans/SAMSUNG_FINISHING_ROUND_2026_11_24.md) — архив задания и последующие результаты кандидата PR #372; актуальное ограниченное подтверждение push — в отчёте от 25.11 ниже.
+- [`docs/plans/ALICE_IPHONE_PUSH_2026_11_24.md`](docs/plans/ALICE_IPHONE_PUSH_2026_11_24.md) — исторический протокол push и актуальная отметка остановки живых тестов владельцем.
+- [`docs/plans/ALICE_PUSH_REVIEW_AND_RELEASE_2026_11_25.md`](docs/plans/ALICE_PUSH_REVIEW_AND_RELEASE_2026_11_25.md) — один подтверждённый native push, границы результата, аудит #376/#377 и общий кандидат выпуска #375–#377.
+- [`docs/plans/GOOGLE_LOGIN_UX_AND_NEXT_RELEASE_2026_11_24.md`](docs/plans/GOOGLE_LOGIN_UX_AND_NEXT_RELEASE_2026_11_24.md) — приёмка `ae376d22`: прежние замечания закрыты; обычный вход Google из панели, решение об установке и следующий небольшой UX-раунд.
+- [`docs/plans/YOUTUBE_CONNECTION_REVIEW_375_2026_11_24.md`](docs/plans/YOUTUBE_CONNECTION_REVIEW_375_2026_11_24.md) — исходные замечания к #375, последующий отчёт реализации и актуальный статус их закрытия.
+- [`docs/plans/YOUTUBE_CONNECTION_AND_RELEASE_2026_11_24.md`](docs/plans/YOUTUBE_CONNECTION_AND_RELEASE_2026_11_24.md) — исходный план подключения без JSON и совокупного выпуска; читать с последующим статусом.
+- [`docs/plans/MUSIC_LIBRARY_ROUND3_REVIEW_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND3_REVIEW_2026_11_24.md) — аудит третьего раунда и исходный блокер YouTube; последующее исправление отмечено в начале.
+- [`docs/plans/MUSIC_LIBRARY_ROUND2_REVIEW_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND2_REVIEW_2026_11_24.md) — приёмка R1–R5 и исходное задание третьего раунда; читать с последующим статусом в начале документа.
+- [`docs/plans/MUSIC_LIBRARY_ROUND2_2026_11_24.md`](docs/plans/MUSIC_LIBRARY_ROUND2_2026_11_24.md) — исходный аудит `8df311a` и сценарии R1–R5; последующий статус указан в начале документа.
+- [`docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md`](docs/plans/LIKED_MUSIC_LIBRARY_2026_11_24.md) — исходное задание реализованного кандидата #374: отдельная страница «Музыка», новый компактный плеер, плейлисты и асинхронные кнопки кондиционера; читать с учётом последующего аудита.
+- [`docs/YOUTUBE_CURRENT_TRACK.md`](docs/YOUTUBE_CURRENT_TRACK.md) — архив исходного исследования сохранения уже играющей песни и ссылки на реализованный кандидат PR #373; читать с учётом последнего отчёта.
+- [`docs/CODEX_INITIALIZATION_PROMPT.md`](docs/CODEX_INITIALIZATION_PROMPT.md) — исторический стартовый prompt первоначального discovery/MVP; для текущих задач использовать AGENTS, Playbook и карту доступа.
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — продуктовая спецификация и UX.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — компоненты и границы ответственности.
 - [`docs/PROJECT_ONBOARDING.md`](docs/PROJECT_ONBOARDING.md) — capability-based подключение, отключение и настройка проектов.
@@ -76,7 +89,7 @@
 - [`config/widgets.example.yaml`](config/widgets.example.yaml) — widget definitions, instances и auto-materialization policy.
 - [`config/layouts.example.yaml`](config/layouts.example.yaml) — default layouts и будущие drag/resize capabilities.
 - [`config/widget-user-presets.example.yaml`](config/widget-user-presets.example.yaml) — поздняя no-code модель безопасных пользовательских widgets.
-- [GitHub Issues](../../issues) — исполнимый backlog по реализации, widgets, integrations, health, backups, security и миграции ОС.
+- [GitHub Issues](https://github.com/decorum-guy/artem-control-center/issues) — исполнимый backlog по реализации, widgets, integrations, health, backups, security и миграции ОС.
 
 ## Базовый принцип
 
@@ -119,3 +132,4 @@ Production runtime раздаёт собранный dashboard через Panel 
 через Task Scheduler и хранит конфигурацию/логи в
 `%LOCALAPPDATA%\ArtemControlCenter`. Полные инструкции и rollback находятся в
 [`docs/WINDOWS_PRODUCTION_RUNTIME.md`](docs/WINDOWS_PRODUCTION_RUNTIME.md).
+
