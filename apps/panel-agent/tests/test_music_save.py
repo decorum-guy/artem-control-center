@@ -193,6 +193,9 @@ def test_dispatch_keeps_tv_and_music_independent(tmp_path, scenario):
     wrong_device = event(time[0], "music", scenario)
     wrong_device["data"]["entity_id"] = "media_player.other"
     dispatch_scenario(wrong_device, bridge, seen.append)
+    echo = event(time[0], "voice-feedback", scenario)
+    echo["data"]["instance"] = "tts"
+    dispatch_scenario(echo, bridge, seen.append)
     assert bridge.operation is None and not seen
     dispatch_scenario(event(time[0], "music", scenario), bridge, seen.append)
     assert bridge.operation.status == "no_track" and not seen
