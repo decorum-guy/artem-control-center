@@ -99,6 +99,14 @@ class MusicSave:
                 "destination": "Понравившаяся музыка", "operation": result, "busyEvents": self.busy_events,
                 "canChoose": self.allowed() and self.session is not None}
 
+    def paired_track(self, video_id: str) -> str | None:
+        self._prune()
+        if self.session is None:
+            return None
+        tracks = {track for (generation, track), candidate in self.saved.items()
+                  if generation == self.session.generation and candidate.video_id == video_id}
+        return next(iter(tracks)) if len(tracks) == 1 else None
+
     def handle(self, event: dict) -> None:
         data, context = event.get("data"), event.get("context")
         if (self.closed or event.get("event_type") != "yandex_scenario" or event.get("origin") != "LOCAL"

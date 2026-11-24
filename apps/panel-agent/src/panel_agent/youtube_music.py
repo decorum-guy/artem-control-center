@@ -233,19 +233,19 @@ def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2):
             target = urlsplit(url)
             if (self.remaining < 0 or elapsed <= 0 or target.scheme != "https"
                     or target.netloc != "music.youtube.com"):
-                raise MusicUnavailable
+                raise MusicUnavailable("request budget or host")
             kwargs.update(timeout=min(elapsed, 4), allow_redirects=False, stream=True,
                           proxies={"https": proxy})
             with super().request(method, url, **kwargs) as response:
                 if response.status_code in (401, 403):
                     raise MusicAuthRequired
                 if response.status_code >= 300:
-                    raise MusicUnavailable
+                    raise MusicUnavailable(f"upstream HTTP {response.status_code}")
                 body = bytearray()
                 for chunk in response.iter_content(65536):
                     self.bytes_left -= len(chunk)
                     if self.bytes_left < 0 or time.monotonic() > self.deadline:
-                        raise MusicUnavailable
+                        raise MusicUnavailable("response budget")
                     body.extend(chunk)
                 response._content = bytes(body)
                 return response

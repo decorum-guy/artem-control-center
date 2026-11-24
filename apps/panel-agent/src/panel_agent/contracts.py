@@ -272,6 +272,7 @@ class StationPlayback(BaseModel):
     title: str | None = None
     artist: str | None = None
     coverPath: str | None = None
+    trackId: str | None = None
     observedAt: str | None
 
 

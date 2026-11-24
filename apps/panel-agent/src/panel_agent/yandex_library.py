@@ -69,7 +69,8 @@ class YandexLibrary:
             raise MusicAuthRequired
         if self.context == version and time.monotonic() < self.expires and self.token:
             return
-        self.reset()
+        if self.context != version:
+            self.reset()
         try:
             cfg = self.file.read()
             if cfg.music_token:

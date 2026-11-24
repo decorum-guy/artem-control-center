@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 import logging
 import os
@@ -54,6 +55,10 @@ os.environ.update(
     PANEL_AGENT_MODE="read_only",
     PANEL_TV_VOICE_ENABLED="true",
     PANEL_ALICE_VOICE_FEEDBACK_ENABLED="true" if lease.get("voice_feedback") else "false",
+    PANEL_DIAGNOSTIC_LIVE_STATION="true" if lease.get("music_library") else "false",
+    PANEL_ALICE_BASE_URL=config.get("PANEL_ALICE_BASE_URL") or "",
+    PANEL_MUSIC_LIBRARY_ENABLED="true" if lease.get("music_library") else "false",
+    PANEL_YOUTUBE_LIBRARY_CREDENTIAL_FILE=str(ROOT / "station-credentials" / "youtube-library.dpapi"),
     PANEL_YOUTUBE_MUSIC_ENABLED="true" if lease.get("youtube_music_preview") else "false",
     PANEL_YOUTUBE_MUSIC_STATION_ENTITY=lease["station_entity"],
     PANEL_YOUTUBE_MUSIC_CREDENTIAL_FILE=str(ROOT / "station-credentials" / "youtube-music.dpapi"),
@@ -78,7 +83,7 @@ from panel_agent.access_policy import AccessPolicyStore
 from panel_agent.ble_strip import build_ble_strip_router
 from panel_agent.capabilities import CapabilityOverrideStore
 from panel_agent.main import (
-    app, ble_strip, music_save, runtime, startup_lifecycle, station_playback, station_reminders, voice_feedback,
+    app, ble_strip, music_library, music_save, runtime, startup_lifecycle, station_playback, station_reminders, voice_feedback, SETTINGS,
 )
 from panel_agent.music_save import dispatch_scenario
 from panel_agent.static_dashboard import install_dashboard_routes
@@ -136,6 +141,43 @@ bridge = TVVoiceBridge(
 if music_save is not None:
     music_save.access = access
     music_save.writes = lambda: allowed("PANEL_WRITES_ENABLED")
+if music_library is not None:
+    music_library.access = access
+    music_library.writes = lambda: allowed("PANEL_ALICE_STATION_ACTIONS_ENABLED")
+if lease.get("music_library"):
+    from panel_agent.home_assistant_actions import HomeAssistantActionExecutor, build_home_assistant_action_router
+    from panel_agent.station_actions import StationActionExecutor, build_station_action_router
+
+    class PreviewPolicy:
+        def require(self, *args, **kwargs):
+            return access().require(*args, **kwargs)
+
+        def authorize(self, *args, **kwargs):
+            return access().authorize(*args, **kwargs)
+
+        def audit_capability(self, *args, **kwargs):
+            return access().audit_capability(*args, **kwargs)
+
+    policy = PreviewPolicy()
+    climate = HomeAssistantActionExecutor(
+        replace(SETTINGS, writes_enabled=True), policy, runtime.home_assistant,
+        gate_provider=lambda capability: capability == "home_climate_actions" and allowed("PANEL_HOME_CLIMATE_ACTIONS_ENABLED"),
+    )
+    app.include_router(build_home_assistant_action_router(climate))
+    base = urlsplit(SETTINGS.alice_base_url)
+    station = StationActionExecutor(
+        replace(SETTINGS, writes_enabled=True, alice_station_actions_enabled=True,
+                alice_control_center_token=(config.get("PANEL_ALICE_CONTROL_CENTER_TOKEN") or
+                                            config.get("PANEL_ALICE_DETAILS_TOKEN") or "")),
+        policy, lambda: allowed("PANEL_ALICE_STATION_ACTIONS_ENABLED")
+        and base.scheme == "http" and base.hostname in {"127.0.0.1", "localhost"},
+    )
+    mini = build_station_action_router(station)
+    mini.routes = [route for route in mini.routes if route.path in {
+        "/api/v1/actions/station", "/api/v1/actions/station/availability"
+    }]
+    app.include_router(mini)
+
 runtime.home_assistant.set_yandex_scenario_handler(lambda event: dispatch_scenario(event, music_save, bridge.handle))
 from panel_agent.main import station_reminders
 

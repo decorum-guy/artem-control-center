@@ -29,11 +29,12 @@ def thumbnail(value: object) -> str | None:
 
 def playlist(row: dict) -> Playlist | None:
     key, title = row.get("playlistId"), text(row.get("title"))
-    if not isinstance(key, str) or key == "LM" or not PLAYLIST_ID.fullmatch(key) or not title:
+    if not isinstance(key, str) or not PLAYLIST_ID.fullmatch(key) or not title:
         return None
     raw = row.get("count")
     count = int(raw) if type(raw) in (int, str) and re.fullmatch(r"[0-9]{1,7}", str(raw)) else None
-    return Playlist(key, title, "playlist", thumbnail(row.get("thumbnails")), count)
+    return Playlist(key, "Понравившаяся музыка" if key == "LM" else title,
+                    "liked" if key == "LM" else "playlist", thumbnail(row.get("thumbnails")), count)
 
 
 def recording(row: dict | None) -> Recording:
@@ -97,7 +98,7 @@ class YouTubeLibrary:
             account = GoogleCredential.parse(read_browser_vault(self.official_path))
         except ValueError as exc:
             raise MusicAuthRequired from exc
-        with music_http(self.proxy, json.dumps(auth)) as client:
+        with music_http(self.proxy, json.dumps(auth), request_limit=4) as client:
             if self.validated is None or self.validated[0] != version or self.validated[1] < time.monotonic():
                 active = client.get_account_info().get("channelHandle")
                 if not isinstance(active, str) or active.casefold() != account.channel_handle.casefold():
@@ -111,7 +112,9 @@ class YouTubeLibrary:
 
 def read_page(client, key: str | None, cursor: Continuation | None) -> ProviderPage:
     from ytmusicapi.continuations import CONTINUATION_ITEMS, get_continuation_string, get_continuation_token
-    from ytmusicapi.navigation import GRID, MRLIR, SECTION, TWO_COLUMN_RENDERER, nav
+    from ytmusicapi.navigation import (
+        GRID, MRLIR, MTRIR, NAVIGATION_BROWSE_ID, SECTION, TITLE, TWO_COLUMN_RENDERER, nav,
+    )
     from ytmusicapi.parsers.browsing import parse_content_list, parse_playlist
     from ytmusicapi.parsers.library import get_library_contents
     from ytmusicapi.parsers.playlists import parse_playlist_item
@@ -137,11 +140,13 @@ def read_page(client, key: str | None, cursor: Continuation | None) -> ProviderP
             container = {}
         if not isinstance(entries, list):
             raise MusicUnavailable
-        tiles = [item for item in entries if "musicTwoRowItemRenderer" in item]
+        tiles = [item for item in entries if nav(item, [MTRIR] + TITLE + NAVIGATION_BROWSE_ID, True)]
         rows = tuple(parsed for item in parse_content_list(tiles, parse_playlist) if (parsed := playlist(item)))
         legacy = nav(container, ["continuations", 0, "nextContinuationData", "continuation"], True)
         next_page = _cursor(legacy, "grid") if legacy else _cursor(get_continuation_token(entries) if entries else None, "append")
-        return ProviderPage(((Playlist("LM", "Понравившаяся музыка", "liked"),) if cursor is None else ()) + rows, next_page)
+        if cursor is None and all(row.key != "LM" for row in rows):
+            rows = (Playlist("LM", "Понравившаяся музыка", "liked"), *rows)
+        return ProviderPage(rows, next_page)
 
     if not PLAYLIST_ID.fullmatch(key):
         raise MusicUnavailable
@@ -161,7 +166,16 @@ def read_page(client, key: str | None, cursor: Continuation | None) -> ProviderP
         entries = nav(response, CONTINUATION_ITEMS)
     if not isinstance(entries, list):
         raise MusicUnavailable
-    rows = tuple(recording(parse_playlist_item(item[MRLIR])) for item in entries if MRLIR in item)
+    rows = []
+    for item in entries:
+        if MRLIR not in item:
+            continue
+        try:
+            parsed = parse_playlist_item(item[MRLIR])
+        except (KeyError, IndexError, TypeError, ValueError):
+            parsed = None
+        rows.append(recording(parsed))
+    rows = tuple(rows)
     return ProviderPage(rows, _cursor(get_continuation_token(entries) if entries else None, "tracks"))
 
 
