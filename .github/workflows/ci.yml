@@ -114,6 +114,24 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run install:browsers
 
+      - name: Validate Music and climate interactions
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          VITE_V3_VISUAL_SKIN: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/music-climate.json
+        run: |
+          npm run test:e2e -- tests/e2e/music-page.spec.ts tests/e2e/climate-async.spec.ts --reporter=line,json
+          node --input-type=module -e '
+            import { appendFileSync, readFileSync } from "node:fs";
+            const { expected, skipped } = JSON.parse(readFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE)).stats;
+            if (!expected || skipped) throw Error(`Music/climate: ${expected} passed, ${skipped} skipped`);
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Music and climate: ${expected} passed, ${skipped} skipped.\n`);
+          '
+
       - name: "Run #317 kettle stop and existing kettle browser gates"
         if: runner.os == 'Linux'
         env:
@@ -185,24 +203,6 @@ jobs:
         run: |
           npm run test:e2e -- tests/e2e/v3-skin-*.spec.ts
           npm run test:e2e -- tests/e2e/issue-298-station-artwork.spec.ts --grep "scrolls genres"
-
-      - name: Validate Music and climate interactions
-        if: runner.os == 'Linux'
-        env:
-          VITE_V2_VISUAL_SHELL: "true"
-          VITE_OVERVIEW_V2_ENABLED: "true"
-          VITE_V3_VISUAL_SKIN: "true"
-          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
-          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
-          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/music-climate.json
-        run: |
-          npm run test:e2e -- tests/e2e/music-page.spec.ts tests/e2e/climate-async.spec.ts --reporter=line,json
-          node --input-type=module -e '
-            import { appendFileSync, readFileSync } from "node:fs";
-            const { expected, skipped } = JSON.parse(readFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE)).stats;
-            if (!expected || skipped) throw Error(`Music/climate: ${expected} passed, ${skipped} skipped`);
-            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Music and climate: ${expected} passed, ${skipped} skipped.\n`);
-          '
 
       - name: "Run #279 Slice 1 foundation and visual review gate"
         if: runner.os == 'Linux'
