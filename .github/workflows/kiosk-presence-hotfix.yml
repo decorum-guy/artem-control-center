@@ -2,7 +2,10 @@ name: Kiosk presence hotfix
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - codex/samsung-autonomous-2026-11-24
+      - codex/current-track-youtube-music
   workflow_dispatch:
 
 permissions:
