@@ -2,6 +2,20 @@
 
 Инструкции для Codex и любых разработчиков Artem Control Center.
 
+## 0. Существующий доступ с Mac
+
+Владелец подтвердил три уже настроенных SSH alias на своём Mac:
+
+| Команда | Узел и назначение |
+| --- | --- |
+| `ssh control-panel-pc` | Домашний Samsung / Windows: Panel Agent, kiosk, локальные интеграции и доступ к Android TV через ADB. |
+| `ssh ha-vps` | VPS: Home Assistant и стек AliceTG_Bot; HA остаётся на этом сервере. |
+| `ssh kz-bot` | Отдельный зарубежный прокси-сервер; через него, в частности, Telegram-бот на `ha-vps` обращается к Telegram. |
+
+Перед работой с инфраструктурой прочитай [docs/INFRASTRUCTURE_ACCESS.md](docs/INFRASTRUCTURE_ACCESS.md): там единая карта маршрутов, источник сведений и датированная запись о временном отключении `kz-bot`. Сверяй текущее состояние; не превращай историческую остановку в постоянную настройку.
+
+При работе на Mac сначала используй существующие alias и доступные инструменты. Для порученной диагностики не проси владельца заново настраивать SSH или выполнять доступные агенту команды. В облачном окружении этих alias и ключей может не быть: тогда укажи границу доступа. Наличие SSH не расширяет разрешённый scope изменений.
+
 ## 1. Product intent
 
 Это персональная премиальная touch-first панель, а не типовой admin dashboard.
@@ -358,12 +372,13 @@ Mac success не является Windows hardware acceptance. Hardware-dependen
 Этот `AGENTS.md` остаётся основным набором правил проекта. Новые агенты должны дополнительно прочесть:
 
 - [RULES.md](RULES.md) — обязательные operational/safety rules, truthfulness, protected production boundaries и PR-дисциплина.
+- [docs/INFRASTRUCTURE_ACCESS.md](docs/INFRASTRUCTURE_ACCESS.md) — три SSH alias с Mac, роли Samsung/HA/proxy и актуальность внешних зависимостей.
 - [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md) — где лежат frontend, Panel Agent, provider adapters, contracts, Windows runtime и приватные tunnels.
 - [docs/AGENT_PLAYBOOK.md](docs/AGENT_PLAYBOOK.md) — onboarding sequence, Git preflight, тестирование, PR и отчёт.
 - [docs/TV_ACCESS.md](docs/TV_ACCESS.md) — доступ к телевизору с Mac через SSH Samsung и ADB, снимки `screencap`, живой `tv-mirror`/`scrcpy` и границы подтверждения экрана; прочитать перед диагностикой или приёмкой ТВ.
 - [docs/PRODUCTION_DIAGNOSTICS.md](docs/PRODUCTION_DIAGNOSTICS.md) — read-only Samsung/VPS diagnostics, Calendar/Planning freshness, refresh UI semantics и portrait widget fallback.
 - [docs/TODOIST_TASKS.md](docs/TODOIST_TASKS.md) — отдельный Todoist task provider и защищённые write-gates; он не заменяет Planning «Дела»/Calendar.
 - [issue #322](https://github.com/decorum-guy/artem-control-center/issues/322) — portrait 9:16 acceptance и сохранение landscape layouts.
-- [agent-telegram](https://github.com/decorum-guy/agent-telegram) — связь с владельцем через Telegram: отчёты, вопросы и его ответы идут через топик проекта. В начале каждой сессии выполнить `AGENT.md` оттуда; проект описан в [.agent-telegram.json](.agent-telegram.json). Если на этом компьютере нет ключа бота проекта — первым делом попросить его у владельца в чате, пока он у компьютера. Подробности (путь в PowerShell, вторая роль, облачный запуск без Telegram) — [RULES.md](RULES.md) §0.
+- [agent-telegram](https://github.com/decorum-guy/agent-telegram) — существующий канал связи, когда владелец выбрал Telegram для текущего задания. Явный выбор чата и ограничения на уведомления имеют приоритет; отсутствие Telegram не блокирует независимую работу. Порядок — [RULES.md](RULES.md) §0.
 
-Если пользователь разрешает SSH-доступ для диагностики, это не является разрешением менять `runtime.env`, networking, VPS, HA, Caddy или физическое состояние устройств. Сначала собрать sanitized evidence и установить root cause, затем создавать reviewable branch/PR без автоматического merge/deploy. В случае несовпадения этого документа с новым кодом или остальными требованиями, зафиксировать конфликт, а не незаметно выбирать удобное толкование.
+Подтверждённый владельцем SSH-доступ используется в рамках текущего задания; сам по себе он не является разрешением менять `runtime.env`, networking, VPS, HA, Caddy или физическое состояние устройств. Сначала собрать sanitized evidence и установить root cause, затем создавать reviewable branch/PR без автоматического merge/deploy. В случае несовпадения этого документа с новым кодом или остальными требованиями, зафиксировать конфликт, а не незаметно выбирать удобное толкование.
