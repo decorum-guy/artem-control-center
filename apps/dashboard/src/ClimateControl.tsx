@@ -147,6 +147,7 @@ export function ClimateControl({
   const revision = useRef(0);
   const serviceId = useRef(service.id);
   const mounted = useRef(true);
+  const availabilityRead = useRef(0);
   const [, redraw] = useState(0);
   const changeDraft = (next: typeof draft) => {
     draftRef.current = next;
@@ -161,15 +162,23 @@ export function ClimateControl({
     [data.fanModes]
   );
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (series?: AbortSignal) => {
+    const read = ++availabilityRead.current;
+    const timeout = AbortSignal.timeout(7_000);
+    const signal = series ? AbortSignal.any([series, timeout]) : timeout;
+    const isLatest = () => mounted.current && availabilityRead.current === read && !series?.aborted;
     try {
-      const next = await fetchHomeAssistantActionAvailability();
-      setAvailability(next);
-      setApiAvailable(true);
-      return next;
+      const next = await fetchHomeAssistantActionAvailability(signal);
+      if (isLatest()) {
+        setAvailability(next);
+        setApiAvailable(true);
+      }
+      return signal.aborted ? null : next;
     } catch {
-      setAvailability(null);
-      setApiAvailable(false);
+      if (isLatest()) {
+        setAvailability(null);
+        setApiAvailable(false);
+      }
       return null;
     }
   }, []);
@@ -203,7 +212,7 @@ export function ClimateControl({
     dispatch: async (intent, signal) => {
       const guardRevision = revision.current;
       const identity = service.id;
-      const decision = (await refresh())?.actions[intent.id];
+      const decision = (await refresh(signal))?.actions[intent.id];
       if (signal.aborted || !guardMutation() || !mounted.current || identity !== serviceId.current
           || guardRevision !== revision.current) throw new Error("queue_closed");
       if (!decision?.allowed) {

@@ -157,10 +157,10 @@ async function parse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function fetchHomeAssistantActionAvailability(): Promise<HomeAssistantActionAvailability> {
+export async function fetchHomeAssistantActionAvailability(signal?: AbortSignal): Promise<HomeAssistantActionAvailability> {
   return parse<HomeAssistantActionAvailability>(await fetch(
     "/api/v1/actions/home-assistant/availability",
-    { cache: "no-store" }
+    { cache: "no-store", signal }
   ));
 }
 

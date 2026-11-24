@@ -45,3 +45,48 @@ for (const view of ["home", "overview"]) {
     expect(posted).toEqual([original - 1, original - 2]);
   });
 }
+
+test("locking aborts a held preflight and allows a new climate request after unlocking", async ({ page }) => {
+  test.skip(process.env.VITE_TOUCH_INPUT_LOCK_ENABLED !== "true", "Enable the production interaction lock.");
+  let holdNext = false;
+  let held = false;
+  const posted: number[] = [];
+  let releaseOld!: () => void;
+  const oldResponse = new Promise<void>(resolve => { releaseOld = resolve; });
+  await page.route("**/api/v1/actions/home-assistant/availability", async route => {
+    if (holdNext) {
+      holdNext = false;
+      held = true;
+      await oldResponse;
+      return route.fulfill({ json: { schemaVersion: 1, actions: {} } }).catch(() => {});
+    }
+    return route.fulfill({ json: availability() });
+  });
+  await page.route("**/api/v1/actions/home-assistant", async route => {
+    const action = route.request().postDataJSON();
+    posted.push(action.temperature);
+    await route.fulfill({ json: { ...action, status: "confirmed", observedAt: "2026-11-24T07:10:00Z",
+      climate: { state: "cool", targetTemperature: action.temperature, fanMode: "one" } } });
+  });
+  await page.goto("/home?scenario=home-climate-healthy&motion=reduced");
+  const minus = page.getByTestId("climate-temperature-decrease-home");
+  const confirm = page.getByTestId("climate-temperature-confirm-home");
+  const lock = page.getByTestId("interaction-lock-control");
+  await minus.click();
+  holdNext = true;
+  await confirm.click();
+  await expect.poll(() => held).toBe(true);
+  await lock.click({ delay: 1000 });
+  await expect(lock).toHaveAttribute("aria-pressed", "true");
+  await lock.click({ delay: 1000 });
+  await expect(lock).toHaveAttribute("aria-pressed", "false");
+  await minus.click();
+  await confirm.click();
+  try {
+    await expect.poll(() => posted.length).toBe(1);
+  } finally {
+    releaseOld();
+  }
+  await expect(minus).toBeEnabled();
+  expect(posted).toHaveLength(1);
+});
