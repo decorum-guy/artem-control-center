@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -20,7 +20,7 @@ ORIGIN = "https://music.youtube.com"
 PROFILE_DIRECTORY = "music-edge-profile"
 LOGIN_HOSTS = {"accounts.google.com", "consent.google.com", "consent.youtube.com"}
 CONNECT_CAPABILITY = "media.youtube.connect_browser"
-MANUAL_TIMEOUT = 180
+MANUAL_TIMEOUT = 600
 RECOVERY_TIMEOUT = 30
 AUTH_COOKIES = frozenset({
     "SID", "HSID", "SSID", "APISID", "SAPISID", "SIDCC", "LOGIN_INFO",
@@ -62,6 +62,39 @@ def capture_session(state: dict, cookies: list[dict]) -> bytes:
     return result
 
 
+def installed_edge() -> Path:
+    for key in ("ProgramFiles(x86)", "ProgramFiles"):
+        root = os.environ.get(key)
+        if root:
+            path = Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+            if path.is_file():
+                return path
+    raise MusicUnavailable
+
+
+async def sign_in_normally(profile: Path, report: Callable[[str], None]) -> None:
+    # No automation/debugging session during interactive Google sign-in.
+    browser = await asyncio.create_subprocess_exec(
+        str(installed_edge()), f"--user-data-dir={profile}", f"--proxy-server={YOUTUBE_PROXY}",
+        "--disable-quic", "--disable-background-mode", "--no-first-run", "--new-window",
+        ORIGIN + "/", stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+    )
+    report("sign_in")
+    try:
+        if await browser.wait() != 0:
+            raise MusicUnavailable
+    finally:
+        if browser.returncode is None:
+            # This PID belongs to the isolated Edge instance we just opened.
+            cleanup = await asyncio.create_subprocess_exec(
+                "taskkill.exe", "/PID", str(browser.pid), "/T", "/F",
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            await cleanup.wait()
+            await browser.wait()
+
+
 async def browse_for_session(
     profile: Path,
     manual: bool,
@@ -70,54 +103,42 @@ async def browse_for_session(
 ) -> None:
     from playwright.async_api import Error as BrowserError, async_playwright
 
+    if manual:
+        await sign_in_normally(profile, report)
+    report("verifying")
     async with async_playwright() as driver:
         context = await driver.chromium.launch_persistent_context(
-            str(profile), channel="msedge", headless=not manual, proxy={"server": YOUTUBE_PROXY},
+            str(profile), channel="msedge", headless=True, proxy={"server": YOUTUBE_PROXY},
             accept_downloads=False, args=["--disable-quic"], timeout=15_000,
         )
         try:
             page = context.pages[0] if context.pages else await context.new_page()
             await page.goto(ORIGIN + "/", wait_until="domcontentloaded", timeout=16_000)
-            reviewed: set[bytes] = set()
-            while not page.is_closed():
-                location = urlsplit(page.url)
-                if location.scheme == "https" and location.hostname in LOGIN_HOSTS:
-                    report("sign_in")
-                    if not manual:
+            async with asyncio.timeout(8):
+                # Only Music's own account hint is evaluated in this phase.
+                # A Google sign-in redirect requires the ordinary window again.
+                while not page.is_closed():
+                    location = urlsplit(page.url)
+                    if location.scheme == "https" and location.hostname in LOGIN_HOSTS:
                         raise MusicAuthRequired
-                elif location.scheme == "https" and location.netloc == "music.youtube.com":
-                    try:
-                        state = await page.evaluate(MUSIC_SIGN_IN_STATE)
-                    except BrowserError:
-                        # A normal navigation during Google sign-in replaces the JS context.
-                        state = None
-                    if state and state["signedIn"] is False:
-                        report("sign_in")
-                        if not manual:
-                            raise MusicAuthRequired
-                    elif state and state["signedIn"] is True:
+                    if location.scheme == "https" and location.netloc == "music.youtube.com":
                         try:
-                            candidate = capture_session(state, await context.cookies(ORIGIN + "/youtubei/v1/browse"))
-                        except (KeyError, TypeError, ValueError):
-                            if not manual:
+                            state = await page.evaluate(MUSIC_SIGN_IN_STATE)
+                        except BrowserError:
+                            state = None
+                        if state is not None:
+                            if not state["signedIn"]:
+                                raise MusicAuthRequired
+                            try:
+                                candidate = capture_session(state, await context.cookies(ORIGIN + "/youtubei/v1/browse"))
+                            except (KeyError, TypeError, ValueError):
                                 raise MusicAuthRequired from None
-                            report("sign_in")
-                            await asyncio.sleep(.75)
-                            continue
-                        # The request signature is time dependent. Count unique cookie/account
-                        # combinations, so a mismatch cannot cause a loop of network attempts.
-                        fields = browser_headers(candidate)
-                        marker = hashlib.sha256((fields["x-goog-authuser"] + "\n" + fields["cookie"]).encode()).digest()
-                        if marker not in reviewed:
-                            if len(reviewed) == 4:
-                                raise MusicAuthRequired
-                            reviewed.add(marker)
-                            if await approve(candidate):
-                                return
-                            if not manual:
-                                raise MusicAuthRequired
-                await asyncio.sleep(.75)
-            raise BrowserConnectionChanged
+                            break
+                    await asyncio.sleep(.25)
+                else:
+                    raise BrowserConnectionChanged
+            if not await approve(candidate):
+                raise MusicAuthRequired
         finally:
             # Normally closing the context flushes the profile and closes
             # only this Edge tree. Driver teardown is the bounded fallback.

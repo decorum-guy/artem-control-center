@@ -12,7 +12,7 @@ interface Connection {
 const endpoint = "/api/v1/music/youtube/connection";
 const labels: Record<string, string> = {
   opening: "Открываем YouTube Music на Samsung…",
-  sign_in: "Войди в Google или выбери нужный канал в открытом окне.",
+  sign_in: "Войди в Google, выбери нужный канал и закрой окно Edge. Панель проверит подключение.",
   recovering: "Восстанавливаем доступ к библиотеке…",
   verifying: "Проверяем канал и читаем каталог…",
   connected: "Канал проверен. Библиотека подключена.",
