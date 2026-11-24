@@ -5,6 +5,7 @@ export type SourceMode = "live" | "cached" | "fixture" | "stale" | "unavailable"
 export type InterfaceCopyNavigationKey =
   | "overview"
   | "weather"
+  | "music"
   | "home"
   | "services"
   | "calendar"
@@ -31,6 +32,7 @@ export interface InterfaceCopyCatalog {
   navigation: {
     overview: string;
     weather: string;
+    music: string;
     home: string;
     services: string;
     calendar: string;
@@ -48,6 +50,7 @@ export interface InterfaceCopyCatalog {
   page: {
     overview: InterfaceCopyPageText;
     weather: InterfaceCopyPageText;
+    music: InterfaceCopyPageText;
     home: InterfaceCopyPageText;
     services: InterfaceCopyPageText;
     calendar: InterfaceCopyPageText;
@@ -71,6 +74,7 @@ export interface InterfaceCopyOverrides {
   page: {
     overview: Partial<InterfaceCopyPageText>;
     weather: Partial<InterfaceCopyPageText>;
+    music: Partial<InterfaceCopyPageText>;
     home: Partial<InterfaceCopyPageText>;
     services: Partial<InterfaceCopyPageText>;
     calendar: Partial<InterfaceCopyPageText>;
@@ -887,6 +891,7 @@ export interface StationPlayback {
   artist: string | null;
   coverPath: string | null;
   observedAt: string | null;
+  trackId?: string | null;
 }
 
 export interface StationRetention {

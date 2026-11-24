@@ -30,6 +30,7 @@ SCENARIOS = frozenset({
     "Панель · Сохранить трек в YouTube Music",
 })
 CHOICE_SECONDS = 90
+VOICE_ACK_SECONDS = 2
 
 
 def _music_scenario(data: object) -> bool:
@@ -57,6 +58,7 @@ class MusicSave:
         self.station, self.provider, self.target = station, provider, target
         self.access, self.writes, self.clock = access, writes, clock
         self.feedback = feedback
+        self.on_new_like: Callable[[], None] | None = None
         self.session: MusicSession | None = None
         self.operation: Operation | None = None
         self.task: asyncio.Task | None = None
@@ -71,8 +73,16 @@ class MusicSave:
 
     def _state(self, op: Operation, status: str) -> None:
         op.status, op.changed_at = status, self.clock()
-        if self.feedback is not None:
-            self.feedback.announce(self.target, f"music.{status}", self.allowed)
+
+    def _acknowledge(self, op: Operation, cue: str, requested_at: datetime) -> None:
+        if self.feedback is None:
+            return
+
+        def may_speak() -> bool:
+            return (self.operation is op and self.allowed()
+                    and (self.clock() - requested_at).total_seconds() <= VOICE_ACK_SECONDS)
+
+        self.feedback.announce(self.target, f"music.{cue}", may_speak)
 
     def _prune(self) -> None:
         if self.session is not None and self.provider is not None and not self.provider.is_current(self.session):
@@ -98,6 +108,14 @@ class MusicSave:
         return {"connection": self.connection, "channel": self.session.handle if self.session else None,
                 "destination": "Понравившаяся музыка", "operation": result, "busyEvents": self.busy_events,
                 "canChoose": self.allowed() and self.session is not None}
+
+    def paired_track(self, video_id: str) -> str | None:
+        self._prune()
+        if self.session is None:
+            return None
+        tracks = {track for (generation, track), candidate in self.saved.items()
+                  if generation == self.session.generation and candidate.video_id == video_id}
+        return next(iter(tracks)) if len(tracks) == 1 else None
 
     def handle(self, event: dict) -> None:
         data, context = event.get("data"), event.get("context")
@@ -126,7 +144,9 @@ class MusicSave:
             self._state(op, "blocked")
         elif not tracks:
             self._state(op, "no_track")
+            self._acknowledge(op, "no_track", min(fired, now))
         else:
+            self._acknowledge(op, "working", min(fired, now))
             self.task = asyncio.create_task(self._run(op), name="music-save")
 
     async def _run(self, op: Operation, choice: Candidate | None = None) -> None:
@@ -205,6 +225,8 @@ class MusicSave:
         self.provider.require_current(session)
         state = "already_in_music" if already_liked and in_music else "in_music" if in_music else "youtube_like"
         self._state(op, state)
+        if not already_liked and self.on_new_like is not None:
+            self.on_new_like()
         self.access().audit_capability(CAPABILITY, result=state)
         if op.track.source_id:
             key = (session.generation, op.track.source_id)
@@ -296,10 +318,8 @@ def build_music_save_router(service: MusicSave | None) -> APIRouter:
 
     @router.get("")
     async def read(response: Response):
-        if service is None:
-            raise HTTPException(404)
         response.headers["Cache-Control"] = "no-store"
-        return service.projection()
+        return service.projection() if service is not None else None
 
     @router.post("/verify")
     async def verify(request: Request):

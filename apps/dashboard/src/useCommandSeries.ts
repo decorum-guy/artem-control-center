@@ -2,8 +2,11 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 type SeriesResult<R> = { accepted: number; completed: number; last: R | undefined; cancelled: boolean; error?: unknown };
 interface Options<T, R> {
-  mode: "ordered" | "latest";
+  mode: "ordered" | "latest" | "coalesced";
+  coalesce?: (queue: T[], value: T) => T[];
+  onProgress?: () => void;
   enabled: boolean;
+  scope?: string;
   dispatch: (value: T, signal: AbortSignal) => Promise<R>;
   onFinish: (result: SeriesResult<R>) => void;
 }
@@ -51,8 +54,9 @@ export function useCommandSeries<T, R>(options: Options<T, R>) {
   }, [finish]);
 
   useLayoutEffect(() => {
+    const previousScope = callbacks.current.scope;
     callbacks.current = options;
-    if (!options.enabled) cancel();
+    if (!options.enabled || previousScope !== options.scope) cancel();
   });
   useLayoutEffect(() => {
     mounted.current = true;
@@ -67,6 +71,8 @@ export function useCommandSeries<T, R>(options: Options<T, R>) {
         series.sent = value;
         series.last = await callbacks.current.dispatch(value, series.controller.signal);
         series.completed++;
+        if (callbacks.current.mode === "coalesced") series.sent = undefined;
+        if (mounted.current) callbacks.current.onProgress?.();
       }
     } catch (error) {
       finish(series, error);
@@ -87,13 +93,18 @@ export function useCommandSeries<T, R>(options: Options<T, R>) {
     };
     if (series.controller.signal.aborted) return false;
     if (options.mode === "ordered" && series.accepted >= MAX_VOLUME_STEPS) return false;
+    if (options.mode === "coalesced" && options.coalesce) {
+      const pending = options.coalesce(series.queue, value);
+      if (pending.length > MAX_VOLUME_STEPS) return false;
+      series.queue = pending;
+    }
     clearTimeout(series.timer);
     series.lastInput = performance.now();
     series.accepted++;
     if (options.mode === "latest") {
       series.queue.length = 0;
       if (!Object.is(value, series.sent)) series.queue.push(value);
-    } else {
+    } else if (options.mode === "ordered") {
       series.queue.push(value);
     }
     setAccepted(series.accepted);
@@ -102,5 +113,10 @@ export function useCommandSeries<T, R>(options: Options<T, R>) {
   }
 
   return { submit, active: accepted > 0, full: options.mode === "ordered" && accepted >= MAX_VOLUME_STEPS,
-    isActive: () => current.current !== null };
+    isActive: () => current.current !== null,
+    pending: () => {
+      const series = current.current;
+      return series ? [...(series.sent === undefined ? [] : [series.sent]), ...series.queue] : [];
+    },
+  };
 }

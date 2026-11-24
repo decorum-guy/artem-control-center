@@ -3,6 +3,7 @@ import type { ReactNode, SVGProps } from "react";
 export type IconName =
   | "overview"
   | "weather"
+  | "music" | "play" | "pause" | "previous" | "next"
   | "home"
   | "services"
   | "coffee"
@@ -41,6 +42,11 @@ const cloudOutline = <path d="M6.2 18.3a4 4 0 0 1-.7-7.9 6.1 6.1 0 0 1 11.7-1.2 
 const smallCloud = <path d="M8 19a3.5 3.5 0 0 1 .2-7 4.6 4.6 0 0 1 8.7-.6A3.8 3.8 0 1 1 18 19Z" />;
 
 const iconPaths: Record<IconName, ReactNode> = {
+  music: <><path d="M9 16V5l12-2v11M9 7l12-2" /><ellipse cx="6" cy="17" rx="3" ry="2" /><ellipse cx="18" cy="15" rx="3" ry="2" /></>,
+  play: <path d="m8 5 11 7-11 7Z" />,
+  pause: <path d="M9 5v14m6-14v14" />,
+  previous: <path d="M6 5v14m13-14-11 7 11 7Z" />,
+  next: <path d="M18 5v14M5 5l11 7-11 7Z" />,
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2" /></>,
   moon: <path d="M20.7 14.5A8.6 8.6 0 0 1 9.5 3.3a8.8 8.8 0 1 0 11.2 11.2Z" />,
   sky: <><circle cx="12" cy="12" r="6"/><path d="M3 20h18" /></>,

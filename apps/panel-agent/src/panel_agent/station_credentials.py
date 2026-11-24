@@ -65,10 +65,11 @@ class StationCredentialFile:
     def __init__(self, path: Path):
         self.path = path
 
-    def version(self) -> tuple[int, int, int] | None:
+    def version(self) -> tuple[int, int, int, int, int] | None:
         try:
             stat = self.path.stat()
-            return stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size
+            # Atomic replacement may preserve timestamps and length on Windows.
+            return stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size
         except OSError:
             return None
 

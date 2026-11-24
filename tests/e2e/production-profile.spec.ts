@@ -50,6 +50,7 @@ test.describe("accepted-v2 production profile", () => {
 
     const routes = [
       ["/home", "route-home-v2"],
+      ["/music", "route-music"],
       ["/services", "route-services-v2"],
       ["/system", "route-system"],
       ["/settings", "route-settings"],
@@ -64,13 +65,23 @@ test.describe("accepted-v2 production profile", () => {
     }
   });
 
-  test("exposes B4 mutation controls while keeping local policy boundaries visible", async ({ page }) => {
+  test("exposes task, calendar and Alice reminder controls under their own policies", async ({ page }) => {
     await page.goto("/tasks");
     await expect(page.getByRole("button", { name: "Создать задачу" })).toBeVisible();
     await page.goto("/calendar");
     await expect(page.getByRole("button", { name: "Создать событие" })).toBeVisible();
     await page.goto("/reminders");
-    await expect(page.getByRole("button", { name: "Создать напоминание" })).toBeVisible();
+    const alice = page.getByTestId("alice-reminders");
+    await expect(alice.getByRole("status")).toHaveText("Источник Алисы не настроен");
+    await expect(alice.getByRole("button", { name: "Добавить" })).toHaveCount(0);
+    await expect(page.getByTestId("planning-reminder-list")).toHaveCount(0);
+
+    await page.route("**/api/v1/station/reminders", route => route.fulfill({ json: {
+      status: "fresh", observedAt: "2026-11-24T05:00:00Z", items: [], canCreate: true, canReschedule: true
+    } }));
+    await page.reload();
+    await expect(alice.getByRole("button", { name: "Добавить" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Создать напоминание" })).toHaveCount(0);
     await expect(page.getByText(/внешн.*только чтение/i)).toHaveCount(0);
     await expect(page.getByTestId("interaction-lock-control")).toHaveAttribute("aria-pressed", "true");
   });

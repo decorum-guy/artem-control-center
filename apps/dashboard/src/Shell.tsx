@@ -21,6 +21,7 @@ import { useVisualViewport } from "./useVisualViewport";
 
 export type RoutePath =
   | "/overview"
+  | "/music"
   | "/home"
   | "/services"
   | "/calendar"
@@ -42,6 +43,7 @@ export type ShellNavigationTarget = ShellRoutePath | {
 const primaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; short: string }> = [
   { path: "/overview", copyKey: "navigation.overview", short: "О" },
   { path: "/weather", copyKey: "navigation.weather", short: "П" },
+  { path: "/music", copyKey: "navigation.music", short: "М" },
   { path: "/home", copyKey: "navigation.home", short: "Д" },
   { path: "/services", copyKey: "navigation.services", short: "С" },
   { path: "/coffee-diary", copyKey: "navigation.coffeeDiary", short: "К" },
@@ -59,6 +61,7 @@ const secondaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyF
 const v2PrimaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; icon: IconName }> = [
   { path: "/overview", copyKey: "navigation.overview", icon: "overview" },
   { path: "/weather", copyKey: "navigation.weather", icon: "weather" },
+  { path: "/music", copyKey: "navigation.music", icon: "music" },
   { path: "/home", copyKey: "navigation.home", icon: "home" },
   { path: "/services", copyKey: "navigation.services", icon: "services" },
   { path: "/coffee-diary", copyKey: "navigation.coffeeDiary", icon: "coffee" }

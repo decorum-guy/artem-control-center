@@ -26,6 +26,7 @@ InterfaceCopyPageKey = InterfaceCopyNavigationKey
 InterfaceCopyField = Literal[
     "navigation.overview",
     "navigation.weather",
+    "navigation.music",
     "navigation.home",
     "navigation.services",
     "navigation.calendar",
@@ -40,7 +41,9 @@ InterfaceCopyField = Literal[
     "page.overview.title",
     "page.overview.subtitle",
     "page.weather.title",
+    "page.music.title",
     "page.weather.subtitle",
+    "page.music.subtitle",
     "page.home.title",
     "page.home.subtitle",
     "page.services.title",
@@ -272,6 +275,7 @@ class StationPlayback(BaseModel):
     title: str | None = None
     artist: str | None = None
     coverPath: str | None = None
+    trackId: str | None = None
     observedAt: str | None
 
 
@@ -317,6 +321,7 @@ class InterfaceCopyNavigation(BaseModel):
 
     overview: str = Field(min_length=1, max_length=48)
     weather: str = Field(min_length=1, max_length=48)
+    music: str = Field(min_length=1, max_length=48)
     home: str = Field(min_length=1, max_length=48)
     services: str = Field(min_length=1, max_length=48)
     calendar: str = Field(min_length=1, max_length=48)
@@ -348,6 +353,7 @@ class InterfaceCopyPageCatalog(BaseModel):
 
     overview: InterfaceCopyPageText
     weather: InterfaceCopyPageText
+    music: InterfaceCopyPageText
     home: InterfaceCopyPageText
     services: InterfaceCopyPageText
     calendar: InterfaceCopyPageText
@@ -368,6 +374,7 @@ class InterfaceCopyNavigationOverrides(BaseModel):
 
     overview: Optional[str] = Field(default=None, max_length=48)
     weather: Optional[str] = Field(default=None, max_length=48)
+    music: Optional[str] = Field(default=None, max_length=48)
     home: Optional[str] = Field(default=None, max_length=48)
     services: Optional[str] = Field(default=None, max_length=48)
     calendar: Optional[str] = Field(default=None, max_length=48)
@@ -398,6 +405,7 @@ class InterfaceCopyPageOverrides(BaseModel):
 
     overview: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     weather: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
+    music: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     home: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     services: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)
     calendar: InterfaceCopyPageTextOverrides = Field(default_factory=InterfaceCopyPageTextOverrides)

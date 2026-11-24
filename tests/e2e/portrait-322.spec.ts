@@ -18,7 +18,7 @@ import { unlockTouchLockIfNeeded } from "./touch-lock-test-helpers";
 
 const enabled = process.env.VITE_V2_VISUAL_SHELL === "true" && process.env.VITE_OVERVIEW_V2_ENABLED === "true";
 test.skip(!enabled, "Portrait browser profile requires the V2 shell and Overview");
-const routes = ["overview", "home", "weather", "services", "calendar", "tasks", "reminders", "coffee-diary", "backups", "system", "settings", "apps"];
+const routes = ["overview", "home", "weather", "music", "services", "calendar", "tasks", "reminders", "coffee-diary", "backups", "system", "settings", "apps"];
 const sizes = [{ width: 720, height: 1280 }, { width: 768, height: 1366 }, { width: 1080, height: 1920 }, { width: 540, height: 960 }, { width: 1280, height: 720 }];
 async function access(page: Page) {
   const ids = ["overview.layout.edit", "todoist.tasks.write", "planning.calendar.create", "planning.calendar.edit", "planning.calendar.delete"];
@@ -94,6 +94,10 @@ for (const viewport of sizes) test(`all routes and navigation at CSS ${viewport.
       page.locator(".cc-overlay-backdrop").evaluate((element) => Number(getComputedStyle(element).zIndex))
     ]);
     expect(menuGeometry[0]).toBeLessThan(menuGeometry[1]);
+    await dialog.getByRole("link", { name: "Музыка", exact: true }).click();
+    await expect(page).toHaveURL(/\/music/);
+    await expect(page.getByTestId("route-music")).toBeVisible();
+    await floatingNavigation.click();
     await dialog.locator('a[href="/backups"]').click();
     await expect(page).toHaveURL(/\/backups/);
     await floatingNavigation.click();

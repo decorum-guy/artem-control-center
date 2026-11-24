@@ -7,6 +7,7 @@ import { useAccess } from "./AccessControls";
 import { useInteractionLock } from "./InteractionLock";
 import { useNoticeCenter } from "./NoticeCenter";
 import { Icon } from "./icons";
+import { useCommandSeries } from "./useCommandSeries";
 import {
   fetchHomeAssistantActionAvailability,
   executeHomeAssistantAction,
@@ -66,7 +67,15 @@ function actionErrorCopy(code: string): string {
     case "ha_verification_timeout":
       return "Home Assistant не подтвердил изменение состояния вовремя.";
     case "ha_service_failed":
-      return "Home Assistant не принял команду.";
+    case "ha_transport_uncertain":
+      return "Результат команды не подтверждён. Проверяем состояние кондиционера.";
+    case "ha_action_busy":
+      return "Кондиционер уже выполняет другую команду.";
+    case "ha_action_disabled":
+    case "gate_disabled":
+      return "Управление выключено в настройках возможностей.";
+    case "profile_blocked":
+      return "Команда недоступна в текущем профиле.";
     case "ha_integration_unavailable":
     case "ha_entity_unavailable":
       return "Состояние кондиционера сейчас недоступно.";
@@ -81,6 +90,34 @@ function climateAvailabilityCopy(availability: string, explain: (value: string) 
     : explain(availability);
 }
 
+type ClimateIntent = {
+  id: ClimateActionId;
+  temperature?: number;
+  mode?: ClimateHvacMode;
+  fanMode?: ClimateFanMode;
+  revision?: number;
+  powerFence?: number;
+};
+
+function turnsOff(intent: ClimateIntent) {
+  return intent.id === HOME_CLIMATE_POWER_OFF || intent.mode === "off";
+}
+
+function isPower(intent: ClimateIntent) {
+  return intent.id === HOME_CLIMATE_POWER_ON || turnsOff(intent);
+}
+
+export function coalesceClimate(queue: ClimateIntent[], intent: ClimateIntent): ClimateIntent[] {
+  if (turnsOff(intent)) return [intent];
+  if (isPower(intent)) return [...queue, intent];
+  if (intent.id === HOME_CLIMATE_SET_MODE) {
+    return queue.at(-1)?.id === HOME_CLIMATE_SET_MODE && !isPower(queue.at(-1)!)
+      ? [...queue.slice(0, -1), intent] : [...queue, intent];
+  }
+  const barrier = queue.reduce((last, item, index) => isPower(item) || item.id === HOME_CLIMATE_SET_MODE ? index : last, -1);
+  return queue.filter((item, index) => index <= barrier || item.id !== intent.id).concat(intent);
+}
+
 export function ClimateControl({
   service,
   variant,
@@ -92,20 +129,30 @@ export function ClimateControl({
   interactive?: boolean;
   overviewSizeVariant?: "compact" | "standard" | "large";
 }) {
-  const { ensureCapability, explainAvailability } = useAccess();
+  const { status: accessStatus, ensureCapability, explainAvailability } = useAccess();
   const { guardMutation, locked } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
   const [availability, setAvailability] = useState<HomeAssistantActionAvailability | null>(null);
   const [apiAvailable, setApiAvailable] = useState(false);
-  const [pendingAction, setPendingAction] = useState<ClimateActionId | null>(null);
   const data = climateData(service);
   const climateLive = service.health === "healthy" && data.available !== false && data.stale !== true;
   const minimumTemperature = 16;
   const maximumTemperature = 32;
   const targetTemperature = typeof data.targetTemperature === "number" ? data.targetTemperature : null;
-  const [confirmedTarget, setConfirmedTarget] = useState<number | null>(targetTemperature);
-  const [draftTarget, setDraftTarget] = useState<number | null>(targetTemperature);
-  const serviceIdRef = useRef(service.id);
+  const [confirmed, setConfirmed] = useState({ state: data.state ?? "off", target: targetTemperature, fan: data.fanMode });
+  const [draft, setDraft] = useState<{ value: number; revision: number } | null>(null);
+  const draftRef = useRef(draft);
+  const edit = useRef(0);
+  const powerFence = useRef(0);
+  const revision = useRef(0);
+  const serviceId = useRef(service.id);
+  const mounted = useRef(true);
+  const availabilityRead = useRef(0);
+  const [, redraw] = useState(0);
+  const changeDraft = (next: typeof draft) => {
+    draftRef.current = next;
+    setDraft(next);
+  };
   const modes = useMemo(
     () => hvacOrder.filter((mode) => (data.hvacModes ?? []).includes(mode)),
     [data.hvacModes]
@@ -115,15 +162,23 @@ export function ClimateControl({
     [data.fanModes]
   );
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (series?: AbortSignal) => {
+    const read = ++availabilityRead.current;
+    const timeout = AbortSignal.timeout(7_000);
+    const signal = series ? AbortSignal.any([series, timeout]) : timeout;
+    const isLatest = () => mounted.current && availabilityRead.current === read && !series?.aborted;
     try {
-      const next = await fetchHomeAssistantActionAvailability();
-      setAvailability(next);
-      setApiAvailable(true);
-      return next;
+      const next = await fetchHomeAssistantActionAvailability(signal);
+      if (isLatest()) {
+        setAvailability(next);
+        setApiAvailable(true);
+      }
+      return signal.aborted ? null : next;
     } catch {
-      setAvailability(null);
-      setApiAvailable(false);
+      if (isLatest()) {
+        setAvailability(null);
+        setApiAvailable(false);
+      }
       return null;
     }
   }, []);
@@ -135,99 +190,118 @@ export function ClimateControl({
   }, [refresh]);
 
   useEffect(() => {
-    if (serviceIdRef.current !== service.id) {
-      serviceIdRef.current = service.id;
-      setConfirmedTarget(targetTemperature);
-      setDraftTarget(targetTemperature);
-      return;
+    setConfirmed({ state: data.state ?? "off", target: targetTemperature, fan: data.fanMode });
+    if (serviceId.current !== service.id) {
+      serviceId.current = service.id;
+      draftRef.current = null;
+      setDraft(null);
     }
-    setConfirmedTarget((previousConfirmed) => {
-      setDraftTarget((previousDraft) => previousDraft === previousConfirmed ? targetTemperature : previousDraft);
-      return targetTemperature;
-    });
-  }, [service.id, targetTemperature]);
+  }, [service.id, data.state, targetTemperature, data.fanMode]);
 
-  const canUse = useCallback((actionId: ClimateActionId) => {
-    const decision = availability?.actions[actionId];
-    return Boolean(
-      interactive &&
-      !locked &&
-      climateLive &&
-      !pendingAction &&
-      decision &&
-      (decision.allowed || decision.availability === "elevation_required")
-    );
-  }, [availability, climateLive, interactive, locked, pendingAction]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; revision.current++; };
+  }, []);
 
-  const run = useCallback(async (
-    actionId: ClimateActionId,
-    values: { temperature?: number; mode?: ClimateHvacMode; fanMode?: ClimateFanMode } = {}
-  ) => {
-    if (!interactive || pendingAction || !guardMutation()) return null;
-    let decision = availability?.actions[actionId] ?? null;
-    if (!decision) {
-      const next = await refresh();
-      decision = next?.actions[actionId] ?? null;
-    }
-    if (!decision) {
-      showNotice({ id: "home.climate.action", severity: "warning", title: "Кондиционер", detail: "Управление кондиционером сейчас недоступно.", timeoutMs: 6_000 });
-      return null;
-    }
-    if (!decision.allowed && decision.availability === "elevation_required") {
-      const elevated = await ensureCapability(actionId, "Кондиционер");
-      if (elevated) {
-        const next = await refresh();
-        decision = next?.actions[actionId] ?? decision;
+  const queue = useCommandSeries<ClimateIntent, void>({
+    mode: "coalesced",
+    scope: service.id,
+    coalesce: coalesceClimate,
+    enabled: interactive && !locked && climateLive && accessStatus?.effectiveProfile !== "read_only",
+    onProgress: () => redraw(value => value + 1),
+    dispatch: async (intent, signal) => {
+      const guardRevision = revision.current;
+      const identity = service.id;
+      const decision = (await refresh(signal))?.actions[intent.id];
+      if (signal.aborted || !guardMutation() || !mounted.current || identity !== serviceId.current
+          || guardRevision !== revision.current) throw new Error("queue_closed");
+      if (!decision?.allowed) {
+        if (decision?.availability === "elevation_required") {
+          if (!await ensureCapability(intent.id, "Кондиционер")) throw new Error("profile_blocked");
+        } else {
+          throw new Error(decision?.availability === "busy" ? "ha_action_busy" : decision?.availability ?? "ha_entity_unavailable");
+        }
       }
-    }
-    if (!decision.allowed) {
-      showNotice({ id: "home.climate.action", severity: "warning", title: "Кондиционер", detail: climateAvailabilityCopy(decision.availability, explainAvailability), timeoutMs: 6_000 });
-      return null;
-    }
-    if (!guardMutation()) return null;
-    setPendingAction(actionId);
-    showNotice({ id: "home.climate.action", severity: "progress", title: "Кондиционер", detail: "Отправляем команду и ждём подтверждение…" });
-    try {
+      if (signal.aborted || !guardMutation() || guardRevision !== revision.current) throw new Error("queue_closed");
+      if (!turnsOff(intent) && intent.powerFence !== powerFence.current) return;
+      const requestId = newHomeAssistantRequestId();
       const response = await executeHomeAssistantAction({
-        actionId,
-        requestId: newHomeAssistantRequestId(),
-        temperature: values.temperature ?? null,
-        mode: values.mode ?? null,
-        fanMode: values.fanMode ?? null
+        actionId: intent.id, requestId, temperature: intent.temperature ?? null,
+        mode: intent.mode ?? null, fanMode: intent.fanMode ?? null
+      }, AbortSignal.timeout(26_000)).catch(error => {
+        if (error instanceof DOMException || error instanceof TypeError) throw new Error("ha_transport_uncertain");
+        throw error;
       });
-      showNotice({ id: "home.climate.action", severity: "success", title: "Кондиционер", detail: "Изменение подтверждено Home Assistant.", timeoutMs: 6_000 });
-      await refresh();
-      return response;
-    } catch (error) {
-      showNotice({ id: "home.climate.action", severity: "error", title: "Кондиционер", detail: actionErrorCopy(error instanceof Error ? error.message : "action_failed"), timeoutMs: 10_000 });
-      return null;
-    } finally {
-      setPendingAction(null);
+      if (response.requestId !== requestId || response.actionId !== intent.id || response.status !== "confirmed" || !response.climate) {
+        throw new Error("ha_transport_uncertain");
+      }
+      if (mounted.current && identity === serviceId.current) {
+        setConfirmed({ state: response.climate.state, target: response.climate.targetTemperature, fan: response.climate.fanMode });
+        if (intent.revision !== undefined && draftRef.current?.revision === intent.revision) changeDraft(null);
+      }
+    },
+    onFinish: (result) => {
+      if (result.cancelled) return;
+      const error = result.error instanceof Error ? result.error.message : null;
+      if (error === "queue_closed") return;
+      showNotice({
+        id: "home.climate.action", title: "Кондиционер", severity: error ? "warning" : "success",
+        detail: error ? actionErrorCopy(error) : "Изменение подтверждено Home Assistant.", timeoutMs: error ? 10_000 : 6_000
+      });
+      void refresh();
     }
-  }, [availability, ensureCapability, explainAvailability, guardMutation, interactive, pendingAction, refresh, showNotice]);
+  });
 
-  const state = data.state ?? "off";
-  const powerAction = state === "off" ? HOME_CLIMATE_POWER_ON : HOME_CLIMATE_POWER_OFF;
+  const submitted = queue.pending();
+  const isPending = (action: ClimateActionId) => submitted.some(intent => intent.id === action);
+  const powerPending = submitted.some(intent => isPower(intent) || intent.id === HOME_CLIMATE_SET_MODE);
+  const canUse = (action: ClimateActionId) => {
+    const decision = availability?.actions[action];
+    return interactive && !locked && climateLive && accessStatus?.effectiveProfile !== "read_only" && Boolean(
+      decision && (decision.allowed || decision.availability === "elevation_required" ||
+        (decision.availability === "busy" && queue.isActive() && decision.gateEnabled && decision.integrationAvailable)));
+  };
+  const submit = (intent: ClimateIntent) => {
+    if (!canUse(intent.id) || !guardMutation()) return false;
+    if (turnsOff(intent)) powerFence.current++;
+    if (!queue.submit({ ...intent, powerFence: powerFence.current })) {
+      showNotice({ id: "home.climate.action", title: "Кондиционер", severity: "warning",
+        detail: "Ожидают подтверждения несколько команд.", timeoutMs: 4_000 });
+      return false;
+    }
+    return true;
+  };
+
+  const state = confirmed.state;
+  const powerFor = (pending: ClimateIntent[]) => {
+    const choice = pending.slice().reverse().find(intent => isPower(intent) || intent.id === HOME_CLIMATE_SET_MODE);
+    const on = choice ? !turnsOff(choice) : state !== "off";
+    return on ? HOME_CLIMATE_POWER_OFF : HOME_CLIMATE_POWER_ON;
+  };
+  const powerAction = powerFor(submitted);
   const stateLabel = climateHvacLabels[state] ?? "Состояние неизвестно";
   const statusLabel = !climateLive
     ? service.health === "stale" || data.stale ? "Данные устарели" : "Недоступен"
     : stateLabel;
-  const selectedMode = modes.includes(state) ? state : modes[0] ?? "off";
-  const selectedFan = data.fanMode && fans.includes(data.fanMode) ? data.fanMode : fans[0] ?? "one";
-  const step = 1;
-  const targetDirty = draftTarget !== confirmedTarget;
-  const temperaturePending = pendingAction === HOME_CLIMATE_SET_TEMPERATURE;
+  const intendedMode = submitted.slice().reverse().find(intent => intent.mode)?.mode;
+  const displayMode = intendedMode ?? state;
+  const selectedMode = modes.includes(displayMode) ? displayMode : modes[0] ?? "off";
+  const intendedFan = submitted.slice().reverse().find(intent => intent.fanMode)?.fanMode ?? confirmed.fan;
+  const selectedFan = intendedFan && fans.includes(intendedFan) ? intendedFan : fans[0] ?? "one";
+  const queuedTemperature = submitted.slice().reverse().find(intent => intent.temperature !== undefined)?.temperature;
+  const draftTarget = draft?.value ?? queuedTemperature ?? confirmed.target;
+  const targetDirty = draft !== null && draft.value !== (queuedTemperature ?? confirmed.target);
+  const temperaturePending = isPending(HOME_CLIMATE_SET_TEMPERATURE);
   const updateDraft = (delta: number) => {
-    if (draftTarget === null || temperaturePending || !canUse(HOME_CLIMATE_SET_TEMPERATURE)) return;
-    setDraftTarget(Math.min(maximumTemperature, Math.max(minimumTemperature, draftTarget + delta)));
+    if (!canUse(HOME_CLIMATE_SET_TEMPERATURE)) return;
+    const base = draftRef.current?.value ?? queuedTemperature ?? confirmed.target;
+    if (base !== null) changeDraft({ value: Math.min(maximumTemperature, Math.max(minimumTemperature, base + delta)), revision: ++edit.current });
   };
-  const confirmDraft = async () => {
-    if (draftTarget === null || !targetDirty || temperaturePending) return;
-    const response = await run(HOME_CLIMATE_SET_TEMPERATURE, { temperature: draftTarget });
-    const confirmed = response?.climate?.targetTemperature;
-    if (typeof confirmed === "number") {
-      setConfirmedTarget(confirmed);
-      setDraftTarget(confirmed);
+  const confirmDraft = () => {
+    const next = draftRef.current;
+    const last = queue.pending().slice().reverse().find(intent => intent.temperature !== undefined)?.temperature;
+    if (next && next.value !== (last ?? confirmed.target)) {
+      submit({ id: HOME_CLIMATE_SET_TEMPERATURE, temperature: next.value, revision: next.revision });
     }
   };
 
@@ -255,13 +329,13 @@ export function ClimateControl({
           data-testid={`climate-power-${variant}`}
           data-power-state={state === "off" ? "off" : "on"}
           disabled={!canUse(powerAction)}
-          aria-label={state === "off" ? "Включить кондиционер" : "Выключить кондиционер"}
+          aria-label={powerAction === HOME_CLIMATE_POWER_ON ? "Включить кондиционер" : "Выключить кондиционер"}
           aria-pressed={state !== "off"}
-          aria-busy={pendingAction === powerAction}
-          onClick={() => void run(powerAction)}
+          aria-busy={powerPending}
+          onClick={() => submit({ id: powerFor(queue.pending()) })}
           title={availability?.actions[powerAction] ? climateAvailabilityCopy(availability.actions[powerAction].availability, explainAvailability) : "Проверяем доступность"}
         >
-          {pendingAction === powerAction ? <Icon name="refresh" size={20} className="climate-control__pending-icon" /> : <Icon name="power" size={22} />}
+          {powerPending ? <Icon name="refresh" size={20} className="climate-control__pending-icon" /> : <Icon name="power" size={22} />}
         </button>
 
         <div className="climate-control__temperature-control" aria-label="Целевая температура">
@@ -274,7 +348,7 @@ export function ClimateControl({
             className="climate-control__stepper"
             data-testid={`climate-temperature-decrease-${variant}`}
             disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || draftTarget === null || draftTarget <= minimumTemperature}
-            onClick={() => updateDraft(-step)}
+            onClick={() => updateDraft(-1)}
             aria-label="Уменьшить целевую температуру"
           >
             <Icon name="minus" size={24} />
@@ -284,7 +358,7 @@ export function ClimateControl({
             className="climate-control__stepper"
             data-testid={`climate-temperature-increase-${variant}`}
             disabled={!canUse(HOME_CLIMATE_SET_TEMPERATURE) || draftTarget === null || draftTarget >= maximumTemperature}
-            onClick={() => updateDraft(step)}
+            onClick={() => updateDraft(1)}
             aria-label="Увеличить целевую температуру"
           >
             <Icon name="plus" size={24} />
@@ -297,30 +371,30 @@ export function ClimateControl({
             aria-label={targetDirty ? "Подтвердить целевую температуру" : "Целевая температура подтверждена"}
             aria-busy={temperaturePending}
             title={targetDirty ? "Подтвердить целевую температуру" : "Целевая температура подтверждена"}
-            onClick={() => void confirmDraft()}
+            onClick={confirmDraft}
           >
             {temperaturePending ? <Icon name="refresh" size={20} className="climate-control__pending-icon" /> : <Icon name="check" size={20} />}
           </button>
         </div>
 
-        <label className="climate-control__select-label climate-control__mode-label">
+        <label className="climate-control__select-label climate-control__mode-label" aria-busy={isPending(HOME_CLIMATE_SET_MODE)}>
           <span>Режим</span>
           <SelectField
             value={selectedMode}
             disabled={!canUse(HOME_CLIMATE_SET_MODE) || !modes.length}
-            onValueChange={(nextValue) => void run(HOME_CLIMATE_SET_MODE, { mode: nextValue as ClimateHvacMode })}
+            onValueChange={(nextValue) => submit({ id: HOME_CLIMATE_SET_MODE, mode: nextValue as ClimateHvacMode })}
             aria-label="Режим кондиционера"
           >
             {modes.map((mode) => <option key={mode} value={mode}>{climateHvacLabels[mode]}</option>)}
           </SelectField>
         </label>
 
-        <label className="climate-control__select-label climate-control__fan-label">
+        <label className="climate-control__select-label climate-control__fan-label" aria-busy={isPending(HOME_CLIMATE_SET_FAN_MODE)}>
           <span>Скорость вентилятора</span>
           <SelectField
             value={selectedFan}
             disabled={!canUse(HOME_CLIMATE_SET_FAN_MODE) || !fans.length}
-            onValueChange={(nextValue) => void run(HOME_CLIMATE_SET_FAN_MODE, { fanMode: nextValue as ClimateFanMode })}
+            onValueChange={(nextValue) => submit({ id: HOME_CLIMATE_SET_FAN_MODE, fanMode: nextValue as ClimateFanMode })}
             aria-label="Скорость вентилятора"
           >
             {fans.map((fan) => <option key={fan} value={fan}>Скорость {climateFanLabels[fan]}</option>)}

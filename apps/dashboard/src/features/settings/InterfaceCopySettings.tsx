@@ -14,6 +14,7 @@ type CopyFieldDefinition = {
 const navigationFields: CopyFieldDefinition[] = [
   ["overview", "Обзор"],
   ["weather", "Погода"],
+  ["music", "Музыка"],
   ["home", "Дом"],
   ["services", "Сервисы"],
   ["calendar", "Календарь"],
@@ -29,6 +30,7 @@ const navigationFields: CopyFieldDefinition[] = [
 const pageFields: CopyFieldDefinition[] = ([
   ["overview", "Обзор"],
   ["weather", "Погода"],
+  ["music", "Музыка"],
   ["home", "Дом"],
   ["services", "Сервисы"],
   ["calendar", "Календарь"],

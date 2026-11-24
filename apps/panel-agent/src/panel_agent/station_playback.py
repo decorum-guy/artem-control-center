@@ -1,4 +1,4 @@
-"""Read-only Station Mini 2 connection, with server-side cover retrieval."""
+"""Shared Station Mini 2 connection and server-side cover retrieval."""
 
 from __future__ import annotations
 
@@ -48,13 +48,44 @@ class StationReplyUnavailable(RuntimeError):
 
 
 class StationReplies:
-    """One explicit list request per connection, with the existing reader owning recv()."""
+    """Correlate explicit requests while the Station collector owns recv()."""
 
     def __init__(self, ws, token: str):
         self.ws = ws
         self.token = token
         self.request_id: str | None = None
         self.pending: asyncio.Future[dict] | None = None
+        self.speech: tuple[str, asyncio.Future[bool]] | None = None
+
+    async def repeat_phrase(self, phrase: str, may_send: Callable[[], bool]) -> bool:
+        if self.speech is not None or not may_send():
+            return False
+        request_id = str(uuid.uuid4())
+        pending = asyncio.get_running_loop().create_future()
+        self.speech = request_id, pending
+        try:
+            async with asyncio.timeout(4):
+                await self.ws.send(json.dumps({
+                    "conversationToken": self.token,
+                    "id": request_id,
+                    "sentTime": round(time.time() * 1000),
+                    "payload": {
+                        "command": "serverAction",
+                        "serverActionEventPayload": {
+                            "type": "server_action", "name": "update_form",
+                            "payload": {"form_update": {
+                                "name": "personal_assistant.scenarios.quasar.iot.repeat_phrase",
+                                "slots": [{"type": "string", "name": "phrase_to_repeat", "value": phrase}],
+                            }, "resubmit": True},
+                        },
+                    },
+                }, ensure_ascii=False))
+                return await pending
+        except (OSError, TimeoutError, WebSocketException):
+            return False
+        finally:
+            pending.cancel()
+            self.speech = None
 
     async def reminder_list(self) -> dict:
         if self.pending is not None:
@@ -77,6 +108,10 @@ class StationReplies:
             self.request_id, self.pending = None, None
 
     def receive(self, frame: dict) -> None:
+        if self.speech is not None:
+            request_id, speech = self.speech
+            if frame.get("requestId") == request_id and not speech.done() and "status" in frame:
+                speech.set_result(str(frame["status"]).lower() in {"success", "ok", "200"})
         pending = self.pending
         if pending is None or pending.done() or frame.get("requestId") != self.request_id:
             return
@@ -90,6 +125,8 @@ class StationReplies:
             pending.set_exception(StationReplyUnavailable())
 
     def close(self) -> None:
+        if self.speech is not None and not self.speech[1].done():
+            self.speech[1].set_result(False)
         if self.pending is not None and not self.pending.done():
             self.pending.set_exception(StationReplyUnavailable())
 
@@ -193,14 +230,15 @@ class StationSessionTokens:
         return token
 
 
-def normalize_cover(value: object) -> str | None:
+def normalize_cover(value: object, *, playlist: bool = False) -> str | None:
     if not isinstance(value, str) or not 1 <= len(value) <= 1024:
         return None
     normalized = value.replace("%%", "200x200")
     if "://" not in normalized:
         normalized = "https://" + normalized
     url = _allowed_https(normalized, COVER_HOSTS)
-    if url and not url.query and url.path.startswith("/get-music-content/"):
+    prefixes = ("/get-music-content/", "/get-music-user-playlist/") if playlist else ("/get-music-content/",)
+    if url and not url.query and url.path.startswith(prefixes):
         return url.geturl()
     return None
 
@@ -247,6 +285,7 @@ class StationPlaybackCollector:
         self.covers: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
         self.cover_lock: asyncio.Lock | None = None
         self._replies: StationReplies | None = None
+        self._track_waiter: tuple[str, int, asyncio.Future[bool]] | None = None
         self.track: Track | None = None
         self.previous_track: Track | None = None
         self.generation = 0
@@ -271,7 +310,10 @@ class StationPlaybackCollector:
         retention_changed = self.on_state(status, identity) if self.on_state else False
         self.cover_url = cover
         cover_path = ("/api/v1/station-playback/cover/" + hashlib.sha256(cover.encode()).hexdigest()) if cover else None
-        content = {"status": status, "title": title, "artist": artist, "coverPath": cover_path}
+        content = {
+            "status": status, "title": title, "artist": artist, "coverPath": cover_path,
+            "trackId": track_key if status in {"playing", "paused"} else None,
+        }
         playback_changed = self.state is None or self.state.model_dump(exclude={"observedAt"}) != content
         observed_at = self.state.observedAt if self.state is not None else None
         if status not in {"stale", "auth_required"}:
@@ -404,9 +446,57 @@ class StationPlaybackCollector:
                     duration = player.get("duration") if isinstance(player, dict) else None
                     length = int(duration) if type(duration) in (int, float) and 0 < duration < 14_400 else None
                     await self.update(*normalized, duration=length)
+                    pending = self._track_waiter
+                    if (pending and not pending[2].done()
+                            and pending[1] == self.generation
+                            and normalized[0] == "playing" and normalized[4] == pending[0]):
+                        pending[2].set_result(True)
             finally:
+                pending = self._track_waiter
+                if pending and not pending[2].done():
+                    pending[2].set_result(False)
                 self._replies = None
                 replies.close()
+
+    async def play_track(self, track_id: str, may_send: Callable[[], bool]) -> str:
+        """Send one exact recording over the existing reader-owned connection."""
+        if not re.fullmatch(r"[0-9]{1,20}", track_id):
+            raise ValueError("Invalid Station track ID")
+        if self._track_waiter is not None:
+            return "busy"
+        link = self._replies
+        if link is None or self.state is None or self.state.status in {"stale", "auth_required"}:
+            return "unavailable"
+        if not may_send():
+            return "blocked"
+        track = self.track
+        if (self.state.status == "playing" and track and track.source_id == track_id
+                and (self._clock() - track.observed_at).total_seconds() <= STATE_TIMEOUT_SECONDS):
+            return "already_playing"
+
+        waiter = asyncio.get_running_loop().create_future()
+        self._track_waiter = track_id, self.generation, waiter
+        try:
+            if not may_send():
+                return "blocked"
+            async with asyncio.timeout(9):
+                await link.ws.send(json.dumps({
+                    "conversationToken": link.token, "id": str(uuid.uuid4()),
+                    "payload": {"command": "playMusic", "type": "track", "id": track_id},
+                    "sentTime": round(time.time() * 1000),
+                }))
+                return "playing" if await waiter else "unconfirmed"
+        except (OSError, TimeoutError, WebSocketException):
+            return "unconfirmed"
+        finally:
+            waiter.cancel()
+            self._track_waiter = None
+
+    async def repeat_phrase(self, phrase: str, may_send: Callable[[], bool]) -> bool:
+        link = self._replies
+        if link is None or self.state is None or self.state.status in {"stale", "auth_required"}:
+            return False
+        return await link.repeat_phrase(phrase, may_send)
 
     async def request_reminder_list(self) -> dict:
         """Explicit diagnostic request that may speak. No browser route or periodic calls."""

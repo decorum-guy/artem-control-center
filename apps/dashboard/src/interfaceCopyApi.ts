@@ -31,16 +31,16 @@ function catalog(value: unknown): InterfaceCopyCatalog {
   const raw = object(value, "catalog");
   exactKeys(raw, ["navigation", "navigationGroup", "page"], "catalog");
   const nav = object(raw.navigation, "navigation");
-  const navKeys = ["overview", "weather", "home", "services", "calendar", "tasks", "reminders", "coffeeDiary", "backups", "apps", "system", "settings"] as const;
-  exactKeys(nav, navKeys, "navigation");
-  const navigation = Object.fromEntries(navKeys.map((key) => [key, text(nav[key], `navigation_${key}`, 48, true)])) as InterfaceCopyCatalog["navigation"];
+  const navKeys = ["overview", "weather", "music", "home", "services", "calendar", "tasks", "reminders", "coffeeDiary", "backups", "apps", "system", "settings"] as const;
+  exactKeys(nav, nav.music === undefined ? navKeys.filter(key => key !== "music") : navKeys, "navigation");
+  const navigation = Object.fromEntries(navKeys.map((key) => [key, text(nav[key] ?? (key === "music" ? "Музыка" : undefined), `navigation_${key}`, 48, true)])) as InterfaceCopyCatalog["navigation"];
   const group = object(raw.navigationGroup, "navigation_group");
   exactKeys(group, ["planning"], "navigation_group");
   const pageRaw = object(raw.page, "page");
-  const pageKeys = ["overview", "weather", "home", "services", "calendar", "tasks", "reminders", "coffeeDiary", "backups", "apps", "system", "settings"] as const;
-  exactKeys(pageRaw, pageKeys, "page");
+  const pageKeys = ["overview", "weather", "music", "home", "services", "calendar", "tasks", "reminders", "coffeeDiary", "backups", "apps", "system", "settings"] as const;
+  exactKeys(pageRaw, pageRaw.music === undefined ? pageKeys.filter(key => key !== "music") : pageKeys, "page");
   const page = Object.fromEntries(pageKeys.map((key) => {
-    const value = object(pageRaw[key], `page_${key}`);
+    const value = object(pageRaw[key] ?? (key === "music" ? { title: "Музыка", subtitle: "" } : undefined), `page_${key}`);
     exactKeys(value, ["title", "subtitle"], `page_${key}`);
     return [key, { title: text(value.title, `page_${key}_title`, 96, true), subtitle: text(value.subtitle, `page_${key}_subtitle`, 240, false) }];
   })) as InterfaceCopyCatalog["page"];
@@ -56,18 +56,16 @@ function overrides(value: unknown): InterfaceCopyOverrides {
   const raw = object(value, "overrides");
   exactKeys(raw, ["navigation", "navigationGroup", "page"], "overrides");
   const nav = object(raw.navigation, "navigation_overrides");
-  const navKeys = ["overview", "weather", "home", "services", "calendar", "tasks", "reminders", "coffeeDiary", "backups", "apps", "system", "settings"] as const;
+  const navKeys = ["overview", "weather", "music", "home", "services", "calendar", "tasks", "reminders", "coffeeDiary", "backups", "apps", "system", "settings"] as const;
   if (Object.keys(nav).some((key) => !navKeys.includes(key as typeof navKeys[number]))) throw new Error("invalid_navigation_overrides");
   const navigation = Object.fromEntries(navKeys.map((key) => [key, optional(nav[key], `navigation_${key}`, 48, true)]).filter(([, value]) => value !== null)) as InterfaceCopyOverrides["navigation"];
   const group = object(raw.navigationGroup, "navigation_group_overrides");
   if (Object.keys(group).some((key) => key !== "planning")) throw new Error("invalid_navigation_group_overrides");
   const navigationGroup = optional(group.planning, "navigation_group_planning", 48, true) === null ? {} : { planning: optional(group.planning, "navigation_group_planning", 48, true) };
   const pageRaw = object(raw.page, "page_overrides");
-  const pageKeys = ["overview", "weather", "home", "services", "calendar", "tasks", "reminders", "coffeeDiary", "backups", "apps", "system", "settings"] as const;
-  const actualPageKeys = Object.keys(pageRaw).sort();
-  const fullPageKeys = [...pageKeys].sort();
-  const legacyPageKeys = pageKeys.filter((key) => key !== "coffeeDiary").sort();
-  if (![fullPageKeys, legacyPageKeys].some((keys) => keys.length === actualPageKeys.length && keys.every((key, index) => key === actualPageKeys[index]))) throw new Error("invalid_page_overrides");
+  const pageKeys = ["overview", "weather", "music", "home", "services", "calendar", "tasks", "reminders", "coffeeDiary", "backups", "apps", "system", "settings"] as const;
+  const optionalPages = ["coffeeDiary", "music"];
+  exactKeys(pageRaw, pageKeys.filter(key => !optionalPages.includes(key) || pageRaw[key] !== undefined), "page_overrides");
   const page = Object.fromEntries(pageKeys.map((key) => {
     const pageValue = object(pageRaw[key] ?? {}, `page_${key}_overrides`);
     if (Object.keys(pageValue).some((entry) => entry !== "title" && entry !== "subtitle")) throw new Error(`invalid_page_${key}_overrides`);

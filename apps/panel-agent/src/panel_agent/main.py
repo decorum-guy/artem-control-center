@@ -106,6 +106,10 @@ from .access_policy import AccessPolicyStore
 from .tv_api import TVExecutorClient, build_tv_router
 from .tv_voice import TVVoiceBridge
 from .music_save import MusicSave, build_music_save_router, dispatch_scenario
+from .music_library import MusicLibrary, build_music_library_router
+from .station_credentials import StationCredentialFile
+from .yandex_library import YandexLibrary
+from .youtube_library import YouTubeLibrary
 from .alice_voice_feedback import AliceVoiceFeedback
 from .youtube_music import YouTubeMusic
 from .backups import AvalarStageBackupEngine, BackupEngine, BackupService, PanelConfigSource, build_backup_router
@@ -261,7 +265,11 @@ access_policy = AccessPolicyStore.from_environment(
     temporary_minutes=SETTINGS.access_temporary_minutes,
 )
 voice_feedback = (
-    AliceVoiceFeedback(runtime.home_assistant.speak_on_station)
+    AliceVoiceFeedback(
+        runtime.home_assistant.speak_on_station,
+        local_music_entity=os.getenv("PANEL_STATION_PLAYBACK_VOICE_ENTITY", "").strip(),
+        speak_local=station_playback.repeat_phrase if station_settings else None,
+    )
     if os.getenv("PANEL_ALICE_VOICE_FEEDBACK_ENABLED", "").strip().lower() == "true"
     else None
 )
@@ -292,6 +300,23 @@ if tv_voice is not None or music_save is not None:
     runtime.home_assistant.set_yandex_scenario_handler(
         lambda event: dispatch_scenario(event, music_save, tv_voice.handle if tv_voice else None)
     )
+
+music_library = None
+if MODE in {"production", "read_only"} and os.getenv("PANEL_MUSIC_LIBRARY_ENABLED", "").lower() == "true":
+    yandex_library = (YandexLibrary(StationCredentialFile(station_settings.credential_path))
+                      if station_settings and station_settings.credential_path else None)
+    youtube_browser = os.getenv("PANEL_YOUTUBE_LIBRARY_CREDENTIAL_FILE", "").strip()
+    youtube_library = (YouTubeLibrary(Path(youtube_browser), Path(music_credentials),
+                                      os.getenv("PANEL_YOUTUBE_MUSIC_HTTP_PROXY", ""))
+                       if youtube_browser and music_credentials else None)
+    music_library = MusicLibrary(
+        station_playback, yandex_library, youtube_library, access=lambda: access_policy,
+        writes=lambda: MODE == "production" and startup_lifecycle.phase == "ready"
+        and _write_allowed(SETTINGS.alice_station_actions_enabled),
+        paired_track=music_save.paired_track if music_save else lambda _: None,
+    )
+    if music_save is not None:
+        music_save.on_new_like = music_library.invalidate_youtube_likes
 
 system_controls = WindowsSystemControls()
 backup_source = PanelConfigSource.from_store_paths(
@@ -399,7 +424,7 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
-if MODE != "production":
+if MODE != "production" and os.getenv("PANEL_DIAGNOSTIC_LIVE_STATION") != "true":
     # Fixture/read-only clients still receive a truthful, bounded projection.
     # Production installs the real Alice-backed router in production.py.
     app.include_router(build_station_action_router(
@@ -408,6 +433,7 @@ if MODE != "production":
 app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(build_station_playback_router(station_playback))
 app.include_router(build_music_save_router(music_save))
+app.include_router(build_music_library_router(music_library))
 if MODE == "production" and station_reminders is not None:
     station_reminders.writer = StationRemindersWriter(
         station_reminders, access=lambda: access_policy,
