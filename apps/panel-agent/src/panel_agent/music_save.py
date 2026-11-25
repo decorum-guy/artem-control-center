@@ -297,7 +297,7 @@ class MusicSave:
         if self.provider is None:
             return
         self.task = asyncio.create_task(self._verify(), name="music-save-account")
-        await self.task
+        await asyncio.shield(self.task)
 
     async def _verify(self) -> None:
         assert self.provider is not None
