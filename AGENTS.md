@@ -374,6 +374,8 @@ Mac success не является Windows hardware acceptance. Hardware-dependen
 - [RULES.md](RULES.md) — обязательные operational/safety rules, truthfulness, protected production boundaries и PR-дисциплина.
 - [docs/INFRASTRUCTURE_ACCESS.md](docs/INFRASTRUCTURE_ACCESS.md) — три SSH alias с Mac, роли Samsung/HA/proxy и актуальность внешних зависимостей.
 - [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md) — где лежат frontend, Panel Agent, provider adapters, contracts, Windows runtime и приватные tunnels.
+- [docs/plans/PANEL_FOLLOWUP_2026_11_25.md](docs/plans/PANEL_FOLLOWUP_2026_11_25.md) — решения владельца после выпуска #375: две независимые ленты в «Обзоре», исправление System, сопоставления «Notch Decay», музыкальных статусов и полный поиск/редактор напоминаний. Они заменяют прежний исключающий выбор ленты; расследование скорости вентилятора снято по решению владельца.
+- [docs/plans/PANEL_FOLLOWUP_ACCEPTANCE_2026_11_25.md](docs/plans/PANEL_FOLLOWUP_ACCEPTANCE_2026_11_25.md) — принятый результат #380, подтверждённый CI, открытые ограничения и адресные исправления без Samsung; перед продолжением отличать принятие раунда от штатной установки.
 - [docs/AGENT_PLAYBOOK.md](docs/AGENT_PLAYBOOK.md) — onboarding sequence, Git preflight, тестирование, PR и отчёт.
 - [docs/TV_ACCESS.md](docs/TV_ACCESS.md) — доступ к телевизору с Mac через SSH Samsung и ADB, снимки `screencap`, живой `tv-mirror`/`scrcpy` и границы подтверждения экрана; прочитать перед диагностикой или приёмкой ТВ.
 - [docs/PRODUCTION_DIAGNOSTICS.md](docs/PRODUCTION_DIAGNOSTICS.md) — read-only Samsung/VPS diagnostics, Calendar/Planning freshness, refresh UI semantics и portrait widget fallback.
