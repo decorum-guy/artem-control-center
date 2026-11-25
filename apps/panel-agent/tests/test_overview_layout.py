@@ -167,8 +167,8 @@ def test_kettle_detail_size_is_opt_in_and_preserves_stored_layout_until_explicit
     module = load_app(monkeypatch, path, writes=True)
     from panel_agent import overview_layout
 
-    assert overview_layout.PRESET_VERSION == 6
-    assert overview_layout.shipped_layout()["presetVersion"] == 6
+    assert overview_layout.PRESET_VERSION == 7
+    assert overview_layout.shipped_layout()["presetVersion"] == 7
     stored = {
         "schemaVersion": overview_layout.SCHEMA_VERSION,
         "profileId": overview_layout.PROFILE_ID,
@@ -197,14 +197,14 @@ def test_kettle_detail_size_is_opt_in_and_preserves_stored_layout_until_explicit
     path.write_bytes(original)
 
     recovered, warnings, unplaced = overview_layout.recover_stored_layout(stored)
-    assert recovered == stored
+    assert recovered == {**stored, "presetVersion": 7}
     assert warnings == []
     assert unplaced == []
 
     with TestClient(module.app) as client:
         old_layout = get_layout(client)
         old_payload = old_layout.json()
-        assert old_payload["presetVersion"] == 6
+        assert old_payload["presetVersion"] == 7
         assert old_payload["revision"] == 21
         assert old_payload["items"] == stored["items"]
         assert old_payload["warnings"] == []
@@ -220,14 +220,14 @@ def test_kettle_detail_size_is_opt_in_and_preserves_stored_layout_until_explicit
             json={"items": resized_items},
         )
         assert resized.status_code == 200
-        assert resized.json()["presetVersion"] == 6
+        assert resized.json()["presetVersion"] == 7
         assert resized.json()["revision"] == 22
         assert resized.json()["items"] == resized_items
 
     restarted_module = load_app(monkeypatch, path, writes=True)
     with TestClient(restarted_module.app) as client:
         reloaded = get_layout(client).json()
-        assert reloaded["presetVersion"] == 6
+        assert reloaded["presetVersion"] == 7
         assert reloaded["revision"] == 22
         assert reloaded["items"] == resized_items
         assert reloaded["warnings"] == []
@@ -242,7 +242,7 @@ def test_home_climate_registry_shipped_v4_and_strict_size_singleton_validation(t
         "standard": (7, 3),
         "large": (8, 5),
     }
-    assert overview_layout.shipped_layout()["presetVersion"] == 6
+    assert overview_layout.shipped_layout()["presetVersion"] == 7
     with TestClient(module.app) as client:
         initial = get_layout(client)
         payload = initial.json()
@@ -332,7 +332,7 @@ def test_preset_v2_existing_climate_is_not_duplicated_and_read_does_not_write(tm
 
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 6
+        assert payload["presetVersion"] == 7
         assert payload["revision"] == 11
         assert len([item for item in payload["items"] if item["widgetType"] == "home.climate"]) == 1
     assert path.read_bytes() == original
@@ -376,7 +376,7 @@ def test_preset_v3_to_v4_shrinks_climate_in_place_and_preserves_owner_state(tmp_
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
         recovered = next(item for item in payload["items"] if item["widgetType"] == "home.climate")
-        assert payload["presetVersion"] == 6
+        assert payload["presetVersion"] == 7
         assert payload["revision"] == 12
         assert recovered["placement"] == {"x": 0, "y": 5, "w": 7, "h": 3}
         assert recovered["visibility"] == "hidden"
@@ -421,7 +421,7 @@ def test_get_without_file_returns_shipped_v4_and_no_store(tmp_path, monkeypatch)
         payload = response.json()
         assert payload["schemaVersion"] == "overview.layout.v2"
         assert payload["presetId"] == "overview.default"
-        assert payload["presetVersion"] == 6
+        assert payload["presetVersion"] == 7
         assert payload["revision"] == 0
         assert payload["writesEnabled"] is False
         assert response.headers["cache-control"] == "no-store"
@@ -897,7 +897,7 @@ def test_legacy_migration_and_corrupt_fallback_never_overwrite_bytes(tmp_path, m
     module = load_app(monkeypatch, path, writes=False)
     with TestClient(module.app) as client:
         payload = get_layout(client).json()
-        assert payload["presetVersion"] == 6
+        assert payload["presetVersion"] == 7
         assert payload["revision"] == 0
         assert payload["warnings"]
     assert path.read_bytes() == corrupt_bytes
@@ -1022,3 +1022,33 @@ def test_portrait_strict_validation_corrupt_wrapper_and_atomic_failure(tmp_path,
         assert client.patch("/api/v1/overview/layout/portrait", headers={"If-Match": '\"0\"'}, json={"items": items}).status_code == 500
         assert store.path.read_bytes() == original
         assert not list(tmp_path.glob("*.tmp"))
+
+
+
+def test_bedroom_strip_migrates_each_saved_profile_without_moving_existing_widgets(tmp_path):
+    from panel_agent import overview_layout as layouts
+
+    landscape = layouts.OverviewLayoutStore(str(tmp_path / "overview.json"), writes_enabled=True)
+    portrait = layouts.PortraitOverviewLayoutStore(landscape)
+    legacy = layouts.shipped_layout(revision=12)
+    legacy["presetVersion"] = 6
+    legacy["items"].append(layouts._item("owner.strip", "home.light-strip", "standard", 0, 9))
+    landscape._atomic_write(legacy)
+    separate = deepcopy(legacy)
+    separate["items"][-1]["placement"]["y"] = 15
+    portrait._atomic_write(separate)
+    for store, original in ((landscape, legacy), (portrait, separate)):
+        recovered = store.read()
+        assert recovered.revision == 12 and recovered.presetVersion == 7
+        items = [item.model_dump() for item in recovered.items]
+        assert items[:-1] == original["items"]
+        bedroom = items[-1]
+        assert bedroom["widgetType"] == "home.bedroom-light-strip"
+        assert all(not layouts._rectangle_overlap(bedroom["placement"], item["placement"])
+                   for item in items[:-1] if item["visibility"] == "visible")
+        assert store.read() == recovered
+        store._atomic_write({**original, "presetVersion": 7,
+                             "items": [*original["items"], {**bedroom, "visibility": "hidden"}]})
+        assert store.read().items[-1].visibility == "hidden"
+        store._atomic_write({**original, "presetVersion": 7})
+        assert all(item.widgetType != bedroom["widgetType"] for item in store.read().items)

@@ -53,7 +53,7 @@ export type OverviewEditorAction =
 function cloneDocument(document: OverviewLayoutDocument): OverviewLayoutDocument {
   return {
     ...document,
-    presetVersion: 6,
+    presetVersion: 7,
     items: normalizeLayoutItems(document.items.filter((item) => item.widgetType !== "home.quick-actions")),
     warnings: document.warnings ? [...document.warnings] : [],
     unplaced: document.unplaced ? document.unplaced.filter((record) => record.widgetType !== "home.quick-actions").map((record) => ({ ...record })) : []
@@ -73,7 +73,7 @@ export function makeShippedOverviewDocument(writesEnabled = false): OverviewLayo
     schemaVersion: "overview.layout.v2",
     profileId: "samsung-control",
     presetId: "overview.default",
-    presetVersion: 6,
+    presetVersion: 7,
     revision: 0,
     viewportClass: "landscape-12",
     updatedAt: "1970-01-01T00:00:00+00:00",

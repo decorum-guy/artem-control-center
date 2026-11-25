@@ -7,6 +7,7 @@ describe("Overview V2 fixed registry", () => {
       "home.coffee-machine",
       "home.kettle",
       "home.light-strip",
+      "home.bedroom-light-strip",
       "home.climate",
       "home.station-mini-2",
       "home.television",

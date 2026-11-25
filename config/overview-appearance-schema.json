@@ -155,6 +155,7 @@
     },
     "home.kettle": { "defaults": {}, "controls": [] },
     "home.light-strip": { "defaults": {}, "controls": [] },
+    "home.bedroom-light-strip": { "defaults": {}, "controls": [] },
     "home.climate": { "defaults": {}, "controls": [] },
     "home.station-mini-2": { "defaults": {}, "controls": [] },
     "home.television": { "defaults": {}, "controls": [] },

@@ -1007,6 +1007,7 @@ export type OverviewWidgetType =
   | "home.climate"
   | "home.kettle"
   | "home.light-strip"
+  | "home.bedroom-light-strip"
   | "home.station-mini-2"
   | "home.television"
   | "system.rog-g703-operational"
@@ -1057,7 +1058,7 @@ export interface OverviewLayoutDocument {
   schemaVersion: "overview.layout.v2";
   profileId: "samsung-control";
   presetId: "overview.default";
-  presetVersion: 6;
+  presetVersion: 7;
   revision: number;
   viewportClass: "landscape-12";
   updatedAt: string;
