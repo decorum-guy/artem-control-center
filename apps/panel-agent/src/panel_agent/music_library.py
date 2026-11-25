@@ -285,6 +285,11 @@ class PlaylistQueue:
     pause_requested: bool = False
     previous_progress: float | None = None
     options: dict[str, Recording] = field(default_factory=dict)
+    intent: int = 0
+    work_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    observed_playback: tuple[str, str | None] | None = None
+    pending_target: str | None = None
+    expected_pause: str | None = None
 
 
 class LikeSelection(BaseModel):
@@ -330,6 +335,7 @@ class MusicLibrary:
         self.search_locks = {provider: asyncio.Lock() for provider in self.feeds}
         self.playlist_queue: PlaylistQueue | None = None
         self.playlist_task: asyncio.Task | None = None
+        self.playlist_tasks: set[asyncio.Task] = set()
         if station is not None:
             station.on_playback_progress = self._observe_playlist
         self.uncertain_likes: OrderedDict[tuple[str, str], None] = OrderedDict()
@@ -684,6 +690,8 @@ class MusicLibrary:
 
         try:
             async with self.play_lock:
+                if self.playlist_queue is not None:
+                    self._interrupt_playlist(self.playlist_queue, "stopped")
                 self.playlist_queue = None
                 match_key = (request.generation, ya_epoch, row.track_id)
                 if provider == "yandex":
@@ -729,13 +737,39 @@ class MusicLibrary:
         queue = self.playlist_queue
         if queue is None:
             return None
+        return self._playlist_projection(queue)
+
+    def _playlist_projection(self, queue: PlaylistQueue) -> dict:
         return {"id": queue.id, "provider": queue.provider, "source": queue.source, "status": queue.status,
                 "position": queue.position + 1,
                 "title": queue.records[queue.position].title if queue.position < len(queue.records) else None,
                 "options": [self._track_dict(record, key) for key, record in queue.options.items()]}
 
-    def _playlist_allowed(self, queue: PlaylistQueue) -> bool:
-        return (self.playlist_queue is queue and self.can_play()
+    def _playlist_current(self, queue: PlaylistQueue, intent: int) -> bool:
+        return self.playlist_queue is queue and queue.intent == intent
+
+    def _playlist_result(self, queue: PlaylistQueue, intent: int) -> dict:
+        result = self._playlist_projection(queue)
+        if not self._playlist_current(queue, intent) and queue.status not in {
+            "paused", "stopped", "stopped_unconfirmed", "unavailable", "blocked",
+        }:
+            # A superseded request never returns another operation's success.
+            result["status"] = "stopped"
+            result["options"] = []
+        return result
+
+    @staticmethod
+    def _interrupt_playlist(queue: PlaylistQueue, status: str) -> int:
+        # Invalidate before any await. Provider reads may finish, but their
+        # captured intent can no longer publish a result or send a command.
+        queue.intent += 1
+        queue.status, queue.expected_end = status, None
+        queue.pause_requested = status == "paused"
+        queue.options.clear()
+        return queue.intent
+
+    def _playlist_allowed(self, queue: PlaylistQueue, intent: int | None = None) -> bool:
+        return (self.playlist_queue is queue and (intent is None or queue.intent == intent) and self.can_play()
                 and self.feeds[queue.provider].stamp() == queue.stamp
                 and queue.source in self.feeds[queue.provider].sources
                 and self.feeds["yandex"].sync() == queue.yandex_generation
@@ -754,13 +788,17 @@ class MusicLibrary:
             raise HTTPException(404, "unknown_playlist")
         if feed.status in {"auth_required", "connecting"}:
             return {"status": "auth_required" if feed.status == "auth_required" else "unavailable"}
+        if self.playlist_queue is not None:
+            self._interrupt_playlist(self.playlist_queue, "stopped")
+        self.playlist_queue = None
+        if provider == "youtube" or selection.source == "likes":
+            queue = self.playlist_queue = PlaylistQueue(
+                uuid4().hex, provider, selection.source, stamp, self.feeds["yandex"].sync(), self.station.generation,
+            )
+            # Publish the ID before the first provider await so another request
+            # can stop this initial load. Provider locks still bound read concurrency.
+            return await self._play_playlist_position(queue, 0)
         async with self.play_lock:
-            self.playlist_queue = None
-            if provider == "youtube" or selection.source == "likes":
-                queue = self.playlist_queue = PlaylistQueue(
-                    uuid4().hex, provider, selection.source, stamp, self.feeds["yandex"].sync(), self.station.generation,
-                )
-                return await self._play_playlist_position(queue, 0)
             if self.yandex is None:
                 return {"status": "unavailable"}
             try:
@@ -779,32 +817,55 @@ class MusicLibrary:
 
     async def _play_playlist_position(self, queue: PlaylistQueue, position: int,
                                       choice: Recording | None = None,
-                                      extra_gate: Callable[[], bool] = lambda: True) -> dict:
-        def permitted() -> bool:
-            return extra_gate() and self._playlist_allowed(queue)
-
-        if not permitted():
-            queue.status = "blocked"
-            return {"status": queue.status}
-        feed = self.feeds[queue.provider]
+                                      extra_gate: Callable[[], bool] = lambda: True,
+                                      expected_pause: str | None = None) -> dict:
+        if not self._playlist_allowed(queue) or not extra_gate():
+            if self.playlist_queue is queue:
+                self._interrupt_playlist(queue, "blocked")
+            return self._playlist_projection(queue)
+        queue.intent += 1
+        intent = queue.intent
         queue.status, queue.target, queue.expected_end = "working", None, None
         queue.position, queue.previous_progress, queue.pause_requested = position, None, False
+        queue.pending_target, queue.expected_pause = None, expected_pause
+        state = self.station.state
+        if state is not None:
+            queue.observed_playback = state.status, state.trackId
         queue.options.clear()
+
+        # This lock belongs to the queue, not the whole player. Stop/pause are
+        # synchronous invalidations; a new queue cannot be owned by this work.
+        async with queue.work_lock:
+            return await self._load_playlist_position(queue, intent, position, choice, extra_gate)
+
+    async def _load_playlist_position(self, queue: PlaylistQueue, intent: int, position: int,
+                                      choice: Recording | None, extra_gate: Callable[[], bool]) -> dict:
+        def permitted() -> bool:
+            return extra_gate() and self._playlist_allowed(queue, intent)
+
+        def blocked() -> dict:
+            if self._playlist_current(queue, intent):
+                queue.status = "blocked"
+            return self._playlist_result(queue, intent)
+
+        if not permitted():
+            return blocked()
+        feed = self.feeds[queue.provider]
         try:
             if position >= len(queue.records) and not queue.complete:
                 assert feed.provider is not None
                 async with feed.lock:
                     if not permitted():
-                        raise MusicAuthRequired
+                        return blocked()
                     if isinstance(feed.provider, YandexLibrary):
                         page, index = await feed.provider.scan_tracks(queue.source, queue.cursor, queue.index)
                     else:
                         page, index = await feed.provider.tracks(queue.source, queue.cursor), None
                 if not permitted():
-                    raise MusicAuthRequired
+                    return blocked()
                 if page.continuation in queue.seen or len(queue.records) + len(page.rows) > 2400:
                     queue.status = "limit"
-                    return self.playlist_status() or {"status": queue.status}
+                    return self._playlist_result(queue, intent)
                 if any(not isinstance(row, Recording) for row in page.rows):
                     raise MusicUnavailable
                 queue.records.extend(row for row in page.rows if isinstance(row, Recording))
@@ -813,7 +874,7 @@ class MusicLibrary:
                     queue.seen.add(queue.cursor)
             if position >= len(queue.records):
                 queue.status = "complete" if queue.complete else "unavailable"
-                return self.playlist_status() or {"status": queue.status}
+                return self._playlist_result(queue, intent)
 
             row = queue.records[position]
             if choice is not None:
@@ -823,23 +884,27 @@ class MusicLibrary:
             else:
                 target, options = None, []
             if not permitted():
-                queue.status = "blocked"
+                return blocked()
             elif options:
                 queue.options = {uuid4().hex: record for record in options}
                 queue.status = "choose"
             elif target is None:
                 queue.status = "no_match"
             else:
+                queue.pending_target = target
                 outcome = await self.station.play_track(target, permitted, restart=True)
-                if self.playlist_queue is queue:
+                if self._playlist_current(queue, intent):
                     queue.status = "playing" if outcome in {"playing", "already_playing"} else outcome
                     queue.target = target if queue.status == "playing" else None
+                    queue.pending_target, queue.expected_pause = None, None
                     self.access().audit_capability(PLAY_CAPABILITY, result=queue.status)
         except MusicAuthRequired:
-            queue.status = "auth_required"
+            if self._playlist_current(queue, intent):
+                queue.status = "auth_required"
         except (MusicUnavailable, YandexPageExpired):
-            queue.status = "unavailable"
-        return self.playlist_status() or {"status": queue.status}
+            if self._playlist_current(queue, intent):
+                queue.status = "unavailable"
+        return self._playlist_result(queue, intent)
 
     async def playlist_command(self, command: PlaylistCommand) -> dict:
         queue = self.playlist_queue
@@ -847,55 +912,93 @@ class MusicLibrary:
             raise HTTPException(409, "playlist_changed")
         if not self.can_play():
             raise HTTPException(403, "play_blocked")
-        if self.play_lock.locked():
-            raise HTTPException(409, "busy")
-        async with self.play_lock:
-            if command.action == "stop":
-                self.playlist_queue = None
-                def may_pause() -> bool:
-                    return bool(self.can_play() and queue.target and self.station.state
-                                and self.station.state.trackId == queue.target)
+        if command.action == "stop":
+            target = queue.pending_target or queue.expected_pause or queue.target
+            in_flight = bool((queue.pending_target or queue.expected_pause) and self.station.media_busy)
+            intent = self._interrupt_playlist(queue, "stopped")
 
-                if may_pause() and await self.station.control("pause", may_pause) != "confirmed":
-                    return {"status": "stopped_unconfirmed"}
-                return {"status": "stopped"}
-            if command.action == "choose":
-                choice = queue.options.get(command.choice or "")
-                if choice is None or queue.status != "choose":
-                    raise HTTPException(409, "choice_expired")
-                return await self._play_playlist_position(queue, queue.position, choice)
-            if queue.status not in {"choose", "no_match"}:
-                raise HTTPException(409, "playlist_changed")
-            return await self._play_playlist_position(queue, queue.position + 1)
+            def may_pause() -> bool:
+                return bool(self._playlist_current(queue, intent) and self.can_play() and target
+                            and self.station.state and self.station.state.trackId == target)
+
+            if may_pause():
+                outcome = await self.station.control("pause", may_pause)
+                if self._playlist_current(queue, intent) and outcome != "confirmed":
+                    queue.status = "stopped_unconfirmed"
+            elif in_flight:
+                # A dispatched command cannot be unsent. Do not retry it or
+                # claim physical silence while its result is unknown.
+                queue.status = "stopped_unconfirmed"
+            return self._playlist_result(queue, intent)
+        if self.play_lock.locked() or queue.work_lock.locked():
+            raise HTTPException(409, "busy")
+        if command.action == "choose":
+            choice = queue.options.get(command.choice or "")
+            if choice is None or queue.status != "choose":
+                raise HTTPException(409, "choice_expired")
+            return await self._play_playlist_position(queue, queue.position, choice)
+        if queue.status not in {"choose", "no_match"}:
+            raise HTTPException(409, "playlist_changed")
+        return await self._play_playlist_position(queue, queue.position + 1)
 
     async def navigate_playlist(self, direction: str, may_send: Callable[[], bool]) -> str | None:
         queue = self.playlist_queue
-        if queue is None or queue.status not in {"playing", "choose", "no_match"}:
+        if queue is None or queue.status not in {"working", "playing", "paused", "choose", "no_match"}:
             return None
-        if direction in {"pause", "play"} and queue.status == "playing":
+        if direction == "pause":
             if not may_send():
                 return "blocked"
-            queue.pause_requested = direction == "pause"
-            queue.expected_end = None
+            self._interrupt_playlist(queue, "paused")
             return None
+        if direction == "play" and queue.status == "paused":
+            if not may_send() or not self._playlist_allowed(queue):
+                return "blocked"
+            state = self.station.state
+            if queue.target and state and state.trackId == queue.target:
+                queue.intent += 1
+                intent = queue.intent
+                queue.status, queue.pause_requested = "working", False
+                queue.pending_target = queue.target
+                queue.observed_playback = state.status, state.trackId
+                outcome = await self.station.control("play", lambda: may_send() and self._playlist_allowed(queue, intent))
+                if self._playlist_current(queue, intent):
+                    queue.status = "playing" if outcome == "confirmed" else outcome
+                    queue.pending_target = None
+                    return outcome
+                return "unconfirmed"
+            result = await self._play_playlist_position(queue, queue.position, extra_gate=may_send)
+            return "confirmed" if result["status"] in {"playing", "choose", "no_match", "complete"} else result["status"]
+        if queue.status == "working" and direction in {"play", "next", "previous"}:
+            return "busy"
         if direction not in {"next", "previous"}:
             return None
-        if self.play_lock.locked():
+        if self.play_lock.locked() or queue.work_lock.locked():
             return "busy"
         if not may_send():
             return "blocked"
-        async with self.play_lock:
-            position = max(0, queue.position + (1 if direction == "next" else -1))
-            result = await self._play_playlist_position(queue, position, extra_gate=may_send)
-            return "confirmed" if result["status"] in {"playing", "choose", "no_match", "complete"} else result["status"]
+        position = max(0, queue.position + (1 if direction == "next" else -1))
+        result = await self._play_playlist_position(queue, position, extra_gate=may_send)
+        return "confirmed" if result["status"] in {"playing", "choose", "no_match", "complete"} else result["status"]
 
     def _observe_playlist(self, status: str, track_id: str | None,
                           progress: float | None, duration: float | None) -> None:
         queue = self.playlist_queue
-        if queue is None or queue.status != "playing":
+        if queue is None or queue.status not in {"working", "playing"}:
             return
         if self.station.generation != queue.station_generation or status in {"stale", "auth_required"}:
-            queue.status = "unavailable"
+            self._interrupt_playlist(queue, "unavailable")
+            return
+        if queue.status == "working":
+            observed = status, track_id
+            if observed == queue.observed_playback:
+                return
+            if status == "playing" and track_id == queue.pending_target:
+                queue.observed_playback, queue.expected_pause = observed, None
+                return
+            if status == "paused" and track_id == queue.expected_pause:
+                queue.observed_playback, queue.expected_pause = observed, None
+                return
+            self._interrupt_playlist(queue, "paused" if status == "paused" else "stopped")
             return
         rolled_over = (track_id == queue.target and progress is not None
                        and queue.previous_progress is not None and progress + 3 < queue.previous_progress)
@@ -909,43 +1012,62 @@ class MusicLibrary:
             return
         natural_end = queue.expected_end is not None and -0.3 <= time.monotonic() - queue.expected_end <= 3
         if not natural_end or self.play_lock.locked():
-            queue.status = "stopped"
+            self._interrupt_playlist(queue, "stopped")
             return
         if not self._playlist_allowed(queue):
-            queue.status = "blocked"
+            self._interrupt_playlist(queue, "blocked")
             return
-        queue.status = "working"
-        self.playlist_task = asyncio.create_task(self._continue_playlist(queue, track_id), name="station-playlist")
+        queue.status, queue.observed_playback = "working", (status, track_id)
+        queue.intent += 1
+        self.playlist_task = asyncio.create_task(self._continue_playlist(queue, track_id, queue.intent), name="station-playlist")
+        self.playlist_tasks.add(self.playlist_task)
+        self.playlist_task.add_done_callback(self.playlist_tasks.discard)
 
-    async def _continue_playlist(self, queue: PlaylistQueue, active_track: str | None) -> None:
-        async with self.play_lock:
-            if not self._playlist_allowed(queue):
-                queue.status = "blocked"
-                return
-            try:
-                async with asyncio.timeout(2.2):
-                    while self.station.media_busy:
-                        await asyncio.sleep(0.05)
-            except TimeoutError:
+    async def _continue_playlist(self, queue: PlaylistQueue, active_track: str | None, intent: int) -> None:
+        def permitted() -> bool:
+            return self._playlist_allowed(queue, intent)
+
+        if not permitted():
+            return
+        try:
+            async with asyncio.timeout(2.2):
+                while self.station.media_busy:
+                    await asyncio.sleep(0.05)
+                    if not permitted():
+                        return
+        except TimeoutError:
+            if self._playlist_current(queue, intent):
                 queue.status = "busy"
-                return
-            state = self.station.state
-            if state and state.status == "playing" and state.trackId != active_track:
-                queue.status = "stopped"
-                return
-            if state and state.status == "playing" and state.trackId == active_track:
-                def may_pause() -> bool:
-                    return bool(self._playlist_allowed(queue) and self.station.state
-                                and self.station.state.trackId == active_track)
+            return
+        if not permitted():
+            return
+        state = self.station.state
+        if state and state.status == "playing" and state.trackId != active_track:
+            self._interrupt_playlist(queue, "stopped")
+            return
+        expected_pause = None
+        if state and state.status == "playing" and state.trackId == active_track:
+            queue.expected_pause = expected_pause = active_track
 
-                await self.station.control("pause", may_pause)
-            await self._play_playlist_position(queue, queue.position + 1)
+            def may_pause() -> bool:
+                return bool(permitted() and self.station.state and self.station.state.trackId == active_track)
+
+            outcome = await self.station.control("pause", may_pause)
+            if not permitted():
+                return
+            if outcome != "confirmed":
+                queue.status = "unconfirmed"
+                return
+        await self._play_playlist_position(queue, queue.position + 1, expected_pause=expected_pause)
 
     async def close(self) -> None:
+        if self.playlist_queue is not None:
+            self._interrupt_playlist(self.playlist_queue, "stopped")
         self.playlist_queue = None
-        if self.playlist_task is not None:
-            self.playlist_task.cancel()
-            await asyncio.gather(self.playlist_task, return_exceptions=True)
+        pending = tuple(self.playlist_tasks)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
     async def _find(self, row: Recording) -> tuple[str | None, list[Recording]]:
         assert self.yandex is not None and row.track_id is not None

@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ServiceSnapshot, StationPlayback } from "@artem/contracts";
 import { useInteractionLock } from "../../InteractionLock";
 import { useInterfaceCopy } from "../../interfaceCopy";
@@ -52,13 +52,21 @@ const buttons: ReadonlyArray<{ action: StationActionId; icon: IconName; title: s
   { action: "media.alice.volume_up", icon: "plus", title: "Громче" }
 ];
 
-const StationMiniPlayer = memo(function StationMiniPlayer({ playback: snapshotPlayback }: { playback?: StationPlayback | null }) {
+const StationMiniPlayer = memo(function StationMiniPlayer({ playback: snapshotPlayback, preparing, onTransportIntent }: {
+  playback?: StationPlayback | null;
+  preparing: boolean;
+  onTransportIntent: () => void;
+}) {
   const { locked, guardMutation } = useInteractionLock();
   const [available, setAvailable] = useState<StationActionAvailability | null>(null);
   const [message, setMessage] = useState("");
   const [musicSave, setMusicSave] = useState<MusicProjection>();
   const [actionPending, setActionPending] = useState(false);
   const actionGate = useRef(false);
+  const pauseGate = useRef(false);
+  const [pausePending, setPausePending] = useState(false);
+  const presence = useRef(true);
+  const availabilityRequest = useRef(0);
   const manualOperation = useRef<string | undefined>(undefined);
   const [now, setNow] = useState(Date.now);
   const [station, setStation] = useState<StationPlayback | null>(null);
@@ -148,29 +156,63 @@ const StationMiniPlayer = memo(function StationMiniPlayer({ playback: snapshotPl
   const live = playing || paused;
   const playbackLabel = playing ? "Играет" : paused ? "Пауза" : playback?.status === "auth_required"
     ? "Нужно подключить Станцию" : playback?.status === "idle" ? "Музыка не играет" : "Нет свежего состояния";
-  useEffect(() => {
-    let active = true;
-    const stopped = () => { active = false; };
-    void fetchStationAvailability().then(result => { if (active) setAvailable(result); }).catch(() => {});
-    return stopped;
+  const refreshAvailability = useCallback(async () => {
+    if (!presence.current) return;
+    const request = ++availabilityRequest.current;
+    try {
+      const result = await fetchStationAvailability();
+      if (presence.current && availabilityRequest.current === request) setAvailable(result);
+    } catch {
+      if (presence.current && availabilityRequest.current === request) setAvailable(null);
+    }
   }, []);
+  useEffect(() => {
+    presence.current = true;
+    void refreshAvailability();
+    return () => { presence.current = false; };
+  }, [refreshAvailability]);
   const queue = useCommandSeries<StationActionId, unknown>({
     mode: "ordered", enabled: !locked,
     dispatch: async (action, signal) => {
       if (signal.aborted || !guardMutation()) throw new Error("locked");
-      return executeStationAction(action);
+      try {
+        return await executeStationAction(action);
+      } finally {
+        // A cancelled client series can still be holding the agent's executor
+        // until its dispatched request settles. Read the released gate then.
+        if (signal.aborted) void refreshAvailability();
+      }
     },
     onFinish: ({ cancelled, error }) => {
       if (!cancelled) {
         setMessage(error ? "Результат команды не подтверждён." : "");
-        void fetchStationAvailability().then(setAvailable).catch(() => setAvailable(null));
+        void refreshAvailability();
       }
     }
   });
+  async function pause() {
+    if (pauseGate.current || !guardMutation()) return;
+    // Pause must reach the agent while a preceding Next is still resolving.
+    queue.interrupt();
+    onTransportIntent();
+    pauseGate.current = true;
+    setPausePending(true);
+    setMessage("");
+    try {
+      await executeStationAction("media.alice.pause");
+    } catch {
+      setMessage("Результат паузы не подтверждён.");
+    } finally {
+      pauseGate.current = false;
+      setPausePending(false);
+      void refreshAvailability();
+    }
+  }
+  const canPause = playing || preparing;
   const actions = [buttons[0], {
-    action: playing ? "media.alice.pause" as const : "media.alice.play" as const,
-    icon: playing ? "pause" as const : "play" as const,
-    title: playing ? "Пауза" : "Продолжить"
+    action: canPause ? "media.alice.pause" as const : "media.alice.play" as const,
+    icon: canPause ? "pause" as const : "play" as const,
+    title: canPause ? "Пауза" : "Продолжить"
   }, ...buttons.slice(1)];
   return <section className="music-mini" aria-label="Плеер Яндекс Станции" data-playing={playing}>
     <Artwork url={live ? playback.coverPath : null} className="music-mini__art" />
@@ -183,9 +225,15 @@ const StationMiniPlayer = memo(function StationMiniPlayer({ playback: snapshotPl
       {actions.map(item => <button key={item.action} type="button" className="music-icon-button"
         data-primary={item.icon === "play" || item.icon === "pause"}
         aria-label={item.title} title={item.title}
-        aria-busy={queue.pending().includes(item.action)}
-        disabled={locked || queue.full || !available?.actions[item.action]?.allowed}
-        onClick={() => { if (guardMutation()) { setMessage(""); queue.submit(item.action); } }}>
+        aria-busy={item.action === "media.alice.pause" ? pausePending : queue.pending().includes(item.action)}
+        disabled={locked || pausePending || (item.action !== "media.alice.pause" && queue.full) || !available?.actions[item.action]?.allowed}
+        onClick={() => {
+          if (item.action === "media.alice.pause") void pause();
+          else if (guardMutation()) {
+            setMessage("");
+            if (queue.submit(item.action) && !item.action.startsWith("media.alice.volume_")) onTransportIntent();
+          }
+        }}>
         <Icon name={item.icon} size={20} />
       </button>)}
       <button type="button" className="music-load" aria-label="Лайк в Яндекс Музыке"
@@ -221,6 +269,7 @@ const playlistOutcomes: Record<string, string> = {
   ...outcomes,
   playing: "Плейлист играет на Станции.",
   working: "Готовим запись для Станции…",
+  paused: "Очередь на паузе.",
   complete: "Плейлист закончился.",
   stopped: "Очередь плейлиста остановлена.",
   stopped_unconfirmed: "Очередь остановлена. Станция ещё не подтвердила паузу.",
@@ -229,11 +278,12 @@ const playlistOutcomes: Record<string, string> = {
   limit: "Достигнут предел очереди.",
 };
 
-const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, onPlaylist }: {
+const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, beginPlaylistIntent, onPlaylist }: {
   provider: Provider;
   current?: string | null;
   playlist: PlaylistPlayback | null;
-  onPlaylist: (next: PlaylistPlayback) => void;
+  beginPlaylistIntent: () => number;
+  onPlaylist: (next: PlaylistPlayback, intent: number) => void;
 }) {
   const [library, state] = useMusicLibrary(provider);
   const { locked, guardMutation } = useInteractionLock();
@@ -245,12 +295,18 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
   const [result, setResult] = useState<{ message: string; record: Recording } | null>(null);
   const [choose, setChoose] = useState<{ original: Recording; options: Recording[] } | null>(null);
   const [playlistPending, setPlaylistPending] = useState(false);
+  const [playlistCancelPending, setPlaylistCancelPending] = useState(false);
+  const playlistRequest = useRef(0);
+  const playlistCancelGate = useRef(false);
   const [playlistError, setPlaylistError] = useState("");
   const presence = useRef(true);
   const activePlaylist = playlist?.provider === provider && playlist.source === state.selected ? playlist : null;
   const scanRequest = useRef<{ id: string; controller: AbortController | null } | null>(null);
   const [scan, setScan] = useState<PlaylistSearchResult | null>(null);
   const [scanScroll, setScanScroll] = useState(0);
+  const scanVisible = useRef(false);
+
+  useLayoutEffect(() => { scanVisible.current = scan !== null; }, [scan]);
 
   useEffect(() => {
     setScan(null);
@@ -264,6 +320,17 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
     };
   }, [library, state.selected, state.generation, state.sessionRevision, list.query]);
 
+  useEffect(() => {
+    // A refresh (including a known change to Likes) invalidates the completed
+    // scan too. Keep its rows/scroll, but never call them a scan of the new list.
+    if (scanRequest.current) {
+      scanRequest.current.controller?.abort();
+      library.cancelSearch(scanRequest.current.id);
+      scanRequest.current = null;
+    }
+    setScan(before => before ? { ...before, status: "playlist_changed" } : null);
+  }, [library, state.selected, list.searchRevision]);
+
   function stopSearch() {
     if (scanRequest.current) {
       scanRequest.current.controller?.abort();
@@ -275,7 +342,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
   }
 
   async function searchPlaylist(restart = false) {
-    if (!list.query.trim() || !state.selected || scanRequest.current?.controller) return;
+    if (!list.query.trim() || !state.selected || list.pending || scanRequest.current?.controller) return;
     if (restart) stopSearch();
     const id = scanRequest.current?.id ?? crypto.randomUUID().replaceAll("-", "");
     const controller = new AbortController();
@@ -302,7 +369,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
       if (document.hidden) return;
       const node = listNode.current;
       const visible = library.getList(library.read().selected);
-      if (node && visible.observedAt && !scanRequest.current) {
+      if (node && visible.observedAt && !scanRequest.current && !scanVisible.current) {
         const index = Math.floor(node.scrollTop / MUSIC_ROW_HEIGHT);
         library.scroll(node.scrollTop, filterTracks(visible.items, visible.query)[index]?.trackId);
       }
@@ -344,6 +411,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
   async function play(record: Recording, choice?: string) {
     if (gate.current || !guardMutation()) return;
     gate.current = true;
+    beginPlaylistIntent();
     const { generation, selected, sessionRevision } = library.read();
     setActive(record.key);
     setChoose(null);
@@ -371,10 +439,13 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
     }
   }
 
-  async function playPlaylist(action?: "skip" | "stop" | "choose", choice?: string) {
-    if (gate.current || !state.selected || !guardMutation()) return;
+  async function playPlaylist(action?: "skip" | "choose", choice?: string) {
+    if (gate.current || playlistCancelGate.current || !state.selected || !guardMutation()) return;
     if (action && !activePlaylist?.id) return;
     gate.current = true;
+    const request = ++playlistRequest.current;
+    const intent = beginPlaylistIntent();
+    const source = state.selected;
     setPlaylistPending(true);
     setPlaylistError("");
     setResult(null);
@@ -382,13 +453,40 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
       const next = action && activePlaylist?.id
         ? await playlistPlaybackAction(activePlaylist.id, action, choice)
         : await library.playPlaylist();
-      onPlaylist({ provider, source: state.selected, ...next });
+      if (presence.current && playlistRequest.current === request) onPlaylist({ provider, source, ...next }, intent);
     } catch (error) {
       const code = error instanceof Error ? error.message : "";
-      setPlaylistError(playlistOutcomes[code] ?? playlistOutcomes.unconfirmed);
+      if (presence.current && playlistRequest.current === request) setPlaylistError(playlistOutcomes[code] ?? playlistOutcomes.unconfirmed);
     } finally {
+      if (playlistRequest.current === request) {
+        gate.current = false;
+        if (presence.current) setPlaylistPending(false);
+      }
+    }
+  }
+
+  async function stopPlaylist() {
+    if (playlistCancelGate.current || !activePlaylist?.id || !guardMutation()) return;
+    const id = activePlaylist.id;
+    const source = activePlaylist.source;
+    const request = ++playlistRequest.current;
+    const intent = beginPlaylistIntent();
+    playlistCancelGate.current = true;
+    setPlaylistCancelPending(true);
+    setPlaylistError("");
+    try {
+      const next = await playlistPlaybackAction(id, "stop");
+      if (presence.current && playlistRequest.current === request) onPlaylist({ id, provider, source, ...next }, intent);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      if (presence.current && playlistRequest.current === request) setPlaylistError(playlistOutcomes[code] ?? playlistOutcomes.unconfirmed);
+    } finally {
+      playlistCancelGate.current = false;
       gate.current = false;
-      if (presence.current) setPlaylistPending(false);
+      if (presence.current) {
+        setPlaylistCancelPending(false);
+        setPlaylistPending(false);
+      }
     }
   }
 
@@ -413,7 +511,7 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
       <div><h2>{labels[provider]}</h2>{subtitle && <p>{subtitle}</p>}</div>
       {state.selected && <button type="button" className="music-icon-button music-play-playlist"
         aria-label={`Проиграть плейлист на Станции · ${labels[provider]}`} title="Проиграть весь плейлист на Станции"
-        disabled={locked || !state.canPlay || Boolean(active) || playlistPending || activePlaylist?.status === "working"}
+        disabled={locked || !state.canPlay || Boolean(active) || playlistPending || playlistCancelPending || activePlaylist?.status === "working"}
         aria-busy={playlistPending} onClick={() => void playPlaylist()}>
         <Icon name="play" size={18} />
       </button>}
@@ -448,29 +546,29 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
         activePlaylist && playlistOutcomes[activePlaylist.status]
       ].filter(Boolean).join(" · ")}</p>
       {activePlaylist?.options?.map(option => <button key={option.key} type="button" className="music-load"
-        disabled={locked || playlistPending} onClick={() => void playPlaylist("choose", option.key)}>
+        disabled={locked || playlistPending || playlistCancelPending} onClick={() => void playPlaylist("choose", option.key)}>
         {[option.title, option.artist, option.album, duration(option.duration)].filter(Boolean).join(" · ")}
       </button>)}
       {activePlaylist?.id && ["choose", "no_match"].includes(activePlaylist.status)
-        && <button type="button" className="music-load" disabled={locked || playlistPending}
+        && <button type="button" className="music-load" disabled={locked || playlistPending || playlistCancelPending}
           onClick={() => void playPlaylist("skip")}>Пропустить позицию</button>}
-      {activePlaylist?.id && !["complete", "stopped", "working"].includes(activePlaylist.status)
-        && <button type="button" className="music-load" disabled={locked || playlistPending}
-          onClick={() => void playPlaylist("stop")}>Остановить очередь</button>}
+      {activePlaylist?.id && !["complete", "stopped", "stopped_unconfirmed"].includes(activePlaylist.status)
+        && <button type="button" className="music-load" disabled={locked || playlistCancelPending}
+          aria-busy={playlistCancelPending} onClick={() => void stopPlaylist()}>Остановить очередь</button>}
     </div>}
     {list.query.trim() && state.selected && <div className="music-scan">
-      {!scan && <button type="button" className="music-load" onClick={() => void searchPlaylist()}>Искать по всему плейлисту</button>}
+      {!scan && <button type="button" className="music-load" disabled={list.pending} onClick={() => void searchPlaylist()}>Искать по всему плейлисту</button>}
       {scan && <>
         <span role="status">Проверено позиций: {scan.checked}. {({
           working: "Ищем…", more: "Можно продолжить поиск.", complete: "Плейлист проверен полностью.",
           limit: "Достигнут предел поиска. Уточните запрос.", auth_required: "Нужно восстановить доступ к источнику.",
           source_unavailable: "Источник временно недоступен.", busy: "Предыдущий запрос ещё завершается.",
-          page_expired: "Продолжение устарело.", playlist_changed: "Плейлист изменился."
+          page_expired: "Продолжение устарело.", playlist_changed: "Результаты предыдущего поиска. Запустите поиск заново."
         })[scan.status]}</span>
         {["more", "auth_required", "source_unavailable", "busy"].includes(scan.status) &&
-          <button type="button" className="music-load" onClick={() => void searchPlaylist()}>Продолжить поиск</button>}
+          <button type="button" className="music-load" disabled={list.pending} onClick={() => void searchPlaylist()}>Продолжить поиск</button>}
         {["page_expired", "playlist_changed"].includes(scan.status) &&
-          <button type="button" className="music-load" onClick={() => void searchPlaylist(true)}>Начать заново</button>}
+          <button type="button" className="music-load" disabled={list.pending} onClick={() => void searchPlaylist(true)}>Начать заново</button>}
         <button type="button" className="music-load" onClick={stopSearch}>{scan.status === "working" ? "Остановить" : "К загруженным трекам"}</button>
       </>}
     </div>}
@@ -560,7 +658,7 @@ export function MusicPage({ playback, services = [] }: { playback?: StationPlayb
       const revision = playlistRevision.current;
       try {
         const next = await readPlaylistPlayback(controller.signal);
-        if (next?.id && !controller.signal.aborted && playlistRevision.current === revision) setPlaylist(next);
+        if ((next === null || next?.id) && !controller.signal.aborted && playlistRevision.current === revision) setPlaylist(next);
       } catch {
         // Keep the last known status if the local agent is temporarily unavailable.
       } finally {
@@ -570,14 +668,18 @@ export function MusicPage({ playback, services = [] }: { playback?: StationPlayb
     void poll();
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, []);
-  function updatePlaylist(next: PlaylistPlayback) {
+  function beginPlaylistIntent() {
+    return ++playlistRevision.current;
+  }
+  function updatePlaylist(next: PlaylistPlayback, intent: number) {
+    if (playlistRevision.current !== intent) return;
     playlistRevision.current += 1;
     setPlaylist(next);
   }
   return <section className="music-page" data-testid="route-music">
     <PageHeader title={copy("page.music.title")} description={copy("page.music.subtitle")} variant="compact" />
-    <StationMiniPlayer playback={playback} />
+    <StationMiniPlayer playback={playback} preparing={playlist?.status === "working"} onTransportIntent={beginPlaylistIntent} />
     <MusicConnectionNotice services={services} />
-    <div className="music-page__libraries"><LibraryPanel provider="yandex" current={displayedTrack} playlist={playlist} onPlaylist={updatePlaylist} /><LibraryPanel provider="youtube" current={displayedTrack} playlist={playlist} onPlaylist={updatePlaylist} /></div>
+    <div className="music-page__libraries"><LibraryPanel provider="yandex" current={displayedTrack} playlist={playlist} beginPlaylistIntent={beginPlaylistIntent} onPlaylist={updatePlaylist} /><LibraryPanel provider="youtube" current={displayedTrack} playlist={playlist} beginPlaylistIntent={beginPlaylistIntent} onPlaylist={updatePlaylist} /></div>
   </section>;
 }

@@ -1,11 +1,12 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from panel_agent.access_policy import AccessPolicyStore
-from panel_agent.music_library import MusicLibrary, PlaySelection, SearchSelection
+from panel_agent.music_library import MusicLibrary, PlaySelection, SearchSelection, PlaylistCommand, PlaylistSelection
 from panel_agent.music_library_types import Continuation, Playlist, ProviderPage, Recording
 from panel_agent import youtube_browser_connect
 from panel_agent.youtube_library_credentials import browser_headers, capture_headers
@@ -473,6 +474,233 @@ def test_playlists_use_native_yandex_identity_and_confirmed_youtube_order(tmp_pa
         library._observe_playlist("playing", TRACK.track_id, 20, 180)
         library._observe_playlist("playing", "external-track", 0, 100)
         assert library.playlist_status()["status"] == "stopped"
+        await library.close()
+
+    asyncio.run(run())
+
+
+class QueueStation(Station):
+    def __init__(self):
+        super().__init__()
+        self.generation = 1
+        self.media_busy = False
+        self.state = SimpleNamespace(status="playing", trackId="90000")
+        self.controls = []
+        self.on_playback_progress = None
+
+    def observe(self, status, track_id, progress=None, duration=None):
+        self.state = SimpleNamespace(status=status, trackId=track_id)
+        if self.on_playback_progress:
+            self.on_playback_progress(status, track_id, progress, duration)
+
+    async def play_track(self, track_id, may_send, *, restart=False):
+        if not may_send():
+            return "blocked"
+        assert restart
+        self.sent.append(track_id)
+        self.observe("playing", track_id, 0, 180)
+        return "playing"
+
+    async def control(self, action, may_send):
+        if self.media_busy:
+            return "busy"
+        if not may_send():
+            return "blocked"
+        self.controls.append(action)
+        self.observe("paused" if action == "pause" else "playing", self.state.trackId)
+        return "confirmed"
+
+
+async def queue_setup(tmp_path):
+    yandex, youtube, station = Source(), Source(), QueueStation()
+    access = AccessPolicyStore(tmp_path / "access.json")
+    access.set_profile("standard")
+    library = MusicLibrary(station, yandex, youtube, access=lambda: access, writes=lambda: True,
+                           paired_track=lambda _: None)
+    await library.page("yandex", "", None)
+    catalog = await library.page("youtube", "", None)
+    selection = PlaylistSelection(generation=catalog["generation"], source="likes")
+    return library, yandex, youtube, station, selection
+
+
+@pytest.mark.parametrize("late_failure", [False, True])
+def test_stop_pending_playlist_page_is_immediate_and_old_result_cannot_own_new_queue(tmp_path, late_failure):
+    async def run():
+        library, _, youtube, station, selection = await queue_setup(tmp_path)
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = active = maximum = 0
+
+        async def tracks(_source, _cursor):
+            nonlocal calls, active, maximum
+            calls += 1
+            active += 1
+            maximum = max(maximum, active)
+            try:
+                if calls == 1:
+                    entered.set()
+                    await release.wait()
+                    if late_failure:
+                        raise MusicUnavailable
+                return ProviderPage((TRACK,))
+            finally:
+                active -= 1
+
+        youtube.tracks = tracks
+        old = asyncio.create_task(library.start_playlist("youtube", selection))
+        await asyncio.wait_for(entered.wait(), 1)
+        old_id = library.playlist_status()["id"]
+        assert library.playlist_status()["status"] == "working"
+        stopped = await asyncio.wait_for(library.playlist_command(PlaylistCommand(id=old_id, action="stop")), 1)
+        assert stopped["status"] == "stopped" and not old.done() and not release.is_set()
+
+        new = asyncio.create_task(library.start_playlist("youtube", selection))
+        await asyncio.sleep(0)
+        new_id = library.playlist_status()["id"]
+        assert new_id != old_id and calls == 1
+        release.set()
+        previous, current = await asyncio.wait_for(asyncio.gather(old, new), 1)
+        assert previous["id"] == old_id and previous["status"] == "stopped"
+        assert current["id"] == new_id and current["status"] == "playing"
+        assert library.playlist_status()["id"] == new_id
+        assert station.sent == [TRACK.track_id] and not station.controls and maximum == 1
+        await library.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("resume_before_result", [False, True])
+def test_pause_pending_match_invalidates_old_intent_and_explicit_resume_plays_once(tmp_path, resume_before_result):
+    async def run():
+        library, yandex, _, station, selection = await queue_setup(tmp_path)
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def search(_row):
+            entered.set()
+            await release.wait()
+            return [TRACK]
+
+        yandex.search = search
+        pending = asyncio.create_task(library.start_playlist("youtube", selection))
+        await asyncio.wait_for(entered.wait(), 1)
+        assert await asyncio.wait_for(library.navigate_playlist("pause", lambda: True), 1) is None
+        assert await station.control("pause", lambda: True) == "confirmed"
+        assert library.playlist_status()["status"] == "paused" and not pending.done()
+        resumed = asyncio.create_task(library.navigate_playlist("play", lambda: True)) if resume_before_result else None
+        if resumed:
+            await asyncio.sleep(0)
+            assert library.playlist_status()["status"] == "working" and not station.sent
+        release.set()
+        assert (await asyncio.wait_for(pending, 1))["status"] == ("stopped" if resumed else "paused")
+        if resumed:
+            assert await asyncio.wait_for(resumed, 1) == "confirmed"
+        else:
+            assert not station.sent
+            assert await library.navigate_playlist("play", lambda: True) == "confirmed"
+        assert station.sent == [TRACK.track_id] and library.playlist_status()["status"] == "playing"
+        await library.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("status,track_id,expected", [
+    ("paused", "90000", "paused"),
+    ("playing", "90001", "stopped"),
+])
+def test_external_playback_change_cancels_pending_match(tmp_path, status, track_id, expected):
+    async def run():
+        library, yandex, _, station, selection = await queue_setup(tmp_path)
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def search(_row):
+            entered.set()
+            await release.wait()
+            return [TRACK]
+
+        yandex.search = search
+        pending = asyncio.create_task(library.start_playlist("youtube", selection))
+        await asyncio.wait_for(entered.wait(), 1)
+        station.observe(status, track_id)
+        assert library.playlist_status()["status"] == expected
+        release.set()
+        assert (await asyncio.wait_for(pending, 1))["status"] == expected
+        assert not station.sent and not station.controls
+        await library.close()
+
+    asyncio.run(run())
+
+
+def test_stop_automatic_continuation_during_page_read_prevents_late_replay(tmp_path):
+    async def run():
+        library, _, youtube, station, selection = await queue_setup(tmp_path)
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def tracks(_source, cursor):
+            if cursor:
+                entered.set()
+                await release.wait()
+            return ProviderPage((TRACK,), Continuation("next", "tracks") if cursor is None else None)
+
+        youtube.tracks = tracks
+        first = await library.start_playlist("youtube", selection)
+        station.observe("playing", TRACK.track_id, 180, 180)
+        station.observe("idle", None)
+        await asyncio.wait_for(entered.wait(), 1)
+        continuation = library.playlist_task
+        assert (await library.playlist_command(PlaylistCommand(id=first["id"], action="stop")))["status"] == "stopped"
+        release.set()
+        await asyncio.wait_for(continuation, 1)
+        assert station.sent == [TRACK.track_id] and library.playlist_status()["status"] == "stopped"
+        station.observe("playing", TRACK.track_id, 180, 180)
+        station.observe("idle", None)
+        assert library.playlist_task is continuation and not station.controls
+        await library.close()
+
+    asyncio.run(run())
+
+
+def test_permission_loss_during_playlist_read_blocks_dispatch(tmp_path):
+    async def run():
+        library, _, youtube, station, selection = await queue_setup(tmp_path)
+        youtube.held = asyncio.Event()
+        pending = asyncio.create_task(library.start_playlist("youtube", selection))
+        await asyncio.wait_for(youtube.entered.wait(), 1)
+        library.writes = lambda: False
+        youtube.held.set()
+        assert (await asyncio.wait_for(pending, 1))["status"] == "blocked"
+        assert not station.sent
+        library.writes = lambda: True
+        assert (await library.start_playlist("youtube", selection))["status"] == "playing"
+        assert station.sent == [TRACK.track_id]
+        await library.close()
+
+    asyncio.run(run())
+
+
+def test_stop_during_dispatched_play_remains_unconfirmed_without_retry(tmp_path):
+    async def run():
+        library, _, _, station, selection = await queue_setup(tmp_path)
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def play_track(track_id, may_send, *, restart=False):
+            assert may_send() and restart
+            station.sent.append(track_id)
+            station.media_busy = True
+            entered.set()
+            await release.wait()
+            station.observe("playing", track_id, 0, 180)
+            station.media_busy = False
+            return "playing"
+
+        station.play_track = play_track
+        pending = asyncio.create_task(library.start_playlist("youtube", selection))
+        await asyncio.wait_for(entered.wait(), 1)
+        identity = library.playlist_status()["id"]
+        result = await library.playlist_command(PlaylistCommand(id=identity, action="stop"))
+        assert result["status"] == "stopped_unconfirmed" and not pending.done()
+        release.set()
+        assert (await asyncio.wait_for(pending, 1))["status"] == "stopped_unconfirmed"
+        assert station.sent == [TRACK.track_id] and not station.controls
+        assert library.playlist_status()["status"] == "stopped_unconfirmed"
         await library.close()
 
     asyncio.run(run())

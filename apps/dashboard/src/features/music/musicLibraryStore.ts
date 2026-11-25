@@ -71,6 +71,7 @@ interface TrackView {
 }
 
 interface TrackData {
+  searchRevision: number;
   items: Recording[];
   next: string | null;
   segments: Segment[];
@@ -103,7 +104,7 @@ interface LibraryState {
 }
 
 const emptyData: TrackData = {
-  items: [], next: null, segments: [], observedAt: null, pending: false, error: null, omitted: 0
+  searchRevision: 0, items: [], next: null, segments: [], observedAt: null, pending: false, error: null, omitted: 0
 };
 const emptyView: TrackView = { scroll: 0, query: "" };
 const initial: LibraryState = {
@@ -209,7 +210,7 @@ export class MusicLibraryStore {
           if (!likes.pending && likes.items.length <= 100 && likes.scroll === 0) {
             void this.tracks(false, true);
           } else {
-            this.writeData(likedKey, { changesAvailable: true });
+            this.writeData(likedKey, { changesAvailable: true, searchRevision: likes.searchRevision + 1 });
           }
         } else if (likedChanged && this.state.selected !== likedKey && this.state.lists[likedKey]) {
           const lists = { ...this.state.lists };
@@ -348,7 +349,8 @@ export class MusicLibraryStore {
     if (!generation || !selected || list.pending || (more && !list.next)) return;
     const controller = new AbortController();
     this.listRequests.set(selected, controller);
-    this.writeData(selected, { pending: true, error: null, movedToStart: false });
+    this.writeData(selected, { pending: true, error: null, movedToStart: false,
+      searchRevision: list.searchRevision + (refresh ? 1 : 0) });
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(24_000)]);
     function load(provider: Provider, cursor: string | null, refreshFirst = false) {
       const search = new URLSearchParams();
