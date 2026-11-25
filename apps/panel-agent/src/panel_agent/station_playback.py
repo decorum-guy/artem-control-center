@@ -304,7 +304,10 @@ class StationPlaybackCollector:
 
     async def update(self, status: str, title: str | None = None, artist: str | None = None,
                      cover: str | None = None, track_key: str | None = None,
-                     *, duration: int | None = None, album: str | None = None) -> None:
+                     *, duration: int | None = None, album: str | None = None,
+                     volume: float | None = None) -> None:
+        if status == "playing" and self.state is not None and self.state.status == "paused":
+            self.track = self.previous_track = None
         self._observe_track(status, title, artist, track_key, duration, album)
         identity = track_key if track_key is not None or title is None else repr((title, artist))
         retention_changed = self.on_state(status, identity) if self.on_state else False
@@ -313,6 +316,7 @@ class StationPlaybackCollector:
         content = {
             "status": status, "title": title, "artist": artist, "coverPath": cover_path,
             "trackId": track_key if status in {"playing", "paused"} else None,
+            "volume": volume,
         }
         playback_changed = self.state is None or self.state.model_dump(exclude={"observedAt"}) != content
         observed_at = self.state.observedAt if self.state is not None else None
@@ -326,7 +330,7 @@ class StationPlaybackCollector:
         self, status: str, title: str | None, artist: str | None, key: str | None,
         duration: int | None, album: str | None,
     ) -> None:
-        if status != "playing" or not title:
+        if status not in {"playing", "paused"} or not title:
             self.track = self.previous_track = None
             return
         now = self._clock()
@@ -340,7 +344,16 @@ class StationPlaybackCollector:
             self.previous_track = active if active is not None and active.generation == self.generation else None
             self.track = Track(key, title, artist, duration, album, self.generation, now, now)
 
+    def displayed_track(self, track_id: str, now: datetime) -> Track | None:
+        track = self.track
+        if (track is None or track.source_id != track_id or track.generation != self.generation
+                or not 0 <= (now - track.observed_at).total_seconds() <= STATE_TIMEOUT_SECONDS):
+            return None
+        return track
+
     def capture_tracks(self, now: datetime) -> tuple[Track, ...]:
+        if self.state is None or self.state.status != "playing":
+            return ()
         current = self.track
         if current is None or (now - current.observed_at).total_seconds() > STATE_TIMEOUT_SECONDS:
             return ()
@@ -445,7 +458,9 @@ class StationPlaybackCollector:
                     player = data["state"].get("playerState")
                     duration = player.get("duration") if isinstance(player, dict) else None
                     length = int(duration) if type(duration) in (int, float) and 0 < duration < 14_400 else None
-                    await self.update(*normalized, duration=length)
+                    raw_volume = data["state"].get("volume")
+                    volume = float(raw_volume) if type(raw_volume) in (int, float) and 0 <= raw_volume <= 1 else None
+                    await self.update(*normalized, duration=length, volume=volume)
                     pending = self._track_waiter
                     if (pending and not pending[2].done()
                             and pending[1] == self.generation
@@ -537,6 +552,11 @@ class StationPlaybackCollector:
 
 def build_station_playback_router(collector: StationPlaybackCollector) -> APIRouter:
     router = APIRouter(prefix="/api/v1/station-playback", tags=["station-playback"])
+
+    @router.get("", response_model=StationPlayback | None)
+    async def state(response: Response) -> StationPlayback | None:
+        response.headers["Cache-Control"] = "no-store"
+        return collector.state
 
     @router.get("/cover/{cover_id}")
     async def cover(cover_id: str) -> Response:

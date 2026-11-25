@@ -276,6 +276,7 @@ class StationPlayback(BaseModel):
     artist: str | None = None
     coverPath: str | None = None
     trackId: str | None = None
+    volume: float | None = Field(default=None, ge=0, le=1)
     observedAt: str | None
 
 

@@ -894,6 +894,7 @@ export interface StationPlayback {
   coverPath: string | null;
   observedAt: string | null;
   trackId?: string | null;
+  volume?: number | null;
 }
 
 export interface StationRetention {

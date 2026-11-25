@@ -133,8 +133,10 @@ class YandexLibrary:
         self.context, self.token = version, token
         self.expires = time.monotonic() + 900
 
-    async def _request(self, method: str, path: str, *, limit: int = 786_432, **kwargs):
+    async def _request(self, method: str, path: str, *, limit: int = 786_432, may_send=None, **kwargs):
         await self._authorize()
+        if may_send is not None and not may_send():
+            return False
         try:
             async with asyncio.timeout(8), httpx.AsyncClient(
                 base_url=API_URL, headers={"Authorization": f"OAuth {self.token}"},
@@ -153,7 +155,7 @@ class YandexLibrary:
                     if self.context != self.version():
                         self.reset()
                         raise MusicAuthRequired
-                    return json.loads(raw)["result"]
+                    return True if may_send is not None else json.loads(raw)["result"]
         except (httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError) as exc:
             raise MusicUnavailable from exc
 
@@ -210,6 +212,24 @@ class YandexLibrary:
             if not 0 < start < len(index.positions):
                 raise YandexPageExpired
 
+        page = await self._index_page(index, start)
+        # Publish the index only after the associated metadata page succeeds.
+        self.indexes[playlist] = index
+        self.indexes.move_to_end(playlist)
+        if len(self.indexes) > MAX_INDEXES:
+            self.indexes.popitem(last=False)
+        return page
+
+    async def scan_tracks(self, playlist: str, cursor: Continuation | None,
+                          index: PlaylistIndex | None) -> tuple[ProviderPage, PlaylistIndex]:
+        uid = await self._account()
+        if index is None and cursor is None:
+            index = await self._read_index(uid, playlist)
+        elif index is None or cursor is None or cursor.kind != index.version:
+            raise YandexPageExpired
+        return await self._index_page(index, int(cursor.value) if cursor else 0), index
+
+    async def _index_page(self, index: PlaylistIndex, start: int) -> ProviderPage:
         positions = index.positions[start:start + BATCH_SIZE]
         ids = dict.fromkeys(f"{track}:{album}" if album else track for track, album in positions if track)
         records = await self._request("POST", "/tracks", data={"track-ids": ",".join(ids), "with-positions": "False"}) if ids else []
@@ -225,17 +245,24 @@ class YandexLibrary:
                 if isinstance(album, dict) and (album_id := identity(album.get("id"))):
                     by_album.setdefault((track, album_id), row)
 
-        # Publish the index only after the associated metadata page succeeds.
-        self.indexes[playlist] = index
-        self.indexes.move_to_end(playlist)
-        if len(self.indexes) > MAX_INDEXES:
-            self.indexes.popitem(last=False)
         next_index = start + len(positions)
         return ProviderPage(
             tuple(recording((by_album.get((track, album), {}) if album else by_track.get(track, {})),
                             track_id=track, album_id=album) for track, album in positions),
             Continuation(next_index, index.version) if next_index < len(index.positions) else None,
         )
+
+    async def liked_track_ids(self, uid: str) -> set[str]:
+        index = await self._read_index(uid, "likes")
+        if any(track_id is None for track_id, _ in index.positions):
+            raise MusicUnavailable
+        return {track_id for track_id, _ in index.positions if track_id is not None}
+
+    async def like_track(self, uid: str, track_id: str, may_send) -> bool:
+        # _request may refresh authorization before opening the request.
+        # Check the pinned account and permission after that refresh.
+        return await self._request("POST", f"/users/{uid}/likes/tracks/add-multiple",
+                                   data={"track-ids": track_id}, may_send=may_send)
 
     async def lookup(self, track_id: str) -> Recording | None:
         if identity(track_id) is None:
@@ -245,7 +272,24 @@ class YandexLibrary:
                      if isinstance(row, dict) and identity(row.get("id")) == track_id), None)
 
     async def search(self, track: Recording) -> list[Recording]:
-        response = await self._request("GET", "/search", params={
-            "text": f"{track.title} {' '.join(track.artists)}", "type": "track", "page": 0, "nocorrect": "true",
-        })
-        return [recording(row) for row in response.get("tracks", {}).get("results", [])[:20] if isinstance(row, dict)]
+        query = " ".join((track.title, *track.artists))
+        records: list[Recording] = []
+        try:
+            async with asyncio.timeout(15):
+                for page in range(3):
+                    response = await self._request("GET", "/search", params={
+                        "text": query, "type": "track", "page": page, "nocorrect": "true",
+                    })
+                    tracks = response.get("tracks") if isinstance(response, dict) else None
+                    results = tracks.get("results") if isinstance(tracks, dict) else None
+                    if not isinstance(results, list) or any(not isinstance(row, dict) for row in results):
+                        raise MusicUnavailable
+                    records.extend(recording(row) for row in results[:20])
+                    total, per_page = tracks.get("total"), tracks.get("perPage")
+                    if not results or type(total) is not int or type(per_page) is not int or not 0 < per_page <= 20:
+                        break
+                    if (page + 1) * per_page >= total:
+                        break
+        except TimeoutError as exc:
+            raise MusicUnavailable from exc
+        return records

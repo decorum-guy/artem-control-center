@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from panel_agent.access_policy import AccessPolicyStore
-from panel_agent.music_library import MusicLibrary, PlaySelection
+from panel_agent.music_library import MusicLibrary, PlaySelection, SearchSelection
 from panel_agent.music_library_types import Continuation, Playlist, ProviderPage, Recording
 from panel_agent import youtube_browser_connect
 from panel_agent.youtube_library_credentials import browser_headers, capture_headers
@@ -384,3 +384,40 @@ def test_disabled_music_reports_inactive_reads_without_enabling_actions():
         assert result.json() is None
         assert result.headers["Cache-Control"] == "no-store"
         assert client.post("/api/v1/station/music-save/verify").status_code == 404
+
+
+
+def test_full_playlist_search_keeps_duplicates_checkpoint_and_playable_rows(tmp_path, monkeypatch):
+    from panel_agent import music_library as module
+
+    async def run():
+        library, source, station = setup(tmp_path)
+        catalog = await library.page("yandex", "", None)
+        sent = []
+        fail = True
+
+        async def tracks(_source, continuation):
+            index = int(continuation.value) if continuation else 0
+            sent.append(index)
+            if index == 1 and fail:
+                raise MusicUnavailable
+            rows = (TRACK,) if index != 1 else (TRACK, TRACK)
+            return ProviderPage(rows, Continuation(index + 1, "version") if index < 2 else None)
+
+        source.tracks = tracks
+        monkeypatch.setattr(module, "SEARCH_PAGES_PER_CYCLE", 2)
+        search = SearchSelection(searchId="a" * 32, generation=catalog["generation"], source="likes", query="STUDIO")
+        first = await library.search_playlist("yandex", search)
+        assert first["status"] == "source_unavailable" and first["checked"] == 1
+        fail = False
+        assert not library.feeds["yandex"].cursors
+        done = await library.search_playlist("yandex", search)
+        assert done["status"] == "complete" and done["checked"] == 4
+        assert [row["trackId"] for row in done["items"]] == ["12345"] * 4
+        assert len({row["key"] for row in done["items"]}) == 4
+        assert done["items"][0] == first["items"][0]
+        assert sent == [0, 1, 1, 2] and not station.sent
+        row = PlaySelection(generation=search.generation, source="likes", row=done["items"][-1]["key"])
+        assert (await library.play("yandex", row))["status"] == "playing"
+
+    asyncio.run(run())

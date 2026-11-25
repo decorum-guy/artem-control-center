@@ -297,3 +297,24 @@ def test_unconfirmed_speech_never_repeats_confirmed_like(tmp_path):
         await bridge.close()
 
     asyncio.run(check())
+
+
+def test_manual_save_uses_displayed_track_without_voice_or_previous_choice(tmp_path):
+    async def run():
+        station, provider, bridge, time, _ = setup(tmp_path)
+        announced = []
+        bridge._acknowledge = lambda *args: announced.append(args)
+        await station.update("playing", "Previous", "Other", track_key="8")
+        await station.update("paused", CATALOG.title, CATALOG.artist, track_key="9", duration=202, volume=0)
+        bridge.start_manual("9")
+        time[0] += timedelta(seconds=1)
+        await station.update("playing", "Next", "Other", track_key="10")
+        await bridge.task
+        assert bridge.projection()["operation"]["status"] == "in_music"
+        assert [track.source_id for track in provider.searches] == ["9"]
+        assert not announced
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException, match="track_changed"):
+            bridge.start_manual("9")
+
+    asyncio.run(run())

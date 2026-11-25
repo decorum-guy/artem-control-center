@@ -19,6 +19,14 @@ export interface Recording {
   playable: boolean;
 }
 interface Page<T> { items: T[]; next: string | null; generation: string; sessionRevision?: number; observedAt: string }
+export interface PlaylistSearchResult {
+  searchId: string;
+  items: Recording[];
+  checked: number;
+  status: "working" | "complete" | "more" | "limit" | "page_expired" |
+    "playlist_changed" | "source_unavailable" | "auth_required" | "busy";
+}
+
 export interface PlayResult {
   status: string;
   stationTrackId?: string | null;
@@ -172,18 +180,19 @@ export class MusicLibraryStore {
         ]));
         this.patch({ ...status, lists, catalogPending: false, catalogRefreshing: false });
       } else {
-        const likedChanged = status.likedRevision > this.state.likedRevision && this.provider === "youtube";
+        const likedChanged = status.likedRevision > this.state.likedRevision;
+        const likedKey = this.provider === "youtube" ? "LM" : "likes";
         this.patch({ ...status, matches: status.yandexGeneration === this.state.yandexGeneration ? this.state.matches : {} });
-        if (likedChanged && this.state.selected === "LM") {
-          const likes = this.getList("LM");
+        if (likedChanged && this.state.selected === likedKey) {
+          const likes = this.getList(likedKey);
           if (!likes.pending && likes.items.length <= 100 && likes.scroll === 0) {
             void this.tracks(false, true);
           } else {
-            this.writeData("LM", { changesAvailable: true });
+            this.writeData(likedKey, { changesAvailable: true });
           }
-        } else if (likedChanged && this.state.selected !== "LM" && this.state.lists.LM) {
+        } else if (likedChanged && this.state.selected !== likedKey && this.state.lists[likedKey]) {
           const lists = { ...this.state.lists };
-          delete lists.LM;
+          delete lists[likedKey];
           this.patch({ lists });
         }
       }
@@ -393,6 +402,21 @@ export class MusicLibraryStore {
         this.writeData(selected, { pending: false });
       }
     }
+  }
+
+  searchPage(searchId: string, signal: AbortSignal): Promise<PlaylistSearchResult> {
+    const { generation, selected } = this.state;
+    return request<PlaylistSearchResult>(`${root}${this.provider}/search`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Panel-Intent": "music-library" },
+      body: JSON.stringify({ searchId, generation, source: selected, query: this.getList(selected).query }),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(35_000)])
+    });
+  }
+
+  cancelSearch(searchId: string) {
+    void fetch(`${root}${this.provider}/search/${searchId}`, {
+      method: "DELETE", headers: { "X-Panel-Intent": "music-library" }, keepalive: true
+    }).catch(() => {});
   }
 
   async play(record: Recording, choice?: string): Promise<PlayResult> {

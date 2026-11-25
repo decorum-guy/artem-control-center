@@ -140,14 +140,11 @@ export function currentProblemsForSnapshot(
   const add = (next: DiagnosticsProblem) => { problems.set(next.id, next); };
   for (const service of snapshot.services) {
     if (!serviceNeedsAttention(service)) continue;
-    const subsystem = serviceLabels[service.id] ?? "Сервис";
-    add(problem(
-      `service:${service.id}`,
-      subsystem,
-      stateForHealth(service),
-      snapshot.generatedAt,
-      service.presentation?.freshnessLabel ?? null
-    ));
+    const subsystem = serviceLabels[service.id] ?? (service.title.trim() || service.id);
+    const current = problem(`service:${service.id}`, subsystem, stateForHealth(service),
+      snapshot.generatedAt, service.presentation?.freshnessLabel ?? null);
+    if (service.dataContract === "music.connection.v1") current.summary = service.summary;
+    add(current);
   }
 
   const planning = snapshot.planning;

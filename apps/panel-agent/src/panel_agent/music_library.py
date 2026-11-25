@@ -10,8 +10,9 @@ import json
 import re
 import secrets
 import time
+import unicodedata
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Literal
 from urllib.parse import urlsplit
@@ -25,13 +26,14 @@ from .access_policy import AccessPolicyStore
 from .music_library_types import Continuation, Playlist, ProviderPage, Recording
 from .music_matching import Candidate, Track, match
 from .station_playback import StationPlaybackCollector
-from .yandex_library import YandexLibrary, YandexPageExpired
+from .yandex_library import PlaylistIndex, YandexLibrary, YandexPageExpired
 from .youtube_browser_connect import MusicBrowserConnector
 from .youtube_library import BrowserChannelMismatch, YouTubeLibrary
-from .youtube_music import MusicAuthRequired, MusicUnavailable, YOUTUBE_PROXY
+from .youtube_music import MusicAuthRequired, MusicProxyUnavailable, MusicUnavailable, YOUTUBE_PROXY
 
 Provider = Literal["yandex", "youtube"]
 PLAY_CAPABILITY = "media.station.play_library"
+LIKE_CAPABILITY = "media.alice.like"
 ARTWORK_HOSTS = {
     "youtube": {"i.ytimg.com", "i9.ytimg.com", "lh3.googleusercontent.com", "lh3.ggpht.com",
                 "yt3.ggpht.com", "yt3.googleusercontent.com"},
@@ -42,6 +44,10 @@ CURSOR_CACHE = 220
 CATALOG_LIMIT = 500
 CATALOG_PAGES = 16
 MAX_ROW_KEY = 18_000
+SEARCH_PAGES_PER_CYCLE = 10
+SEARCH_SECONDS_PER_CYCLE = 20
+SEARCH_ROWS = 500
+SEARCH_TTL_SECONDS = 900
 
 
 def keep(mapping: OrderedDict, key, value, size: int) -> None:
@@ -62,6 +68,8 @@ class Feed:
         self.row_signing_key = secrets.token_bytes(32)
         self.status = "auth_required" if provider else "not_configured"
         self.catalog_failed = False
+        self.last_read = 0.0
+        self.connection_issue: str | None = None
         self.lock = asyncio.Lock()
         self.waiters = 0
         self.pages: OrderedDict[tuple[str, str | None], dict] = OrderedDict()
@@ -75,6 +83,8 @@ class Feed:
         self.row_signing_key = secrets.token_bytes(32)
         self.status = status
         self.catalog_failed = False
+        self.last_read = 0.0
+        self.connection_issue: str | None = None
         self.pages.clear()
         self.sources.clear()
         self.cursors.clear()
@@ -102,6 +112,8 @@ class Feed:
         self.session_revision += 1
         self.row_signing_key = secrets.token_bytes(32)
         self.status = status
+        self.last_read = 0.0
+        self.connection_issue = None
         self.needs_session_probe = True
         assert self.provider is not None
         self.provider.reset()
@@ -206,6 +218,44 @@ class Artwork:
         return Response(body, media_type=content_type, headers={"Cache-Control": "private, max-age=120"})
 
 
+class SearchSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    searchId: str = Field(pattern=r"^[a-f0-9]{32}$")
+    generation: str = Field(pattern=r"^[a-f0-9]{32}$")
+    source: str = Field(min_length=1, max_length=148, pattern=r"^[a-zA-Z0-9_-]+$")
+    query: str = Field(min_length=1, max_length=90)
+
+
+def search_text(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+@dataclass
+class PlaylistSearch:
+    id: str
+    stamp: tuple[str, int]
+    source: str
+    query: str
+    cursor: Continuation | None = None
+    index: PlaylistIndex | None = None
+    seen_cursors: set[bytes] = field(default_factory=set)
+    matches: list[dict] = field(default_factory=list)
+    checked: int = 0
+    status: str = "working"
+    updated_at: float = field(default_factory=time.monotonic)
+
+    def projection(self) -> dict:
+        return {"searchId": self.id, "items": self.matches.copy(), "checked": self.checked,
+                "status": self.status}
+
+
+class LikeSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trackId: str = Field(pattern=r"^[0-9]{1,20}$")
+
+
 class PlaySelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     generation: str = Field(pattern=r"^[a-f0-9]{32}$")
@@ -237,10 +287,154 @@ class MusicLibrary:
         self.choices: OrderedDict[str, Options] = OrderedDict()
         self.matches: OrderedDict[tuple[str, str, str], str] = OrderedDict()
         self.liked_revision = 0
+        self.yandex_liked_revision = 0
+        self.like_lock = asyncio.Lock()
+        self.searches: dict[Provider, PlaylistSearch] = {}
+        self.search_locks = {provider: asyncio.Lock() for provider in self.feeds}
+        self.uncertain_likes: OrderedDict[tuple[str, str], None] = OrderedDict()
 
     def invalidate_youtube_likes(self) -> None:
         self.liked_revision += 1
         self.feeds["youtube"].pages.pop(("LM", None), None)
+        self.invalidate_search("youtube", "LM")
+
+    def invalidate_search(self, provider: Provider, source: str) -> None:
+        job = self.searches.get(provider)
+        if job and job.source == source:
+            job.status = "playlist_changed"
+
+    def cancel_search(self, provider: Provider, identity: str) -> None:
+        job = self.searches.get(provider)
+        if job and job.id == identity:
+            del self.searches[provider]
+
+    async def search_playlist(self, provider: Provider, body: SearchSelection) -> dict:
+        feed = self.feeds[provider]
+        stamp = feed.stamp()
+        term = search_text(body.query)
+        if not term:
+            raise HTTPException(422, "empty_query")
+        if stamp[0] != body.generation:
+            raise HTTPException(409, "account_changed")
+        if feed.provider is None or feed.version is None or body.source not in feed.sources:
+            raise HTTPException(404, "unknown_playlist")
+        lock = self.search_locks[provider]
+        if lock.locked():
+            raise HTTPException(429, "busy")
+        async with lock:
+            job = self.searches.get(provider)
+            if job is None or job.id != body.searchId:
+                job = PlaylistSearch(body.searchId, stamp, body.source, term)
+                self.searches[provider] = job
+            elif (job.stamp, job.source, job.query) != (stamp, body.source, term):
+                raise HTTPException(409, "account_changed")
+            if time.monotonic() - job.updated_at > SEARCH_TTL_SECONDS:
+                job.status = "page_expired"
+            if job.status in {"complete", "limit", "page_expired", "playlist_changed"}:
+                return job.projection()
+            job.status = "working"
+            deadline = time.monotonic() + SEARCH_SECONDS_PER_CYCLE
+            try:
+                for _ in range(SEARCH_PAGES_PER_CYCLE):
+                    if time.monotonic() >= deadline:
+                        break
+                    async with feed.lock:
+                        if self.searches.get(provider) is not job or job.status != "working":
+                            break
+                        if feed.stamp() != stamp:
+                            raise HTTPException(409, "account_changed")
+                        if isinstance(feed.provider, YandexLibrary):
+                            page, index = await feed.provider.scan_tracks(job.source, job.cursor, job.index)
+                        else:
+                            page, index = await feed.provider.tracks(job.source, job.cursor), None
+                        if feed.stamp() != stamp:
+                            raise HTTPException(409, "account_changed")
+                        if self.searches.get(provider) is not job or job.status != "working":
+                            break
+                        next_page = page.continuation
+                        cursor_id = hashlib.sha256(repr(next_page).encode()).digest() if next_page else None
+                        if len(page.rows) > 220 or (cursor_id is not None and cursor_id in job.seen_cursors):
+                            job.status = "page_expired"
+                            break
+                        for row in page.rows:
+                            if not isinstance(row, Recording):
+                                raise MusicUnavailable
+                            if term in search_text(" ".join((row.title, *row.artists, row.album or ""))):
+                                if len(job.matches) == SEARCH_ROWS:
+                                    job.status = "limit"
+                                    break
+                                job.matches.append(self._project(provider, feed, job.source, row))
+                            job.checked += 1
+                        if job.status == "limit":
+                            break
+                        job.index, job.cursor = index, next_page
+                        if next_page is None:
+                            job.status = "complete"
+                            break
+                        assert cursor_id is not None
+                        job.seen_cursors.add(cursor_id)
+                        if len(job.seen_cursors) >= 2000:
+                            job.status = "limit"
+                            break
+            except YandexPageExpired:
+                job.status = "page_expired"
+            except MusicAuthRequired:
+                job.status = "auth_required"
+            except MusicUnavailable:
+                job.status = "source_unavailable"
+            if self.searches.get(provider) is not job:
+                raise HTTPException(409, "search_cancelled")
+            if job.status == "working":
+                job.status = "more"
+            job.updated_at = time.monotonic()
+            return job.projection()
+
+    async def like_current(self, track_id: str) -> dict:
+        self.access().require(LIKE_CAPABILITY, gate_enabled=self.writes())
+        if self.station.displayed_track(track_id, datetime.now(timezone.utc)) is None:
+            raise HTTPException(409, "track_changed")
+        yandex = self.yandex
+        if yandex is None:
+            raise HTTPException(409, "not_configured")
+        if self.like_lock.locked():
+            raise HTTPException(409, "busy")
+        async with self.like_lock:
+            version = yandex.version()
+            key = None
+            try:
+                uid = await yandex._account()
+                key = (uid, track_id)
+                if track_id in await yandex.liked_track_ids(uid):
+                    self.uncertain_likes.pop(key, None)
+                    return {"status": "already_liked"}
+                if key in self.uncertain_likes:
+                    return {"status": "unconfirmed"}
+
+                def may_send() -> bool:
+                    allowed = yandex.version() == version and self.access().authorize(
+                        LIKE_CAPABILITY, gate_enabled=self.writes()).allowed
+                    if allowed:
+                        keep(self.uncertain_likes, key, None, 128)
+                    return allowed
+
+                try:
+                    if not await yandex.like_track(uid, track_id, may_send):
+                        return {"status": "blocked"}
+                except (MusicAuthRequired, MusicUnavailable):
+                    if key not in self.uncertain_likes:
+                        raise
+                if yandex.version() != version or track_id not in await yandex.liked_track_ids(uid):
+                    return {"status": "unconfirmed"}
+                self.uncertain_likes.pop(key, None)
+                self.feeds["yandex"].pages.pop(("likes", None), None)
+                self.invalidate_search("yandex", "likes")
+                self.yandex_liked_revision += 1
+                self.access().audit_capability(LIKE_CAPABILITY, result="confirmed")
+                return {"status": "liked"}
+            except (MusicAuthRequired, MusicUnavailable) as exc:
+                if key in self.uncertain_likes:
+                    return {"status": "unconfirmed"}
+                raise HTTPException(503, "source_unavailable") from exc
 
     def can_play(self) -> bool:
         return self.access().authorize(PLAY_CAPABILITY, gate_enabled=self.writes()).allowed
@@ -250,8 +444,49 @@ class MusicLibrary:
         return {"generation": feed.sync(), "status": feed.status, "canPlay": self.can_play(),
                 "sessionRevision": feed.session_revision,
                 "viewIdentity": hashlib.sha256(("music-view:" + feed.account).encode()).hexdigest() if feed.account else None,
-                "likedRevision": self.liked_revision if provider == "youtube" else 0,
+                "likedRevision": self.liked_revision if provider == "youtube" else self.yandex_liked_revision,
                 "yandexGeneration": self.feeds["yandex"].sync()}
+
+    def youtube_connection_status(self) -> str:
+        feed = self.feeds["youtube"]
+        feed.sync()
+        if self.browser and self.browser.projection()["active"]:
+            return "recovering"
+        if feed.connection_issue:
+            return feed.connection_issue
+        if feed.provider is None:
+            return "not_configured"
+        if feed.version is None:
+            return "auth_required"
+        if not feed.last_read or time.monotonic() - feed.last_read > 660:
+            return "unchecked"
+        return "ready"
+
+    async def probe_youtube(self) -> None:
+        feed = self.feeds["youtube"]
+        stamp = feed.stamp()
+        if (feed.provider is None or feed.version is None or feed.lock.locked()
+                or self.browser and self.browser.projection()["active"]):
+            return
+        async with feed.lock:
+            try:
+                await feed.provider.catalog(None)
+            except BrowserChannelMismatch:
+                issue = "wrong_channel"
+            except MusicAuthRequired:
+                issue = "auth_required"
+            except MusicProxyUnavailable:
+                issue = "proxy_unavailable"
+            except MusicUnavailable:
+                issue = "unavailable"
+            else:
+                issue = None
+            if feed.stamp() == stamp:
+                feed.connection_issue = issue
+                if issue is None:
+                    feed.last_read = time.monotonic()
+                    if self.browser:
+                        self.browser.confirm_read(feed.version)
 
     async def page(self, provider: Provider, source: str, cursor: str | None, refresh: bool = False) -> dict:
         feed = self.feeds[provider]
@@ -294,6 +529,7 @@ class MusicLibrary:
                         raise HTTPException(409, "account_changed") from exc
                     if provider == "youtube":
                         feed.status = "auth_required"
+                        feed.connection_issue = "wrong_channel" if isinstance(exc, BrowserChannelMismatch) else "auth_required"
                         feed.needs_session_probe = True
                         if self.browser and not isinstance(exc, BrowserChannelMismatch):
                             self.browser.recover()
@@ -306,6 +542,7 @@ class MusicLibrary:
                     if not source:
                         feed.catalog_failed = True
                     feed.status = "unavailable"
+                    feed.connection_issue = "proxy_unavailable" if isinstance(exc, MusicProxyUnavailable) else "unavailable"
                     raise HTTPException(503, "source_unavailable") from exc
                 if feed.stamp() != stamp:
                     raise HTTPException(409, "account_changed")
@@ -313,10 +550,12 @@ class MusicLibrary:
                 if len(page.rows) > limit or (continuation is not None and page.continuation == continuation):
                     raise HTTPException(503, "invalid_page")
                 if refresh:
+                    self.invalidate_search(provider, source)
                     feed.discard_pages(source)
                     if not source:
                         refreshed = {row.key for row in page.rows if isinstance(row, Playlist)}
                         for removed in feed.sources.keys() - refreshed:
+                            self.invalidate_search(provider, removed)
                             feed.discard_pages(removed)
                         feed.sources.clear()
                 items = [self._project(provider, feed, source, row) for row in page.rows]
@@ -329,6 +568,9 @@ class MusicLibrary:
                 keep(feed.pages, key, result, PAGE_CACHE)
                 if not source:
                     feed.catalog_failed = False
+                if not feed.catalog_failed:
+                    feed.last_read = time.monotonic()
+                    feed.connection_issue = None
                 feed.needs_session_probe = False
                 feed.status = "unavailable" if feed.catalog_failed else "ready"
                 if provider == "youtube" and self.browser:
@@ -529,6 +771,23 @@ def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
                      refresh: bool = False):
         response.headers["Cache-Control"] = "no-store"
         return await library.page(provider, source, cursor, refresh and cursor is None)
+
+    @router.post("/{provider}/search")
+    async def search(provider: Provider, request: Request, response: Response, body: SearchSelection):
+        require_music_origin(request, "music-library")
+        response.headers["Cache-Control"] = "no-store"
+        return await library.search_playlist(provider, body)
+
+    @router.delete("/{provider}/search/{identity}", status_code=204)
+    async def cancel_search(provider: Provider, request: Request, identity: str):
+        require_music_origin(request, "music-library")
+        library.cancel_search(provider, identity)
+        return Response(status_code=204)
+
+    @router.post("/yandex/like-current")
+    async def like_current(request: Request, body: LikeSelection):
+        require_music_origin(request, "music-library")
+        return await library.like_current(body.trackId)
 
     @router.post("/{provider}/play")
     async def play(provider: Provider, request: Request, body: PlaySelection):
