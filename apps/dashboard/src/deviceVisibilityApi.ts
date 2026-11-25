@@ -1,4 +1,17 @@
-import type { DeviceVisibilitySettings, OwnerFacingDeviceKey } from "@artem/contracts";
+import type { DeviceVisibilitySettings, OverviewLightStripId, OwnerFacingDeviceKey } from "@artem/contracts";
+
+export type DevicePresentationPatch =
+  | { deviceKey: OwnerFacingDeviceKey; visible: boolean }
+  | { overviewLightStripId: OverviewLightStripId | null };
+
+export const overviewLightStripLabels: Record<OverviewLightStripId, string> = {
+  "living-room-light-strip": "Лента в зале",
+  "bedroom-ble-light-strip": "Лента в спальне"
+};
+
+export function isOverviewLightStripId(value: unknown): value is OverviewLightStripId {
+  return typeof value === "string" && Object.hasOwn(overviewLightStripLabels, value);
+}
 
 export class DeviceVisibilityApiError extends Error {
   constructor(readonly code: string, readonly status: number) {
@@ -24,7 +37,11 @@ function parseSettings(value: unknown): DeviceVisibilitySettings {
   if (devices.length !== 1 || devices[0].key !== "kettle" || value.warnings.some((warning) => warning !== "stored_device_visibility_unavailable")) {
     throw new DeviceVisibilityApiError("contract_invalid", 200);
   }
-  return { schemaVersion: "device.visibility.v1", revision, updatedAt: value.updatedAt, devices, available: value.available, warnings: value.warnings as DeviceVisibilitySettings["warnings"], writesEnabled: value.writesEnabled };
+  const overviewLightStripId = value.overviewLightStripId ?? null;
+  if (overviewLightStripId !== null && !isOverviewLightStripId(overviewLightStripId)) {
+    throw new DeviceVisibilityApiError("contract_invalid", 200);
+  }
+  return { schemaVersion: "device.visibility.v1", revision, updatedAt: value.updatedAt, devices, overviewLightStripId, available: value.available, warnings: value.warnings as DeviceVisibilitySettings["warnings"], writesEnabled: value.writesEnabled };
 }
 
 async function request(path: string, init?: RequestInit): Promise<DeviceVisibilitySettings> {
@@ -49,6 +66,6 @@ export function getDeviceVisibility(signal?: AbortSignal): Promise<DeviceVisibil
   return request("/api/v1/settings/device-visibility", { signal });
 }
 
-export function patchDeviceVisibility(entry: { expectedRevision: number; deviceKey: OwnerFacingDeviceKey; visible: boolean }): Promise<DeviceVisibilitySettings> {
-  return request("/api/v1/settings/device-visibility", { method: "PATCH", body: JSON.stringify({ expectedRevision: entry.expectedRevision, deviceKey: entry.deviceKey, visible: entry.visible }) });
+export function patchDeviceVisibility(entry: DevicePresentationPatch & { expectedRevision: number }): Promise<DeviceVisibilitySettings> {
+  return request("/api/v1/settings/device-visibility", { method: "PATCH", body: JSON.stringify(entry) });
 }

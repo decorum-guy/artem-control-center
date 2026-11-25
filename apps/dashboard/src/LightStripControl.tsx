@@ -1,3 +1,4 @@
+import { BleLightStripControls } from "./BleLightStripControls";
 import { Slider } from "./ui/Controls";
 import { v3VisualSkinEnabled } from "./visualShellConfig";
 import { RingGauge } from "./ui/RingGauge";
@@ -107,11 +108,20 @@ function hexToHs(hex: string): [number, number] {
   return [Math.round((hue * 60 + 360) % 360), Math.round(max ? delta / max * 100 : 0)];
 }
 
-export function LightStripControl({ service, variant = "home", interactive = true }: {
+interface LightStripControlProps {
   service: ServiceSnapshot;
   variant?: "home" | "overview";
   interactive?: boolean;
-}) {
+}
+
+export function LightStripControl({ service, variant = "home", interactive = true }: LightStripControlProps) {
+  if ((service.data as Record<string, unknown>).provider === "ble") {
+    return <BleLightStripControls service={service} variant={variant} interactive={interactive} />;
+  }
+  return <HaLightStripControl service={service} variant={variant} interactive={interactive} />;
+}
+
+function HaLightStripControl({ service, variant = "home", interactive = true }: LightStripControlProps) {
   const data = service.data as LightData;
   const { ensureCapability, explainAvailability } = useAccess();
   const { guardMutation, locked } = useInteractionLock();

@@ -24,7 +24,6 @@ const technicalCopy = [
 ];
 
 const calendarEventsRoute = new RegExp("/api/v1/planning/events(?:/[^/?]+)?(?:\\?.*)?$");
-const reminderListRoute = new RegExp("/api/v1/planning/reminders(?:/[^/?]+)?(?:\\?.*)?$");
 
 const artifactDirectory = (testInfo: TestInfo) =>
   process.env.ISSUE_116_ARTIFACT_DIR ?? testInfo.outputPath("issue-116-owner-copy-review");
@@ -256,14 +255,12 @@ test.describe("Issue #116 owner-facing copy", () => {
     await expect(page.getByTestId("planning-calendar-selected-day-empty")).toContainText("Нет событий");
     await expectPlainOwnerCopy(page, "route-calendar");
 
-    await page.route(reminderListRoute, async (route) => {
+    await page.route("**/api/v1/station/reminders", async (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "unavailable" }) });
     });
     await page.goto("/reminders");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
-    await expect(page.getByTestId("planning-route-health")).toContainText("могут быть неполными");
-    await expect(page.getByTestId("planning-reminder-route-row")).toHaveCount(1);
+    await expect(page.getByTestId("alice-reminders")).toContainText("Не удалось связаться с панелью");
     await expectPlainOwnerCopy(page, "route-reminders");
 
     await page.route("**/api/v1/access", async (route) => {

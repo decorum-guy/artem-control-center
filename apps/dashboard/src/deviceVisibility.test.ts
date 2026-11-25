@@ -8,6 +8,7 @@ function service(id: string, dataContract: string): ServiceSnapshot {
 
 const visibleSettings: DeviceVisibilitySettings = {
   schemaVersion: "device.visibility.v1", revision: 0, updatedAt: "now", available: true, warnings: [], writesEnabled: true,
+  overviewLightStripId: null,
   devices: [{ key: "kettle", label: "Чайник", defaultVisible: true, visible: true }]
 };
 

@@ -90,7 +90,7 @@ test.describe("Control Center V2 shell", () => {
     await waitForShell(page);
     const navRoutes = await page.locator(".v2-nav-link").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-nav-route")));
     expect(navRoutes).toEqual([
-      "/overview", "/weather", "/home", "/services",
+      "/overview", "/weather", "/music", "/home", "/services",
       "/coffee-diary", "/calendar", "/tasks", "/reminders", "/system", "/settings"
     ]);
     expect(await page.locator(".v2-nav-link > svg").count()).toBe(navRoutes.length);

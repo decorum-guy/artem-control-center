@@ -4,16 +4,19 @@ version = "0.1.0"
 requires-python = ">=3.9"
 dependencies = [
   "astral==3.2",
+  "bleak==3.1.0; sys_platform == 'win32' and python_version >= '3.11'",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "icalendar>=6.3,<8",
   "Pillow>=11.3,<12",
+  "playwright==1.55.0; sys_platform == 'win32' and python_version >= '3.9'",
   "pydantic>=2.11,<3",
   "PyYAML>=6,<7",
   "tzdata>=2024.1,<2027",
   "tzfpy==0.16.4",
   "uvicorn[standard]>=0.35,<1",
-  "websockets>=14,<16"
+  "websockets>=14,<16",
+  "ytmusicapi==1.12.4; python_version >= '3.10'"
 ]
 
 [tool.pytest.ini_options]

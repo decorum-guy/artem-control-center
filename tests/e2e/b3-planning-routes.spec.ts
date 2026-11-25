@@ -54,30 +54,6 @@ async function setEmptyPlanningPreview(page: Page, domain: "tasks" | "calendar" 
   });
 }
 
-async function expectReminderViewResponse(
-  page: Page,
-  view: "upcoming" | "overdue" | "delivery",
-  action: () => Promise<unknown>,
-) {
-  const responsePromise = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return url.pathname === "/api/v1/planning/reminders/view"
-      && url.searchParams.get("view") === view;
-  });
-  await action();
-  const response = await responsePromise;
-  const payload = await response.json() as Record<string, unknown>;
-  expect(response.status()).toBe(200);
-  expect(payload.schemaVersion).toBe("planning.panel.v1");
-  expect(payload.kind).toBe("list");
-  expect(payload.domain).toBe("reminder");
-  expect(payload.sourceStatus).toBe("current");
-  expect(payload.lastSyncedAt).toBeTruthy();
-  expect(Array.isArray(payload.sources)).toBeTruthy();
-  expect(payload.sources).not.toBeNull();
-  expect(JSON.stringify(payload)).not.toContain("accountId");
-  expect(JSON.stringify(payload)).not.toContain("correlation_id");
-}
 
 test.describe("B3 Planning monitoring routes", () => {
   test.beforeEach(async ({ page }) => {
@@ -155,34 +131,14 @@ test.describe("B3 Planning monitoring routes", () => {
     await assertNoWrites();
   });
 
-  test("Overview reaches the reminder monitor without requiring a placeholder row", async ({ page }) => {
+  test("Overview opens the native Alice reminder route", async ({ page }) => {
     const assertNoWrites = await assertPlanningTrafficIsReadOnly(page);
-    await setEmptyPlanningPreview(page, "tasks");
     await page.goto("/overview");
     const overviewReminder = page.getByTestId("planning-reminder-row");
-    if (await overviewReminder.count()) {
-      await expectReminderViewResponse(page, "upcoming", () => overviewReminder.tap());
-    } else {
-      await expectReminderViewResponse(page, "upcoming", () => page.goto("/reminders"));
-    }
+    if (await overviewReminder.count()) await overviewReminder.tap();
+    else await page.goto("/reminders");
     await expect(page.getByTestId("route-reminders")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Напоминания" })).toHaveCount(v2ShellEnabled ? 1 : 0);
-    await expectReminderViewResponse(
-      page,
-      "overdue",
-      () => page.locator(".planning-segmented").getByRole("button", { name: "Пропущено" }).tap(),
-    );
-    await expect(page.getByTestId("planning-reminder-list")).toContainText("Доставлено · ждёт завершения");
-    await expect(page.getByTestId("planning-reminder-list")).toContainText("Открыто");
-    await expectReminderViewResponse(
-      page,
-      "delivery",
-      () => page.locator(".planning-segmented").getByRole("button", { name: "Доставка" }).tap(),
-    );
-    await expect(page.getByTestId("planning-reminder-list")).toContainText("Повторная попытка");
-    await expect(page.getByTestId("planning-reminder-list")).toContainText("Не доставлено");
-    await expect(page.getByTestId("planning-reminder-list")).not.toContainText("Доставлено · ждёт завершения");
-    await openDetailAndClose(page, "planning-reminder-route-row", "planning-reminder-detail");
+    await expect(page.getByTestId("alice-reminders")).toContainText("Источник Алисы не настроен");
     await assertNoWrites();
   });
 
@@ -241,44 +197,10 @@ test.describe("B3 Planning monitoring routes", () => {
     await expect(page.getByTestId("planning-task-list")).toBeVisible();
   });
 
-  test("Reminder contract failure keeps the fallback and Retry remains read-only", async ({ page }) => {
-    const writes: string[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("/api/v1/planning/") && request.method() !== "GET") {
-        writes.push(`${request.method()} ${request.url()}`);
-      }
-    });
-    await setRouteResponseState(page, "/api/v1/planning/reminders/view", 200, (payload) => {
-      payload.sources = null;
-    });
-    await page.goto("/reminders");
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
-    const retryButton = page.getByRole("button", { name: "Повторить" }).first();
-    const failedRetryResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.pathname === "/api/v1/planning/reminders/view" && response.status() === 200;
-    });
-    await retryButton.tap();
-    await failedRetryResponse;
-    await expect(page.getByTestId("planning-route-health")).toContainText("Последние доступные данные");
-    expect(writes).toEqual([]);
-
-    await page.unroute("**/api/v1/planning/reminders/view*");
-    const recoveredResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.pathname === "/api/v1/planning/reminders/view" && response.status() === 200;
-    });
-    await retryButton.tap();
-    await recoveredResponse;
-    await expect(page.getByTestId("planning-reminder-list")).toBeVisible();
-    expect(writes).toEqual([]);
-  });
-
   test("503 with an empty bounded preview is not rendered as successful empty for any route", async ({ page }) => {
     for (const [domain, routePath, routeUrl] of [
       ["tasks", "/api/v1/planning/tasks", "/tasks"],
-      ["calendar", "/api/v1/planning/events", "/calendar"],
-      ["reminders", "/api/v1/planning/reminders/view", "/reminders"]
+      ["calendar", "/api/v1/planning/events", "/calendar"]
     ] as const) {
       await setEmptyPlanningPreview(page, domain);
       await setRouteResponseState(page, routePath, 503);
@@ -351,12 +273,12 @@ test.describe("B3 Planning monitoring routes", () => {
       ["tasks-overdue", "/tasks?theme=day"],
       ["calendar-today", "/calendar?theme=day"],
       ["calendar-month", "/calendar?theme=day"],
-      ["reminders-soon", "/reminders?theme=day"],
-      ["reminders-delivery", "/reminders?theme=night"]
+      ["reminders-alice", "/reminders?theme=day"],
+      ["reminders-unconfigured", "/reminders?theme=night"]
     ] as const) {
       await page.goto(url);
       if (name === "tasks-overdue") await page.locator(".planning-segmented").first().getByRole("button", { name: "Просрочено" }).tap();
-      if (name === "reminders-delivery") await page.locator(".planning-segmented").getByRole("button", { name: "Доставка" }).tap();
+      if (name.startsWith("reminders-")) await expect(page.getByTestId("alice-reminders")).toContainText("Источник Алисы не настроен");
       await page.screenshot({ path: path.join(artifactDir, `${name}.png`), animations: "disabled" });
     }
     await page.route("**/api/v1/planning/tasks**", async (route) => {

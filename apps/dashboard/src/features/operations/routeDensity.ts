@@ -62,7 +62,7 @@ export interface HomePrimarySelection {
   coffee: ServiceSnapshot | null;
   climate: ServiceSnapshot | null;
   kettle: ServiceSnapshot | null;
-  light: ServiceSnapshot | null;
+  lights: ServiceSnapshot[];
   fallback: ServiceSnapshot | null;
   additional: ServiceSnapshot[];
 }
@@ -81,16 +81,16 @@ export function selectHomePrimaryDevices(services: readonly ServiceSnapshot[]): 
   const coffee = homeDevices.find((service) => resolveManifest(service).id === "home.coffee-machine") ?? null;
   const climate = homeDevices.find((service) => service.dataContract === "home.climate.v1") ?? null;
   const kettle = homeDevices.find((service) => resolveManifest(service).id === "home.kettle") ?? null;
-  const light = homeDevices.find((service) => service.dataContract === "home.light-strip.v1") ?? null;
-  const selected = new Set([coffee?.id, climate?.id, kettle?.id, light?.id]);
-  const fallback = !coffee && !climate && !kettle && !light ? homeDevices[0] ?? null : null;
+  const lights = homeDevices.filter((service) => service.dataContract === "home.light-strip.v1");
+  const selected = new Set([coffee?.id, climate?.id, kettle?.id, ...lights.map((service) => service.id)]);
+  const fallback = !coffee && !climate && !kettle && lights.length === 0 ? homeDevices[0] ?? null : null;
   if (fallback) selected.add(fallback.id);
 
   return {
     coffee,
     climate,
     kettle,
-    light,
+    lights,
     fallback,
     additional: homeDevices.filter((service) => !selected.has(service.id))
   };

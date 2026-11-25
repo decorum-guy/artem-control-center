@@ -14,6 +14,7 @@ import { KettleControl } from "../../KettleControl";
 import { LightStripControl } from "../../LightStripControl";
 import { StationMiniWidget } from "./StationMiniWidget";
 import type { OverviewRuntimeContext } from "./overviewRuntime";
+import { overviewLightStripLabels } from "../../deviceVisibilityApi";
 import { coffeeAppearanceConfig, planningDensityFor } from "./appearanceConfig";
 import type {
   OverviewFallbackReason,
@@ -143,10 +144,18 @@ function renderKettle(runtime: OverviewRuntimeContext): ReactNode {
 }
 
 function renderLightStrip(runtime: OverviewRuntimeContext): ReactNode {
-  const light = runtime.snapshot.services.find((service) => service.enabled && service.dataContract === "home.light-strip.v1") ?? null;
-  if (!light) return <OverviewRuntimeUnavailable title="Лента в зале" detail="Данные Home Assistant пока недоступны." testId="overview-light-strip-unavailable" />;
+  const selected = runtime.overviewLightStripId;
+  if (selected === undefined) {
+    return <OverviewRuntimeUnavailable title="Лента" detail="Настройки ленты пока недоступны." testId="overview-light-strip-unavailable" />;
+  }
+  const light = runtime.snapshot.services.find((service) => service.enabled
+    && service.dataContract === "home.light-strip.v1" && (selected === null || service.id === selected));
+  if (!light) {
+    return <OverviewRuntimeUnavailable title={selected ? overviewLightStripLabels[selected] : "Лента"}
+      detail={selected ? "Выбранная лента недоступна." : "Нет подключённой ленты."} testId="overview-light-strip-unavailable" />;
+  }
   return <WorkZone className="overview-v2-real-widget overview-light-strip-widget" data-testid="overview-light-strip-widget" data-widget-type="home.light-strip">
-    <LightStripControl service={light} variant="overview" interactive={!runtime.editMode} />
+    <LightStripControl key={light.id} service={light} variant="overview" interactive={!runtime.editMode} />
   </WorkZone>;
 }
 
@@ -309,7 +318,7 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
     case "home.television":
       return <TelevisionWidget interactive={!runtime.editMode} />;
     case "home.station-mini-2":
-      return <StationMiniWidget interactive={!runtime.editMode} />;
+      return <StationMiniWidget interactive={!runtime.editMode} playback={runtime.snapshot.stationPlayback} />;
     case "planning.summary":
       return renderPlanning(item, runtime);
     case "system.health-summary":

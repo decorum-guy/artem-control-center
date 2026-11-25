@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { DeviceVisibilitySettings, OwnerFacingDeviceKey } from "@artem/contracts";
-import { getDeviceVisibility, patchDeviceVisibility } from "./deviceVisibilityApi";
+import type { DeviceVisibilitySettings } from "@artem/contracts";
+import { getDeviceVisibility, patchDeviceVisibility, type DevicePresentationPatch } from "./deviceVisibilityApi";
 
 interface DeviceVisibilityContextValue {
   settings: DeviceVisibilitySettings | null;
   loading: boolean;
   refresh: () => Promise<void>;
-  save: (entry: { deviceKey: OwnerFacingDeviceKey; visible: boolean }) => Promise<DeviceVisibilitySettings>;
+  save: (entry: DevicePresentationPatch) => Promise<DeviceVisibilitySettings>;
 }
 
 const DeviceVisibilityContext = createContext<DeviceVisibilityContextValue | null>(null);
@@ -16,7 +16,7 @@ export function DeviceVisibilityProvider({ children }: { children: ReactNode }) 
   const [loading, setLoading] = useState(true);
   const refresh = useCallback(async () => {
     setLoading(true);
-    try { setSettings(await getDeviceVisibility()); } catch { setSettings(null); } finally { setLoading(false); }
+    try { setSettings(await getDeviceVisibility()); } catch { /* Keep the last confirmed selection. */ } finally { setLoading(false); }
   }, []);
   useEffect(() => {
     void refresh();
@@ -24,7 +24,7 @@ export function DeviceVisibilityProvider({ children }: { children: ReactNode }) 
     window.addEventListener("artem-capabilities-changed", onCapabilitiesChanged);
     return () => window.removeEventListener("artem-capabilities-changed", onCapabilitiesChanged);
   }, [refresh]);
-  const save = useCallback(async (entry: { deviceKey: OwnerFacingDeviceKey; visible: boolean }) => {
+  const save = useCallback(async (entry: DevicePresentationPatch) => {
     if (!settings) throw new Error("device_visibility_unavailable");
     const saved = await patchDeviceVisibility({ expectedRevision: settings.revision, ...entry });
     setSettings(saved);

@@ -97,3 +97,58 @@ test("host battery shows its level before the weather and follows charging chang
   await expect(battery).toHaveCount(0);
   await expect(weather).toBeVisible();
 });
+
+test("returning to an open V3 section does not replay the route entrance", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/overview?motion=full");
+  const content = page.locator(".v2-route-content");
+  await expect(content).toBeVisible();
+  await content.evaluate(async (element) => {
+    const animations = element.getAnimations({ subtree: true })
+      .filter((animation) => animation instanceof CSSAnimation && animation.animationName === "cc-skin-enter");
+    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+  });
+
+  const repeats = await content.evaluate(async (element) => {
+    const frame = () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await frame();
+    Reflect.deleteProperty(document, "hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await frame();
+    return element.getAnimations({ subtree: true })
+      .filter((animation) => animation instanceof CSSAnimation && animation.animationName === "cc-skin-enter").length;
+  });
+  expect(repeats).toBe(0);
+  await page.getByRole("navigation").getByRole("link", { name: "Дом", exact: true }).click();
+  await expect(page).toHaveURL(/\/home(?:\?|$)/);
+  await expect(content).toHaveCount(1);
+  await expect(content.getByRole("heading", { name: "Дом", exact: true })).toBeVisible();
+});
+
+test("navigation drops the previous page's theme transition", async ({ page }) => {
+  await page.goto("/overview?theme=night&motion=full");
+  await expect(page.locator("[data-testid^=route-overview]")).toBeVisible();
+  await page.getByRole("navigation").getByRole("link", { name: "Настройки", exact: true }).click();
+  await expect(page.getByTestId("settings-theme-day")).toBeVisible();
+  const overlap = await page.evaluate(async () => {
+    const activeTheme = () => document.getAnimations().filter((animation) =>
+      animation instanceof CSSAnimation && animation.animationName.includes("view-transition"));
+    const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    document.querySelector<HTMLButtonElement>("[data-testid=settings-theme-day]")!.click();
+    for (let i = 0; i < 20 && activeTheme().length === 0; i++) await frame();
+    const before = activeTheme().length;
+    history.back();
+    let oldPageFrames = 0;
+    for (let i = 0; i < 14; i++) {
+      await frame();
+      if (location.pathname === "/overview" && document.querySelector("[data-testid^=route-overview]") && activeTheme().length) {
+        oldPageFrames++;
+      }
+    }
+    return { before, oldPageFrames, route: location.pathname, theme: document.documentElement.dataset.theme };
+  });
+  expect(overlap.before).toBeGreaterThan(0);
+  expect(overlap).toMatchObject({ oldPageFrames: 0, route: "/overview", theme: "day" });
+});

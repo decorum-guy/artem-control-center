@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { CalendarEventMarkerStyle, PlanningCalendarSource } from "@artem/contracts";
+import type { CalendarEventMarkerStyle, PlanningCalendarSource, StationRetention } from "@artem/contracts";
 import type { AccessStatus } from "../../accessApi";
 import type { ShellNavigationTarget } from "../../Shell";
 import {
@@ -32,6 +32,8 @@ import { projectRegistryStateLabel, projectRegistrySummary } from "../../project
 import { useDeviceVisibility } from "../../DeviceVisibility";
 import { useInterfaceCopy } from "../../interfaceCopy";
 import { useProjectRegistry, type ProjectRegistryController } from "../../ProjectRegistry";
+import { StationRetentionSettings } from "./StationRetentionSettings";
+import { MusicSaveSettings } from "./MusicSaveSettings";
 import "./settingsV2.css";
 
 import { v3VisualSkinEnabled } from "../../visualShellConfig";
@@ -60,6 +62,7 @@ export function SettingsV2Page({
   theme,
   motion,
   calendarSources,
+  stationRetention,
   onThemeChange,
   onMotionChange,
   jarvisEnabled,
@@ -73,6 +76,7 @@ export function SettingsV2Page({
   theme: Theme;
   motion: MotionMode;
   calendarSources: PlanningCalendarSource[];
+  stationRetention?: StationRetention | null;
   onThemeChange: (theme: Theme) => void;
   onMotionChange: (motion: MotionMode) => void;
   jarvisEnabled: boolean;
@@ -154,6 +158,8 @@ export function SettingsV2Page({
       </section>
 
       <SystemControlsSettings />
+      {stationRetention && <StationRetentionSettings retention={stationRetention} />}
+      <MusicSaveSettings />
 
       <div className="settings-v2-summary-grid">
         <SettingsSummaryColumn>

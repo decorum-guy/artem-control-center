@@ -5,11 +5,6 @@ import { expect, test, type Page } from "@playwright/test";
 const artifactDirectory = (testInfo: { outputPath: (name: string) => string }) =>
   process.env.PR9_ARTIFACT_DIR ?? testInfo.outputPath("v2-planning-foundation-review");
 const taskMutationsEnabled = process.env.VITE_PLANNING_TASK_MUTATIONS_ENABLED === "true";
-const planningMutationControlsEnabled = [
-  "VITE_PLANNING_TASK_MUTATIONS_ENABLED",
-  "VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED",
-  "VITE_PLANNING_REMINDER_MUTATIONS_ENABLED"
-].some((name) => process.env[name] === "true");
 
 async function mutatePlanningRoute(page: Page, routePath: string, mutate: (payload: Record<string, unknown>) => void) {
   await page.route(`**${routePath}*`, async (route) => {
@@ -71,11 +66,8 @@ test.describe("PR9 Planning visual/module foundation", () => {
     await expect(overlap).not.toContainText("Europe/Moscow");
 
     await page.goto("/reminders?theme=day");
-    await expect(page.getByTestId("route-reminders")).toHaveAttribute("data-planning-module", "planning.reminders-monitoring");
-    await expect(page.locator(".planning-segmented button")).toHaveCount(3);
-    await expect(page.getByTestId("planning-reminder-lifecycle").first()).toBeVisible();
-    await expect(page.getByTestId("planning-reminder-delivery").first()).toBeVisible();
-    await expect(page.locator("[data-testid='planning-future-action-slot']")).toHaveCount(planningMutationControlsEnabled ? 1 : 0);
+    await expect(page.getByTestId("alice-reminders")).toContainText("Источник Алисы не настроен");
+    await expect(page.getByTestId("planning-future-action-slot")).toHaveCount(0);
   });
 
   test("captures the bounded PR9 review matrix", async ({ page }, testInfo) => {
@@ -137,14 +129,8 @@ test.describe("PR9 Planning visual/module foundation", () => {
     await page.unroute("**/api/v1/planning/events**");
 
     await page.goto("/reminders?theme=day");
-    await expect(page.getByTestId("planning-reminder-list")).toBeVisible();
-    await capture(page, directory, "planning-reminders-default");
-    await page.getByRole("button", { name: "Пропущено" }).tap();
-    await expect(page.getByTestId("planning-reminder-list")).toContainText("Доставлено · ждёт завершения");
-    await capture(page, directory, "planning-reminders-delivered-pending");
-    await page.getByRole("button", { name: "Доставка", exact: true }).tap();
-    await expect(page.getByTestId("planning-reminder-list")).toContainText("Не доставлено");
-    await capture(page, directory, "planning-reminders-delivery-failure");
+    await expect(page.getByTestId("alice-reminders")).toContainText("Источник Алисы не настроен");
+    await capture(page, directory, "planning-reminders-alice");
 
     await page.goto("/overview?theme=day");
     await expect(page.getByTestId("planning-overview-card")).toBeVisible();

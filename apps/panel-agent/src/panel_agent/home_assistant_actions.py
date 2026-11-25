@@ -252,6 +252,8 @@ class HomeAssistantActionExecutor:
             capability_id = "home_climate_actions"
             configured = self.settings.home_climate_actions_enabled
         elif action_id in LIGHT_ACTION_IDS:
+            if self.settings.light_strip_provider == "ble":
+                return False
             capability_id = "light_strip_actions"
             configured = self.settings.light_strip_actions_enabled
         else:
@@ -365,7 +367,9 @@ class HomeAssistantActionExecutor:
             async with self._lock_for(action_id):
                 # The lock is deliberately queued. The fresh read below makes
                 # a duplicate request idempotent after an earlier request wins.
-                if not self.home_assistant.mutation_transport_available():
+                if action_id in CLIMATE_ACTION_IDS:
+                    self._require(action_id, integration_available=self._integration_available(action_id))
+                elif not self.home_assistant.mutation_transport_available():
                     raise HomeAssistantActionError("ha_integration_unavailable", 503)
                 result = await self._execute_locked(request)
             self.access.audit_capability(
@@ -518,6 +522,19 @@ class HomeAssistantActionExecutor:
 
     async def _execute_climate(self, request: HomeAssistantActionRequest) -> dict[str, Any]:
         current = await self._fresh(CLIMATE_ENTITY)
+        async def send(path: str, body: dict) -> None:
+            # Fresh state requires an await. The last authorization check must
+            # run after it, while this request still owns the climate lock.
+            self._require(request.actionId, integration_available=self._integration_available(request.actionId))
+            try:
+                await self._call_service(path, body)
+            except HomeAssistantActionError:
+                try:
+                    await self._fresh(CLIMATE_ENTITY)
+                except HomeAssistantActionError:
+                    pass
+                raise
+
         current_state = current.get("state")
         if current_state not in set(CLIMATE_HVAC_MODES):
             raise HomeAssistantActionError("ha_invalid_state", 409)
@@ -525,7 +542,7 @@ class HomeAssistantActionExecutor:
         if request.actionId == "home.climate.power_on":
             if current_state in CLIMATE_ON_STATES:
                 return self._climate_result(request.requestId, request.actionId, current)
-            await self._call_service(
+            await send(
                 "/api/services/climate/turn_on",
                 {"entity_id": CLIMATE_ENTITY},
             )
@@ -536,7 +553,7 @@ class HomeAssistantActionExecutor:
         elif request.actionId == "home.climate.power_off":
             if current_state == "off":
                 return self._climate_result(request.requestId, request.actionId, current)
-            await self._call_service(
+            await send(
                 "/api/services/climate/turn_off",
                 {"entity_id": CLIMATE_ENTITY},
             )
@@ -546,7 +563,7 @@ class HomeAssistantActionExecutor:
             )
         elif request.actionId == "home.climate.set_temperature":
             assert request.temperature is not None
-            await self._call_service(
+            await send(
                 "/api/services/climate/set_temperature",
                 {"entity_id": CLIMATE_ENTITY, "temperature": request.temperature},
             )
@@ -558,7 +575,7 @@ class HomeAssistantActionExecutor:
         elif request.actionId == "home.climate.set_mode":
             assert request.mode is not None
             if request.mode == "off":
-                await self._call_service(
+                await send(
                     "/api/services/climate/turn_off",
                     {"entity_id": CLIMATE_ENTITY},
                 )
@@ -567,7 +584,7 @@ class HomeAssistantActionExecutor:
                     lambda state: state.get("state") == "off",
                 )
             else:
-                await self._call_service(
+                await send(
                     "/api/services/climate/set_hvac_mode",
                     {"entity_id": CLIMATE_ENTITY, "hvac_mode": request.mode},
                 )
@@ -577,7 +594,7 @@ class HomeAssistantActionExecutor:
                 )
         else:
             assert request.fanMode is not None
-            await self._call_service(
+            await send(
                 "/api/services/climate/set_fan_mode",
                 {"entity_id": CLIMATE_ENTITY, "fan_mode": request.fanMode},
             )

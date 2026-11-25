@@ -46,6 +46,7 @@ with _CATALOG_PATH.open("r", encoding="utf-8") as _catalog_file:
 _FIELDS: tuple[InterfaceCopyField, ...] = (
     "navigation.overview",
     "navigation.weather",
+    "navigation.music",
     "navigation.home",
     "navigation.services",
     "navigation.calendar",
@@ -60,7 +61,9 @@ _FIELDS: tuple[InterfaceCopyField, ...] = (
     "page.overview.title",
     "page.overview.subtitle",
     "page.weather.title",
+    "page.music.title",
     "page.weather.subtitle",
+    "page.music.subtitle",
     "page.home.title",
     "page.home.subtitle",
     "page.services.title",
@@ -134,6 +137,7 @@ def _valid_text(field: InterfaceCopyField, value: str | None) -> str | None:
 def _override_value(overrides: InterfaceCopyOverrides, field: InterfaceCopyField) -> str | None:
     if field == "navigation.overview": return overrides.navigation.overview
     if field == "navigation.weather": return overrides.navigation.weather
+    if field == "navigation.music": return overrides.navigation.music
     if field == "navigation.home": return overrides.navigation.home
     if field == "navigation.services": return overrides.navigation.services
     if field == "navigation.calendar": return overrides.navigation.calendar
@@ -148,7 +152,9 @@ def _override_value(overrides: InterfaceCopyOverrides, field: InterfaceCopyField
     if field == "page.overview.title": return overrides.page.overview.title
     if field == "page.overview.subtitle": return overrides.page.overview.subtitle
     if field == "page.weather.title": return overrides.page.weather.title
+    if field == "page.music.title": return overrides.page.music.title
     if field == "page.weather.subtitle": return overrides.page.weather.subtitle
+    if field == "page.music.subtitle": return overrides.page.music.subtitle
     if field == "page.home.title": return overrides.page.home.title
     if field == "page.home.subtitle": return overrides.page.home.subtitle
     if field == "page.services.title": return overrides.page.services.title

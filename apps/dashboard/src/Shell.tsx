@@ -21,6 +21,7 @@ import { useVisualViewport } from "./useVisualViewport";
 
 export type RoutePath =
   | "/overview"
+  | "/music"
   | "/home"
   | "/services"
   | "/calendar"
@@ -42,6 +43,7 @@ export type ShellNavigationTarget = ShellRoutePath | {
 const primaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; short: string }> = [
   { path: "/overview", copyKey: "navigation.overview", short: "О" },
   { path: "/weather", copyKey: "navigation.weather", short: "П" },
+  { path: "/music", copyKey: "navigation.music", short: "М" },
   { path: "/home", copyKey: "navigation.home", short: "Д" },
   { path: "/services", copyKey: "navigation.services", short: "С" },
   { path: "/coffee-diary", copyKey: "navigation.coffeeDiary", short: "К" },
@@ -59,6 +61,7 @@ const secondaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyF
 const v2PrimaryNavigation: Array<{ path: ShellRoutePath; copyKey: InterfaceCopyField; icon: IconName }> = [
   { path: "/overview", copyKey: "navigation.overview", icon: "overview" },
   { path: "/weather", copyKey: "navigation.weather", icon: "weather" },
+  { path: "/music", copyKey: "navigation.music", icon: "music" },
   { path: "/home", copyKey: "navigation.home", icon: "home" },
   { path: "/services", copyKey: "navigation.services", icon: "services" },
   { path: "/coffee-diary", copyKey: "navigation.coffeeDiary", icon: "coffee" }
@@ -300,6 +303,39 @@ function V2AccessHeaderStatus({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+function RouteContent({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [entering, setEntering] = useState(true);
+
+  useEffect(() => {
+    const content = ref.current;
+    if (!v3VisualSkinEnabled || !content) return;
+    const finish = () => setEntering(false);
+    const onCancel = (event: AnimationEvent) => {
+      if (event.target === content) finish();
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) finish();
+    };
+    // The entrance is 220 ms plus at most 200 ms of stagger.
+    const deadline = window.setTimeout(finish, 440);
+    content.addEventListener("animationcancel", onCancel);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearTimeout(deadline);
+      content.removeEventListener("animationcancel", onCancel);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  return (
+    <div ref={ref} className="route-content v2-route-content"
+      data-route-transition={entering ? "enter" : undefined} tabIndex={-1}>
+      {children}
+    </div>
+  );
+}
+
 function V2ProductShell({
   route,
   snapshot,
@@ -462,7 +498,7 @@ function V2ProductShell({
             <InteractionLockStatus />
           </div>
         </header>
-        <div key={route} className="route-content v2-route-content" data-route-transition="enter" tabIndex={-1}>{children}</div>
+        <RouteContent key={route}>{children}</RouteContent>
       </main>
       <button
         ref={floatingMenuRef}

@@ -1,3 +1,4 @@
+import { MusicPage } from "./features/music/MusicPage";
 import { flushSync } from "react-dom";
 import { SelectField } from "./ui/SelectField";
 import { readAccent, persistAccent, readColorMode, persistColorMode, explicitlyStoredAppearance, loadAppearance, saveAppearance, type Appearance, type Accent } from "./skin/accent";
@@ -14,7 +15,8 @@ import {
   SystemPage
 } from "./pages";
 import { BackupsPage } from "./BackupsPage";
-import { CalendarPage, RemindersPage, TasksPage } from "./PlanningRoutes";
+import { CalendarPage, TasksPage } from "./PlanningRoutes";
+import { AliceRemindersSection } from "./AliceRemindersSection";
 import { TasksProviderBoundary } from "./TodoistTasks";
 import {
   planningRouteEnabled
@@ -70,6 +72,7 @@ function persistJarvisVisible(visible: boolean): void {
 const userRoutes: ShellRoutePath[] = [
   "/overview",
   "/weather",
+  "/music",
   "/home",
   "/services",
   "/coffee-diary",
@@ -87,10 +90,6 @@ function routeFromLocation(): ShellRoutePath {
     return "/overview";
   }
   const requested = window.location.pathname as ShellRoutePath;
-  if (requested === "/reminders" && !planningRouteEnabled("/reminders")) {
-    window.history.replaceState({}, "", `/overview${window.location.search}`);
-    return "/overview";
-  }
   return [...userRoutes, "/dev/widget-gallery"].includes(requested) ? requested : "/overview";
 }
 
@@ -135,6 +134,7 @@ export function App() {
   const [coffeeDelayedStartPending, setCoffeeDelayedStartPending] = useState(false);
   const [coffeeDelayedStartDialogOpen, setCoffeeDelayedStartDialogOpen] = useState(false);
   const snapshotCoordinator = useRef<SnapshotCoordinator | null>(null);
+  const themeTransition = useRef<ViewTransition | null>(null);
 
   useEffect(() => {
     const coordinator = new SnapshotCoordinator({
@@ -198,7 +198,10 @@ export function App() {
   }, [refreshCoffeeDelayedStart, snapshot]);
 
   useEffect(() => {
-    const onPopState = () => setRoute(routeFromLocation());
+    const onPopState = () => {
+      themeTransition.current?.skipTransition();
+      setRoute(routeFromLocation());
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -277,7 +280,13 @@ export function App() {
     }
     if (v3VisualSkinEnabled && motion === "full" && !document.hidden
       && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && document.startViewTransition) {
-      document.startViewTransition(() => flushSync(() => setTheme(next)));
+      themeTransition.current?.skipTransition();
+      const transition = document.startViewTransition(() => flushSync(() => setTheme(next)));
+      themeTransition.current = transition;
+      const clear = () => {
+        if (themeTransition.current === transition) themeTransition.current = null;
+      };
+      void transition.finished.then(clear, clear);
     } else {
       setTheme(next);
     }
@@ -295,6 +304,7 @@ export function App() {
 
   function navigate(target: ShellNavigationTarget) {
     const nextRoute = typeof target === "string" ? target : target.path;
+    if (nextRoute !== route) themeTransition.current?.skipTransition();
     const query = new URLSearchParams(import.meta.env.DEV ? window.location.search : "");
     if (typeof target !== "string") {
       const targetQuery = new URLSearchParams(target.search);
@@ -614,6 +624,7 @@ export function App() {
             )
           )}
           {route === "/weather" && <WeatherPage />}
+          {route === "/music" && <MusicPage playback={snapshot?.stationPlayback} />}
           {route === "/home" && (
             v2VisualShellEnabled ? (
               <HomeV2Page
@@ -651,6 +662,7 @@ export function App() {
                 theme={theme}
                 motion={motion}
                 calendarSources={snapshot?.planning?.providerStatuses ?? []}
+                stationRetention={snapshot?.stationRetention}
                 onThemeChange={changeTheme}
                 onMotionChange={setMotion}
                 jarvisEnabled={jarvisEnabled}
@@ -671,8 +683,8 @@ export function App() {
           {route === "/system" && (v2VisualShellEnabled ? <SystemV2Page snapshot={snapshot} /> : <SystemPage snapshot={snapshot} />)}
           {route === "/tasks" && <TasksProviderBoundary fallback={planningRouteEnabled("/tasks") ? <TasksPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/tasks" />} />}
           {route === "/calendar" && (planningRouteEnabled("/calendar") ? <CalendarPage snapshot={snapshot} onNavigate={navigate} /> : <PlaceholderPage route="/calendar" />)}
-          {route === "/reminders" && planningRouteEnabled("/reminders") && <RemindersPage snapshot={snapshot} onNavigate={navigate} />}
-          {!["/overview", "/weather", "/home", "/services", "/coffee-diary", "/backups", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
+          {route === "/reminders" && <AliceRemindersSection />}
+          {!["/overview", "/weather", "/music", "/home", "/services", "/coffee-diary", "/backups", "/settings", "/system", "/tasks", "/calendar", "/reminders"].includes(route) && (
             <PlaceholderPage route={route as "/backups" | "/apps" | "/system"} />
           )}
         </ProductShell>

@@ -44,6 +44,10 @@ CAPABILITIES: dict[str, AccessProfile] = {
     "home.climate.set_temperature": "standard",
     "home.climate.set_mode": "standard",
     "home.climate.set_fan_mode": "standard",
+    "home.television.voice": "standard",
+    "media.youtube.save_current": "standard",
+    "media.youtube.connect_browser": "standard",
+    "media.station.play_library": "standard",
     "home.light_strip.power_on": "standard",
     "home.light_strip.power_off": "standard",
     "home.light_strip.set_brightness": "standard",
@@ -180,11 +184,13 @@ class AccessPolicyStore:
         audit_dir: str | Path | None = None,
         temporary_minutes: int = 30,
         now=utc_now,
+        read_only: bool = False,
     ) -> None:
         self.path = Path(path)
         self.audit_dir = Path(audit_dir) if audit_dir else self.path.parent / "audit"
         self.temporary_minutes = max(1, temporary_minutes)
         self._now = now
+        self._read_only = read_only
         self._lock = RLock()
         self._state = self._load_state()
 
@@ -236,6 +242,8 @@ class AccessPolicyStore:
             return self._safe_state()
 
     def _atomic_write(self) -> None:
+        if self._read_only:
+            raise RuntimeError("Access policy is open for reading only")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + f".{os.getpid()}.tmp")
         temporary.write_text(
@@ -276,9 +284,10 @@ class AccessPolicyStore:
     def _temporary_expiry(self) -> datetime | None:
         expiry = parse_datetime(self._state.get("temporaryFullExpiresAt"))
         if expiry and expiry <= self._now():
-            self._state["temporaryFullExpiresAt"] = None
-            self._bump()
-            self._audit("temporary_full_expired", result="standard")
+            if not self._read_only:
+                self._state["temporaryFullExpiresAt"] = None
+                self._bump()
+                self._audit("temporary_full_expired", result="standard")
             return None
         return expiry
 
@@ -332,7 +341,7 @@ class AccessPolicyStore:
         lockout = parse_datetime(self._state.get("lockoutUntil"))
         if lockout and lockout > self._now():
             return lockout
-        if lockout:
+        if lockout and not self._read_only:
             self._state["lockoutUntil"] = None
             self._state["failedUnlocks"] = []
             self._bump()

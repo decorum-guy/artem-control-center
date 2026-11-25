@@ -1,6 +1,8 @@
+import type { CSSProperties } from "react";
+import type { StationPlayback } from "@artem/contracts";
 import { v3VisualSkinEnabled } from "../../visualShellConfig";
 import { Icon } from "../../icons";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { executeStationAction, fetchStationAvailability, STATION_ACTIONS,
   type StationActionAvailability, type StationActionId } from "../../stationActionsApi";
 import { WorkZone } from "../../ShellPrimitives";
@@ -14,6 +16,7 @@ import { useCommandSeries } from "../../useCommandSeries";
 
 const STATION_ARTWORK = resolveWidgetAsset("./assets/widgets/station-mini-2.png", v3VisualSkinEnabled);
 const STATION_GLOW_FEEDBACK_DURATION_MS = 1200;
+const TRACK_FADE_OUT_MS = 220;
 type VolumeStep = "media.alice.volume_up" | "media.alice.volume_down";
 function isVolumeStep(action: StationActionId): action is VolumeStep {
   return action === "media.alice.volume_up" || action === "media.alice.volume_down";
@@ -48,7 +51,58 @@ function ActionIcon({ actionId }: { actionId: StationActionId }) {
   </svg>;
 }
 
-export function StationMiniWidget({ interactive }: { interactive: boolean }) {
+function TrackCover({ source }: { source: string | null }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const available = source !== null && /^\/api\/v1\/station-playback\/cover\/[a-f0-9]{64}$/.test(source) && !failed;
+  return <span className="station-mini-widget__cover" data-cover-loaded={loaded} aria-hidden="true">
+    {!loaded && <span>♪</span>}
+    {available && <img src={source} alt="" decoding="async" draggable={false}
+      onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />}
+  </span>;
+}
+
+function StationTrack({ track }: { track: StationPlayback | null }) {
+  const previousTrack = useRef(track);
+  const [exitComplete, setExitComplete] = useState(track === null);
+  const hasTrack = track !== null;
+
+  useLayoutEffect(() => {
+    if (track) previousTrack.current = track;
+  }, [track]);
+
+  useEffect(() => {
+    if (hasTrack) {
+      setExitComplete(false);
+      return;
+    }
+    if (!previousTrack.current) return;
+    const timeout = setTimeout(() => {
+      previousTrack.current = null;
+      setExitComplete(true);
+    }, TRACK_FADE_OUT_MS + 30);
+    return () => clearTimeout(timeout);
+  }, [hasTrack]);
+
+  const display = track ?? (exitComplete ? null : previousTrack.current);
+  return <div className="station-mini-widget__track" data-track-layer=""
+    data-testid={hasTrack ? "station-current-track" : undefined} aria-hidden={!hasTrack || undefined}>
+    {display && <>
+      <TrackCover key={display.coverPath} source={display.coverPath} />
+      <div className="station-mini-widget__track-text">
+        <strong title={display.title ?? undefined}>{display.title}</strong>
+        {display.artist && <span title={display.artist}>{display.artist}</span>}
+        {display.status === "paused" && <small>Пауза</small>}
+      </div>
+    </>}
+  </div>;
+}
+
+export function StationMiniWidget({ interactive, playback }: {
+  interactive: boolean;
+  playback?: StationPlayback | null;
+}) {
+  const track = (playback?.status === "playing" || playback?.status === "paused") && playback.title ? playback : null;
   const { locked, guardMutation } = useInteractionLock();
   const { showNotice } = useNoticeCenter();
   const [availability, setAvailability] = useState<StationActionAvailability | null>(null);
@@ -202,15 +256,24 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
   }
 
   return <WorkZone className="overview-v2-real-widget station-mini-widget" data-testid="overview-station-mini-widget" data-instrument-active={v3VisualSkinEnabled ? glowActive : undefined}>
-    <header className="station-mini-widget__header"><h2>Станция Mini 2</h2></header>
-    <div className="station-mini-widget__art" data-testid="station-artwork-slot">
-      <span key={glowPulse} className={`station-mini-widget__glow${glowActive ? " station-mini-widget__glow--active" : ""}`} aria-hidden="true" />
-      {STATION_ARTWORK && !artworkFailed && <img className="station-mini-widget__image" src={STATION_ARTWORK}
-        alt="" aria-hidden="true" draggable={false} decoding="async" onError={() => setArtworkFailed(true)} />}
-      {(!STATION_ARTWORK || artworkFailed) && <svg className="station-mini-widget__fallback" viewBox="0 0 80 100" aria-hidden="true">
-        <rect x="16" y="8" width="48" height="84" rx="20" fill="none" stroke="currentColor" strokeWidth="2" />
-        <circle cx="40" cy="77" r="3" fill="currentColor" />
-      </svg>}
+    <header className="station-mini-widget__header">
+      <h2>Станция Mini 2</h2>
+      <p className="station-mini-widget__message" role="status">{volume.active ? "Меняем громкость…" : message ?? (availability ? "" : "Управление недоступно")}</p>
+    </header>
+    <div className="station-mini-widget__art" data-testid="station-artwork-slot" data-track-present={Boolean(track)}
+      style={{ "--station-details-out": `${TRACK_FADE_OUT_MS}ms` } as CSSProperties}>
+      <div className="station-mini-widget__speaker">
+        <span key={glowPulse} className={`station-mini-widget__glow${glowActive ? " station-mini-widget__glow--active" : ""}`} aria-hidden="true" />
+        {STATION_ARTWORK && !artworkFailed && <img className="station-mini-widget__image" src={STATION_ARTWORK}
+          alt="" aria-hidden="true" draggable={false} decoding="async" onError={() => setArtworkFailed(true)} />}
+        {(!STATION_ARTWORK || artworkFailed) && <svg className="station-mini-widget__fallback" viewBox="0 0 80 100" aria-hidden="true">
+          <rect x="16" y="8" width="48" height="84" rx="20" fill="none" stroke="currentColor" strokeWidth="2" />
+          <circle cx="40" cy="77" r="3" fill="currentColor" />
+        </svg>}
+      </div>
+      <StationTrack track={track} />
+      {playback?.status === "stale" && <small className="station-mini-widget__read-status">Нет связи с колонкой</small>}
+      {playback?.status === "auth_required" && <small className="station-mini-widget__read-status">Требуется вход в Яндекс</small>}
     </div>
     <div className="station-mini-widget__controls" aria-label="Управление Станцией Mini 2">
       {STATION_ACTIONS.map((actionId) => <button key={actionId} type="button"
@@ -222,7 +285,6 @@ export function StationMiniWidget({ interactive }: { interactive: boolean }) {
     </div>
     <button ref={musicButton} type="button" className="station-mini-widget__music" onClick={openMusic} aria-haspopup="dialog"
       disabled={!interactive}>🎵 Музыка <span aria-hidden="true">⌄</span></button>
-    <p className="station-mini-widget__message" role="status">{volume.active ? "Меняем громкость…" : message ?? (availability ? "" : "Управление недоступно")}</p>
     {sheet !== "closed" && <DialogFrame className="station-presets__sheet" testId="station-presets"
       title={sheet === "music" ? "Что включить?" : sheet === "manage" ? "Настроить подборки" : "Добавить подборку"}
       onClose={closeSheet} restoreFocusRef={musicButton}>

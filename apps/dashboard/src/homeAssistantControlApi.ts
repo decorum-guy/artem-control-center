@@ -157,15 +157,15 @@ async function parse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function fetchHomeAssistantActionAvailability(): Promise<HomeAssistantActionAvailability> {
+export async function fetchHomeAssistantActionAvailability(signal?: AbortSignal): Promise<HomeAssistantActionAvailability> {
   return parse<HomeAssistantActionAvailability>(await fetch(
     "/api/v1/actions/home-assistant/availability",
-    { cache: "no-store" }
+    { cache: "no-store", signal }
   ));
 }
 
 export async function executeHomeAssistantAction(
-  request: HomeAssistantActionRequest
+  request: HomeAssistantActionRequest, signal?: AbortSignal
 ): Promise<HomeAssistantActionResponse> {
   const body = request.actionId === HOME_KETTLE_BOIL || request.actionId === HOME_KETTLE_STOP
     ? { actionId: request.actionId, requestId: request.requestId }
@@ -187,7 +187,8 @@ export async function executeHomeAssistantAction(
   return parse<HomeAssistantActionResponse>(await fetch("/api/v1/actions/home-assistant", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   }));
 }
 

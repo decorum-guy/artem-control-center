@@ -4,9 +4,11 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Literal
 from urllib.parse import quote
 from uuid import UUID, uuid4
@@ -31,6 +33,7 @@ from .contracts import (
     CalendarEventMarkerStylePatch,
     CalendarDisplayPreferencesResponse,
     DeviceVisibilityPatch,
+    OverviewLightStripPatch,
     DeviceVisibilitySettingsResponse,
     CapabilityPatch,
     DashboardSnapshot,
@@ -47,6 +50,7 @@ from .contracts import (
 )
 from .fixtures import load_fixture_document, services_for_scenario
 from .diagnostics import DiagnosticsCollector
+from .home_assistant import LIGHT_STRIP_SERVICE_ID
 from .integrations import IntegrationRuntime
 from .planning_api import build_planning_router
 from .todoist import TodoistAdapter
@@ -62,6 +66,10 @@ from .host_battery import router as host_battery_router
 from .runtime_control import router as runtime_control_router
 from .system_controls import WindowsSystemControls, build_system_controls_router
 from .settings import IntegrationSettings
+from .ble_strip import ADDRESS as BLE_ADDRESS, BleStripManager, build_ble_strip_router
+from .station_playback import StationPlaybackCollector, StationPlaybackSettings, build_station_playback_router
+from .station_reminders import StationRemindersCollector, StationRemindersWriter, build_station_reminders_router
+from .station_retention import configured_retention
 from .station_actions import StationActionExecutor, build_station_action_router
 from .snapshot import SnapshotPublisher
 from .weather import WeatherService, build_weather_router
@@ -96,7 +104,16 @@ from .ai_settings import AIProviderSettingsStore
 from .ai_text import AITextService
 from .ai_api import build_ai_router
 from .access_policy import AccessPolicyStore
-from .tv_api import build_tv_router
+from .tv_api import TVExecutorClient, build_tv_router
+from .tv_voice import TVVoiceBridge
+from .music_save import MusicSave, build_music_save_router, dispatch_scenario
+from .music_library import MusicLibrary, build_music_library_router
+from .station_credentials import StationCredentialFile
+from .yandex_library import YandexLibrary
+from .youtube_browser_connect import CONNECT_CAPABILITY, MusicBrowserConnector
+from .youtube_library import YouTubeLibrary
+from .alice_voice_feedback import AliceVoiceFeedback
+from .youtube_music import YouTubeMusic
 from .backups import AvalarStageBackupEngine, BackupEngine, BackupService, PanelConfigSource, build_backup_router
 from .interface_copy import (
     FIXTURE_INTERFACE_COPY_SCENARIOS,
@@ -182,15 +199,46 @@ project_registry_store = ProjectRegistryStore(SETTINGS.projects_config_path)
 weather_service = WeatherService(mode=MODE)
 JARVIS_ENABLED = os.getenv("PANEL_JARVIS_ENABLED", "false").strip().lower() == "true"
 diagnostics_collector = DiagnosticsCollector(SETTINGS)
+station_settings = StationPlaybackSettings.from_environment() if MODE in {"production", "read_only"} else None
+station_retention = configured_retention() if station_settings else None
+station_playback = StationPlaybackCollector(station_settings, on_state=station_retention.observe if station_retention else None)
+reminder_credentials = os.getenv("PANEL_STATION_REMINDER_CREDENTIAL_FILE", "").strip()
+station_reminders = (
+    StationRemindersCollector(Path(reminder_credentials))
+    if reminder_credentials and MODE in {"production", "read_only"}
+    else None
+)
+ble_strip = (
+    BleStripManager(SETTINGS.ble_strip_address)
+    if MODE in {"production", "read_only", "integration_test"} and SETTINGS.light_strip_provider in {"ble", "both"}
+    and BLE_ADDRESS.fullmatch(SETTINGS.ble_strip_address)
+    else None
+)
+
+
+def snapshot_services():
+    services = runtime.services()
+    if SETTINGS.light_strip_provider == "ble":
+        services = [service for service in services if service.id != LIGHT_STRIP_SERVICE_ID]
+    if ble_strip is not None:
+        services.append(ble_strip.snapshot())
+    return services
+
+
 snapshot_publisher = SnapshotPublisher(
     mode=MODE,
     jarvis_enabled=JARVIS_ENABLED,
-    services_builder=runtime.services,
+    services_builder=snapshot_services,
     planning_builder=runtime.planning_snapshot,
     heartbeat_seconds=SETTINGS.sse_heartbeat_seconds,
     on_snapshot=diagnostics_collector.observe,
+    station_playback_builder=lambda: station_playback.state,
+    station_retention_builder=station_retention.snapshot if station_retention else None,
 )
 runtime.set_snapshot_callback(snapshot_publisher.rebuild)
+station_playback.on_change = snapshot_publisher.rebuild
+if ble_strip is not None:
+    ble_strip.changed = snapshot_publisher.rebuild
 overview_layout_store = OverviewLayoutStore(
     SETTINGS.overview_layout_path,
     writes_enabled=SETTINGS.overview_layout_writes_enabled and SETTINGS.writes_enabled,
@@ -218,6 +266,68 @@ startup_lifecycle = PanelStartupLifecycle()
 access_policy = AccessPolicyStore.from_environment(
     temporary_minutes=SETTINGS.access_temporary_minutes,
 )
+voice_feedback = (
+    AliceVoiceFeedback(
+        runtime.home_assistant.speak_on_station,
+        local_music_entity=os.getenv("PANEL_STATION_PLAYBACK_VOICE_ENTITY", "").strip(),
+        speak_local=station_playback.repeat_phrase if station_settings else None,
+    )
+    if os.getenv("PANEL_ALICE_VOICE_FEEDBACK_ENABLED", "").strip().lower() == "true"
+    else None
+)
+tv_voice = None
+tv_executor_token = os.getenv("PANEL_TV_EXECUTOR_TOKEN_FILE")
+if (MODE == "production" and SETTINGS.tv_voice_enabled and tv_executor_token
+        and re.fullmatch(r"media_player\.[a-z0-9_]+", SETTINGS.tv_voice_station_entity)):
+    tv_voice = TVVoiceBridge(
+        station_entity=SETTINGS.tv_voice_station_entity,
+        executor=TVExecutorClient(Path(tv_executor_token)),
+        access=lambda: access_policy,
+        write_enabled=lambda: startup_lifecycle.phase == "ready" and _write_allowed(SETTINGS.tv_voice_enabled),
+        feedback=voice_feedback,
+    )
+music_save = None
+music_target = os.getenv("PANEL_YOUTUBE_MUSIC_STATION_ENTITY", "").strip()
+music_credentials = os.getenv("PANEL_YOUTUBE_MUSIC_CREDENTIAL_FILE", "").strip()
+if (MODE in {"production", "read_only"} and os.getenv("PANEL_YOUTUBE_MUSIC_ENABLED", "").strip().lower() == "true"
+        and re.fullmatch(r"media_player\.[a-z0-9_]+", music_target)):
+    music_save = MusicSave(
+        station_playback,
+        YouTubeMusic(Path(music_credentials), os.getenv("PANEL_YOUTUBE_MUSIC_HTTP_PROXY", "")) if music_credentials else None,
+        target=music_target, access=lambda: access_policy,
+        writes=lambda: MODE == "production" and startup_lifecycle.phase == "ready" and _write_allowed(True),
+        feedback=voice_feedback,
+    )
+if tv_voice is not None or music_save is not None:
+    runtime.home_assistant.set_yandex_scenario_handler(
+        lambda event: dispatch_scenario(event, music_save, tv_voice.handle if tv_voice else None)
+    )
+
+music_library = None
+music_browser = None
+if MODE in {"production", "read_only"} and os.getenv("PANEL_MUSIC_LIBRARY_ENABLED", "").lower() == "true":
+    yandex_library = (YandexLibrary(StationCredentialFile(station_settings.credential_path))
+                      if station_settings and station_settings.credential_path else None)
+    youtube_browser = os.getenv("PANEL_YOUTUBE_LIBRARY_CREDENTIAL_FILE", "").strip()
+    youtube_library = (YouTubeLibrary(Path(youtube_browser), Path(music_credentials),
+                                      os.getenv("PANEL_YOUTUBE_MUSIC_HTTP_PROXY", ""))
+                       if youtube_browser and music_credentials else None)
+    music_browser = MusicBrowserConnector.from_environment(
+        youtube_library, lambda: access_policy.authorize(
+            CONNECT_CAPABILITY, gate_enabled=MODE == "production" and startup_lifecycle.phase == "ready"
+            and _write_allowed(True),
+        ).allowed,
+    )
+    music_library = MusicLibrary(
+        station_playback, yandex_library, youtube_library, access=lambda: access_policy,
+        writes=lambda: MODE == "production" and startup_lifecycle.phase == "ready"
+        and _write_allowed(SETTINGS.alice_station_actions_enabled),
+        paired_track=music_save.paired_track if music_save else lambda _: None,
+        browser=music_browser,
+    )
+    if music_save is not None:
+        music_save.on_new_like = music_library.invalidate_youtube_likes
+
 system_controls = WindowsSystemControls()
 backup_source = PanelConfigSource.from_store_paths(
     overview_layout=overview_layout_store.path,
@@ -288,10 +398,22 @@ async def lifespan(_: FastAPI):
         bootstrap(),
         name="panel-agent-bootstrap",
     )
+    station_playback.start()
+    if station_reminders is not None:
+        station_reminders.start()
+    if ble_strip is not None:
+        ble_strip.start()
     try:
         yield
     finally:
         startup_lifecycle.mark_stopping()
+        if music_browser is not None:
+            await music_browser.close()
+        await station_playback.close()
+        if station_reminders is not None:
+            await station_reminders.close()
+        if ble_strip is not None:
+            await ble_strip.close()
         bootstrap_task = startup_lifecycle.bootstrap_task
         if bootstrap_task is not None and not bootstrap_task.done():
             bootstrap_task.cancel()
@@ -299,7 +421,13 @@ async def lifespan(_: FastAPI):
             await asyncio.gather(bootstrap_task, return_exceptions=True)
         if startup_lifecycle.scheduler_started:
             await coffee_delayed_start_scheduler.close()
+        if voice_feedback is not None:
+            await voice_feedback.close()
         await runtime.close()
+        if tv_voice is not None:
+            await tv_voice.close()
+        if music_save is not None:
+            await music_save.close()
         await snapshot_publisher.close()
 
 
@@ -308,13 +436,32 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
-if MODE != "production":
+if MODE != "production" and os.getenv("PANEL_DIAGNOSTIC_LIVE_STATION") != "true":
     # Fixture/read-only clients still receive a truthful, bounded projection.
     # Production installs the real Alice-backed router in production.py.
     app.include_router(build_station_action_router(
         StationActionExecutor(SETTINGS, access_policy, lambda: False)
     ))
 app.include_router(build_backup_router(backup_service, access_policy))
+app.include_router(build_station_playback_router(station_playback))
+app.include_router(build_music_save_router(music_save))
+app.include_router(build_music_library_router(music_library))
+if MODE == "production" and station_reminders is not None:
+    station_reminders.writer = StationRemindersWriter(
+        station_reminders, access=lambda: access_policy,
+        device_id=os.getenv("PANEL_STATION_REMINDER_DEVICE_ID", "").strip(),
+        home_id=os.getenv("PANEL_STATION_REMINDER_HOME_ID", "").strip(),
+        write_enabled=lambda: SETTINGS.writes_enabled
+        and startup_lifecycle.phase == "ready"
+        and os.getenv("PANEL_STATION_REMINDER_WRITES_ENABLED", "").strip().lower() == "true",
+    )
+app.include_router(build_station_reminders_router(station_reminders))
+if ble_strip is not None and MODE == "production":
+    app.include_router(build_ble_strip_router(
+        ble_strip, lambda: access_policy,
+        lambda: startup_lifecycle.phase == "ready"
+        and _write_allowed(effective_immediate_capability_enabled("light_strip_actions")),
+    ))
 app.include_router(build_tv_router(lambda: _write_allowed(bool(os.getenv("PANEL_TV_EXECUTOR_TOKEN_FILE")))))
 app.include_router(
     build_project_registry_router(
@@ -664,7 +811,7 @@ def get_device_visibility(response: Response) -> DeviceVisibilitySettingsRespons
     response_model=DeviceVisibilitySettingsResponse,
 )
 def patch_device_visibility(
-    patch: DeviceVisibilityPatch,
+    patch: DeviceVisibilityPatch | OverviewLightStripPatch,
     response: Response,
 ) -> DeviceVisibilitySettingsResponse:
     if not _device_visibility_write_allowed():
@@ -1397,6 +1544,7 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "avalar_main_deploy": SETTINGS.avalar_main_deploy_enabled,
         "rog_g703": SETTINGS.rog_g703_enabled,
         "rog_g703_alice": SETTINGS.rog_g703_alice_enabled,
+        "tv_voice": tv_voice is not None and SETTINGS.writes_enabled,
         "kiosk_controls": _bool_env("PANEL_KIOSK_CONTROLS_ENABLED"),
         "panel_update_controls": _bool_env("PANEL_UPDATE_CONTROLS_ENABLED"),
     }[capability_id]

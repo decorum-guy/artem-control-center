@@ -89,7 +89,10 @@ describe("PR7 route density helpers", () => {
 
   it("places the light strip once in Home's primary controls", () => {
     const light = service("living-room-light-strip", { dataContract: "home.light-strip.v1", presentation: { category: "home-device", group: "Home infrastructure", overview: "quick-control", priority: 75 } });
-    expect(selectHomePrimaryDevices([light])).toMatchObject({ light, fallback: null, additional: [] });
+    const bedroom = { ...light, id: "bedroom-ble-light-strip", title: "Лента в спальне" };
+    expect(selectHomePrimaryDevices([light, bedroom])).toMatchObject({
+      lights: [light, bedroom], fallback: null, additional: []
+    });
   });
 
   it("classifies only trusted system contracts and explicit System categories", () => {

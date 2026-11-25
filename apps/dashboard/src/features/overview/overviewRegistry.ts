@@ -74,7 +74,7 @@ export const overviewWidgetRegistry: readonly OverviewWidgetDefinition[] = [
   }),
   definition({
     widgetType: "home.light-strip",
-    title: "Лента в зале",
+    title: "Лента",
     category: "Дом",
     iconKey: "home",
     singleton: true,

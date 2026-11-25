@@ -91,3 +91,23 @@ def test_patch_contract_is_closed_to_extra_fields():
         pass
     else:
         raise AssertionError("arbitrary routing field was accepted")
+
+
+def test_overview_strip_selection_is_closed_and_survives_restart(tmp_path, monkeypatch):
+    path = tmp_path / "device-visibility.json"
+    endpoint = "/api/v1/settings/device-visibility"
+    module = load_app(monkeypatch, path)
+    with TestClient(module.app) as client:
+        assert client.get(endpoint).json()["overviewLightStripId"] is None
+        selected = client.patch(endpoint, json={"expectedRevision": 0, "overviewLightStripId": "bedroom-ble-light-strip"})
+        assert selected.status_code == 200
+        assert selected.json()["overviewLightStripId"] == "bedroom-ble-light-strip"
+        assert client.patch(endpoint, json={"expectedRevision": 1, "overviewLightStripId": "light.somewhere"}).status_code == 422
+        assert client.patch(endpoint, json={"expectedRevision": 0, "overviewLightStripId": None}).status_code == 409
+        assert patch_visibility(client, 1, False).json()["overviewLightStripId"] == "bedroom-ble-light-strip"
+    module = load_app(monkeypatch, path, writes=False)
+    with TestClient(module.app) as client:
+        settings = client.get(endpoint).json()
+        assert settings["overviewLightStripId"] == "bedroom-ble-light-strip"
+        assert settings["devices"][0]["visible"] is False
+        assert client.patch(endpoint, json={"expectedRevision": 2, "overviewLightStripId": None}).status_code == 403

@@ -18,6 +18,7 @@ import { coffeeEditorPreviewPresentation, type CoffeeEditorPreviewStage } from "
 import "./overviewEditor.css";
 import { usePortraitViewport } from "../../viewportLayout";
 import { useAccess } from "../../AccessControls";
+import { useDeviceVisibility } from "../../DeviceVisibility";
 import type { OverviewLayoutProfile } from "./overviewLayoutApi";
 
 export function OverviewV2Page({
@@ -38,6 +39,7 @@ export function OverviewV2Page({
   onCoffeeDelayedStart: () => void;
 }): ReactNode {
   const { copy } = useInterfaceCopy();
+  const { settings: devicePresentation } = useDeviceVisibility();
   const fixtureMode = overviewFixtureModeFromLocation();
   const { showNotice } = useNoticeCenter();
   const { guardMutation } = useInteractionLock();
@@ -118,6 +120,7 @@ export function OverviewV2Page({
 
   const runtime = {
     snapshot,
+    overviewLightStripId: devicePresentation?.available ? devicePresentation.overviewLightStripId : undefined,
     onNavigate: editMode ? (() => undefined) : onNavigate,
     onCoffeeAction: editMode ? (() => undefined) : onCoffeeAction,
     coffeeActionPending,

@@ -1421,3 +1421,33 @@
     grid-template-columns: 1fr;
   }
 }
+
+.station-retention-settings {
+  padding: 0 14px;
+  border: 1px solid var(--cc-border);
+  border-radius: 14px;
+  background: var(--cc-surface-1);
+}
+.station-retention-settings summary {
+  min-height: 48px;
+  align-content: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+.station-retention-settings p,
+.station-retention-settings li { color: var(--cc-text-secondary); }
+
+.music-save-options {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.music-save-options button {
+  display: grid;
+  justify-items: start;
+  width: 100%;
+  min-block-size: 48px;
+  text-align: start;
+}

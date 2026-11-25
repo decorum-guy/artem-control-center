@@ -89,17 +89,17 @@ export function HomeV2Page({
             <KettleControl service={selection.kettle} />
           </ErrorBoundary>
         )}
-        {selection.light && (
-          <ErrorBoundary title={selection.light.title}>
-            <HomeWidgetRenderer service={selection.light} />
+        {selection.lights.map((light) => (
+          <ErrorBoundary key={light.id} title={light.title}>
+            <HomeWidgetRenderer service={light} />
           </ErrorBoundary>
-        )}
-        {!selection.coffee && !selection.climate && !selection.kettle && !selection.light && selection.fallback && (
+        ))}
+        {!selection.coffee && !selection.climate && !selection.kettle && selection.lights.length === 0 && selection.fallback && (
           <ErrorBoundary title={selection.fallback.title}>
             <DeviceRow service={selection.fallback} primary />
           </ErrorBoundary>
         )}
-        {!selection.coffee && !selection.climate && !selection.kettle && !selection.light && !selection.fallback && (
+        {!selection.coffee && !selection.climate && !selection.kettle && selection.lights.length === 0 && !selection.fallback && (
           <div className="home-v2-empty" data-testid="home-no-devices">
             <Icon name="home" />
             <strong>Домашние устройства не зарегистрированы</strong>

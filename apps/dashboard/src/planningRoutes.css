@@ -610,3 +610,97 @@
   .calendar-event-row__badges { justify-self: end; min-width: 0; max-width: 110px; }
   .planning-detail-field { grid-template-columns: 1fr; gap: 4px; }
 }
+
+.planning-alice-reminders {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.planning-alice-reminders > :is(h2, p, ul) {
+  margin: 0;
+}
+
+.planning-alice-reminders > ul {
+  padding: 0;
+  list-style: none;
+}
+
+.planning-alice-reminders-heading,
+.planning-alice-reminders-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planning-alice-reminders-heading {
+  min-block-size: 48px;
+}
+
+.planning-alice-reminders-sync {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  block-size: 1.5rem;
+}
+
+.planning-alice-reminders-sync > span {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planning-alice-reminders [aria-disabled="true"],
+.planning-alice-reminders-form [aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.planning-alice-reminders-heading h2,
+.planning-alice-reminders-form p {
+  margin: 0;
+}
+
+.planning-alice-reminders-form {
+  display: grid;
+  gap: 16px;
+}
+
+.planning-alice-reminders-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.planning-alice-reminders-form input {
+  width: 100%;
+  min-height: 48px;
+}
+
+.planning-alice-reminders-time > label {
+  flex: 1;
+}
+
+.planning-alice-reminders-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.planning-alice-reminders-presets button[aria-pressed="true"] {
+  border-color: var(--cc-accent);
+  color: var(--cc-accent);
+}
+
+.planning-alice-reminders-destination {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.planning-alice-reminders-destination legend {
+  margin-block-end: 6px;
+}

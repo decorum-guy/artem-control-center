@@ -6,12 +6,12 @@
 
 Сначала определить, что пользователь попросил: диагностику, план, код/PR, production fix или physical acceptance. Не интерпретировать разрешение читать SSH как разрешение менять сервер/Windows.
 
-Включить связь с владельцем через Telegram — [RULES.md](../RULES.md) §0: `AGENT.md` из [agent-telegram](https://github.com/decorum-guy/agent-telegram). Нет ключа бота проекта на этом компьютере — попросить его в чате до остальной работы.
+Определить выбранный владельцем канал связи по [RULES.md](../RULES.md) §0. Текущий чат и запрет уведомлений не подменять Telegram. Автономный режим сам по себе не меняет выбранный канал. Недоступность Telegram или `kz-bot` не блокирует независимую работу.
 
 Прочитай в таком порядке:
 
 1. `README.md`, `AGENTS.md`, `RULES.md`;
-2. [PROJECT_MAP.md](PROJECT_MAP.md), [ARCHITECTURE.md](ARCHITECTURE.md), [DESIGN_DIRECTION.md](DESIGN_DIRECTION.md);
+2. [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md), [PROJECT_MAP.md](PROJECT_MAP.md), [ARCHITECTURE.md](ARCHITECTURE.md), [DESIGN_DIRECTION.md](DESIGN_DIRECTION.md);
 3. [DEVELOPMENT.md](DEVELOPMENT.md), [WINDOWS_PRODUCTION_RUNTIME.md](WINDOWS_PRODUCTION_RUNTIME.md), [PRIVATE_PRODUCTION_CONNECTIVITY.md](PRIVATE_PRODUCTION_CONNECTIVITY.md);
 4. тематические контракты (Todoist, Planning, HA, Overview, ASUS) и связанный GitHub issue;
 5. актуальный source и tests — **source wins over old prose**; не изменять контракт молча.
@@ -42,10 +42,11 @@ git log -5 --oneline origin/main
 - `CODE`: проверенные обработчики и tests в конкретном Git SHA;
 - `INFERENCE`: гипотеза, пока не подтверждена последовательностью наблюдений.
 
-Если пользователь явно дал SSH доступ, сначала read-only:
+Для порученной диагностики с Mac уже известны три alias (их наличие подтвердил владелец; доступность проверяется в текущем окружении). Сначала read-only:
 - `ssh control-panel-pc` — узнать реальный Samsung hostname/uptime/runtime SHA, `status-production.ps1 -Json`, `status-connectivity.ps1 -Json`, process/ports/logs;
 - `ssh ha-vps` — проверить container state/loopback health/safe logs HA и AliceTG_Bot;
-- проверить независимые пути: browser→Panel Agent, Samsung→HA, Samsung→Planning, Samsung→Todoist, provider→iCloud, а не объявлять всё одной проблемой.
+- `ssh kz-bot` — отдельный зарубежный прокси; проверять только при релевантной сетевой задаче с учётом датированной заметки в [INFRASTRUCTURE_ACCESS.md](INFRASTRUCTURE_ACCESS.md);
+- проверить независимые пути: browser→Panel Agent, Samsung→HA, Samsung→Planning, Samsung→Todoist, provider→iCloud, AliceTG_Bot→proxy→Telegram. Ошибка Telegram сама по себе не доказывает отказ HA, Planning API или локальных устройств.
 
 Не делать `cat runtime.env`, `env`, токенсодержащие `curl -v`, отключение firewall или рестарт services без отдельной санкции. Read-only probes не должны мутировать календари/задачи или HA devices. Детальный runbook: [PRODUCTION_DIAGNOSTICS.md](PRODUCTION_DIAGNOSTICS.md).
 
@@ -89,7 +90,8 @@ git diff --check
 Перед допуском к PR:
 - focused unit/backend tests на root cause;
 - regressions соседних функций;
-- full repo validation и CI;
+- применимые локальные проверки и честный статус CI; ограничения владельца на Actions/артефакты соблюдать;
+- для docs-only: проверить diff, относительные ссылки и согласованность без фиктивных runtime-тестов;
 - опасные операции/tunnel/restart/HA writes не происходили;
 - проектные документы и screenshot artifacts не содержат приватных данных.
 

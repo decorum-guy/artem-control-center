@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
@@ -28,6 +29,7 @@ KETTLE_TEA_MODES = (
 KETTLE_MODES = ("on", "off", *KETTLE_TEA_MODES)
 CLIMATE_ENTITY = "climate.konditsioner"
 LIGHT_STRIP_ENTITY = "light.zal_lenta"
+LIGHT_STRIP_SERVICE_ID = "living-room-light-strip"
 PSU_1_ENTITY = "switch.bp_1"
 PSU_2_ENTITY = "switch.bp_2"
 CLIMATE_HVAC_MODES = ("cool", "heat", "fan_only", "dry", "auto", "off")
@@ -51,6 +53,7 @@ WATCHED_ENTITIES = (
 LOGGER = logging.getLogger(__name__)
 _STATE_CHANGED_SUBSCRIPTION_ID = 1
 _YANDEX_INTENT_SUBSCRIPTION_ID = 2
+_YANDEX_SCENARIO_SUBSCRIPTION_ID = 3
 _MAX_PRE_ACK_EVENTS = 16
 YandexIntentHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -82,6 +85,8 @@ class HomeAssistantAdapter:
         self._stale_task: Optional[asyncio.Task[None]] = None
         self._panel_mode = panel_mode
         self._on_change = on_change
+        self._yandex_scenario_handler: Callable[[dict[str, Any]], None] | None = None
+        self._yandex_scenario_subscribed = False
         self._yandex_intent_handler: YandexIntentHandler | None = None
         self._yandex_intent_subscribed = False
         self._yandex_intent_status = "disabled"
@@ -107,6 +112,9 @@ class HomeAssistantAdapter:
 
         self._yandex_intent_handler = handler
 
+    def set_yandex_scenario_handler(self, handler: Callable[[dict[str, Any]], None]) -> None:
+        self._yandex_scenario_handler = handler
+
     async def respond_to_yandex_intent(self, text: str) -> None:
         """Send one fixed yandex_dialogs response event to Home Assistant."""
 
@@ -121,6 +129,26 @@ class HomeAssistantAdapter:
                 "/api/events/yandex_intent_response",
                 json={"text": text, "end_session": True},
             )
+            response.raise_for_status()
+
+    async def speak_on_station(self, entity: str, phrase: str) -> None:
+        """Say a server-selected confirmation through the Station integration."""
+        if (not self.configured or not re.fullmatch(r"media_player\.[a-z0-9_]+", entity)
+                or not 0 < len(phrase) <= 90 or "://" in phrase):
+            raise ValueError("Invalid Station confirmation")
+        async with httpx.AsyncClient(
+            base_url=self._settings.ha_url,
+            headers={"Authorization": f"Bearer {self._settings.ha_token}"},
+            timeout=4,
+            follow_redirects=False,
+            trust_env=False,
+            transport=self._transport,
+        ) as client:
+            response = await client.post("/api/services/media_player/play_media", json={
+                "entity_id": entity,
+                "media_content_type": "text",
+                "media_content_id": phrase,
+            })
             response.raise_for_status()
 
     async def start(self) -> None:
@@ -585,7 +613,7 @@ class HomeAssistantAdapter:
             ),
         ]
         services.append(ServiceSnapshot(
-            id="living-room-light-strip",
+            id=LIGHT_STRIP_SERVICE_ID,
             title="Лента в зале",
             enabled=light is not None,
             health=light_health,
@@ -791,12 +819,26 @@ class HomeAssistantAdapter:
         else:
             self._yandex_intent_subscribed = False
             self._yandex_intent_status = "disabled"
+        self._yandex_scenario_subscribed = False
+        scenario_requested = self._yandex_scenario_handler is not None
+        if scenario_requested:
+            await socket.send(json.dumps({
+                "id": _YANDEX_SCENARIO_SUBSCRIPTION_ID,
+                "type": "subscribe_events",
+                "event_type": "yandex_scenario",
+            }))
         for message in pre_ack_events:
             await self._handle_websocket_event(message)
         async for raw in socket:
             try:
                 message = json.loads(raw)
             except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if (scenario_requested and isinstance(message, dict)
+                    and message.get("type") == "result" and message.get("id") == _YANDEX_SCENARIO_SUBSCRIPTION_ID):
+                self._yandex_scenario_subscribed = message.get("success") is True
+                if not self._yandex_scenario_subscribed:
+                    LOGGER.warning("TV voice HA subscription denied")
                 continue
             await self._handle_websocket_event(message)
 
@@ -851,6 +893,12 @@ class HomeAssistantAdapter:
             return
         if event_type == "yandex_intent":
             await self._dispatch_yandex_intent(data)
+        if (event_type == "yandex_scenario" and message.get("id") == _YANDEX_SCENARIO_SUBSCRIPTION_ID
+                and self._yandex_scenario_subscribed and self._yandex_scenario_handler):
+            try:
+                self._yandex_scenario_handler(event)
+            except Exception:
+                LOGGER.warning("TV voice HA event handler failed")
 
     async def _dispatch_yandex_intent(self, data: dict[str, Any]) -> None:
         handler = self._yandex_intent_handler
@@ -947,6 +995,7 @@ class HomeAssistantAdapter:
         was_connected = self._websocket_connected
         should_record_failure = was_connected or self._source == "live"
         self._websocket_connected = False
+        self._yandex_scenario_subscribed = False
         self._yandex_intent_subscribed = False
         self._yandex_intent_status = "disabled"
         self._snapshot_confirmed_for_transport = False

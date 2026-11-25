@@ -5,6 +5,7 @@ export type SourceMode = "live" | "cached" | "fixture" | "stale" | "unavailable"
 export type InterfaceCopyNavigationKey =
   | "overview"
   | "weather"
+  | "music"
   | "home"
   | "services"
   | "calendar"
@@ -31,6 +32,7 @@ export interface InterfaceCopyCatalog {
   navigation: {
     overview: string;
     weather: string;
+    music: string;
     home: string;
     services: string;
     calendar: string;
@@ -48,6 +50,7 @@ export interface InterfaceCopyCatalog {
   page: {
     overview: InterfaceCopyPageText;
     weather: InterfaceCopyPageText;
+    music: InterfaceCopyPageText;
     home: InterfaceCopyPageText;
     services: InterfaceCopyPageText;
     calendar: InterfaceCopyPageText;
@@ -71,6 +74,7 @@ export interface InterfaceCopyOverrides {
   page: {
     overview: Partial<InterfaceCopyPageText>;
     weather: Partial<InterfaceCopyPageText>;
+    music: Partial<InterfaceCopyPageText>;
     home: Partial<InterfaceCopyPageText>;
     services: Partial<InterfaceCopyPageText>;
     calendar: Partial<InterfaceCopyPageText>;
@@ -727,6 +731,7 @@ export interface CalendarDisplayPreferences {
 
 /** Source-owned presentation visibility; this is intentionally not a device-management API. */
 export type OwnerFacingDeviceKey = "kettle";
+export type OverviewLightStripId = "living-room-light-strip" | "bedroom-ble-light-strip";
 
 export interface DeviceVisibilityState {
   key: OwnerFacingDeviceKey;
@@ -740,6 +745,7 @@ export interface DeviceVisibilitySettings {
   revision: number;
   updatedAt: string;
   devices: DeviceVisibilityState[];
+  overviewLightStripId: OverviewLightStripId | null;
   available: boolean;
   warnings: "stored_device_visibility_unavailable"[];
   writesEnabled: boolean;
@@ -881,6 +887,41 @@ export interface PlanningSnapshot {
   providerStatuses: PlanningProviderStatus[];
 }
 
+export interface StationPlayback {
+  status: "playing" | "paused" | "idle" | "stale" | "auth_required";
+  title: string | null;
+  artist: string | null;
+  coverPath: string | null;
+  observedAt: string | null;
+  trackId?: string | null;
+}
+
+export interface StationRetention {
+  activeSince: string | null;
+  samples: {
+    startedAt: string;
+    endedAt: string;
+    seconds: number;
+    outcome: "cleared" | "new_media" | "resumed" | "signal_lost";
+  }[];
+}
+
+export interface StationReminderList {
+  status: "not_configured" | "loading" | "fresh" | "partial" | "stale" | "auth_required";
+  observedAt: string | null;
+  canCreate?: boolean;
+  voiceTargetConfigured?: boolean;
+  canReschedule?: boolean;
+  items: {
+    id: string;
+    title: string;
+    dueAt: string | null;
+    timezone: string;
+    repeats: boolean;
+    version?: string | null;
+  }[];
+}
+
 export interface DashboardSnapshot {
   revision: number;
   generatedAt: string;
@@ -889,6 +930,8 @@ export interface DashboardSnapshot {
   jarvisEnabled?: boolean;
   services: ServiceSnapshot[];
   planning?: PlanningSnapshot | null;
+  stationPlayback?: StationPlayback | null;
+  stationRetention?: StationRetention | null;
 }
 
 export interface CoffeeTimingSettings {

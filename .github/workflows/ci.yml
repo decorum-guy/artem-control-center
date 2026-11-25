@@ -2,7 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - codex/samsung-autonomous-2026-11-24
+      - codex/current-track-youtube-music
+      - codex/youtube-music-release
+      - codex/google-login-overview-strip
   push:
     branches: [main]
   workflow_dispatch:
@@ -111,6 +116,24 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run install:browsers
 
+      - name: Validate Music and climate interactions
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_OVERVIEW_V2_ENABLED: "true"
+          VITE_V3_VISUAL_SKIN: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/music-climate.json
+        run: |
+          npm run test:e2e -- tests/e2e/music-page.spec.ts tests/e2e/music-save.spec.ts tests/e2e/climate-async.spec.ts --reporter=line,json
+          node --input-type=module -e '
+            import { appendFileSync, readFileSync } from "node:fs";
+            const { expected, skipped } = JSON.parse(readFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE)).stats;
+            if (!expected || skipped) throw Error(`Music/climate: ${expected} passed, ${skipped} skipped`);
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Music and climate: ${expected} passed, ${skipped} skipped.\n`);
+          '
+
       - name: "Run #317 kettle stop and existing kettle browser gates"
         if: runner.os == 'Linux'
         env:
@@ -121,27 +144,11 @@ jobs:
           VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
         run: npm run test:e2e -- tests/e2e/issue-293-kettle.spec.ts tests/e2e/issue-297-kettle-overview.spec.ts tests/e2e/issue-317-kettle-stop.spec.ts
 
-      - name: "Upload #317 kettle stop review screenshots"
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: kettle-stop-317-${{ github.sha }}
-          path: artifacts/kettle-stop-317
-          if-no-files-found: error
-
       - name: "Run focused #173 Coffee visual-review parity gate"
         if: runner.os == 'Linux'
         env:
           ISSUE_173_ARTIFACT_DIR: artifacts/issue-173-coffee-review
         run: npm run test:e2e:coffee-review
-
-      - name: Upload #173 Coffee visual-review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-173-coffee-review-${{ github.sha }}
-          path: artifacts/issue-173-coffee-review
-          if-no-files-found: error
 
       - name: Run focused Coffee Diary browser gate
         if: runner.os == 'Linux'
@@ -159,14 +166,6 @@ jobs:
           VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
           COFFEE_DIARY_SLICE2_ARTIFACT_DIR: artifacts/coffee-diary-slice2-review
         run: npm run test:e2e -- tests/e2e/coffee-diary-slice2.spec.ts
-
-      - name: Upload Coffee Diary Slice 2 review screenshot
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coffee-diary-slice2-review-${{ github.sha }}
-          path: artifacts/coffee-diary-slice2-review
-          if-no-files-found: error
 
       - name: Run focused B0 browser gate
         if: runner.os == 'Linux'
@@ -207,14 +206,6 @@ jobs:
           npm run test:e2e -- tests/e2e/v3-skin-*.spec.ts
           npm run test:e2e -- tests/e2e/issue-298-station-artwork.spec.ts --grep "scrolls genres"
 
-      - name: Upload V2 shell review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-shell-review-${{ github.sha }}
-          path: artifacts/v2-shell-review
-          if-no-files-found: error
-
       - name: "Run #279 Slice 1 foundation and visual review gate"
         if: runner.os == 'Linux'
         env:
@@ -224,14 +215,6 @@ jobs:
           ISSUE_279_ARTIFACT_DIR: artifacts/issue-279-foundation-review
         run: npm run test:e2e -- tests/e2e/issue-279-foundation.spec.ts
 
-      - name: "Upload #279 Slice 1 review screenshots"
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-279-foundation-review-${{ github.sha }}
-          path: artifacts/issue-279-foundation-review
-          if-no-files-found: error
-
       - name: "Run #279 Slice 2 Overview visual and state gate"
         if: runner.os == 'Linux'
         env:
@@ -239,14 +222,6 @@ jobs:
           VITE_OVERVIEW_V2_ENABLED: "true"
           ISSUE_279_OVERVIEW_ARTIFACT_DIR: artifacts/issue-279-overview-review
         run: npm run test:e2e -- tests/e2e/issue-279-overview.spec.ts
-
-      - name: "Upload #279 Slice 2 Overview review screenshots"
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-279-overview-review-${{ github.sha }}
-          path: artifacts/issue-279-overview-review
-          if-no-files-found: error
 
       - name: "Run #279 Slice 3 Calendar visual and touch gate"
         if: runner.os == 'Linux'
@@ -256,14 +231,6 @@ jobs:
           VITE_PLANNING_CALENDAR_MUTATIONS_ENABLED: "true"
           ISSUE_279_CALENDAR_ARTIFACT_DIR: artifacts/issue-279-calendar-review
         run: npm run test:e2e -- tests/e2e/issue-279-calendar.spec.ts
-
-      - name: "Upload #279 Slice 3 Calendar review screenshots"
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-279-calendar-review-${{ github.sha }}
-          path: artifacts/issue-279-calendar-review
-          if-no-files-found: error
 
       - name: Run focused V2 overlay gate
         if: runner.os == 'Linux'
@@ -275,28 +242,12 @@ jobs:
           B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
         run: npm run test:e2e -- tests/e2e/v2-overlays.spec.ts
 
-      - name: Upload V2 overlay review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-overlays-review-${{ github.sha }}
-          path: artifacts/v2-overlays-review
-          if-no-files-found: error
-
       - name: Run focused PR6 Weather compositor and route gate
         if: runner.os == 'Linux'
         env:
           VITE_V2_VISUAL_SHELL: "true"
           V2_WEATHER_ARTIFACT_DIR: artifacts/v2-weather-review
         run: npm run test:e2e -- tests/e2e/v2-weather.spec.ts
-
-      - name: Upload PR6 Weather review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-weather-review-${{ github.sha }}
-          path: artifacts/v2-weather-review
-          if-no-files-found: error
 
       - name: Run focused PR7 route-density gate
         if: runner.os == 'Linux'
@@ -305,28 +256,12 @@ jobs:
           V2_ROUTE_DENSITY_ARTIFACT_DIR: artifacts/v2-route-density-review
         run: npm run test:e2e -- tests/e2e/v2-route-density.spec.ts
 
-      - name: Upload PR7 route-density review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-route-density-review-${{ github.sha }}
-          path: artifacts/v2-route-density-review
-          if-no-files-found: error
-
       - name: Run focused PR8 Settings information architecture gate
         if: runner.os == 'Linux'
         env:
           VITE_V2_VISUAL_SHELL: "true"
           V2_SETTINGS_ARTIFACT_DIR: artifacts/v2-settings-review
         run: npm run test:e2e -- tests/e2e/v2-settings.spec.ts
-
-      - name: Upload PR8 Settings review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-settings-review-${{ github.sha }}
-          path: artifacts/v2-settings-review
-          if-no-files-found: error
 
       - name: Run focused V2 Overview grid gate
         if: runner.os == 'Linux'
@@ -335,14 +270,6 @@ jobs:
           VITE_V2_VISUAL_SHELL: "true"
           V2_OVERVIEW_ARTIFACT_DIR: artifacts/v2-overview-grid-review
         run: npm run test:e2e -- tests/e2e/v2-overview-grid.spec.ts
-
-      - name: Upload V2 Overview grid review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-overview-grid-review-${{ github.sha }}
-          path: artifacts/v2-overview-grid-review
-          if-no-files-found: error
 
       - name: Run focused PR4 curated Overview gate
         if: runner.os == 'Linux'
@@ -356,14 +283,6 @@ jobs:
           B3_PLANNING_CALENDAR_ROUTE_ENABLED: "true"
           B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
         run: npm run test:e2e -- tests/e2e/v2-curated-overview.spec.ts
-
-      - name: Upload PR4 curated Overview review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-overview-curated-review-${{ github.sha }}
-          path: artifacts/v2-overview-curated-review
-          if-no-files-found: error
 
       - name: "Run focused #79B delayed Coffee start gate"
         if: runner.os == 'Linux'
@@ -386,14 +305,6 @@ jobs:
         run: |
           npm run test:e2e -- tests/e2e/v2-overview-editor.spec.ts
           npm run test:e2e -- tests/e2e/issue-207-179-ha-controls.spec.ts --grep "Issue 207 · Overview climate projection"
-
-      - name: Upload PR5 Overview editor review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-overview-editor-review-${{ github.sha }}
-          path: artifacts/v2-overview-editor-review
-          if-no-files-found: error
 
       - name: Run Overview grid gate without V2 visual shell
         if: runner.os == 'Linux'
@@ -426,14 +337,6 @@ jobs:
           ISSUE_112_ARTIFACT_DIR: artifacts/issue-112-calendar-review
         run: npm run test:e2e -- tests/e2e/issue-112-calendar-month-grid.spec.ts
 
-      - name: Upload #112 Calendar Slice A review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-112-calendar-review-${{ github.sha }}
-          path: artifacts/issue-112-calendar-review
-          if-no-files-found: error
-
       - name: "Run focused #112 B2.1 Calendar Settings gate"
         if: runner.os == 'Linux'
         env:
@@ -442,28 +345,12 @@ jobs:
           ISSUE_112_B2_CALENDAR_SETTINGS_ARTIFACT_DIR: artifacts/issue-112-b2-calendar-settings-review
         run: npm run test:e2e -- tests/e2e/issue-112-b2-calendar-settings.spec.ts
 
-      - name: Upload #112 B2.1 Calendar Settings review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-112-b2-calendar-settings-review-${{ github.sha }}
-          path: artifacts/issue-112-b2-calendar-settings-review
-          if-no-files-found: error
-
       - name: "Run focused #112 B2.2 Capabilities Settings gate"
         if: runner.os == 'Linux'
         env:
           VITE_V2_VISUAL_SHELL: "true"
           ISSUE_112_B2_CAPABILITIES_ARTIFACT_DIR: artifacts/issue-112-b2-capabilities-review
         run: npm run test:e2e -- tests/e2e/issue-112-b2-capabilities-settings.spec.ts
-
-      - name: Upload #112 B2.2 Capabilities Settings review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-112-b2-capabilities-review-${{ github.sha }}
-          path: artifacts/issue-112-b2-capabilities-review
-          if-no-files-found: error
 
       - name: "Run focused #116 owner-facing copy gate"
         if: runner.os == 'Linux'
@@ -477,13 +364,15 @@ jobs:
           ISSUE_116_ARTIFACT_DIR: artifacts/issue-116-owner-copy-review
         run: npm run test:e2e -- tests/e2e/issue-116-owner-facing-copy.spec.ts
 
-      - name: Upload #116 owner-facing copy review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: issue-116-owner-copy-review-${{ github.sha }}
-          path: artifacts/issue-116-owner-copy-review
-          if-no-files-found: error
+      - name: Validate native Alice reminder form and quiet synchronization
+        if: runner.os == 'Linux'
+        env:
+          VITE_V2_VISUAL_SHELL: "true"
+          VITE_V3_VISUAL_SKIN: "true"
+          VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
+          VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
+          B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
+        run: npm run test:e2e -- tests/e2e/b4-planning-reminders.spec.ts
 
       - name: Run focused PR9 Planning foundation gate
         if: runner.os == 'Linux'
@@ -495,14 +384,6 @@ jobs:
           B3_PLANNING_REMINDERS_ROUTE_ENABLED: "true"
           PR9_ARTIFACT_DIR: artifacts/v2-planning-foundation-review
         run: npm run test:e2e -- tests/e2e/v2-planning-foundation.spec.ts
-
-      - name: Upload PR9 Planning foundation review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-planning-foundation-review-${{ github.sha }}
-          path: artifacts/v2-planning-foundation-review
-          if-no-files-found: error
 
       - name: Run B4.2 Tasks gate-off browser contract
         if: runner.os == 'Linux'
@@ -522,14 +403,6 @@ jobs:
           B4_TASK_ARTIFACT_DIR: artifacts/b4-task-mutations-review
         run: npm run test:e2e -- tests/e2e/b4-planning-tasks.spec.ts --grep-invert "writer gate is off"
 
-      - name: Upload B4.2 Tasks exact-head review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: b4-task-mutations-review-${{ github.sha }}
-          path: artifacts/b4-task-mutations-review
-          if-no-files-found: error
-
       - name: Run B4.3 Calendar gate-off browser contract
         if: runner.os == 'Linux'
         env:
@@ -548,14 +421,6 @@ jobs:
           B4_CALENDAR_ARTIFACT_DIR: artifacts/b4-calendar-mutations-review
         run: npm run test:e2e -- tests/e2e/b4-planning-calendar.spec.ts --grep-invert "writer gate is off"
 
-      - name: Upload B4.3 Calendar exact-head review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: b4-calendar-mutations-review-${{ github.sha }}
-          path: artifacts/b4-calendar-mutations-review
-          if-no-files-found: error
-
       - name: Run focused ISSUE #22 iCloud Calendar Phase B gate
         if: runner.os == 'Linux'
         env:
@@ -568,14 +433,6 @@ jobs:
           ICLOUD_CALENDAR_PHASE_B_ARTIFACT_DIR: artifacts/icloud-calendar-phase-b-review
         run: npm run test:e2e -- tests/e2e/icloud-calendar-phase-b.spec.ts
 
-      - name: Upload ISSUE #22 iCloud Calendar Phase B exact-head screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: icloud-calendar-phase-b-review-${{ github.sha }}
-          path: artifacts/icloud-calendar-phase-b-review
-          if-no-files-found: error
-
       - name: "Run focused #82 Full Access and touch lock gate"
         if: runner.os == 'Linux'
         env:
@@ -584,14 +441,6 @@ jobs:
           VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
           TOUCH_LOCK_ARTIFACT_DIR: artifacts/v2-full-access-touch-lock-review
         run: npm run test:e2e -- tests/e2e/v2-full-access-touch-lock.spec.ts
-
-      - name: "Upload #82 Full Access and touch lock review screenshots"
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v2-full-access-touch-lock-review-${{ github.sha }}
-          path: artifacts/v2-full-access-touch-lock-review
-          if-no-files-found: error
 
       - name: Run RGB light strip Home and Overview gate
         if: runner.os == 'Linux'
@@ -625,14 +474,6 @@ jobs:
           npm run test:e2e -- tests/e2e/portrait-322.spec.ts
           PLAYWRIGHT_PORTRAIT=true npm run test:e2e -- tests/e2e/issue-317-kettle-stop.spec.ts
 
-      - name: Upload portrait review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: portrait-322-${{ github.sha }}
-          path: artifacts/issue-322
-          if-no-files-found: warn
-
       - name: Todoist runtime source and mutations at Samsung viewport
         if: runner.os == 'Linux'
         env:
@@ -640,14 +481,6 @@ jobs:
           VITE_TOUCH_INPUT_LOCK_ENABLED: "true"
           VITE_TOUCH_INPUT_LOCK_START_LOCKED: "false"
         run: npm run test:e2e -- tests/e2e/todoist-tasks.spec.ts
-
-      - name: Upload Todoist Samsung browser evidence
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: todoist-tasks-${{ github.sha }}
-          path: test-results/todoist-tasks-*/
-          if-no-files-found: warn
 
       - name: Smoke-test production runtime
         run: npm run test:production-smoke
@@ -660,10 +493,8 @@ jobs:
           VITE_OVERVIEW_V2_ENABLED: "true"
         run: npm run test:e2e -- tests/e2e/tv-remote.spec.ts
 
-      - name: Upload TV review screenshots
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: tv-control-review-${{ github.sha }}
-          path: artifacts/tv-control-review
-          if-no-files-found: warn
+
+      - name: Summarize validation
+        if: always()
+        shell: bash
+        run: printf 'Validate (%s) — %s\n' '${{ matrix.os }}' '${{ job.status }}' >> "$GITHUB_STEP_SUMMARY"
