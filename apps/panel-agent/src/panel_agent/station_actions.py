@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal
 from uuid import UUID
 
 import httpx
@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .access_policy import AccessPolicyStore
 from .settings import IntegrationSettings
+from .station_playback import StationPlaybackCollector
 
 StationActionId = Literal[
     "media.alice.play", "media.alice.pause", "media.alice.volume_down",
@@ -53,11 +54,15 @@ class PresetDeleteRequest(BaseModel):
 
 class StationActionExecutor:
     def __init__(self, settings: IntegrationSettings, access: AccessPolicyStore,
-                 alice_available: Callable[[], bool], *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+                 alice_available: Callable[[], bool], *, station: StationPlaybackCollector | None = None,
+                 playlist_navigation: Callable[[str, Callable[[], bool]], Awaitable[str | None]] | None = None,
+                 transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.settings = settings
         self.access = access
         self.alice_available = alice_available
         self.transport = transport
+        self.station = station
+        self.playlist_navigation = playlist_navigation
         self._lock: asyncio.Lock | None = None
 
     def _busy(self) -> bool:
@@ -67,15 +72,26 @@ class StationActionExecutor:
         return bool(self.settings.alice_base_url and self.settings.alice_control_center_token
                     and self.alice_available())
 
+    def _use_local(self, action_id: StationActionId) -> bool:
+        return self.station is not None and self.station.settings is not None and action_id != "media.alice.like"
+
+    def _available_for(self, action_id: StationActionId) -> bool:
+        if self._use_local(action_id):
+            assert self.station is not None
+            available = self.station.local_media_available
+            if action_id in {"media.alice.volume_up", "media.alice.volume_down"}:
+                return available and self.station.state is not None and self.station.state.volume is not None
+            return available
+        return self._integration_available()
+
     def availability(self) -> dict[str, Any]:
         enabled = self.settings.writes_enabled and self.settings.alice_station_actions_enabled
-        available = self._integration_available()
         busy = self._busy()
         return {"schemaVersion": 1, "actions": {
             action_id: {
                 **self.access.authorize(action_id, gate_enabled=enabled,
-                                        integration_available=available, busy=busy).as_dict(),
-                "gateEnabled": enabled, "integrationAvailable": available, "busy": busy,
+                                        integration_available=self._available_for(action_id), busy=busy).as_dict(),
+                "gateEnabled": enabled, "integrationAvailable": self._available_for(action_id), "busy": busy,
             } for action_id in ACTION_NAMES
         }}
 
@@ -172,7 +188,7 @@ class StationActionExecutor:
         try:
             self.access.require(action_id,
                                 gate_enabled=self.settings.writes_enabled and self.settings.alice_station_actions_enabled,
-                                integration_available=self._integration_available(), busy=self._busy())
+                                integration_available=self._available_for(action_id), busy=self._busy())
         except HTTPException as exc:
             self.access.audit_capability(action_id, result=str(exc.detail), correlation_id=correlation)
             raise
@@ -183,6 +199,27 @@ class StationActionExecutor:
             raise HTTPException(status_code=409, detail="station_action_busy")
         self.access.audit_capability(action_id, result="accepted", correlation_id=correlation)
         async with self._lock:
+            if self._use_local(action_id):
+                assert self.station is not None
+
+                def may_send() -> bool:
+                    return self.access.authorize(
+                        action_id, gate_enabled=self.settings.writes_enabled and self.settings.alice_station_actions_enabled,
+                        integration_available=self._available_for(action_id),
+                    ).allowed
+
+                action = ACTION_NAMES[action_id]
+                outcome = await self.playlist_navigation(action, may_send) if self.playlist_navigation else None
+                if outcome is None:
+                    outcome = await self.station.control(action, may_send)
+                self.access.audit_capability(action_id, result=outcome, correlation_id=correlation)
+                if outcome == "confirmed":
+                    return {"schemaVersion": 1, "actionId": action_id, "requestId": correlation,
+                            "status": "dispatched", "transport": "local"}
+                errors = {"busy": (409, "station_action_busy"), "blocked": (403, "profile_blocked"),
+                          "unavailable": (503, "station_unavailable")}
+                code, detail = errors.get(outcome, (503, "station_dispatch_uncertain"))
+                raise HTTPException(code, detail)
             if not self._integration_available():
                 self.access.audit_capability(action_id, result="alice_unavailable", correlation_id=correlation)
                 raise HTTPException(status_code=503, detail="alice_unavailable")

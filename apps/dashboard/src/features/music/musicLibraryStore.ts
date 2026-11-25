@@ -27,6 +27,27 @@ export interface PlaylistSearchResult {
     "playlist_changed" | "source_unavailable" | "auth_required" | "busy";
 }
 
+export interface PlaylistPlayback {
+  id?: string;
+  provider?: Provider;
+  source?: string;
+  title?: string | null;
+  status: string;
+  position?: number;
+  options?: Recording[];
+}
+
+export function readPlaylistPlayback(signal: AbortSignal) {
+  return request<PlaylistPlayback | null>("/api/v1/station/playlist", { signal });
+}
+
+export function playlistPlaybackAction(id: string, action: "skip" | "stop" | "choose", choice?: string) {
+  return request<PlaylistPlayback>("/api/v1/station/playlist", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Panel-Intent": "music-library" },
+    body: JSON.stringify({ id, action, choice })
+  });
+}
+
 export interface PlayResult {
   status: string;
   stationTrackId?: string | null;
@@ -417,6 +438,14 @@ export class MusicLibraryStore {
     void fetch(`${root}${this.provider}/search/${searchId}`, {
       method: "DELETE", headers: { "X-Panel-Intent": "music-library" }, keepalive: true
     }).catch(() => {});
+  }
+
+  playPlaylist(): Promise<PlaylistPlayback> {
+    const { generation, selected } = this.state;
+    return request<PlaylistPlayback>(`${root}${this.provider}/play-playlist`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Panel-Intent": "music-library" },
+      body: JSON.stringify({ generation, source: selected })
+    });
   }
 
   async play(record: Recording, choice?: string): Promise<PlayResult> {

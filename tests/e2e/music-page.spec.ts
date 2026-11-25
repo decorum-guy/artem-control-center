@@ -531,3 +531,32 @@ test("full playlist search resumes beyond loaded rows without playing until sele
   await yandex.getByRole("button", { name: "Включить на Станции · Трек 500" }).click();
   expect(plays).toEqual([{ generation, source: "likes", row: row(500).key }]);
 });
+
+test("each chosen playlist can be started as a playlist on the Station", async ({ page }) => {
+  const starts: string[] = [];
+  await page.route("**/api/v1/music/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/status")) return route.fulfill({ json: status });
+    const provider = path.includes("/youtube/") ? "youtube" : "yandex";
+    if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage(
+      provider === "youtube" ? [{ key: "LM", title: "Liked" }] : [{ key: "ya_1_5", title: "Плейлист" }]
+    ) });
+    if (path.endsWith("/play-playlist")) {
+      const body = route.request().postDataJSON();
+      expect(Object.keys(body).sort()).toEqual(["generation", "source"]);
+      starts.push(body.source);
+      return route.fulfill({ json: { status: "playing" } });
+    }
+    return route.fulfill({ json: samplePage([row(200)]) });
+  });
+  await page.goto("/music");
+  const youtube = page.getByRole("region", { name: "YouTube Music", exact: true });
+  const yandex = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+  await expect(youtube.getByRole("button", { name: /Проиграть плейлист/ })).toHaveCount(0);
+  await yandex.getByRole("button", { name: /Проиграть плейлист/ }).click();
+  await expect(yandex.getByText("Плейлист играет на Станции.")).toBeVisible();
+  await youtube.getByRole("button", { name: "Liked" }).click();
+  await youtube.getByRole("button", { name: /Проиграть плейлист/ }).click();
+  await expect(youtube.getByText("Плейлист играет на Станции.")).toBeVisible();
+  expect(starts).toEqual(["ya_1_5", "LM"]);
+});

@@ -421,3 +421,58 @@ def test_full_playlist_search_keeps_duplicates_checkpoint_and_playable_rows(tmp_
         assert (await library.play("yandex", row))["status"] == "playing"
 
     asyncio.run(run())
+
+
+def test_playlists_use_native_yandex_identity_and_confirmed_youtube_order(tmp_path):
+    from panel_agent.music_library import PlaylistSelection
+
+    async def run():
+        library, _, station = setup(tmp_path)
+        station.generation = 1
+        station.media_busy = False
+        station.state = None
+        native = []
+
+        async def play_native(owner, kind, may_send):
+            assert may_send()
+            native.append((owner, kind))
+            return "playing"
+
+        async def play_track(track_id, may_send, *, restart=False):
+            assert may_send() and restart
+            station.sent.append(track_id)
+            return "playing"
+
+        station.play_playlist = play_native
+        station.play_track = play_track
+        ya = library.feeds["yandex"]
+        ya.sync()
+        ya.status = "ready"
+        ya.sources["ya_12_4"] = Playlist("ya_12_4", "Chosen", "playlist")
+        selected = PlaylistSelection(generation=ya.generation, source="ya_12_4")
+        assert await library.start_playlist("yandex", selected) == {"status": "playing"}
+        assert native == [("12", "4")] and not station.sent
+
+        yt = library.feeds["youtube"]
+        yt.sync()
+        yt.status = "ready"
+        yt.sources["LM"] = Playlist("LM", "Liked", "liked")
+
+        async def tracks(_source, cursor):
+            return ProviderPage((TRACK,), Continuation("next", "tracks") if cursor is None else None)
+
+        yt.provider.tracks = tracks
+        result = await library.start_playlist("youtube", PlaylistSelection(generation=yt.generation, source="LM"))
+        assert result["status"] == "playing" and result["position"] == 1
+        assert station.sent == [TRACK.track_id]
+        library._observe_playlist("playing", TRACK.track_id, 180, 180)
+        library._observe_playlist("idle", None, None, None)
+        await library.playlist_task
+        assert library.playlist_status()["position"] == 2
+        assert station.sent == [TRACK.track_id, TRACK.track_id]
+        library._observe_playlist("playing", TRACK.track_id, 20, 180)
+        library._observe_playlist("playing", "external-track", 0, 100)
+        assert library.playlist_status()["status"] == "stopped"
+        await library.close()
+
+    asyncio.run(run())

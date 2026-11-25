@@ -285,10 +285,12 @@ class StationPlaybackCollector:
         self.covers: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
         self.cover_lock: asyncio.Lock | None = None
         self._replies: StationReplies | None = None
+        self._media_request: tuple[str, Callable[[dict], bool] | None, asyncio.Future[bool]] | None = None
         self._track_waiter: tuple[str, int, asyncio.Future[bool]] | None = None
         self.track: Track | None = None
         self.previous_track: Track | None = None
         self.generation = 0
+        self.on_playback_progress: Callable[[str, str | None, float | None, float | None], None] | None = None
 
     def start(self) -> None:
         if self.settings is not None and self.task is None:
@@ -323,6 +325,8 @@ class StationPlaybackCollector:
         if status not in {"stale", "auth_required"}:
             observed_at = self._clock().isoformat()
         self.state = StationPlayback.model_validate({**content, "observedAt": observed_at})
+        if self.on_playback_progress is not None and status in {"stale", "auth_required"}:
+            self.on_playback_progress(status, None, None, None)
         if self.on_change is not None and (playback_changed or retention_changed):
             await self.on_change()
 
@@ -451,6 +455,8 @@ class StationPlaybackCollector:
                         replies.receive(data)
                     normalized = parse_state(data)
                     if normalized is None:
+                        if isinstance(data, dict):
+                            self._observe_media_reply(data, None)
                         if isinstance(data, dict) and data.get("status") in ("unauthorized", "forbidden", 401, 403):
                             raise StationAuthRequired
                         continue
@@ -461,6 +467,8 @@ class StationPlaybackCollector:
                     raw_volume = data["state"].get("volume")
                     volume = float(raw_volume) if type(raw_volume) in (int, float) and 0 <= raw_volume <= 1 else None
                     await self.update(*normalized, duration=length, volume=volume)
+                    self._observe_media_reply(data, data["state"])
+                    self._observe_progress(normalized, player)
                     pending = self._track_waiter
                     if (pending and not pending[2].done()
                             and pending[1] == self.generation
@@ -470,14 +478,130 @@ class StationPlaybackCollector:
                 pending = self._track_waiter
                 if pending and not pending[2].done():
                     pending[2].set_result(False)
+                request = self._media_request
+                if request and not request[2].done():
+                    request[2].set_result(False)
                 self._replies = None
                 replies.close()
 
-    async def play_track(self, track_id: str, may_send: Callable[[], bool]) -> str:
+    @property
+    def local_media_available(self) -> bool:
+        return self._replies is not None and self._fresh_state()
+
+    @property
+    def media_busy(self) -> bool:
+        return self._track_waiter is not None or self._media_request is not None
+
+    def _fresh_state(self) -> bool:
+        return bool(self.state and self.state.observedAt and self.state.status in {"playing", "paused", "idle"}
+                    and (self._clock() - datetime.fromisoformat(self.state.observedAt)).total_seconds()
+                    <= STATE_TIMEOUT_SECONDS)
+
+    def _observe_progress(self, normalized, player: object) -> None:
+        if self.on_playback_progress is None:
+            return
+        data = player if isinstance(player, dict) else {}
+        progress, duration = data.get("progress"), data.get("duration")
+        self.on_playback_progress(
+            normalized[0], normalized[4],
+            float(progress) if type(progress) in (int, float) and 0 <= progress < 14400 else None,
+            float(duration) if type(duration) in (int, float) and 0 < duration < 14400 else None,
+        )
+
+    def _observe_media_reply(self, frame: dict, state: dict | None) -> None:
+        pending = self._media_request
+        if not pending or pending[2].done():
+            return
+        identity, expected, confirmed = pending
+        if frame.get("requestId") == identity and "status" in frame:
+            if str(frame["status"]).lower() not in {"success", "ok", "200"}:
+                confirmed.set_result(False)
+                return
+            if expected is None:
+                confirmed.set_result(True)
+                return
+        if state is not None and expected is not None and expected(state):
+            confirmed.set_result(True)
+
+    async def _send_media(self, payload: dict, may_send: Callable[[], bool],
+                          expected: Callable[[dict], bool] | None = None, *, timeout: float = 2) -> str:
+        if self.media_busy:
+            return "busy"
+        link = self._replies
+        if link is None or not self._fresh_state():
+            return "unavailable"
+        if not may_send():
+            return "blocked"
+        identity = str(uuid.uuid4())
+        confirmed = asyncio.get_running_loop().create_future()
+        self._media_request = identity, expected, confirmed
+        try:
+            async with asyncio.timeout(timeout):
+                await link.ws.send(json.dumps({
+                    "conversationToken": link.token, "id": identity, "payload": payload,
+                    "sentTime": round(time.time() * 1000),
+                }))
+                return "confirmed" if await confirmed else "unconfirmed"
+        except (OSError, TimeoutError, WebSocketException):
+            return "unconfirmed"
+        finally:
+            confirmed.cancel()
+            self._media_request = None
+
+    async def control(self, action: str, may_send: Callable[[], bool]) -> str:
+        commands = {"play": "play", "pause": "stop", "previous": "prev", "next": "next"}
+        if action in commands:
+            return await self._send_media({"command": commands[action]}, may_send)
+        if action not in {"volume_up", "volume_down"} or not self.local_media_available:
+            return "unavailable"
+        assert self.state is not None
+        current = self.state.volume
+        if current is None:
+            return "unavailable"
+        if not may_send():
+            return "blocked"
+        delta = 0.1 if action == "volume_up" else -0.1
+        target = min(1.0, max(0.0, round(current + delta, 1)))
+        if abs(current - target) < 0.005:
+            return "confirmed"
+
+        def at_volume(state: dict) -> bool:
+            level = state.get("volume")
+            return type(level) in (int, float) and abs(level - target) < 0.005
+
+        return await self._send_media({"command": "setVolume", "volume": target}, may_send, at_volume)
+
+    async def play_playlist(self, owner: str, kind: str, may_send: Callable[[], bool]) -> str:
+        if not all(re.fullmatch(r"[0-9]{1,20}", value) for value in (owner, kind)):
+            raise ValueError("Invalid Station playlist ID")
+        identity = f"{owner}:{kind}"
+
+        def is_playing(state: dict) -> bool:
+            player = state.get("playerState")
+            if state.get("playing") is not True or not isinstance(player, dict):
+                return False
+            return player.get("playlistId") == identity or (
+                str(player.get("playlistPuid")) == owner and str(player.get("playlistId")) == kind
+            )
+
+        status = await self._send_media({"command": "playMusic", "type": "playlist", "id": identity},
+                                        may_send, is_playing, timeout=9)
+        return "playing" if status == "confirmed" else status
+
+    async def play_track(self, track_id: str, may_send: Callable[[], bool], *, restart: bool = False) -> str:
         """Send one exact recording over the existing reader-owned connection."""
         if not re.fullmatch(r"[0-9]{1,20}", track_id):
             raise ValueError("Invalid Station track ID")
-        if self._track_waiter is not None:
+        if restart:
+            def at_start(state: dict) -> bool:
+                player = state.get("playerState")
+                return (state.get("playing") is True and isinstance(player, dict) and str(player.get("id")) == track_id
+                        and type(player.get("progress")) in (int, float) and 0 <= player["progress"] <= 4)
+
+            status = await self._send_media({"command": "playMusic", "type": "track", "id": track_id},
+                                            may_send, at_start, timeout=9)
+            return "playing" if status == "confirmed" else status
+        if self.media_busy:
             return "busy"
         link = self._replies
         if link is None or self.state is None or self.state.status in {"stale", "auth_required"}:

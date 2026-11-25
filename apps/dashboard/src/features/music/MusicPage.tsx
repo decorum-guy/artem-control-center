@@ -8,7 +8,7 @@ import { YouTubeConnectionSettings } from "../settings/YouTubeConnectionSettings
 import { PageHeader } from "../../ui/PageHeader";
 import { executeStationAction, fetchStationAvailability, type StationActionAvailability, type StationActionId } from "../../stationActionsApi";
 import { useCommandSeries } from "../../useCommandSeries";
-import { filterTracks, MUSIC_ROW_HEIGHT, useMusicLibrary, type PlaylistSearchResult, type Provider, type Recording } from "./musicLibraryStore";
+import { filterTracks, MUSIC_ROW_HEIGHT, playlistPlaybackAction, readPlaylistPlayback, useMusicLibrary, type PlaylistPlayback, type PlaylistSearchResult, type Provider, type Recording } from "./musicLibraryStore";
 import { musicSaveEndpoint, resultLabels, submitMusicSave, type MusicProjection } from "./musicSaveApi";
 import "./musicPage.css";
 
@@ -217,7 +217,23 @@ function duration(value: number | null) {
   return value ? `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}` : "";
 }
 
-const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provider: Provider; current?: string | null }) {
+const playlistOutcomes: Record<string, string> = {
+  ...outcomes,
+  playing: "Плейлист играет на Станции.",
+  working: "Готовим запись для Станции…",
+  complete: "Плейлист закончился.",
+  stopped: "Очередь плейлиста остановлена.",
+  choose: "Выберите версию этой позиции в Яндекс Музыке.",
+  no_match: "Для этой позиции нет подтверждённой версии в Яндекс Музыке.",
+  limit: "Достигнут предел очереди.",
+};
+
+const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, onPlaylist }: {
+  provider: Provider;
+  current?: string | null;
+  playlist: PlaylistPlayback | null;
+  onPlaylist: (next: PlaylistPlayback) => void;
+}) {
   const [library, state] = useMusicLibrary(provider);
   const { locked, guardMutation } = useInteractionLock();
   const list = library.getList(state.selected);
@@ -227,7 +243,10 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
   const gate = useRef(false);
   const [result, setResult] = useState<{ message: string; record: Recording } | null>(null);
   const [choose, setChoose] = useState<{ original: Recording; options: Recording[] } | null>(null);
+  const [playlistPending, setPlaylistPending] = useState(false);
+  const [playlistError, setPlaylistError] = useState("");
   const presence = useRef(true);
+  const activePlaylist = playlist?.provider === provider && playlist.source === state.selected ? playlist : null;
   const scanRequest = useRef<{ id: string; controller: AbortController | null } | null>(null);
   const [scan, setScan] = useState<PlaylistSearchResult | null>(null);
   const [scanScroll, setScanScroll] = useState(0);
@@ -341,6 +360,27 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
     }
   }
 
+  async function playPlaylist(action?: "skip" | "stop" | "choose", choice?: string) {
+    if (gate.current || !state.selected || !guardMutation()) return;
+    if (action && !activePlaylist?.id) return;
+    gate.current = true;
+    setPlaylistPending(true);
+    setPlaylistError("");
+    setResult(null);
+    try {
+      const next = action && activePlaylist?.id
+        ? await playlistPlaybackAction(activePlaylist.id, action, choice)
+        : await library.playPlaylist();
+      onPlaylist({ provider, source: state.selected, ...next });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      setPlaylistError(playlistOutcomes[code] ?? playlistOutcomes.unconfirmed);
+    } finally {
+      gate.current = false;
+      if (presence.current) setPlaylistPending(false);
+    }
+  }
+
   const errors = state.catalogError || list.error || (["auth_required", "not_configured", "unavailable"].includes(state.status) ? state.status : null);
   const errorText = state.catalogError && state.playlists.length ? "Каталог не обновился. Показан предыдущий каталог."
     : errors ? libraryErrors[errors] ?? libraryErrors.source_unavailable : "";
@@ -360,6 +400,12 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
     <header className="music-library__head">
       <span className="music-library__badge" aria-hidden="true"><Icon name={provider === "youtube" ? "play" : "music"} size={18} /></span>
       <div><h2>{labels[provider]}</h2>{subtitle && <p>{subtitle}</p>}</div>
+      {state.selected && <button type="button" className="music-icon-button music-play-playlist"
+        aria-label={`Проиграть плейлист на Станции · ${labels[provider]}`} title="Проиграть весь плейлист на Станции"
+        disabled={locked || !state.canPlay || Boolean(active) || playlistPending || activePlaylist?.status === "working"}
+        aria-busy={playlistPending} onClick={() => void playPlaylist()}>
+        <Icon name="play" size={18} />
+      </button>}
       <button type="button" className="music-icon-button music-catalog-refresh"
         aria-label={`Обновить плейлисты · ${labels[provider]}`} title="Обновить каталог плейлистов"
         aria-busy={state.catalogRefreshing} disabled={Boolean(active) || !state.generation || state.catalogRefreshing}
@@ -384,6 +430,23 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current }: { provide
         <Icon name="refresh" size={18} />
       </button>
     </div>
+    {(activePlaylist || playlistError) && <div className="music-playlist-feedback">
+      <p role="status">{playlistError || [
+        activePlaylist?.position ? `Позиция ${activePlaylist.position}` : null,
+        activePlaylist?.title,
+        activePlaylist && playlistOutcomes[activePlaylist.status]
+      ].filter(Boolean).join(" · ")}</p>
+      {activePlaylist?.options?.map(option => <button key={option.key} type="button" className="music-load"
+        disabled={locked || playlistPending} onClick={() => void playPlaylist("choose", option.key)}>
+        {[option.title, option.artist, option.album, duration(option.duration)].filter(Boolean).join(" · ")}
+      </button>)}
+      {activePlaylist?.id && ["choose", "no_match"].includes(activePlaylist.status)
+        && <button type="button" className="music-load" disabled={locked || playlistPending}
+          onClick={() => void playPlaylist("skip")}>Пропустить позицию</button>}
+      {activePlaylist?.id && !["complete", "stopped", "working"].includes(activePlaylist.status)
+        && <button type="button" className="music-load" disabled={locked || playlistPending}
+          onClick={() => void playPlaylist("stop")}>Остановить очередь</button>}
+    </div>}
     {list.query.trim() && state.selected && <div className="music-scan">
       {!scan && <button type="button" className="music-load" onClick={() => void searchPlaylist()}>Искать по всему плейлисту</button>}
       {scan && <>
@@ -476,10 +539,34 @@ function MusicConnectionNotice({ services }: { services: readonly ServiceSnapsho
 export function MusicPage({ playback, services = [] }: { playback?: StationPlayback | null; services?: readonly ServiceSnapshot[] }) {
   const { copy } = useInterfaceCopy();
   const displayedTrack = playback?.status === "playing" ? playback.trackId : undefined;
+  const [playlist, setPlaylist] = useState<PlaylistPlayback | null>(null);
+  const playlistRevision = useRef(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    async function poll() {
+      const revision = playlistRevision.current;
+      try {
+        const next = await readPlaylistPlayback(controller.signal);
+        if (next?.id && !controller.signal.aborted && playlistRevision.current === revision) setPlaylist(next);
+      } catch {
+        // Keep the last known status if the local agent is temporarily unavailable.
+      } finally {
+        if (!controller.signal.aborted) timer = window.setTimeout(poll, 2500);
+      }
+    }
+    void poll();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, []);
+  function updatePlaylist(next: PlaylistPlayback) {
+    playlistRevision.current += 1;
+    setPlaylist(next);
+  }
   return <section className="music-page" data-testid="route-music">
     <PageHeader title={copy("page.music.title")} description={copy("page.music.subtitle")} variant="compact" />
     <StationMiniPlayer playback={playback} />
     <MusicConnectionNotice services={services} />
-    <div className="music-page__libraries"><LibraryPanel provider="yandex" current={displayedTrack} /><LibraryPanel provider="youtube" current={displayedTrack} /></div>
+    <div className="music-page__libraries"><LibraryPanel provider="yandex" current={displayedTrack} playlist={playlist} onPlaylist={updatePlaylist} /><LibraryPanel provider="youtube" current={displayedTrack} playlist={playlist} onPlaylist={updatePlaylist} /></div>
   </section>;
 }
