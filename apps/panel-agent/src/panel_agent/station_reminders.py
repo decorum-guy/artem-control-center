@@ -457,13 +457,15 @@ class StationRemindersCollector:
 DUE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$"
 
 
-def _due_time(due_local: str) -> datetime:
-    zone = ZoneInfo(MOSCOW_ZONE)
+def _local_time(due_local: str) -> datetime:
     try:
-        value = datetime.fromisoformat(due_local).replace(tzinfo=zone)
+        return datetime.fromisoformat(due_local).replace(tzinfo=ZoneInfo(MOSCOW_ZONE))
     except ValueError as exc:
         raise HTTPException(422, "invalid_time") from exc
-    if value <= datetime.now(zone):
+
+
+def _future_time(value: datetime) -> datetime:
+    if value <= datetime.now(ZoneInfo(MOSCOW_ZONE)):
         raise HTTPException(422, "time_must_be_future")
     return value
 
@@ -603,11 +605,14 @@ class StationRemindersWriter:
                                 mode, anchor = _schedule_mode(original)
                                 if mode == "unknown":
                                     raise HTTPException(409, "unsupported_schedule")
-                                start = _due_time(change.dueLocal) if change.dueLocal else anchor
+                                start = _local_time(change.dueLocal) if change.dueLocal else anchor
                                 assert start is not None
-                                if change.repeat == "once" and start <= datetime.now(ZoneInfo(MOSCOW_ZONE)):
-                                    raise HTTPException(422, "time_must_be_future")
-                                note["schedule"] = _build_schedule(start, change.repeat or mode)
+                                repeat = change.repeat or mode
+                                # An existing series may start in the past. Its anchor
+                                # is not the next occurrence returned by the provider.
+                                if repeat == "once":
+                                    _future_time(start)
+                                note["schedule"] = _build_schedule(start, repeat)
                         else:
                             try:
                                 present = await self._note_exists(client, session, original["note_id"])
@@ -619,7 +624,7 @@ class StationRemindersWriter:
                                 raise HTTPException(409, "reminder_changed")
                     else:
                         path = "create_note"
-                        schedule = _build_schedule(_due_time(change.dueLocal), change.repeat)
+                        schedule = _build_schedule(_future_time(_local_time(change.dueLocal)), change.repeat)
                         has_voice = change.delivery != "phone"
                         send_push = "Disabled" if change.delivery == "station" else "Enabled"
                         playback: dict = {"send_push": {"state": send_push}}
