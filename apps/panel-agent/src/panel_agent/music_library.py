@@ -282,6 +282,7 @@ class PlaylistQueue:
     target: str | None = None
     status: str = "working"
     expected_end: float | None = None
+    pause_requested: bool = False
     previous_progress: float | None = None
     options: dict[str, Recording] = field(default_factory=dict)
 
@@ -785,7 +786,7 @@ class MusicLibrary:
             return {"status": queue.status}
         feed = self.feeds[queue.provider]
         queue.status, queue.target, queue.expected_end = "working", None, None
-        queue.position, queue.previous_progress = position, None
+        queue.position, queue.previous_progress, queue.pause_requested = position, None, False
         queue.options.clear()
         try:
             if position >= len(queue.records) and not queue.complete:
@@ -853,8 +854,8 @@ class MusicLibrary:
                     return bool(self.can_play() and queue.target and self.station.state
                                 and self.station.state.trackId == queue.target)
 
-                if may_pause():
-                    await self.station.control("pause", may_pause)
+                if may_pause() and await self.station.control("pause", may_pause) != "confirmed":
+                    return {"status": "stopped_unconfirmed"}
                 return {"status": "stopped"}
             if command.action == "choose":
                 choice = queue.options.get(command.choice or "")
@@ -867,7 +868,15 @@ class MusicLibrary:
 
     async def navigate_playlist(self, direction: str, may_send: Callable[[], bool]) -> str | None:
         queue = self.playlist_queue
-        if queue is None or queue.status not in {"playing", "choose", "no_match"} or direction not in {"next", "previous"}:
+        if queue is None or queue.status not in {"playing", "choose", "no_match"}:
+            return None
+        if direction in {"pause", "play"} and queue.status == "playing":
+            if not may_send():
+                return "blocked"
+            queue.pause_requested = direction == "pause"
+            queue.expected_end = None
+            return None
+        if direction not in {"next", "previous"}:
             return None
         if self.play_lock.locked():
             return "busy"
@@ -889,7 +898,7 @@ class MusicLibrary:
         rolled_over = (track_id == queue.target and progress is not None
                        and queue.previous_progress is not None and progress + 3 < queue.previous_progress)
         if track_id == queue.target and not rolled_over:
-            if status == "paused":
+            if status == "paused" or queue.pause_requested:
                 queue.expected_end = None
             elif progress is not None and duration is not None:
                 remaining = duration - progress
