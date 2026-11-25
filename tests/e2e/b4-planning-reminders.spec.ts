@@ -70,7 +70,7 @@ test("only Alice controls are shown and reminder presets cross midnight in Mosco
   await expect(section.getByText(title)).toBeVisible();
   await expect(page.getByTestId("planning-reminder-mutation-gate")).toHaveCount(0);
   await expect(page.getByTestId("planning-reminder-list")).toHaveCount(0);
-  await section.getByRole("button", { name: "Перенести" }).click();
+  await section.getByRole("button", { name: "Изменить" }).click();
   await editor.getByLabel("Дата").fill("2026-11-27");
   await editor.getByLabel("Время (МСК)").fill("18:20");
   await editor.getByRole("button", { name: "Сохранить" }).click();
@@ -166,7 +166,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
     await page.clock.fastForward(10_100);
     const row = section.locator("li");
     await expect(row).toContainText(sample.title);
-    await row.getByRole("button", { name: "Перенести" }).click();
+    await row.getByRole("button", { name: "Изменить" }).click();
     const editor = page.getByTestId("alice-reminder-editor");
     const field = editor.getByLabel("Время (МСК)");
     await field.fill("18:42");

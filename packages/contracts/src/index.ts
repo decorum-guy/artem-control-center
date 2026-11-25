@@ -913,6 +913,8 @@ export interface StationReminderList {
   canCreate?: boolean;
   voiceTargetConfigured?: boolean;
   canReschedule?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
   items: {
     id: string;
     title: string;
@@ -920,6 +922,9 @@ export interface StationReminderList {
     timezone: string;
     repeats: boolean;
     version?: string | null;
+    scheduleMode?: "once" | "daily" | "weekly" | "unknown";
+    seriesStartAt?: string | null;
+    delivery?: "station" | "phone" | "both" | "unknown";
   }[];
 }
 

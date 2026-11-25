@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
 from icalendar import Event
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .access_policy import AccessPolicyStore
 from .station_credentials import MAX_CREDENTIAL_BYTES, dpapi
@@ -35,6 +35,9 @@ MAX_RESPONSE_BYTES = 512 * 1024
 MAX_NOTES = 200
 MAX_PAGES = 8
 PAGE_DIRECTIONS = ("forward", "backward")
+Repeat = Literal["once", "daily", "weekly"]
+Delivery = Literal["station", "phone", "both"]
+WEEKDAYS = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
 COOKIE_NAMES = {"Session_id", "sessionid2"}
 COOKIE_VALUE = re.compile(r"[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]{1,4096}")
 
@@ -48,6 +51,9 @@ class StationReminder(BaseModel):
     timezone: str
     repeats: bool
     version: str | None = None
+    scheduleMode: Literal["once", "daily", "weekly", "unknown"] = "unknown"
+    seriesStartAt: str | None = None
+    delivery: Literal["station", "phone", "both", "unknown"] = "unknown"
 
 
 class StationReminderList(BaseModel):
@@ -59,6 +65,8 @@ class StationReminderList(BaseModel):
     canCreate: bool = False
     voiceTargetConfigured: bool = False
     canReschedule: bool = False
+    canEdit: bool = False
+    canDelete: bool = False
 
 
 class ReminderAuthRequired(Exception):
@@ -120,6 +128,47 @@ def _time_of(note: dict) -> tuple[datetime | None, str, bool]:
     return start, zone, repeats
 
 
+def _schedule_mode(note: dict) -> tuple[str, datetime | None]:
+    schedule = note["schedule"].strip()
+    lines = schedule.splitlines()
+    anchor = re.fullmatch(r"DTSTART;TZID=Europe/Moscow:([0-9]{8}T[0-9]{6})", lines[0])
+    if anchor is None:
+        return "unknown", None
+    try:
+        start = datetime.strptime(anchor[1], "%Y%m%dT%H%M%S").replace(tzinfo=ZoneInfo(MOSCOW_ZONE))
+    except ValueError:
+        return "unknown", None
+    if len(lines) == 1:
+        return "once", start
+    if lines[1:] == ["RRULE:FREQ=DAILY"]:
+        return "daily", start
+    if lines[1:] in (["RRULE:FREQ=WEEKLY"], ["RRULE:FREQ=WEEKLY;BYDAY=" + WEEKDAYS[start.weekday()]]):
+        return "weekly", start
+    return "unknown", start
+
+
+def _build_schedule(start: datetime, repeat: Repeat) -> str:
+    anchor = "DTSTART;TZID=Europe/Moscow:" + start.strftime("%Y%m%dT%H%M%S")
+    if repeat == "daily":
+        return anchor + "\nRRULE:FREQ=DAILY"
+    if repeat == "weekly":
+        return anchor + "\nRRULE:FREQ=WEEKLY;BYDAY=" + WEEKDAYS[start.weekday()]
+    return anchor
+
+
+def _delivery_mode(note: dict, reminder: dict) -> str:
+    playback = reminder.get("play_settings")
+    if not isinstance(playback, dict):
+        return "unknown"
+    push = playback.get("send_push")
+    push_state = push.get("state") if isinstance(push, dict) else None
+    if note.get("is_personal") is True and not playback.get("play_location") and push_state == "Enabled":
+        return "phone"
+    if note.get("is_personal") is False and playback.get("play_location"):
+        return {"Enabled": "both", "Disabled": "station"}.get(push_state, "unknown")
+    return "unknown"
+
+
 def _version(note: dict) -> str | None:
     note_id = note.get("note_id")
     if not isinstance(note_id, str) or not 0 < len(note_id) <= 128 or len(note["reminders"]) != 1:
@@ -176,9 +225,12 @@ def normalize_reminder_list(payload: object) -> tuple[tuple[StationReminder, ...
                 complete = False
                 continue
             identity = hashlib.sha256(provider_id.encode()).hexdigest()
+            mode, start = _schedule_mode(note)
             item = StationReminder(
                 id=identity, title=title.strip(), dueAt=due.isoformat() if due else None, timezone=zone,
-                repeats=repeats, version=None if repeats else _version(note),
+                repeats=repeats, version=_version(note) if due or start else None, scheduleMode=mode,
+                seriesStartAt=start.isoformat() if start and repeats else None,
+                delivery=_delivery_mode(note, reminder),
             )
             if identity in result and result[identity] != item:
                 complete = False
@@ -391,6 +443,8 @@ class StationRemindersCollector:
             "canCreate": self.writer.allowed(CREATE_CAPABILITY),
             "voiceTargetConfigured": self.writer.has_voice_target,
             "canReschedule": self.writer.allowed(EDIT_CAPABILITY),
+            "canEdit": self.writer.allowed(EDIT_CAPABILITY),
+            "canDelete": self.writer.allowed(EDIT_CAPABILITY),
         })
 
     async def _run(self) -> None:
@@ -400,38 +454,61 @@ class StationRemindersCollector:
                 await asyncio.sleep(REFRESH_SECONDS)
 
 
+DUE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$"
+
+
+def _due_time(due_local: str) -> datetime:
+    zone = ZoneInfo(MOSCOW_ZONE)
+    try:
+        value = datetime.fromisoformat(due_local).replace(tzinfo=zone)
+    except ValueError as exc:
+        raise HTTPException(422, "invalid_time") from exc
+    if value <= datetime.now(zone):
+        raise HTTPException(422, "time_must_be_future")
+    return value
+
+
+def _clean_title(value: str | None) -> str | None:
+    if value is None:
+        return None
+    title = value.strip()
+    if not title or any(ord(char) < 32 for char in title):
+        raise ValueError("Invalid reminder title")
+    return title
+
+
 class ReminderChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     attemptId: UUID
-    dueLocal: str = Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$")
-
-    def due_time(self) -> datetime:
-        zone = ZoneInfo(MOSCOW_ZONE)
-        try:
-            value = datetime.fromisoformat(self.dueLocal).replace(tzinfo=zone)
-        except ValueError as exc:
-            raise HTTPException(422, "invalid_time") from exc
-        if value <= datetime.now(zone):
-            raise HTTPException(422, "time_must_be_future")
-        return value
 
 
 class CreateReminder(ReminderChange):
-    delivery: Literal["station", "phone", "both"] = "station"
+    dueLocal: str = Field(pattern=DUE_PATTERN)
+    delivery: Delivery = "station"
     title: str = Field(min_length=1, max_length=200)
+    repeat: Repeat = "once"
 
-    @field_validator("title")
-    @classmethod
-    def clean_title(cls, value: str) -> str:
-        title = value.strip()
-        if not title or any(ord(char) < 32 for char in title):
-            raise ValueError("Invalid reminder title")
-        return title
+    clean_title = field_validator("title")(_clean_title)
 
 
-class RescheduleReminder(ReminderChange):
+class DeleteReminder(ReminderChange):
     expectedVersion: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class EditReminder(DeleteReminder):
+    dueLocal: str | None = Field(default=None, pattern=DUE_PATTERN)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    repeat: Repeat | None = None
+
+    clean_title = field_validator("title")(_clean_title)
+
+    @model_validator(mode="after")
+    def require_change(self):
+        changes = self.model_fields_set & {"dueLocal", "title", "repeat"}
+        if not changes or any(getattr(self, key) is None for key in changes):
+            raise ValueError("Missing reminder changes")
+        return self
 
 
 def _local_intent(request: Request) -> bool:
@@ -487,8 +564,8 @@ class StationRemindersWriter:
     def allowed(self, capability: str) -> bool:
         return self.access().authorize(capability, gate_enabled=self.write_enabled()).allowed
 
-    async def submit(self, request: Request, change: CreateReminder | RescheduleReminder, identity: str | None = None) -> StationReminderList:
-        capability = EDIT_CAPABILITY if isinstance(change, RescheduleReminder) else CREATE_CAPABILITY
+    async def submit(self, request: Request, change: CreateReminder | EditReminder | DeleteReminder, identity: str | None = None) -> StationReminderList:
+        capability = CREATE_CAPABILITY if isinstance(change, CreateReminder) else EDIT_CAPABILITY
         result = "rejected"
         try:
             if not _local_intent(request):
@@ -501,7 +578,6 @@ class StationRemindersWriter:
             async with self._busy, self.collector.lock:
                 if change.attemptId in self._attempts:
                     raise HTTPException(409, "already_submitted")
-                target = change.due_time()
                 async with httpx.AsyncClient(trust_env=False, follow_redirects=False, timeout=7) as client:
                     try:
                         session = self.collector._current_session()
@@ -513,20 +589,35 @@ class StationRemindersWriter:
                         raise HTTPException(503, "source_unavailable") from exc
                     if not complete:
                         raise HTTPException(409, "incomplete_source")
-                    schedule = "DTSTART;TZID=Europe/Moscow:" + target.strftime("%Y%m%dT%H%M%S")
-                    expected_route = None
-                    if isinstance(change, RescheduleReminder):
+                    original = None
+                    if isinstance(change, DeleteReminder):
                         original = _note_for(before, identity or "")
                         if original is None or _version(original) != change.expectedVersion:
                             raise HTTPException(409, "reminder_changed")
-                        if _time_of(original)[2]:
-                            raise HTTPException(409, "recurring_reminder")
-                        source_note_id = original["note_id"]
-                        expected_route = _delivery_route(original)
-                        path = "update_note"
-                        note = {"note_id": source_note_id, "status": "INCOMPLETE", "schedule": schedule}
+                        path = "update_note" if isinstance(change, EditReminder) else "delete_notes"
+                        note = {"note_id": original["note_id"], "status": "INCOMPLETE"}
+                        if isinstance(change, EditReminder):
+                            if change.title is not None:
+                                note["title"] = change.title
+                            if change.dueLocal is not None or change.repeat is not None:
+                                mode, anchor = _schedule_mode(original)
+                                if mode == "unknown":
+                                    raise HTTPException(409, "unsupported_schedule")
+                                start = _due_time(change.dueLocal) if change.dueLocal else anchor
+                                assert start is not None
+                                note["schedule"] = _build_schedule(start, change.repeat or mode)
+                        else:
+                            try:
+                                present = await self._note_exists(client, session, original["note_id"])
+                            except ReminderAuthRequired as exc:
+                                raise HTTPException(503, "auth_required") from exc
+                            except (ValueError, httpx.HTTPError, OSError, TimeoutError) as exc:
+                                raise HTTPException(503, "source_unavailable") from exc
+                            if not present:
+                                raise HTTPException(409, "reminder_changed")
                     else:
                         path = "create_note"
+                        schedule = _build_schedule(_due_time(change.dueLocal), change.repeat)
                         has_voice = change.delivery != "phone"
                         send_push = "Disabled" if change.delivery == "station" else "Enabled"
                         playback: dict = {"send_push": {"state": send_push}}
@@ -541,54 +632,85 @@ class StationRemindersWriter:
                         raise HTTPException(409, "auth_required")
                     self._attempts.append(change.attemptId)
                     result = "unconfirmed"
-                    await self._mutate(client, path, session, note, target, expected_route)
+                    await self._mutate(client, path, session, note, original)
                     result = "confirmed"
                     return self.collector.projection()
         finally:
             self.access().audit_capability(capability, result=result, correlation_id=str(change.attemptId))
 
+    async def _note_exists(self, client: httpx.AsyncClient, session: _ReminderSession, note_id: str) -> bool:
+        data = await asyncio.wait_for(self.collector._request_json(
+            client, NOTES_BASE + "get_notes_batch", session.headers, {"notes_ids": [note_id]}
+        ), timeout=8)
+        notes = data.get("notes") if isinstance(data, dict) and not data.get("error") else None
+        if not isinstance(notes, list) or any(not isinstance(note, dict) or note.get("note_id") != note_id for note in notes):
+            raise ValueError("Invalid Calendar Notes lookup")
+        return bool(notes)
+
     async def _mutate(
-        self, client: httpx.AsyncClient, path: str, session: _ReminderSession, note: dict, target: datetime,
-        expected_route: tuple | None,
+        self, client: httpx.AsyncClient, path: str, session: _ReminderSession, note: dict,
+        original: dict | None,
     ) -> None:
         headers = session.headers
+        deleting = path == "delete_notes"
+        body = {"note_ids": [note["note_id"]]} if deleting else {"note": note}
         try:
             envelope = await asyncio.wait_for(
-                self.collector._request_json(client, NOTES_BASE + path, headers, {"note": note}),
+                self.collector._request_json(client, NOTES_BASE + path, headers, body),
                 timeout=9,
             )
-            saved = envelope.get("note") if isinstance(envelope, dict) and not envelope.get("error") else None
-            note_id = saved.get("note_id") if isinstance(saved, dict) else None
+            if not isinstance(envelope, dict) or envelope.get("error"):
+                raise ValueError("Invalid Calendar Notes response")
+            saved = envelope.get("note")
+            note_id = note["note_id"] if deleting else saved.get("note_id") if isinstance(saved, dict) else None
         except ReminderAuthRequired as exc:
             raise HTTPException(503, "auth_required") from exc
         except (ValueError, httpx.HTTPError, OSError, asyncio.TimeoutError) as exc:
             raise HTTPException(502, "unconfirmed") from exc
-        if not isinstance(note_id, str) or (path == "update_note" and note_id != note["note_id"]):
+        if not isinstance(note_id, str) or (original is not None and note_id != original["note_id"]):
             raise HTTPException(502, "unconfirmed")
         for delay in (0, 0.4, 1):
             await asyncio.sleep(delay)
             try:
                 after = await asyncio.wait_for(self.collector._read(client, headers), timeout=8)
                 items, complete = normalize_reminder_list(after)
+                if not complete or not self.collector.is_current(session):
+                    continue
+                latest = next((item for item in after["notes"] + after.get("undated_notes", [])
+                               if item.get("note_id") == note_id), None)
+                if deleting:
+                    confirmed = latest is None and not await self._note_exists(client, session, note_id)
+                else:
+                    confirmed = bool(latest and self._matches_update(latest, note, original))
             except (ValueError, httpx.HTTPError, OSError, asyncio.TimeoutError, ReminderAuthRequired):
                 continue
-            if complete and self.collector.is_current(session):
+            if self.collector.is_current(session):
                 self.collector.confirm(items)
-                latest = next((item for item in after["notes"] if item.get("note_id") == note_id), None)
-                if latest and latest.get("reminders") and _time_of(latest)[0] == target:
-                    if path == "create_note":
-                        routes = latest["reminders"]
-                        playback = routes[0].get("play_settings")
-                        expected = note["reminders"][0]["play_settings"]
-                        if (len(routes) == 1 and isinstance(playback, dict)
-                                and playback.get("play_location") == expected.get("play_location")
-                                and playback.get("send_push") == expected["send_push"]
-                                and latest.get("is_personal") is note["is_personal"]
-                                and (latest.get("public_home_ids") or []) == note["public_home_ids"]):
-                            return
-                    elif _delivery_route(latest) == expected_route:
-                        return
+                if confirmed:
+                    return
         raise HTTPException(502, "unconfirmed")
+
+    @staticmethod
+    def _matches_update(latest: dict, note: dict, original: dict | None) -> bool:
+        expected = {**(original or {}), **note}
+        if latest.get("title") != expected.get("title") or latest.get("status") != "INCOMPLETE":
+            return False
+        if str(latest.get("schedule", "")).splitlines() != expected["schedule"].splitlines():
+            return False
+        if original is not None:
+            def normalized_entries(record: dict) -> list:
+                return [{**entry, "offset_seconds": str(entry.get("offset_seconds"))}
+                        for entry in record.get("reminders", [])]
+            return (normalized_entries(latest) == normalized_entries(original)
+                    and _delivery_route(latest) == _delivery_route(original))
+        entries = latest.get("reminders")
+        playback = entries[0].get("play_settings") if isinstance(entries, list) and len(entries) == 1 else None
+        wanted = note["reminders"][0]["play_settings"]
+        return (isinstance(playback, dict)
+                and playback.get("play_location") == wanted.get("play_location")
+                and playback.get("send_push") == wanted["send_push"]
+                and latest.get("is_personal") is note["is_personal"]
+                and (latest.get("public_home_ids") or []) == note["public_home_ids"])
 
 
 def build_station_reminders_router(collector: StationRemindersCollector | None) -> APIRouter:
@@ -610,7 +732,14 @@ def build_station_reminders_router(collector: StationRemindersCollector | None) 
         return await writer().submit(request, change)
 
     @router.patch("/{identity}", response_model=StationReminderList)
-    async def reschedule(identity: str, change: RescheduleReminder, request: Request, response: Response):
+    async def edit(identity: str, change: EditReminder, request: Request, response: Response):
+        if not re.fullmatch(r"[a-f0-9]{64}", identity):
+            raise HTTPException(404, "reminder_not_found")
+        response.headers["Cache-Control"] = "no-store"
+        return await writer().submit(request, change, identity)
+
+    @router.delete("/{identity}", response_model=StationReminderList)
+    async def delete(identity: str, change: DeleteReminder, request: Request, response: Response):
         if not re.fullmatch(r"[a-f0-9]{64}", identity):
             raise HTTPException(404, "reminder_not_found")
         response.headers["Cache-Control"] = "no-store"

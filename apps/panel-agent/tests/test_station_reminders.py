@@ -255,8 +255,9 @@ def test_uncertain_creation_never_repeats_the_provider_post(tmp_path, monkeypatc
 def test_recurrence_without_next_deadline_has_no_due_time():
     recurring = note(schedule="DTSTART;TZID=Europe/Moscow:20261126T160000\r\nRRULE:FREQ=WEEKLY")
     recurring.pop("deadline")
+    recurring["status"] = "INCOMPLETE"
     (item,), complete = reminders.normalize_reminder_list(payload(recurring))
-    assert complete and item.repeats and item.dueAt is None and item.version is None
+    assert complete and item.repeats and item.dueAt is None and item.version and item.scheduleMode == "weekly"
 
 
 def test_rotation_drops_in_flight_result_and_partial_cache(tmp_path, monkeypatch):
@@ -372,3 +373,46 @@ def test_calendar_notes_budget_applies_across_pages():
 
     asyncio.run(run())
     assert response_count == 2
+
+
+def test_delete_uses_note_id_and_checks_the_unfiltered_lookup(tmp_path, monkeypatch):
+    from panel_agent.access_policy import AccessPolicyStore
+
+    store = AccessPolicyStore(tmp_path / "access.json")
+    store.set_profile("standard")
+    collector = reminders.StationRemindersCollector(tmp_path / "unused")
+    monkeypatch.setattr(collector, "_current_session", lambda: reminders._ReminderSession(1, {}))
+    collector.writer = reminders.StationRemindersWriter(collector, access=lambda: store, write_enabled=lambda: True)
+    item = {**note(schedule="DTSTART;TZID=Europe/Moscow:20411201T160000\nRRULE:FREQ=DAILY"),
+            "status": "INCOMPLETE"}
+    calls = []
+    deleted = False
+
+    def native(request):
+        nonlocal deleted
+        name = request.url.path.rsplit("/", 1)[-1]
+        body = json.loads(request.content)
+        calls.append((name, body))
+        if name == "get_calendar_notes":
+            return httpx.Response(200, json=payload() if deleted else payload(item))
+        if name == "delete_notes":
+            assert body == {"note_ids": [item["note_id"]]}
+            deleted = True
+            return httpx.Response(200, json={})
+        assert name == "get_notes_batch" and body == {"notes_ids": [item["note_id"]]}
+        return httpx.Response(200, json={"notes": [] if deleted else [item]})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(reminders.httpx, "AsyncClient",
+                        lambda **options: real(transport=httpx.MockTransport(native), **options))
+    app = FastAPI()
+    app.include_router(reminders.build_station_reminders_router(collector))
+    (record,), complete = reminders.normalize_reminder_list(payload(item))
+    assert complete and record.scheduleMode == "daily" and record.version
+    with TestClient(app, base_url="http://localhost") as client:
+        response = client.request("DELETE", f"/api/v1/station/reminders/{record.id}",
+                                  headers={"Origin": "http://localhost", "X-Panel-Intent": "station-reminders"},
+                                  json={"expectedVersion": record.version, "attemptId": "78f80cdf-942e-4c61-a713-1fbfc914dfad"})
+    assert response.status_code == 200 and response.json()["items"] == []
+    assert [name for name, _ in calls] == ["get_calendar_notes", "get_notes_batch", "delete_notes",
+                                          "get_calendar_notes", "get_notes_batch"]
