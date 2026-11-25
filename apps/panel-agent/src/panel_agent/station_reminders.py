@@ -605,6 +605,8 @@ class StationRemindersWriter:
                                     raise HTTPException(409, "unsupported_schedule")
                                 start = _due_time(change.dueLocal) if change.dueLocal else anchor
                                 assert start is not None
+                                if change.repeat == "once" and start <= datetime.now(ZoneInfo(MOSCOW_ZONE)):
+                                    raise HTTPException(422, "time_must_be_future")
                                 note["schedule"] = _build_schedule(start, change.repeat or mode)
                         else:
                             try:

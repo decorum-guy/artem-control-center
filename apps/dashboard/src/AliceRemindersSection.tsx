@@ -72,7 +72,7 @@ function ReminderEditor({ item, writable, voiceReady, canDelete, onClose, onSave
   const scheduleMode = item?.scheduleMode ?? (item?.repeats ? "unknown" : "once");
   const canChangeSchedule = scheduleMode !== "unknown";
   const itemStart = item?.repeats ? item.seriesStartAt : item?.dueAt;
-  const initial = fields(itemStart ? new Date(itemStart) : new Date(Date.now() + 30 * 60_000));
+  const [initial] = useState(() => fields(itemStart ? new Date(itemStart) : new Date(Date.now() + 30 * 60_000)));
   const [title, setTitle] = useState(item?.title ?? "");
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
@@ -87,7 +87,7 @@ function ReminderEditor({ item, writable, voiceReady, canDelete, onClose, onSave
 
   const draft: ReminderDraft = {};
   if (!item || title.trim() !== item.title) draft.title = title;
-  if (!item || date !== initial.date || time !== initial.time) draft.dueLocal = `${date}T${time}`;
+  if (canChangeSchedule && (!item || date !== initial.date || time !== initial.time)) draft.dueLocal = `${date}T${time}`;
   if (repeat !== "unknown" && (!item || repeat !== scheduleMode)) draft.repeat = repeat;
   if (!item) draft.delivery = delivery;
 
