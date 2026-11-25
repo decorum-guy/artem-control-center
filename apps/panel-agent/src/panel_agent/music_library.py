@@ -310,7 +310,7 @@ class Options:
 
 
 class MusicLibrary:
-    def __init__(self, station: StationPlaybackCollector, yandex: YandexLibrary | None,
+    def __init__(self, station: StationPlaybackCollector | None, yandex: YandexLibrary | None,
                  youtube: YouTubeLibrary | None, *, access: Callable[[], AccessPolicyStore],
                  writes: Callable[[], bool], paired_track: Callable[[str], str | None],
                  browser: MusicBrowserConnector | None = None):
@@ -330,7 +330,8 @@ class MusicLibrary:
         self.search_locks = {provider: asyncio.Lock() for provider in self.feeds}
         self.playlist_queue: PlaylistQueue | None = None
         self.playlist_task: asyncio.Task | None = None
-        self.station.on_playback_progress = self._observe_playlist
+        if station is not None:
+            station.on_playback_progress = self._observe_playlist
         self.uncertain_likes: OrderedDict[tuple[str, str], None] = OrderedDict()
 
     def invalidate_youtube_likes(self) -> None:
@@ -477,7 +478,8 @@ class MusicLibrary:
                 raise HTTPException(503, "source_unavailable") from exc
 
     def can_play(self) -> bool:
-        return self.access().authorize(PLAY_CAPABILITY, gate_enabled=self.writes()).allowed
+        return self.station is not None and self.access().authorize(
+            PLAY_CAPABILITY, gate_enabled=self.writes()).allowed
 
     def status(self, provider: Provider) -> dict:
         feed = self.feeds[provider]
