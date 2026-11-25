@@ -298,9 +298,19 @@ const LibraryPanel = memo(function LibraryPanel({ provider, current, playlist, o
 
   useEffect(() => {
     presence.current = true;
-    void library.sync();
-    const timer = window.setInterval(() => { if (!document.hidden) void library.sync(); }, 20_000);
-    const wake = () => { if (!document.hidden) void library.sync(); };
+    const syncVisibleList = () => {
+      if (document.hidden) return;
+      const node = listNode.current;
+      const visible = library.getList(library.read().selected);
+      if (node && visible.observedAt && !scanRequest.current) {
+        const index = Math.floor(node.scrollTop / MUSIC_ROW_HEIGHT);
+        library.scroll(node.scrollTop, filterTracks(visible.items, visible.query)[index]?.trackId);
+      }
+      void library.sync();
+    };
+    syncVisibleList();
+    const timer = window.setInterval(syncVisibleList, 20_000);
+    const wake = syncVisibleList;
     document.addEventListener("visibilitychange", wake);
     return () => { presence.current = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", wake); };
   }, [library]);

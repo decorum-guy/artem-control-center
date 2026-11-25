@@ -906,7 +906,7 @@ class MusicLibrary:
                 queue.previous_progress = progress
             return
         natural_end = queue.expected_end is not None and -0.3 <= time.monotonic() - queue.expected_end <= 3
-        if not natural_end or self.play_lock.locked() or self.station.media_busy:
+        if not natural_end or self.play_lock.locked():
             queue.status = "stopped"
             return
         if not self._playlist_allowed(queue):
@@ -920,7 +920,17 @@ class MusicLibrary:
             if not self._playlist_allowed(queue):
                 queue.status = "blocked"
                 return
+            try:
+                async with asyncio.timeout(2.2):
+                    while self.station.media_busy:
+                        await asyncio.sleep(0.05)
+            except TimeoutError:
+                queue.status = "busy"
+                return
             state = self.station.state
+            if state and state.status == "playing" and state.trackId != active_track:
+                queue.status = "stopped"
+                return
             if state and state.status == "playing" and state.trackId == active_track:
                 def may_pause() -> bool:
                     return bool(self._playlist_allowed(queue) and self.station.state
