@@ -33,6 +33,14 @@ class MusicUnavailable(Exception):
     pass
 
 
+class MusicProxyUnavailable(MusicUnavailable):
+    pass
+
+
+class OAuthChannelMismatch(MusicAuthRequired):
+    pass
+
+
 @dataclass(frozen=True)
 class GoogleCredential:
     client_id: str = field(repr=False)
@@ -123,8 +131,10 @@ class YouTubeMusic:
             session = MusicSession(generation, token, cfg.channel_id, cfg.channel_handle, time.monotonic() + expires)
             found = await self._data(session, "GET", "channels", {"part": "snippet", "mine": "true", "maxResults": "5"})
             rows = found.get("items")
-            if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("id") != session.channel_id:
-                raise MusicAuthRequired
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise MusicUnavailable
+            if len(rows) != 1 or rows[0].get("id") != session.channel_id:
+                raise OAuthChannelMismatch
             self.require_current(session)
             self._cached = session
             return session
@@ -170,9 +180,11 @@ class YouTubeMusic:
 
     async def _google(self, method: str, url: str, **kwargs) -> dict:
         if self.proxy is None:
-            raise MusicUnavailable
+            raise MusicProxyUnavailable
         try:
             return await asyncio.wait_for(self._google_request(method, url, **kwargs), timeout=9)
+        except (httpx.ProxyError, httpx.ConnectError) as exc:
+            raise MusicProxyUnavailable from exc
         except (httpx.HTTPError, ValueError, asyncio.TimeoutError) as exc:
             raise MusicUnavailable from exc
 
@@ -247,7 +259,7 @@ def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2, b
                diagnostics: MusicReadDiagnostics | None = None):
     """Pin every InnerTube request to the approved HTTPS host and local proxy."""
     if proxy != YOUTUBE_PROXY:
-        raise MusicUnavailable
+        raise MusicProxyUnavailable
     try:
         import requests
         from ytmusicapi import YTMusic
@@ -312,6 +324,8 @@ def music_http(proxy: str | None, auth: str | None, *, request_limit: int = 2, b
             with diagnostics.step("client_init") if diagnostics else nullcontext():
                 client = YTMusic(auth, requests_session=http, proxies={"https": proxy})
             yield client
+    except requests.exceptions.ProxyError:
+        raise MusicProxyUnavailable from None
     except (requests.RequestException, YTMusicError, KeyError, IndexError, TypeError, ValueError):
         # ytmusicapi may put the response or request URL in its exception text.
         raise MusicUnavailable from None

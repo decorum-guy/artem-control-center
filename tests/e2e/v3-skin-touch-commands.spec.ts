@@ -135,7 +135,7 @@ for (const offline of ["health_unreachable_persistent", null]) {
       await expect(page.getByTestId("services-attention-zone")).toContainText("ASUS ROG");
     } else {
       await expect(summary).toContainText("Нет активных проблем");
-      await expect(header).toHaveAccessibleName("Системы в норме");
+      await expect(header).toHaveAccessibleName("Диагностика недоступна");
       await page.getByTestId("healthy-group-system").getByRole("button").first().click();
       await expect(page.getByTestId("health-row-rog_g703gi")).toContainText("Недоступен");
     }

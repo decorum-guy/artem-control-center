@@ -894,6 +894,7 @@ export interface StationPlayback {
   coverPath: string | null;
   observedAt: string | null;
   trackId?: string | null;
+  volume?: number | null;
 }
 
 export interface StationRetention {
@@ -912,6 +913,8 @@ export interface StationReminderList {
   canCreate?: boolean;
   voiceTargetConfigured?: boolean;
   canReschedule?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
   items: {
     id: string;
     title: string;
@@ -919,6 +922,9 @@ export interface StationReminderList {
     timezone: string;
     repeats: boolean;
     version?: string | null;
+    scheduleMode?: "once" | "daily" | "weekly" | "unknown";
+    seriesStartAt?: string | null;
+    delivery?: "station" | "phone" | "both" | "unknown";
   }[];
 }
 
@@ -1007,6 +1013,7 @@ export type OverviewWidgetType =
   | "home.climate"
   | "home.kettle"
   | "home.light-strip"
+  | "home.bedroom-light-strip"
   | "home.station-mini-2"
   | "home.television"
   | "system.rog-g703-operational"
@@ -1057,7 +1064,7 @@ export interface OverviewLayoutDocument {
   schemaVersion: "overview.layout.v2";
   profileId: "samsung-control";
   presetId: "overview.default";
-  presetVersion: 6;
+  presetVersion: 7;
   revision: number;
   viewportClass: "landscape-12";
   updatedAt: string;

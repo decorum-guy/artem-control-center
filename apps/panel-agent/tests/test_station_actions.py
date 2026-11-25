@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
@@ -201,4 +202,71 @@ def test_second_action_cannot_overlap_first(tmp_path):
         release.set()
         assert (await first)["status"] == "dispatched"
         assert calls == 1
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("pause_outcome", ["confirmed", "busy"])
+def test_local_pause_interrupts_pending_navigation_without_claiming_busy_send_succeeded(tmp_path, pause_outcome):
+    async def scenario():
+        entered, release = asyncio.Event(), asyncio.Event()
+        interrupted = False
+        controls = []
+
+        async def navigate(action, may_send):
+            nonlocal interrupted
+            assert may_send()
+            if action == "next":
+                entered.set()
+                await release.wait()
+                return "unconfirmed" if interrupted else "confirmed"
+            if action == "pause":
+                interrupted = True
+            return None
+
+        async def control(action, may_send):
+            assert may_send()
+            controls.append(action)
+            return pause_outcome
+
+        executor = make_executor(tmp_path)
+        executor.station = SimpleNamespace(settings=object(), local_media_available=True,
+                                           state=SimpleNamespace(volume=0.5), control=control)
+        executor.playlist_navigation = navigate
+        pending = asyncio.create_task(executor.execute(StationActionRequest(actionId="media.alice.next", requestId=uuid4())))
+        await asyncio.wait_for(entered.wait(), 1)
+        availability = executor.availability()["actions"]
+        assert availability["media.alice.pause"]["allowed"] and not availability["media.alice.pause"]["busy"]
+        assert not availability["media.alice.next"]["allowed"]
+        pause = StationActionRequest(actionId="media.alice.pause", requestId=uuid4())
+        if pause_outcome == "confirmed":
+            assert (await asyncio.wait_for(executor.execute(pause), 1))["status"] == "dispatched"
+        else:
+            with pytest.raises(HTTPException, match="station_action_busy"):
+                await asyncio.wait_for(executor.execute(pause), 1)
+        assert interrupted and not pending.done() and controls == ["pause"]
+        release.set()
+        with pytest.raises(HTTPException, match="station_dispatch_uncertain"):
+            await asyncio.wait_for(pending, 1)
+
+    asyncio.run(scenario())
+
+
+def test_local_pause_priority_preserves_write_gate(tmp_path):
+    async def scenario():
+        calls = []
+
+        async def navigate(action, _may_send):
+            calls.append(action)
+
+        executor = make_executor(tmp_path, writes=False)
+        executor.station = SimpleNamespace(settings=object(), local_media_available=True,
+                                           state=SimpleNamespace(volume=0.5))
+        executor.playlist_navigation = navigate
+        executor._lock = asyncio.Lock()
+        async with executor._lock:
+            assert not executor.availability()["actions"]["media.alice.pause"]["allowed"]
+            with pytest.raises(HTTPException):
+                await executor.execute(StationActionRequest(actionId="media.alice.pause", requestId=uuid4()))
+        assert not calls
+
     asyncio.run(scenario())

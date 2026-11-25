@@ -23,7 +23,7 @@ for (const size of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }])
       if (path === "status") return route.fulfill({ json: status });
       if (path === "catalog") return route.fulfill({ json: samplePage(provider === "yandex"
         ? [{ key: "likes", title: "Мне нравится", kind: "liked", cover: null, count: null }]
-        : [{ key: "LM", title: "Понравившаяся музыка", kind: "liked", cover, count: null },
+        : [{ key: "LM", title: "Liked", kind: "liked", cover, count: null },
           { key: "PLtest", title: "Другой плейлист", kind: "playlist", cover: null, count: 2 }]) });
       if (path === "tracks") {
         reads.push(provider + "/" + selection + (url.searchParams.has("cursor") ? "/next" : ""));
@@ -39,11 +39,11 @@ for (const size of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }])
     await page.goto("/music");
     await expect(page.getByTestId("route-music")).toBeVisible();
     const yt = page.getByRole("region", { name: "YouTube Music", exact: true });
-    await expect(yt.getByRole("button", { name: "Понравившаяся музыка", exact: true })).toBeVisible();
+    await expect(yt.getByRole("button", { name: "Liked", exact: true })).toBeVisible();
     expect(reads.every(path => path.startsWith("yandex/"))).toBe(true);
     await yt.getByRole("button", { name: "Другой плейлист" }).click();
     await expect(yt.getByRole("button", { name: "Включить на Станции · Трек 1001" })).toBeVisible();
-    await yt.getByRole("button", { name: "Понравившаяся музыка" }).click();
+    await yt.getByRole("button", { name: "Liked" }).click();
     await yt.getByRole("button", { name: "Загрузить ещё" }).click();
     await expect(yt.getByText("Загружено: 1100")).toBeVisible();
     expect(await yt.getByRole("listitem").count()).toBeLessThan(26);
@@ -62,7 +62,7 @@ for (const size of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }])
     });
     await expect(page.getByTestId("route-music")).toHaveCount(0);
     await page.goBack();
-    await expect(yt.getByRole("button", { name: "Понравившаяся музыка" })).toHaveAttribute("aria-pressed", "true");
+    await expect(yt.getByRole("button", { name: "Liked" })).toHaveAttribute("aria-pressed", "true");
     await expect.poll(() => list.evaluate(node => node.scrollTop)).toBe(scroll);
     expect(await page.locator("body").evaluate(node => node.scrollWidth)).toBeLessThanOrEqual(size.width);
   });
@@ -84,9 +84,9 @@ test("Music keeps the selected view on a late response and recovers a failed con
     if (path.endsWith("/status")) return route.fulfill({ json: { ...status, generation: currentGeneration } });
     if (path === "yandex/catalog") return route.fulfill({ json: pageData([]) });
     if (path === "youtube/catalog") return route.fulfill({ json: pageData(currentGeneration === generation ? [
-      { key: "LM", title: "Понравившаяся музыка", kind: "liked", cover: null, count: null },
+      { key: "LM", title: "Liked", kind: "liked", cover: null, count: null },
       { key: "PLtest", title: "Другой плейлист", kind: "playlist", cover: null, count: null }
-    ] : [{ key: "LM", title: "Понравившаяся музыка", kind: "liked", cover: null, count: null }]) });
+    ] : [{ key: "LM", title: "Liked", kind: "liked", cover: null, count: null }]) });
     if (path === "youtube/tracks/PLtest") {
       earlierStarted = true;
       await earlier;
@@ -104,7 +104,7 @@ test("Music keeps the selected view on a late response and recovers a failed con
   const pane = yt.getByRole("region", { name: "Треки · YouTube Music" });
   await yt.getByRole("button", { name: "Другой плейлист" }).click();
   await expect.poll(() => earlierStarted).toBe(true);
-  await yt.getByRole("button", { name: "Понравившаяся музыка" }).click();
+  await yt.getByRole("button", { name: "Liked" }).click();
   await expect(pane.getByText("Трек 100", { exact: true })).toBeVisible();
   releaseEarlier();
   await expect(pane.getByText("Трек 333", { exact: true })).toHaveCount(0);
@@ -126,9 +126,9 @@ test("Music keeps the selected view on a late response and recovers a failed con
 
   currentGeneration = nextGeneration;
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-  await expect(yt.getByRole("button", { name: "Понравившаяся музыка" })).toHaveAttribute("aria-pressed", "false");
+  await expect(yt.getByRole("button", { name: "Liked" })).toHaveAttribute("aria-pressed", "false");
   await expect(pane.getByText("Трек 100", { exact: true })).toHaveCount(0);
-  await yt.getByRole("button", { name: "Понравившаяся музыка" }).click();
+  await yt.getByRole("button", { name: "Liked" }).click();
   await expect(pane.getByText("Трек 555", { exact: true })).toBeVisible();
 });
 
@@ -493,3 +493,361 @@ for (const size of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }])
     expect(played).toEqual([{ generation, source: liked.key, row: row(34).key }]);
   });
 }
+
+test("full playlist search resumes beyond loaded rows without playing until selected", async ({ page }) => {
+  const starts: string[] = [];
+  const plays: unknown[] = [];
+  await page.route("**/api/v1/music/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/status")) return route.fulfill({ json: status });
+    if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage(
+      path.includes("/youtube/") ? [] : [{ key: "likes", title: "Мне нравится", kind: "liked", cover: null, count: null }]
+    ) });
+    if (path.endsWith("/tracks/likes")) return route.fulfill({ json: samplePage([row(1)], "next-page") });
+    if (path.endsWith("/search")) {
+      const { searchId, query } = route.request().postDataJSON();
+      expect(query).toBe("500");
+      starts.push(searchId);
+      return route.fulfill({ json: starts.length === 1
+        ? { searchId, checked: 400, status: "more", items: [] }
+        : { searchId, checked: 540, status: "complete", items: [row(500)] } });
+    }
+    if (path.endsWith("/play")) {
+      plays.push(route.request().postDataJSON());
+      return route.fulfill({ json: { status: "playing", stationTrackId: "500" } });
+    }
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto("/music");
+  const yandex = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+  await yandex.getByRole("searchbox").fill("500");
+  await expect(yandex.getByText("Среди загруженных записей совпадений нет.")).toBeVisible();
+  await yandex.getByRole("button", { name: "Искать по всему плейлисту" }).click();
+  await expect(yandex.getByText(/Проверено позиций: 400/)).toBeVisible();
+  await yandex.getByRole("button", { name: "Продолжить поиск" }).click();
+  await expect(yandex.getByText(/Плейлист проверен полностью/)).toBeVisible();
+  expect(starts[0]).toBe(starts[1]);
+  expect(plays).toEqual([]);
+  await yandex.getByRole("button", { name: "Включить на Станции · Трек 500" }).click();
+  expect(plays).toEqual([{ generation, source: "likes", row: row(500).key }]);
+});
+
+test("each chosen playlist can be started as a playlist on the Station", async ({ page }) => {
+  const starts: string[] = [];
+  await page.route("**/api/v1/music/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/status")) return route.fulfill({ json: status });
+    const provider = path.includes("/youtube/") ? "youtube" : "yandex";
+    if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage(
+      provider === "youtube" ? [{ key: "LM", title: "Liked" }] : [{ key: "ya_1_5", title: "Плейлист" }]
+    ) });
+    if (path.endsWith("/play-playlist")) {
+      const body = route.request().postDataJSON();
+      expect(Object.keys(body).sort()).toEqual(["generation", "source"]);
+      starts.push(body.source);
+      return route.fulfill({ json: { status: "playing" } });
+    }
+    return route.fulfill({ json: samplePage([row(200)]) });
+  });
+  await page.goto("/music");
+  const youtube = page.getByRole("region", { name: "YouTube Music", exact: true });
+  const yandex = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+  await expect(youtube.getByRole("button", { name: /Проиграть плейлист/ })).toHaveCount(0);
+  await yandex.getByRole("button", { name: /Проиграть плейлист/ }).click();
+  await expect(yandex.getByText("Плейлист играет на Станции.")).toBeVisible();
+  await youtube.getByRole("button", { name: "Liked" }).click();
+  await youtube.getByRole("button", { name: /Проиграть плейлист/ }).click();
+  await expect(youtube.getByText("Плейлист играет на Станции.")).toBeVisible();
+  expect(starts).toEqual(["ya_1_5", "LM"]);
+});
+
+for (const previousStatus of ["complete", "more"] as const) {
+  test(`refresh invalidates a ${previousStatus} full search without hiding its rows`, async ({ page }) => {
+    const searches: string[] = [];
+    const cancelled: string[] = [];
+    const writes: string[] = [];
+    let releaseRefresh!: () => void;
+    const refreshing = new Promise<void>(resolve => { releaseRefresh = resolve; });
+    await page.route("**/api/v1/music/**", async route => {
+      const url = new URL(route.request().url());
+      const path = url.pathname;
+      if (path.endsWith("/status")) return route.fulfill({ json: status });
+      if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage(path.includes("/yandex/")
+        ? [{ key: "likes", title: "Мне нравится", kind: "liked", count: null }] : []) });
+      if (path.endsWith("/tracks/likes")) {
+        if (url.searchParams.has("refresh")) await refreshing;
+        return route.fulfill({ json: samplePage([row(1)], "next-page") });
+      }
+      if (route.request().method() === "DELETE") {
+        cancelled.push(path.split("/").at(-1)!);
+        return route.fulfill({ status: 204 });
+      }
+      if (path.endsWith("/search")) {
+        const { searchId } = route.request().postDataJSON();
+        searches.push(searchId);
+        return route.fulfill({ json: { searchId, checked: 540, status: previousStatus, items: [row(500)] } });
+      }
+      writes.push(path);
+      return route.fulfill({ status: 204 });
+    });
+    await page.goto("/music");
+    const panel = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+    await panel.getByRole("searchbox").fill("500");
+    await panel.getByRole("button", { name: "Искать по всему плейлисту" }).click();
+    await expect(panel.getByText(previousStatus === "complete" ? /Плейлист проверен полностью/ : /Можно продолжить поиск/)).toBeVisible();
+    await panel.getByRole("button", { name: "Обновить треки · Яндекс Музыка", exact: true }).click();
+    await expect(panel.getByText(/Результаты предыдущего поиска/)).toBeVisible();
+    await expect(panel.getByText(/Плейлист проверен полностью|Можно продолжить поиск/)).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "Включить на Станции · Трек 500" })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Начать заново" })).toBeDisabled();
+    await expect.poll(() => cancelled).toEqual([searches[0]]);
+    releaseRefresh();
+    await expect(panel.getByRole("button", { name: "Начать заново" })).toBeEnabled();
+    await panel.getByRole("button", { name: "Начать заново" }).click();
+    await expect.poll(() => searches.length).toBe(2);
+    expect(searches[1]).not.toBe(searches[0]);
+    expect(writes).toEqual([]);
+  });
+}
+
+test("refresh rejects a late completed search and uses a new search identity", async ({ page }) => {
+  const searches: string[] = [];
+  const cancelled: string[] = [];
+  let releaseSearch!: () => void;
+  const heldSearch = new Promise<void>(resolve => { releaseSearch = resolve; });
+  await page.route("**/api/v1/music/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/status")) return route.fulfill({ json: status });
+    if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage(path.includes("/yandex/")
+      ? [{ key: "likes", title: "Мне нравится", kind: "liked", count: null }] : []) });
+    if (path.endsWith("/tracks/likes")) return route.fulfill({ json: samplePage([row(1)]) });
+    if (route.request().method() === "DELETE") {
+      cancelled.push(path.split("/").at(-1)!);
+      return route.fulfill({ status: 204 });
+    }
+    const { searchId } = route.request().postDataJSON();
+    searches.push(searchId);
+    if (searches.length === 1) await heldSearch;
+    return route.fulfill({ json: { searchId, checked: 540, status: "complete", items: [row(500)] } }).catch(() => {});
+  });
+  await page.goto("/music");
+  const panel = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+  await panel.getByRole("searchbox").fill("500");
+  await panel.getByRole("button", { name: "Искать по всему плейлисту" }).click();
+  await expect.poll(() => searches.length).toBe(1);
+  await panel.getByRole("button", { name: "Обновить треки · Яндекс Музыка", exact: true }).click();
+  await expect.poll(() => cancelled).toEqual([searches[0]]);
+  releaseSearch();
+  await expect(panel.getByText(/Результаты предыдущего поиска/)).toBeVisible();
+  await expect(panel.getByText(/Плейлист проверен полностью/)).toHaveCount(0);
+  await panel.getByRole("button", { name: "Начать заново" }).click();
+  await expect(panel.getByText(/Плейлист проверен полностью/)).toBeVisible();
+  expect(searches).toHaveLength(2);
+  expect(searches[1]).not.toBe(searches[0]);
+});
+
+test("a known Likes change invalidates a completed full search", async ({ page }) => {
+  let likedRevision = 0;
+  let refreshed = 0;
+  await page.route("**/api/v1/music/**", async route => {
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+    if (path.endsWith("/status")) return route.fulfill({ json: { ...status, likedRevision } });
+    if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage(path.includes("/yandex/")
+      ? [{ key: "likes", title: "Мне нравится", kind: "liked", count: null }] : []) });
+    if (path.endsWith("/tracks/likes")) {
+      if (url.searchParams.has("refresh")) refreshed++;
+      return route.fulfill({ json: samplePage([row(1)]) });
+    }
+    if (route.request().method() === "DELETE") return route.fulfill({ status: 204 });
+    const { searchId } = route.request().postDataJSON();
+    return route.fulfill({ json: { searchId, checked: 540, status: "complete", items: [row(500)] } });
+  });
+  await page.goto("/music");
+  const panel = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+  await panel.getByRole("searchbox").fill("500");
+  await panel.getByRole("button", { name: "Искать по всему плейлисту" }).click();
+  await expect(panel.getByText(/Плейлист проверен полностью/)).toBeVisible();
+  likedRevision = 1;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect.poll(() => refreshed).toBe(1);
+  await expect(panel.getByText(/Результаты предыдущего поиска/)).toBeVisible();
+  await expect(panel.getByText(/Плейлист проверен полностью/)).toHaveCount(0);
+});
+
+test("Stop stays available while a playlist start waits and ignores its late success", async ({ page }) => {
+  const id = "playlist-held";
+  let state: "idle" | "working" | "stopped" = "idle";
+  let releaseStart!: () => void;
+  const heldStart = new Promise<void>(resolve => { releaseStart = resolve; });
+  let startReturned = false;
+  const actions: unknown[] = [];
+  const projection = () => ({ id, provider: "youtube", source: "LM", status: state, position: 1, title: "Трек 1" });
+  await page.route("**/api/v1/station/playlist", async route => {
+    if (route.request().method() === "POST") {
+      actions.push(route.request().postDataJSON());
+      state = "stopped";
+    }
+    return route.fulfill({ json: state === "idle" ? null : projection() });
+  });
+  await page.route("**/api/v1/music/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/status")) return route.fulfill({ json: status });
+    if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage(path.includes("/youtube/")
+      ? [{ key: "LM", title: "Liked", kind: "liked", count: null }] : []) });
+    if (path.endsWith("/play-playlist")) {
+      state = "working";
+      await heldStart;
+      await route.fulfill({ json: { ...projection(), status: "playing" } });
+      startReturned = true;
+      return;
+    }
+    return route.fulfill({ json: samplePage([row(1)]) });
+  });
+  await page.goto("/music");
+  const panel = page.getByRole("region", { name: "YouTube Music", exact: true });
+  await panel.getByRole("button", { name: "Liked", exact: true }).click();
+  await panel.getByRole("button", { name: /Проиграть плейлист/ }).click();
+  await expect(panel.getByText(/Готовим запись для Станции/)).toBeVisible();
+  await expect(panel.getByRole("button", { name: /Проиграть плейлист/ })).toHaveAttribute("aria-busy", "true");
+  await panel.getByRole("button", { name: "Остановить очередь" }).click();
+  expect(actions).toEqual([{ id, action: "stop" }]);
+  await expect(panel.getByText(/Очередь плейлиста остановлена/)).toBeVisible();
+  releaseStart();
+  await expect.poll(() => startReturned).toBe(true);
+  await expect(panel.getByText(/Очередь плейлиста остановлена/)).toBeVisible();
+  await expect(panel.getByText(/Плейлист играет на Станции/)).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: /Проиграть плейлист/ })).toBeEnabled();
+});
+
+test("Pause bypasses a held Next and discards buffered Next commands", async ({ page }) => {
+  const actionIds = ["play", "pause", "previous", "next", "volume_down", "volume_up", "like"];
+  const commands: string[] = [];
+  let releaseNext!: () => void;
+  const heldNext = new Promise<void>(resolve => { releaseNext = resolve; });
+  let nextReturned = false;
+  let nextBusy = false;
+  await page.route("**/api/v1/actions/station/availability", route => route.fulfill({ json: {
+    schemaVersion: 1, actions: Object.fromEntries(actionIds.map(action => [`media.alice.${action}`, {
+      allowed: action === "pause" || !nextBusy, availability: action !== "pause" && nextBusy ? "busy" : "allowed",
+      gateEnabled: true, integrationAvailable: true, busy: action !== "pause" && nextBusy
+    }]))
+  } }));
+  await page.route("**/api/v1/station-playback", route => route.fulfill({ json: {
+    status: "playing", title: "Текущая песня", artist: "Исполнитель", trackId: "123", volume: 0.3,
+    observedAt: new Date().toISOString()
+  } }));
+  await page.route("**/api/v1/actions/station", async route => {
+    const body = route.request().postDataJSON();
+    commands.push(body.actionId);
+    if (body.actionId === "media.alice.next") {
+      nextBusy = true;
+      await heldNext;
+      nextBusy = false;
+    }
+    await route.fulfill({ json: { schemaVersion: 1, ...body, status: "dispatched" } });
+    if (body.actionId === "media.alice.next") nextReturned = true;
+  });
+  await page.goto("/music");
+  const player = page.getByRole("region", { name: "Плеер Яндекс Станции", exact: true });
+  await player.getByRole("button", { name: "Следующая песня", exact: true }).click();
+  await expect.poll(() => commands).toEqual(["media.alice.next"]);
+  await player.getByRole("button", { name: "Следующая песня", exact: true }).click();
+  await player.getByRole("button", { name: "Пауза", exact: true }).click();
+  await expect.poll(() => commands).toEqual(["media.alice.next", "media.alice.pause"]);
+  await expect(player.getByRole("button", { name: "Следующая песня", exact: true })).toBeDisabled();
+  releaseNext();
+  await expect.poll(() => nextReturned).toBe(true);
+  await expect(player.getByRole("button", { name: "Следующая песня", exact: true })).toBeEnabled();
+  await player.getByRole("button", { name: "Громче", exact: true }).click();
+  await expect.poll(() => commands).toEqual(["media.alice.next", "media.alice.pause", "media.alice.volume_up"]);
+});
+
+for (const replacement of ["playlist", "track"] as const) {
+  test(`a newer ${replacement} in the other library owns the UI after an old playlist reply`, async ({ page }) => {
+    const oldQueue = { id: "old-queue", provider: "yandex", source: "likes", status: "working" };
+    const newQueue = { id: "new-queue", provider: "youtube", source: "LM", status: "playing" };
+    let activeQueue: typeof oldQueue | null = null;
+    let releaseOld!: () => void;
+    const heldOld = new Promise<void>(resolve => { releaseOld = resolve; });
+    let oldReturned = false;
+    await page.route("**/api/v1/station/playlist", route => route.fulfill({ json: activeQueue }));
+    await page.route("**/api/v1/music/**", async route => {
+      const path = new URL(route.request().url()).pathname;
+      const isYandex = path.includes("/yandex/");
+      if (path.endsWith("/status")) return route.fulfill({ json: status });
+      if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage([
+        { key: isYandex ? "likes" : "LM", title: isYandex ? "Мне нравится" : "Liked", kind: "liked", count: null }
+      ]) });
+      if (path.endsWith("/play-playlist")) {
+        if (!isYandex) {
+          activeQueue = newQueue;
+          return route.fulfill({ json: newQueue });
+        }
+        activeQueue = oldQueue;
+        await heldOld;
+        await route.fulfill({ json: { ...oldQueue, status: "stopped" } });
+        oldReturned = true;
+        return;
+      }
+      if (path.endsWith("/play")) {
+        activeQueue = null;
+        return route.fulfill({ json: { status: "playing", stationTrackId: "1" } });
+      }
+      return route.fulfill({ json: samplePage([row(1)]) });
+    });
+    await page.goto("/music");
+    const yandex = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+    const youtube = page.getByRole("region", { name: "YouTube Music", exact: true });
+    await youtube.getByRole("button", { name: "Liked", exact: true }).click();
+    await yandex.getByRole("button", { name: /Проиграть плейлист/ }).click();
+    await expect(yandex.getByText(/Готовим запись для Станции/)).toBeVisible();
+    await youtube.getByRole("button", { name: replacement === "playlist"
+      ? /Проиграть плейлист/ : "Включить на Станции · Трек 1" }).click();
+    if (replacement === "playlist") await expect(youtube.getByText(/Плейлист играет на Станции/)).toBeVisible();
+    else await expect(yandex.locator(".music-playlist-feedback")).toHaveCount(0);
+    releaseOld();
+    await expect.poll(() => oldReturned).toBe(true);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(yandex.locator(".music-playlist-feedback")).toHaveCount(0);
+    if (replacement === "playlist") await expect(youtube.getByText(/Плейлист играет на Станции/)).toBeVisible();
+    else await expect(youtube.locator(".music-playlist-feedback")).toHaveCount(0);
+  });
+}
+
+test("stale full-search scrolling cannot overwrite the loaded playlist position", async ({ page }) => {
+  const loaded = Array.from({ length: 100 }, (_, index) => ({ ...row(index + 1), title: `Совпадение загружено ${index}` }));
+  const found = Array.from({ length: 500 }, (_, index) => ({ ...row(index + 101), title: `Совпадение найдено ${index}` }));
+  let statusReads = 0;
+  await page.route("**/api/v1/music/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/status")) {
+      statusReads++;
+      return route.fulfill({ json: status });
+    }
+    if (path.endsWith("/catalog")) return route.fulfill({ json: samplePage(path.includes("/yandex/")
+      ? [{ key: "likes", title: "Мне нравится", kind: "liked", count: null }] : []) });
+    if (path.endsWith("/tracks/likes")) return route.fulfill({ json: samplePage(loaded) });
+    if (route.request().method() === "DELETE") return route.fulfill({ status: 204 });
+    const { searchId } = route.request().postDataJSON();
+    return route.fulfill({ json: { searchId, checked: 600, status: "complete", items: found } });
+  });
+  await page.goto("/music");
+  const panel = page.getByRole("region", { name: "Яндекс Музыка", exact: true });
+  const tracks = panel.getByRole("region", { name: "Треки · Яндекс Музыка", exact: true });
+  await panel.getByRole("searchbox").fill("Совпадение");
+  await panel.getByRole("button", { name: "Искать по всему плейлисту" }).click();
+  await expect(panel.getByText(/Плейлист проверен полностью/)).toBeVisible();
+  await tracks.evaluate(node => { node.scrollTop = 19_200; });
+  await expect.poll(() => tracks.evaluate(node => node.scrollTop)).toBe(19_200);
+  await panel.getByRole("button", { name: "Обновить треки · Яндекс Музыка", exact: true }).click();
+  await expect(panel.getByText(/Результаты предыдущего поиска/)).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Начать заново" })).toBeEnabled();
+  const beforeWake = statusReads;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect.poll(() => statusReads).toBeGreaterThan(beforeWake);
+  await expect.poll(() => tracks.evaluate(node => node.scrollTop)).toBe(19_200);
+  await panel.getByRole("button", { name: "К загруженным трекам" }).click();
+  await expect(tracks.getByText("Совпадение загружено 0", { exact: true })).toBeVisible();
+  await expect.poll(() => tracks.evaluate(node => node.scrollTop)).toBe(0);
+});

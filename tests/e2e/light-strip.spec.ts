@@ -64,7 +64,7 @@ test.describe("living room RGB strip", () => {
     await installActions(page);
     await page.route("**/api/v1/overview/layout*", (route) => route.fulfill({ json: {
       schemaVersion: "overview.layout.v2", profileId: "samsung-control", presetId: "overview.default",
-      presetVersion: 6, revision: 0, viewportClass: "landscape-12", updatedAt: "2026-10-19T00:00:00Z",
+      presetVersion: 7, revision: 0, viewportClass: "landscape-12", updatedAt: "2026-10-19T00:00:00Z",
       items: [{ instanceId: "owner.light", widgetType: "home.light-strip", visibility: "visible",
         placement: { x: 0, y: 0, w: 5, h: 4 }, sizeVariant: "standard", config: {} }],
       warnings: [], unplaced: [], writesEnabled: false
@@ -114,23 +114,9 @@ test("the BLE card separates a sent command from the physical state", async ({ p
   expect(posts).toEqual([{ operation: "color", color: "sea" }]);
 });
 
-test("Overview remembers the selected bedroom strip across reload and orientation while Home keeps both", async ({ page }) => {
+test("Overview shows both independent strips in each orientation and Home keeps both", async ({ page }) => {
   test.skip(!enabled || process.env.VITE_OVERVIEW_V2_ENABLED !== "true", "Requires the V2 Overview and Settings.");
-  const selection = { revision: 0, id: null as string | null };
   let includeBedroom = true;
-  await page.route("**/api/v1/settings/device-visibility", async (route) => {
-    if (route.request().method() === "PATCH") {
-      const patch = route.request().postDataJSON();
-      expect(patch).toEqual({ expectedRevision: selection.revision, overviewLightStripId: "bedroom-ble-light-strip" });
-      selection.id = patch.overviewLightStripId;
-      selection.revision += 1;
-    }
-    await route.fulfill({ json: {
-      schemaVersion: "device.visibility.v1", revision: selection.revision, updatedAt: "2026-11-24T00:00:00Z",
-      devices: [{ key: "kettle", label: "Чайник", defaultVisible: true, visible: true }],
-      overviewLightStripId: selection.id, available: true, warnings: [], writesEnabled: true
-    } });
-  });
   await page.route("**/api/v1/snapshot*", async (route) => {
     const response = await route.fetch();
     const snapshot = await response.json();
@@ -147,9 +133,11 @@ test("Overview remembers the selected bedroom strip across reload and orientatio
     const portrait = route.request().url().endsWith("/portrait");
     const layout = {
       schemaVersion: "overview.layout.v2", profileId: "samsung-control", presetId: "overview.default",
-      presetVersion: 6, revision: 0, viewportClass: "landscape-12", updatedAt: "2026-11-24T00:00:00Z",
+      presetVersion: 7, revision: 0, viewportClass: "landscape-12", updatedAt: "2026-11-24T00:00:00Z",
       items: [{ instanceId: "owner.light", widgetType: "home.light-strip", visibility: "visible",
-        placement: { x: 0, y: 0, w: 5, h: 4 }, sizeVariant: "standard", config: {} }],
+        placement: { x: 0, y: 0, w: 5, h: 4 }, sizeVariant: "standard", config: {} },
+      { instanceId: "fixture.bedroom-light-strip", widgetType: "home.bedroom-light-strip", visibility: "visible",
+        placement: { x: 5, y: 0, w: 5, h: 4 }, sizeVariant: "standard", config: {} }],
       warnings: [], unplaced: [], writesEnabled: false
     };
     return route.fulfill({ json: portrait ? { schemaVersion: "overview.portrait.v1", profile: "portrait", layout } : layout });
@@ -160,31 +148,19 @@ test("Overview remembers the selected bedroom strip across reload and orientatio
     return route.abort();
   });
 
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto("/settings");
-  await page.getByTestId("settings-summary-device-visibility").click();
-  const choice = page.getByTestId("overview-light-strip-choice");
-  if (process.env.VITE_V3_VISUAL_SKIN === "true") {
-    await choice.click();
-    await page.getByRole("option", { name: "Лента в спальне" }).click();
-  } else {
-    await choice.selectOption("bedroom-ble-light-strip");
-  }
-  await expect(page.getByText("Лента для Обзора выбрана.")).toBeVisible();
-
   for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280 }]) {
     await page.setViewportSize(viewport);
     await page.goto("/overview?scenario=home-light-strip");
     const overview = page.getByTestId("overview-light-strip-widget");
-    await expect(overview).toContainText("Лента в спальне");
-    await expect(overview).not.toContainText("Лента в зале");
+    await expect(overview).toContainText("Лента в зале");
+    await expect(page.getByTestId("overview-bedroom-light-strip-widget")).toContainText("Лента в спальне");
     await page.goto("/home?scenario=home-light-strip");
     await expect(page.getByRole("region", { name: "Лента в спальне" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Лента в зале" })).toBeVisible();
   }
   includeBedroom = false;
   await page.goto("/overview?scenario=home-light-strip");
-  await expect(page.getByTestId("overview-light-strip-unavailable")).toContainText("Выбранная лента недоступна.");
-  await expect(page.getByTestId("overview-light-strip-unavailable")).toContainText("Лента в спальне");
+  await expect(page.getByTestId("overview-bedroom-light-strip-unavailable")).toContainText("Лента в спальне");
+  await expect(page.getByTestId("overview-light-strip-widget")).toContainText("Лента в зале");
   expect(hardwarePosts).toEqual([]);
 });

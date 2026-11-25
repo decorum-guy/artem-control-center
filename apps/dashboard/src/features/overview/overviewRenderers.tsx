@@ -143,19 +143,18 @@ function renderKettle(runtime: OverviewRuntimeContext): ReactNode {
   </WorkZone>;
 }
 
-function renderLightStrip(runtime: OverviewRuntimeContext): ReactNode {
-  const selected = runtime.overviewLightStripId;
-  if (selected === undefined) {
-    return <OverviewRuntimeUnavailable title="Лента" detail="Настройки ленты пока недоступны." testId="overview-light-strip-unavailable" />;
-  }
+function renderLightStrip(runtime: OverviewRuntimeContext, bedroom: boolean): ReactNode {
+  const id = bedroom ? "bedroom-ble-light-strip" : "living-room-light-strip";
+  const testId = bedroom ? "overview-bedroom-light-strip" : "overview-light-strip";
   const light = runtime.snapshot.services.find((service) => service.enabled
-    && service.dataContract === "home.light-strip.v1" && (selected === null || service.id === selected));
+    && service.id === id && service.dataContract === "home.light-strip.v1");
   if (!light) {
-    return <OverviewRuntimeUnavailable title={selected ? overviewLightStripLabels[selected] : "Лента"}
-      detail={selected ? "Выбранная лента недоступна." : "Нет подключённой ленты."} testId="overview-light-strip-unavailable" />;
+    return <OverviewRuntimeUnavailable title={overviewLightStripLabels[id]}
+      detail="Лента недоступна." testId={`${testId}-unavailable`} />;
   }
-  return <WorkZone className="overview-v2-real-widget overview-light-strip-widget" data-testid="overview-light-strip-widget" data-widget-type="home.light-strip">
-    <LightStripControl key={light.id} service={light} variant="overview" interactive={!runtime.editMode} />
+  return <WorkZone className="overview-v2-real-widget overview-light-strip-widget" data-testid={`${testId}-widget`}
+    data-widget-type={bedroom ? "home.bedroom-light-strip" : "home.light-strip"}>
+    <LightStripControl service={light} variant="overview" interactive={!runtime.editMode} />
   </WorkZone>;
 }
 
@@ -314,7 +313,9 @@ function renderTrustedWidget(item: OverviewProjectionItem, runtime: OverviewRunt
     case "home.kettle":
       return renderKettle(runtime);
     case "home.light-strip":
-      return renderLightStrip(runtime);
+      return renderLightStrip(runtime, false);
+    case "home.bedroom-light-strip":
+      return renderLightStrip(runtime, true);
     case "home.television":
       return <TelevisionWidget interactive={!runtime.editMode} />;
     case "home.station-mini-2":

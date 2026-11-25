@@ -74,7 +74,18 @@ export const overviewWidgetRegistry: readonly OverviewWidgetDefinition[] = [
   }),
   definition({
     widgetType: "home.light-strip",
-    title: "Лента",
+    title: "Лента в зале",
+    category: "Дом",
+    iconKey: "home",
+    singleton: true,
+    minW: 4, minH: 4, maxW: 8, maxH: 6,
+    defaultSizeVariant: "standard",
+    sizes: { compact: { w: 4, h: 4 }, standard: { w: 5, h: 4 }, large: { w: 8, h: 6 } },
+    fixtureCopy: "Управление цветом и яркостью ленты."
+  }),
+  definition({
+    widgetType: "home.bedroom-light-strip",
+    title: "Лента в спальне",
     category: "Дом",
     iconKey: "home",
     singleton: true,

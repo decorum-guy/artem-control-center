@@ -624,7 +624,7 @@ export function App() {
             )
           )}
           {route === "/weather" && <WeatherPage />}
-          {route === "/music" && <MusicPage playback={snapshot?.stationPlayback} />}
+          {route === "/music" && <MusicPage playback={snapshot?.stationPlayback} services={snapshot?.services} />}
           {route === "/home" && (
             v2VisualShellEnabled ? (
               <HomeV2Page

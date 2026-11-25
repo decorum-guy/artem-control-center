@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from panel_agent.music_library import MusicLibrary, PlaySelection
+from panel_agent.music_library_types import Recording
 from panel_agent.station_playback import StationPlaybackCollector
 from panel_agent.yandex_library import YandexLibrary, YandexPageExpired
 from panel_agent.youtube_music import MusicUnavailable
@@ -127,3 +128,29 @@ def test_catalog_refresh_preserves_last_good_and_clears_removed_source(tmp_path)
             await store.play("yandex", selected)
 
     asyncio.run(run())
+
+
+
+def test_search_reads_past_first_page_and_rejects_unknown_result_container():
+    adapter = FixtureYandex()
+    requested = []
+
+    async def lookup(_method, _path, **kwargs):
+        requested.append(kwargs["params"])
+        return responses[len(requested) - 1]
+
+    song = {"id": "56", "title": "A studio title", "artists": [{"name": "An artist"}], "available": True}
+    responses = [
+        {"tracks": {"results": [{**song, "id": str(i)} for i in range(1, 21)], "total": 21, "perPage": 20}},
+        {"tracks": {"results": [song], "total": 21, "perPage": 20}},
+    ]
+    adapter._request = lookup
+    track = Recording("youtube", song["title"], ("An artist",))
+    rows = asyncio.run(adapter.search(track))
+    assert [query["page"] for query in requested] == [0, 1]
+    assert requested[0]["text"] == "A studio title An artist"
+    assert rows[-1].track_id == "56"
+    requested.clear()
+    responses[:] = [{"tracks": {"total": 0}}]
+    with pytest.raises(MusicUnavailable):
+        asyncio.run(adapter.search(track))

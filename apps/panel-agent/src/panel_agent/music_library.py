@@ -10,8 +10,9 @@ import json
 import re
 import secrets
 import time
+import unicodedata
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Literal
 from urllib.parse import urlsplit
@@ -25,13 +26,14 @@ from .access_policy import AccessPolicyStore
 from .music_library_types import Continuation, Playlist, ProviderPage, Recording
 from .music_matching import Candidate, Track, match
 from .station_playback import StationPlaybackCollector
-from .yandex_library import YandexLibrary, YandexPageExpired
+from .yandex_library import PLAYLIST_ID, PlaylistIndex, YandexLibrary, YandexPageExpired
 from .youtube_browser_connect import MusicBrowserConnector
 from .youtube_library import BrowserChannelMismatch, YouTubeLibrary
-from .youtube_music import MusicAuthRequired, MusicUnavailable, YOUTUBE_PROXY
+from .youtube_music import MusicAuthRequired, MusicProxyUnavailable, MusicUnavailable, YOUTUBE_PROXY
 
 Provider = Literal["yandex", "youtube"]
 PLAY_CAPABILITY = "media.station.play_library"
+LIKE_CAPABILITY = "media.alice.like"
 ARTWORK_HOSTS = {
     "youtube": {"i.ytimg.com", "i9.ytimg.com", "lh3.googleusercontent.com", "lh3.ggpht.com",
                 "yt3.ggpht.com", "yt3.googleusercontent.com"},
@@ -42,6 +44,10 @@ CURSOR_CACHE = 220
 CATALOG_LIMIT = 500
 CATALOG_PAGES = 16
 MAX_ROW_KEY = 18_000
+SEARCH_PAGES_PER_CYCLE = 10
+SEARCH_SECONDS_PER_CYCLE = 20
+SEARCH_ROWS = 500
+SEARCH_TTL_SECONDS = 900
 
 
 def keep(mapping: OrderedDict, key, value, size: int) -> None:
@@ -62,6 +68,8 @@ class Feed:
         self.row_signing_key = secrets.token_bytes(32)
         self.status = "auth_required" if provider else "not_configured"
         self.catalog_failed = False
+        self.last_read = 0.0
+        self.connection_issue: str | None = None
         self.lock = asyncio.Lock()
         self.waiters = 0
         self.pages: OrderedDict[tuple[str, str | None], dict] = OrderedDict()
@@ -75,6 +83,8 @@ class Feed:
         self.row_signing_key = secrets.token_bytes(32)
         self.status = status
         self.catalog_failed = False
+        self.last_read = 0.0
+        self.connection_issue: str | None = None
         self.pages.clear()
         self.sources.clear()
         self.cursors.clear()
@@ -102,6 +112,8 @@ class Feed:
         self.session_revision += 1
         self.row_signing_key = secrets.token_bytes(32)
         self.status = status
+        self.last_read = 0.0
+        self.connection_issue = None
         self.needs_session_probe = True
         assert self.provider is not None
         self.provider.reset()
@@ -206,6 +218,86 @@ class Artwork:
         return Response(body, media_type=content_type, headers={"Cache-Control": "private, max-age=120"})
 
 
+class SearchSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    searchId: str = Field(pattern=r"^[a-f0-9]{32}$")
+    generation: str = Field(pattern=r"^[a-f0-9]{32}$")
+    source: str = Field(min_length=1, max_length=148, pattern=r"^[a-zA-Z0-9_-]+$")
+    query: str = Field(min_length=1, max_length=90)
+
+
+def search_text(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+@dataclass
+class PlaylistSearch:
+    id: str
+    stamp: tuple[str, int]
+    source: str
+    query: str
+    cursor: Continuation | None = None
+    index: PlaylistIndex | None = None
+    seen_cursors: set[bytes] = field(default_factory=set)
+    matches: list[dict] = field(default_factory=list)
+    checked: int = 0
+    status: str = "working"
+    updated_at: float = field(default_factory=time.monotonic)
+
+    def projection(self) -> dict:
+        return {"searchId": self.id, "items": self.matches.copy(), "checked": self.checked,
+                "status": self.status}
+
+
+class PlaylistSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generation: str = Field(pattern=r"^[a-f0-9]{32}$")
+    source: str = Field(min_length=1, max_length=148, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class PlaylistCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    action: Literal["skip", "stop", "choose"]
+    choice: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+
+
+@dataclass
+class PlaylistQueue:
+    id: str
+    provider: Provider
+    source: str
+    stamp: tuple[str, int]
+    yandex_generation: str
+    station_generation: int
+    records: list[Recording] = field(default_factory=list)
+    seen: set[Continuation] = field(default_factory=set)
+    cursor: Continuation | None = None
+    index: PlaylistIndex | None = None
+    complete: bool = False
+    position: int = 0
+    target: str | None = None
+    status: str = "working"
+    expected_end: float | None = None
+    pause_requested: bool = False
+    previous_progress: float | None = None
+    options: dict[str, Recording] = field(default_factory=dict)
+    intent: int = 0
+    work_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    observed_playback: tuple[str, str | None] | None = None
+    pending_target: str | None = None
+    expected_pause: str | None = None
+
+
+class LikeSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trackId: str = Field(pattern=r"^[0-9]{1,20}$")
+
+
 class PlaySelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     generation: str = Field(pattern=r"^[a-f0-9]{32}$")
@@ -223,7 +315,7 @@ class Options:
 
 
 class MusicLibrary:
-    def __init__(self, station: StationPlaybackCollector, yandex: YandexLibrary | None,
+    def __init__(self, station: StationPlaybackCollector | None, yandex: YandexLibrary | None,
                  youtube: YouTubeLibrary | None, *, access: Callable[[], AccessPolicyStore],
                  writes: Callable[[], bool], paired_track: Callable[[str], str | None],
                  browser: MusicBrowserConnector | None = None):
@@ -237,21 +329,212 @@ class MusicLibrary:
         self.choices: OrderedDict[str, Options] = OrderedDict()
         self.matches: OrderedDict[tuple[str, str, str], str] = OrderedDict()
         self.liked_revision = 0
+        self.yandex_liked_revision = 0
+        self.like_lock = asyncio.Lock()
+        self.searches: dict[Provider, PlaylistSearch] = {}
+        self.search_locks = {provider: asyncio.Lock() for provider in self.feeds}
+        self.playlist_queue: PlaylistQueue | None = None
+        self.playlist_task: asyncio.Task | None = None
+        self.playlist_tasks: set[asyncio.Task] = set()
+        if station is not None:
+            station.on_playback_progress = self._observe_playlist
+        self.uncertain_likes: OrderedDict[tuple[str, str], None] = OrderedDict()
 
     def invalidate_youtube_likes(self) -> None:
         self.liked_revision += 1
         self.feeds["youtube"].pages.pop(("LM", None), None)
+        self.invalidate_search("youtube", "LM")
+
+    def invalidate_search(self, provider: Provider, source: str) -> None:
+        job = self.searches.get(provider)
+        if job and job.source == source:
+            job.status = "playlist_changed"
+
+    def cancel_search(self, provider: Provider, identity: str) -> None:
+        job = self.searches.get(provider)
+        if job and job.id == identity:
+            del self.searches[provider]
+
+    async def search_playlist(self, provider: Provider, body: SearchSelection) -> dict:
+        feed = self.feeds[provider]
+        stamp = feed.stamp()
+        term = search_text(body.query)
+        if not term:
+            raise HTTPException(422, "empty_query")
+        if stamp[0] != body.generation:
+            raise HTTPException(409, "account_changed")
+        if feed.provider is None or feed.version is None or body.source not in feed.sources:
+            raise HTTPException(404, "unknown_playlist")
+        lock = self.search_locks[provider]
+        if lock.locked():
+            raise HTTPException(429, "busy")
+        async with lock:
+            job = self.searches.get(provider)
+            if job is None or job.id != body.searchId:
+                job = PlaylistSearch(body.searchId, stamp, body.source, term)
+                self.searches[provider] = job
+            elif (job.stamp, job.source, job.query) != (stamp, body.source, term):
+                raise HTTPException(409, "account_changed")
+            if time.monotonic() - job.updated_at > SEARCH_TTL_SECONDS:
+                job.status = "page_expired"
+            if job.status in {"complete", "limit", "page_expired", "playlist_changed"}:
+                return job.projection()
+            job.status = "working"
+            deadline = time.monotonic() + SEARCH_SECONDS_PER_CYCLE
+            try:
+                for _ in range(SEARCH_PAGES_PER_CYCLE):
+                    if time.monotonic() >= deadline:
+                        break
+                    async with feed.lock:
+                        if self.searches.get(provider) is not job or job.status != "working":
+                            break
+                        if feed.stamp() != stamp:
+                            raise HTTPException(409, "account_changed")
+                        if isinstance(feed.provider, YandexLibrary):
+                            page, index = await feed.provider.scan_tracks(job.source, job.cursor, job.index)
+                        else:
+                            page, index = await feed.provider.tracks(job.source, job.cursor), None
+                        if feed.stamp() != stamp:
+                            raise HTTPException(409, "account_changed")
+                        if self.searches.get(provider) is not job or job.status != "working":
+                            break
+                        next_page = page.continuation
+                        cursor_id = hashlib.sha256(repr(next_page).encode()).digest() if next_page else None
+                        if len(page.rows) > 220 or (cursor_id is not None and cursor_id in job.seen_cursors):
+                            job.status = "page_expired"
+                            break
+                        for row in page.rows:
+                            if not isinstance(row, Recording):
+                                raise MusicUnavailable
+                            if term in search_text(" ".join((row.title, *row.artists, row.album or ""))):
+                                if len(job.matches) == SEARCH_ROWS:
+                                    job.status = "limit"
+                                    break
+                                job.matches.append(self._project(provider, feed, job.source, row))
+                            job.checked += 1
+                        if job.status == "limit":
+                            break
+                        job.index, job.cursor = index, next_page
+                        if next_page is None:
+                            job.status = "complete"
+                            break
+                        assert cursor_id is not None
+                        job.seen_cursors.add(cursor_id)
+                        if len(job.seen_cursors) >= 2000:
+                            job.status = "limit"
+                            break
+            except YandexPageExpired:
+                job.status = "page_expired"
+            except MusicAuthRequired:
+                job.status = "auth_required"
+            except MusicUnavailable:
+                job.status = "source_unavailable"
+            if self.searches.get(provider) is not job:
+                raise HTTPException(409, "search_cancelled")
+            if job.status == "working":
+                job.status = "more"
+            job.updated_at = time.monotonic()
+            return job.projection()
+
+    async def like_current(self, track_id: str) -> dict:
+        self.access().require(LIKE_CAPABILITY, gate_enabled=self.writes())
+        if self.station.displayed_track(track_id, datetime.now(timezone.utc)) is None:
+            raise HTTPException(409, "track_changed")
+        yandex = self.yandex
+        if yandex is None:
+            raise HTTPException(409, "not_configured")
+        if self.like_lock.locked():
+            raise HTTPException(409, "busy")
+        async with self.like_lock:
+            version = yandex.version()
+            key = None
+            try:
+                uid = await yandex._account()
+                key = (uid, track_id)
+                if track_id in await yandex.liked_track_ids(uid):
+                    self.uncertain_likes.pop(key, None)
+                    return {"status": "already_liked"}
+                if key in self.uncertain_likes:
+                    return {"status": "unconfirmed"}
+
+                def may_send() -> bool:
+                    allowed = yandex.version() == version and self.access().authorize(
+                        LIKE_CAPABILITY, gate_enabled=self.writes()).allowed
+                    if allowed:
+                        keep(self.uncertain_likes, key, None, 128)
+                    return allowed
+
+                try:
+                    if not await yandex.like_track(uid, track_id, may_send):
+                        return {"status": "blocked"}
+                except (MusicAuthRequired, MusicUnavailable):
+                    if key not in self.uncertain_likes:
+                        raise
+                if yandex.version() != version or track_id not in await yandex.liked_track_ids(uid):
+                    return {"status": "unconfirmed"}
+                self.uncertain_likes.pop(key, None)
+                self.feeds["yandex"].pages.pop(("likes", None), None)
+                self.invalidate_search("yandex", "likes")
+                self.yandex_liked_revision += 1
+                self.access().audit_capability(LIKE_CAPABILITY, result="confirmed")
+                return {"status": "liked"}
+            except (MusicAuthRequired, MusicUnavailable) as exc:
+                if key in self.uncertain_likes:
+                    return {"status": "unconfirmed"}
+                raise HTTPException(503, "source_unavailable") from exc
 
     def can_play(self) -> bool:
-        return self.access().authorize(PLAY_CAPABILITY, gate_enabled=self.writes()).allowed
+        return self.station is not None and self.access().authorize(
+            PLAY_CAPABILITY, gate_enabled=self.writes()).allowed
 
     def status(self, provider: Provider) -> dict:
         feed = self.feeds[provider]
         return {"generation": feed.sync(), "status": feed.status, "canPlay": self.can_play(),
                 "sessionRevision": feed.session_revision,
                 "viewIdentity": hashlib.sha256(("music-view:" + feed.account).encode()).hexdigest() if feed.account else None,
-                "likedRevision": self.liked_revision if provider == "youtube" else 0,
+                "likedRevision": self.liked_revision if provider == "youtube" else self.yandex_liked_revision,
                 "yandexGeneration": self.feeds["yandex"].sync()}
+
+    def youtube_connection_status(self) -> str:
+        feed = self.feeds["youtube"]
+        feed.sync()
+        if self.browser and self.browser.projection()["active"]:
+            return "recovering"
+        if feed.connection_issue:
+            return feed.connection_issue
+        if feed.provider is None:
+            return "not_configured"
+        if feed.version is None:
+            return "auth_required"
+        if not feed.last_read or time.monotonic() - feed.last_read > 660:
+            return "unchecked"
+        return "ready"
+
+    async def probe_youtube(self) -> None:
+        feed = self.feeds["youtube"]
+        stamp = feed.stamp()
+        if (feed.provider is None or feed.version is None or feed.lock.locked()
+                or self.browser and self.browser.projection()["active"]):
+            return
+        async with feed.lock:
+            try:
+                await feed.provider.catalog(None)
+            except BrowserChannelMismatch:
+                issue = "wrong_channel"
+            except MusicAuthRequired:
+                issue = "auth_required"
+            except MusicProxyUnavailable:
+                issue = "proxy_unavailable"
+            except MusicUnavailable:
+                issue = "unavailable"
+            else:
+                issue = None
+            if feed.stamp() == stamp:
+                feed.connection_issue = issue
+                if issue is None:
+                    feed.last_read = time.monotonic()
+                    if self.browser:
+                        self.browser.confirm_read(feed.version)
 
     async def page(self, provider: Provider, source: str, cursor: str | None, refresh: bool = False) -> dict:
         feed = self.feeds[provider]
@@ -294,6 +577,7 @@ class MusicLibrary:
                         raise HTTPException(409, "account_changed") from exc
                     if provider == "youtube":
                         feed.status = "auth_required"
+                        feed.connection_issue = "wrong_channel" if isinstance(exc, BrowserChannelMismatch) else "auth_required"
                         feed.needs_session_probe = True
                         if self.browser and not isinstance(exc, BrowserChannelMismatch):
                             self.browser.recover()
@@ -306,6 +590,7 @@ class MusicLibrary:
                     if not source:
                         feed.catalog_failed = True
                     feed.status = "unavailable"
+                    feed.connection_issue = "proxy_unavailable" if isinstance(exc, MusicProxyUnavailable) else "unavailable"
                     raise HTTPException(503, "source_unavailable") from exc
                 if feed.stamp() != stamp:
                     raise HTTPException(409, "account_changed")
@@ -313,10 +598,12 @@ class MusicLibrary:
                 if len(page.rows) > limit or (continuation is not None and page.continuation == continuation):
                     raise HTTPException(503, "invalid_page")
                 if refresh:
+                    self.invalidate_search(provider, source)
                     feed.discard_pages(source)
                     if not source:
                         refreshed = {row.key for row in page.rows if isinstance(row, Playlist)}
                         for removed in feed.sources.keys() - refreshed:
+                            self.invalidate_search(provider, removed)
                             feed.discard_pages(removed)
                         feed.sources.clear()
                 items = [self._project(provider, feed, source, row) for row in page.rows]
@@ -329,6 +616,9 @@ class MusicLibrary:
                 keep(feed.pages, key, result, PAGE_CACHE)
                 if not source:
                     feed.catalog_failed = False
+                if not feed.catalog_failed:
+                    feed.last_read = time.monotonic()
+                    feed.connection_issue = None
                 feed.needs_session_probe = False
                 feed.status = "unavailable" if feed.catalog_failed else "ready"
                 if provider == "youtube" and self.browser:
@@ -400,6 +690,9 @@ class MusicLibrary:
 
         try:
             async with self.play_lock:
+                if self.playlist_queue is not None:
+                    self._interrupt_playlist(self.playlist_queue, "stopped")
+                self.playlist_queue = None
                 match_key = (request.generation, ya_epoch, row.track_id)
                 if provider == "yandex":
                     if request.choice:
@@ -439,6 +732,342 @@ class MusicLibrary:
             return {"status": "auth_required"}
         except MusicUnavailable:
             return {"status": "unavailable"}
+
+    def playlist_status(self) -> dict | None:
+        queue = self.playlist_queue
+        if queue is None:
+            return None
+        return self._playlist_projection(queue)
+
+    def _playlist_projection(self, queue: PlaylistQueue) -> dict:
+        return {"id": queue.id, "provider": queue.provider, "source": queue.source, "status": queue.status,
+                "position": queue.position + 1,
+                "title": queue.records[queue.position].title if queue.position < len(queue.records) else None,
+                "options": [self._track_dict(record, key) for key, record in queue.options.items()]}
+
+    def _playlist_current(self, queue: PlaylistQueue, intent: int) -> bool:
+        return self.playlist_queue is queue and queue.intent == intent
+
+    def _playlist_result(self, queue: PlaylistQueue, intent: int) -> dict:
+        result = self._playlist_projection(queue)
+        if not self._playlist_current(queue, intent) and queue.status not in {
+            "paused", "stopped", "stopped_unconfirmed", "unavailable", "blocked",
+        }:
+            # A superseded request never returns another operation's success.
+            result["status"] = "stopped"
+            result["options"] = []
+        return result
+
+    @staticmethod
+    def _interrupt_playlist(queue: PlaylistQueue, status: str) -> int:
+        # Invalidate before any await. Provider reads may finish, but their
+        # captured intent can no longer publish a result or send a command.
+        queue.intent += 1
+        queue.status, queue.expected_end = status, None
+        queue.pause_requested = status == "paused"
+        queue.options.clear()
+        return queue.intent
+
+    def _playlist_allowed(self, queue: PlaylistQueue, intent: int | None = None) -> bool:
+        return (self.playlist_queue is queue and (intent is None or queue.intent == intent) and self.can_play()
+                and self.feeds[queue.provider].stamp() == queue.stamp
+                and queue.source in self.feeds[queue.provider].sources
+                and self.feeds["yandex"].sync() == queue.yandex_generation
+                and self.station.generation == queue.station_generation)
+
+    async def start_playlist(self, provider: Provider, selection: PlaylistSelection) -> dict:
+        if not self.can_play():
+            raise HTTPException(403, "play_blocked")
+        if self.play_lock.locked() or self.station.media_busy:
+            return {"status": "busy"}
+        feed = self.feeds[provider]
+        stamp = feed.stamp()
+        if stamp[0] != selection.generation:
+            raise HTTPException(409, "account_changed")
+        if selection.source not in feed.sources or feed.provider is None:
+            raise HTTPException(404, "unknown_playlist")
+        if feed.status in {"auth_required", "connecting"}:
+            return {"status": "auth_required" if feed.status == "auth_required" else "unavailable"}
+        if self.playlist_queue is not None:
+            self._interrupt_playlist(self.playlist_queue, "stopped")
+        self.playlist_queue = None
+        if provider == "youtube" or selection.source == "likes":
+            queue = self.playlist_queue = PlaylistQueue(
+                uuid4().hex, provider, selection.source, stamp, self.feeds["yandex"].sync(), self.station.generation,
+            )
+            # Publish the ID before the first provider await so another request
+            # can stop this initial load. Provider locks still bound read concurrency.
+            return await self._play_playlist_position(queue, 0)
+        async with self.play_lock:
+            if self.yandex is None:
+                return {"status": "unavailable"}
+            try:
+                if identity := PLAYLIST_ID.fullmatch(selection.source):
+                    owner, kind = identity.groups()
+                else:
+                    return {"status": "unavailable"}
+                status = await self.station.play_playlist(owner, kind, lambda:
+                    self.can_play() and feed.stamp() == stamp and selection.source in feed.sources)
+                self.access().audit_capability(PLAY_CAPABILITY, result=status)
+                return {"status": status}
+            except MusicAuthRequired:
+                return {"status": "auth_required"}
+            except MusicUnavailable:
+                return {"status": "unavailable"}
+
+    async def _play_playlist_position(self, queue: PlaylistQueue, position: int,
+                                      choice: Recording | None = None,
+                                      extra_gate: Callable[[], bool] = lambda: True,
+                                      expected_pause: str | None = None) -> dict:
+        if not self._playlist_allowed(queue) or not extra_gate():
+            if self.playlist_queue is queue:
+                self._interrupt_playlist(queue, "blocked")
+            return self._playlist_projection(queue)
+        queue.intent += 1
+        intent = queue.intent
+        queue.status, queue.target, queue.expected_end = "working", None, None
+        queue.position, queue.previous_progress, queue.pause_requested = position, None, False
+        queue.pending_target, queue.expected_pause = None, expected_pause
+        state = self.station.state
+        if state is not None:
+            queue.observed_playback = state.status, state.trackId
+        queue.options.clear()
+
+        # This lock belongs to the queue, not the whole player. Stop/pause are
+        # synchronous invalidations; a new queue cannot be owned by this work.
+        async with queue.work_lock:
+            return await self._load_playlist_position(queue, intent, position, choice, extra_gate)
+
+    async def _load_playlist_position(self, queue: PlaylistQueue, intent: int, position: int,
+                                      choice: Recording | None, extra_gate: Callable[[], bool]) -> dict:
+        def permitted() -> bool:
+            return extra_gate() and self._playlist_allowed(queue, intent)
+
+        def blocked() -> dict:
+            if self._playlist_current(queue, intent):
+                queue.status = "blocked"
+            return self._playlist_result(queue, intent)
+
+        if not permitted():
+            return blocked()
+        feed = self.feeds[queue.provider]
+        try:
+            if position >= len(queue.records) and not queue.complete:
+                assert feed.provider is not None
+                async with feed.lock:
+                    if not permitted():
+                        return blocked()
+                    if isinstance(feed.provider, YandexLibrary):
+                        page, index = await feed.provider.scan_tracks(queue.source, queue.cursor, queue.index)
+                    else:
+                        page, index = await feed.provider.tracks(queue.source, queue.cursor), None
+                if not permitted():
+                    return blocked()
+                if page.continuation in queue.seen or len(queue.records) + len(page.rows) > 2400:
+                    queue.status = "limit"
+                    return self._playlist_result(queue, intent)
+                if any(not isinstance(row, Recording) for row in page.rows):
+                    raise MusicUnavailable
+                queue.records.extend(row for row in page.rows if isinstance(row, Recording))
+                queue.index, queue.cursor, queue.complete = index, page.continuation, page.continuation is None
+                if queue.cursor:
+                    queue.seen.add(queue.cursor)
+            if position >= len(queue.records):
+                queue.status = "complete" if queue.complete else "unavailable"
+                return self._playlist_result(queue, intent)
+
+            row = queue.records[position]
+            if choice is not None:
+                target, options = choice.track_id, []
+            elif row.track_id is not None and row.playable:
+                target, options = (row.track_id, []) if queue.provider == "yandex" else await self._find(row)
+            else:
+                target, options = None, []
+            if not permitted():
+                return blocked()
+            elif options:
+                queue.options = {uuid4().hex: record for record in options}
+                queue.status = "choose"
+            elif target is None:
+                queue.status = "no_match"
+            else:
+                queue.pending_target = target
+                outcome = await self.station.play_track(target, permitted, restart=True)
+                if self._playlist_current(queue, intent):
+                    queue.status = "playing" if outcome in {"playing", "already_playing"} else outcome
+                    queue.target = target if queue.status == "playing" else None
+                    queue.pending_target, queue.expected_pause = None, None
+                    self.access().audit_capability(PLAY_CAPABILITY, result=queue.status)
+        except MusicAuthRequired:
+            if self._playlist_current(queue, intent):
+                queue.status = "auth_required"
+        except (MusicUnavailable, YandexPageExpired):
+            if self._playlist_current(queue, intent):
+                queue.status = "unavailable"
+        return self._playlist_result(queue, intent)
+
+    async def playlist_command(self, command: PlaylistCommand) -> dict:
+        queue = self.playlist_queue
+        if queue is None or queue.id != command.id:
+            raise HTTPException(409, "playlist_changed")
+        if not self.can_play():
+            raise HTTPException(403, "play_blocked")
+        if command.action == "stop":
+            target = queue.pending_target or queue.expected_pause or queue.target
+            in_flight = bool((queue.pending_target or queue.expected_pause) and self.station.media_busy)
+            intent = self._interrupt_playlist(queue, "stopped")
+
+            def may_pause() -> bool:
+                return bool(self._playlist_current(queue, intent) and self.can_play() and target
+                            and self.station.state and self.station.state.trackId == target)
+
+            if may_pause():
+                outcome = await self.station.control("pause", may_pause)
+                if self._playlist_current(queue, intent) and outcome != "confirmed":
+                    queue.status = "stopped_unconfirmed"
+            elif in_flight:
+                # A dispatched command cannot be unsent. Do not retry it or
+                # claim physical silence while its result is unknown.
+                queue.status = "stopped_unconfirmed"
+            return self._playlist_result(queue, intent)
+        if self.play_lock.locked() or queue.work_lock.locked():
+            raise HTTPException(409, "busy")
+        if command.action == "choose":
+            choice = queue.options.get(command.choice or "")
+            if choice is None or queue.status != "choose":
+                raise HTTPException(409, "choice_expired")
+            return await self._play_playlist_position(queue, queue.position, choice)
+        if queue.status not in {"choose", "no_match"}:
+            raise HTTPException(409, "playlist_changed")
+        return await self._play_playlist_position(queue, queue.position + 1)
+
+    async def navigate_playlist(self, direction: str, may_send: Callable[[], bool]) -> str | None:
+        queue = self.playlist_queue
+        if queue is None or queue.status not in {"working", "playing", "paused", "choose", "no_match"}:
+            return None
+        if direction == "pause":
+            if not may_send():
+                return "blocked"
+            self._interrupt_playlist(queue, "paused")
+            return None
+        if direction == "play" and queue.status == "paused":
+            if not may_send() or not self._playlist_allowed(queue):
+                return "blocked"
+            state = self.station.state
+            if queue.target and state and state.trackId == queue.target:
+                queue.intent += 1
+                intent = queue.intent
+                queue.status, queue.pause_requested = "working", False
+                queue.pending_target = queue.target
+                queue.observed_playback = state.status, state.trackId
+                outcome = await self.station.control("play", lambda: may_send() and self._playlist_allowed(queue, intent))
+                if self._playlist_current(queue, intent):
+                    queue.status = "playing" if outcome == "confirmed" else outcome
+                    queue.pending_target = None
+                    return outcome
+                return "unconfirmed"
+            result = await self._play_playlist_position(queue, queue.position, extra_gate=may_send)
+            return "confirmed" if result["status"] in {"playing", "choose", "no_match", "complete"} else result["status"]
+        if queue.status == "working" and direction in {"play", "next", "previous"}:
+            return "busy"
+        if direction not in {"next", "previous"}:
+            return None
+        if self.play_lock.locked() or queue.work_lock.locked():
+            return "busy"
+        if not may_send():
+            return "blocked"
+        position = max(0, queue.position + (1 if direction == "next" else -1))
+        result = await self._play_playlist_position(queue, position, extra_gate=may_send)
+        return "confirmed" if result["status"] in {"playing", "choose", "no_match", "complete"} else result["status"]
+
+    def _observe_playlist(self, status: str, track_id: str | None,
+                          progress: float | None, duration: float | None) -> None:
+        queue = self.playlist_queue
+        if queue is None or queue.status not in {"working", "playing"}:
+            return
+        if self.station.generation != queue.station_generation or status in {"stale", "auth_required"}:
+            self._interrupt_playlist(queue, "unavailable")
+            return
+        if queue.status == "working":
+            observed = status, track_id
+            if observed == queue.observed_playback:
+                return
+            if status == "playing" and track_id == queue.pending_target:
+                queue.observed_playback, queue.expected_pause = observed, None
+                return
+            if status == "paused" and track_id == queue.expected_pause:
+                queue.observed_playback, queue.expected_pause = observed, None
+                return
+            self._interrupt_playlist(queue, "paused" if status == "paused" else "stopped")
+            return
+        rolled_over = (track_id == queue.target and progress is not None
+                       and queue.previous_progress is not None and progress + 3 < queue.previous_progress)
+        if track_id == queue.target and not rolled_over:
+            if status == "paused" or queue.pause_requested:
+                queue.expected_end = None
+            elif progress is not None and duration is not None:
+                remaining = duration - progress
+                queue.expected_end = time.monotonic() + remaining if 0 <= remaining <= 2 else None
+                queue.previous_progress = progress
+            return
+        natural_end = queue.expected_end is not None and -0.3 <= time.monotonic() - queue.expected_end <= 3
+        if not natural_end or self.play_lock.locked():
+            self._interrupt_playlist(queue, "stopped")
+            return
+        if not self._playlist_allowed(queue):
+            self._interrupt_playlist(queue, "blocked")
+            return
+        queue.status, queue.observed_playback = "working", (status, track_id)
+        queue.intent += 1
+        self.playlist_task = asyncio.create_task(self._continue_playlist(queue, track_id, queue.intent), name="station-playlist")
+        self.playlist_tasks.add(self.playlist_task)
+        self.playlist_task.add_done_callback(self.playlist_tasks.discard)
+
+    async def _continue_playlist(self, queue: PlaylistQueue, active_track: str | None, intent: int) -> None:
+        def permitted() -> bool:
+            return self._playlist_allowed(queue, intent)
+
+        if not permitted():
+            return
+        try:
+            async with asyncio.timeout(2.2):
+                while self.station.media_busy:
+                    await asyncio.sleep(0.05)
+                    if not permitted():
+                        return
+        except TimeoutError:
+            if self._playlist_current(queue, intent):
+                queue.status = "busy"
+            return
+        if not permitted():
+            return
+        state = self.station.state
+        if state and state.status == "playing" and state.trackId != active_track:
+            self._interrupt_playlist(queue, "stopped")
+            return
+        expected_pause = None
+        if state and state.status == "playing" and state.trackId == active_track:
+            queue.expected_pause = expected_pause = active_track
+
+            def may_pause() -> bool:
+                return bool(permitted() and self.station.state and self.station.state.trackId == active_track)
+
+            outcome = await self.station.control("pause", may_pause)
+            if not permitted():
+                return
+            if outcome != "confirmed":
+                queue.status = "unconfirmed"
+                return
+        await self._play_playlist_position(queue, queue.position + 1, expected_pause=expected_pause)
+
+    async def close(self) -> None:
+        if self.playlist_queue is not None:
+            self._interrupt_playlist(self.playlist_queue, "stopped")
+        self.playlist_queue = None
+        pending = tuple(self.playlist_tasks)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
     async def _find(self, row: Recording) -> tuple[str | None, list[Recording]]:
         assert self.yandex is not None and row.track_id is not None
@@ -530,9 +1159,50 @@ def build_music_library_router(library: MusicLibrary | None) -> APIRouter:
         response.headers["Cache-Control"] = "no-store"
         return await library.page(provider, source, cursor, refresh and cursor is None)
 
+    @router.post("/{provider}/search")
+    async def search(provider: Provider, request: Request, response: Response, body: SearchSelection):
+        require_music_origin(request, "music-library")
+        response.headers["Cache-Control"] = "no-store"
+        return await library.search_playlist(provider, body)
+
+    @router.delete("/{provider}/search/{identity}", status_code=204)
+    async def cancel_search(provider: Provider, request: Request, identity: str):
+        require_music_origin(request, "music-library")
+        library.cancel_search(provider, identity)
+        return Response(status_code=204)
+
+    @router.post("/{provider}/play-playlist")
+    async def play_playlist(provider: Provider, request: Request, body: PlaylistSelection):
+        require_music_origin(request, "music-library")
+        return await library.start_playlist(provider, body)
+
+    @router.post("/yandex/like-current")
+    async def like_current(request: Request, body: LikeSelection):
+        require_music_origin(request, "music-library")
+        return await library.like_current(body.trackId)
+
     @router.post("/{provider}/play")
     async def play(provider: Provider, request: Request, body: PlaySelection):
         require_music_origin(request, "music-library")
         return await library.play(provider, body)
+
+    return router
+
+
+
+def build_station_playlist_router(library: MusicLibrary | None) -> APIRouter:
+    router = APIRouter(prefix="/api/v1/station/playlist")
+    if library is None:
+        return router
+
+    @router.get("")
+    async def playlist_status(response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        return library.playlist_status()
+
+    @router.post("")
+    async def playlist_command(request: Request, body: PlaylistCommand):
+        require_music_origin(request, "music-library")
+        return await library.playlist_command(body)
 
     return router

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
@@ -255,8 +256,9 @@ def test_uncertain_creation_never_repeats_the_provider_post(tmp_path, monkeypatc
 def test_recurrence_without_next_deadline_has_no_due_time():
     recurring = note(schedule="DTSTART;TZID=Europe/Moscow:20261126T160000\r\nRRULE:FREQ=WEEKLY")
     recurring.pop("deadline")
+    recurring["status"] = "INCOMPLETE"
     (item,), complete = reminders.normalize_reminder_list(payload(recurring))
-    assert complete and item.repeats and item.dueAt is None and item.version is None
+    assert complete and item.repeats and item.dueAt is None and item.version and item.scheduleMode == "weekly"
 
 
 def test_rotation_drops_in_flight_result_and_partial_cache(tmp_path, monkeypatch):
@@ -372,3 +374,192 @@ def test_calendar_notes_budget_applies_across_pages():
 
     asyncio.run(run())
     assert response_count == 2
+
+
+def test_delete_uses_note_id_and_checks_the_unfiltered_lookup(tmp_path, monkeypatch):
+    from panel_agent.access_policy import AccessPolicyStore
+
+    store = AccessPolicyStore(tmp_path / "access.json")
+    store.set_profile("standard")
+    collector = reminders.StationRemindersCollector(tmp_path / "unused")
+    monkeypatch.setattr(collector, "_current_session", lambda: reminders._ReminderSession(1, {}))
+    collector.writer = reminders.StationRemindersWriter(collector, access=lambda: store, write_enabled=lambda: True)
+    item = {**note(schedule="DTSTART;TZID=Europe/Moscow:20411201T160000\nRRULE:FREQ=DAILY"),
+            "status": "INCOMPLETE"}
+    calls = []
+    deleted = False
+
+    def native(request):
+        nonlocal deleted
+        name = request.url.path.rsplit("/", 1)[-1]
+        body = json.loads(request.content)
+        calls.append((name, body))
+        if name == "get_calendar_notes":
+            return httpx.Response(200, json=payload() if deleted else payload(item))
+        if name == "delete_notes":
+            assert body == {"note_ids": [item["note_id"]]}
+            deleted = True
+            return httpx.Response(200, json={})
+        assert name == "get_notes_batch" and body == {"notes_ids": [item["note_id"]]}
+        return httpx.Response(200, json={"notes": [] if deleted else [item]})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(reminders.httpx, "AsyncClient",
+                        lambda **options: real(transport=httpx.MockTransport(native), **options))
+    app = FastAPI()
+    app.include_router(reminders.build_station_reminders_router(collector))
+    (record,), complete = reminders.normalize_reminder_list(payload(item))
+    assert complete and record.scheduleMode == "daily" and record.version
+    with TestClient(app, base_url="http://localhost") as client:
+        response = client.request("DELETE", f"/api/v1/station/reminders/{record.id}",
+                                  headers={"Origin": "http://localhost", "X-Panel-Intent": "station-reminders"},
+                                  json={"expectedVersion": record.version, "attemptId": "78f80cdf-942e-4c61-a713-1fbfc914dfad"})
+    assert response.status_code == 200 and response.json()["items"] == []
+    assert [name for name, _ in calls] == ["get_calendar_notes", "get_notes_batch", "delete_notes",
+                                          "get_calendar_notes", "get_notes_batch"]
+
+
+@pytest.fixture
+def submit_reminder_change(tmp_path, monkeypatch):
+    from panel_agent.access_policy import AccessPolicyStore
+
+    store = AccessPolicyStore(tmp_path / "access.json")
+    store.set_profile("standard")
+    real_client = httpx.AsyncClient
+
+    def submit(item, change, *, after_update=None, creating=False):
+        saved = deepcopy(item)
+        writes = []
+        collector = reminders.StationRemindersCollector(tmp_path / "unused")
+        monkeypatch.setattr(collector, "_current_session", lambda: reminders._ReminderSession(1, {}))
+        collector.writer = reminders.StationRemindersWriter(
+            collector, access=lambda: store, write_enabled=lambda: True
+        )
+
+        def native(request):
+            assert request.method == "POST"
+            operation = request.url.path.rsplit("/", 1)[-1]
+            if operation == "get_calendar_notes":
+                return httpx.Response(200, json=payload(saved))
+            assert operation == "update_note"
+            body = json.loads(request.content)
+            writes.append(body)
+            saved.update(body["note"])
+            if after_update is not None:
+                after_update(saved)
+            return httpx.Response(200, json={"note": {"note_id": saved["note_id"]}})
+
+        monkeypatch.setattr(reminders.httpx, "AsyncClient",
+                            lambda **options: real_client(transport=httpx.MockTransport(native), **options))
+        app = FastAPI()
+        app.include_router(reminders.build_station_reminders_router(collector))
+        (record,), complete = reminders.normalize_reminder_list(payload(item))
+        assert complete and record.version
+        body = {"attemptId": "78f80cdf-942e-4c61-a713-1fbfc914dfad", **change}
+        endpoint = "/api/v1/station/reminders"
+        if not creating:
+            endpoint += "/" + record.id
+            body["expectedVersion"] = record.version
+        with TestClient(app, base_url="http://localhost") as client:
+            response = client.request("POST" if creating else "PATCH", endpoint, json=body,
+                                      headers={"Origin": "http://localhost", "X-Panel-Intent": "station-reminders"})
+        return response, writes, saved
+
+    return submit
+
+
+def started_note(rule=None):
+    schedule = "DTSTART;TZID=Europe/Moscow:20000103T160000"
+    if rule:
+        schedule += "\n" + rule
+    item = {**note(schedule=schedule), "status": "INCOMPLETE", "is_personal": True, "public_home_ids": []}
+    item["reminders"][0]["play_settings"] = {"send_push": {"state": "Enabled"}}
+    return item
+
+
+@pytest.mark.parametrize("rule, mode", [
+    ("RRULE:FREQ=DAILY", "daily"),
+    ("RRULE:FREQ=WEEKLY;BYDAY=MO", "weekly"),
+])
+def test_started_series_time_edit_preserves_start_date_and_provider_deadline(submit_reminder_change, rule, mode):
+    original = started_note(rule)
+    expected_schedule = "DTSTART;TZID=Europe/Moscow:20000103T201500\n" + rule
+    response, writes, saved = submit_reminder_change(
+        original, {"dueLocal": "2000-01-03T20:15"},
+        after_update=lambda item: item.update(deadline="2041-12-02T20:15:00"),
+    )
+    assert response.status_code == 200
+    assert writes == [{"note": {"note_id": original["note_id"], "status": "INCOMPLETE", "schedule": expected_schedule}}]
+    assert saved["reminders"] == original["reminders"]
+    (projected,) = response.json()["items"]
+    assert projected["scheduleMode"] == mode and projected["delivery"] == "phone"
+    assert projected["seriesStartAt"] == "2000-01-03T20:15:00+03:00"
+    assert projected["dueAt"] == "2041-12-02T20:15:00+03:00"
+
+
+@pytest.mark.parametrize("rule", ["RRULE:FREQ=DAILY", "RRULE:FREQ=WEEKLY;BYDAY=MO"])
+def test_started_series_can_become_a_future_one_off(submit_reminder_change, rule):
+    original = started_note(rule)
+    response, writes, _ = submit_reminder_change(original, {"repeat": "once", "dueLocal": "2041-12-01T17:45"})
+    assert response.status_code == 200
+    assert writes == [{"note": {"note_id": original["note_id"], "status": "INCOMPLETE",
+                                "schedule": "DTSTART;TZID=Europe/Moscow:20411201T174500"}}]
+    (projected,) = response.json()["items"]
+    assert projected["scheduleMode"] == "once" and not projected["repeats"]
+    assert projected["seriesStartAt"] is None and projected["dueAt"] == "2041-12-01T17:45:00+03:00"
+
+
+@pytest.mark.parametrize("rule, change, detail", [
+    (None, {"dueLocal": "2000-01-03T20:15"}, "time_must_be_future"),
+    (None, {"repeat": "once"}, "time_must_be_future"),
+    ("RRULE:FREQ=DAILY", {"repeat": "once"}, "time_must_be_future"),
+    ("RRULE:FREQ=WEEKLY;BYDAY=MO", {"repeat": "once", "dueLocal": "2000-01-03T20:15"}, "time_must_be_future"),
+    ("RRULE:FREQ=DAILY", {"dueLocal": "2000-02-30T20:15"}, "invalid_time"),
+])
+def test_series_edit_does_not_relax_one_off_or_date_validation(submit_reminder_change, rule, change, detail):
+    response, writes, _ = submit_reminder_change(started_note(rule), change)
+    assert response.status_code == 422 and response.json()["detail"] == detail
+    assert writes == []
+
+
+@pytest.mark.parametrize("repeat", ["once", "daily", "weekly"])
+def test_creation_still_requires_a_future_start(submit_reminder_change, repeat):
+    response, writes, _ = submit_reminder_change(started_note(), {
+        "title": "Новая синтетическая запись", "dueLocal": "2000-01-03T20:15", "delivery": "phone", "repeat": repeat,
+    }, creating=True)
+    assert response.status_code == 422 and response.json()["detail"] == "time_must_be_future"
+    assert writes == []
+
+
+@pytest.mark.parametrize("rule", [None, "RRULE:FREQ=DAILY", "RRULE:FREQ=MONTHLY;BYDAY=1MO"])
+def test_title_only_edit_preserves_past_or_unsupported_schedule(submit_reminder_change, rule):
+    original = started_note(rule)
+    response, writes, saved = submit_reminder_change(original, {"title": "Обновлённый синтетический текст"})
+    assert response.status_code == 200
+    assert writes == [{"note": {"note_id": original["note_id"], "status": "INCOMPLETE",
+                                "title": "Обновлённый синтетический текст"}}]
+    assert saved["schedule"] == original["schedule"] and saved["reminders"] == original["reminders"]
+    assert response.json()["items"][0]["title"] == "Обновлённый синтетический текст"
+
+
+def test_unsupported_series_cannot_be_rewritten_as_a_supported_rule(submit_reminder_change):
+    response, writes, _ = submit_reminder_change(started_note("RRULE:FREQ=MONTHLY;BYDAY=1MO"), {
+        "repeat": "daily", "dueLocal": "2000-01-03T20:15",
+    })
+    assert response.status_code == 409 and response.json()["detail"] == "unsupported_schedule"
+    assert writes == []
+
+
+@pytest.mark.parametrize("changed_field", ["origin", "push"])
+def test_started_series_edit_requires_unchanged_delivery_readback(submit_reminder_change, changed_field):
+    def change_route(item):
+        entry = item["reminders"][0]
+        if changed_field == "origin":
+            entry["origin_device_id"] = "different-fixture-device"
+        else:
+            entry["play_settings"]["send_push"]["state"] = "Disabled"
+
+    response, writes, _ = submit_reminder_change(started_note("RRULE:FREQ=DAILY"),
+                                                {"dueLocal": "2000-01-03T20:15"}, after_update=change_route)
+    assert response.status_code == 502 and response.json()["detail"] == "unconfirmed"
+    assert len(writes) == 1

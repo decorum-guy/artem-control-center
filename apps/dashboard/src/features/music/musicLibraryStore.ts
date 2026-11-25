@@ -19,6 +19,35 @@ export interface Recording {
   playable: boolean;
 }
 interface Page<T> { items: T[]; next: string | null; generation: string; sessionRevision?: number; observedAt: string }
+export interface PlaylistSearchResult {
+  searchId: string;
+  items: Recording[];
+  checked: number;
+  status: "working" | "complete" | "more" | "limit" | "page_expired" |
+    "playlist_changed" | "source_unavailable" | "auth_required" | "busy";
+}
+
+export interface PlaylistPlayback {
+  id?: string;
+  provider?: Provider;
+  source?: string;
+  title?: string | null;
+  status: string;
+  position?: number;
+  options?: Recording[];
+}
+
+export function readPlaylistPlayback(signal: AbortSignal) {
+  return request<PlaylistPlayback | null>("/api/v1/station/playlist", { signal });
+}
+
+export function playlistPlaybackAction(id: string, action: "skip" | "stop" | "choose", choice?: string) {
+  return request<PlaylistPlayback>("/api/v1/station/playlist", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Panel-Intent": "music-library" },
+    body: JSON.stringify({ id, action, choice })
+  });
+}
+
 export interface PlayResult {
   status: string;
   stationTrackId?: string | null;
@@ -42,6 +71,7 @@ interface TrackView {
 }
 
 interface TrackData {
+  searchRevision: number;
   items: Recording[];
   next: string | null;
   segments: Segment[];
@@ -74,7 +104,7 @@ interface LibraryState {
 }
 
 const emptyData: TrackData = {
-  items: [], next: null, segments: [], observedAt: null, pending: false, error: null, omitted: 0
+  searchRevision: 0, items: [], next: null, segments: [], observedAt: null, pending: false, error: null, omitted: 0
 };
 const emptyView: TrackView = { scroll: 0, query: "" };
 const initial: LibraryState = {
@@ -172,18 +202,19 @@ export class MusicLibraryStore {
         ]));
         this.patch({ ...status, lists, catalogPending: false, catalogRefreshing: false });
       } else {
-        const likedChanged = status.likedRevision > this.state.likedRevision && this.provider === "youtube";
+        const likedChanged = status.likedRevision > this.state.likedRevision;
+        const likedKey = this.provider === "youtube" ? "LM" : "likes";
         this.patch({ ...status, matches: status.yandexGeneration === this.state.yandexGeneration ? this.state.matches : {} });
-        if (likedChanged && this.state.selected === "LM") {
-          const likes = this.getList("LM");
+        if (likedChanged && this.state.selected === likedKey) {
+          const likes = this.getList(likedKey);
           if (!likes.pending && likes.items.length <= 100 && likes.scroll === 0) {
             void this.tracks(false, true);
           } else {
-            this.writeData("LM", { changesAvailable: true });
+            this.writeData(likedKey, { changesAvailable: true, searchRevision: likes.searchRevision + 1 });
           }
-        } else if (likedChanged && this.state.selected !== "LM" && this.state.lists.LM) {
+        } else if (likedChanged && this.state.selected !== likedKey && this.state.lists[likedKey]) {
           const lists = { ...this.state.lists };
-          delete lists.LM;
+          delete lists[likedKey];
           this.patch({ lists });
         }
       }
@@ -318,7 +349,8 @@ export class MusicLibraryStore {
     if (!generation || !selected || list.pending || (more && !list.next)) return;
     const controller = new AbortController();
     this.listRequests.set(selected, controller);
-    this.writeData(selected, { pending: true, error: null, movedToStart: false });
+    this.writeData(selected, { pending: true, error: null, movedToStart: false,
+      searchRevision: list.searchRevision + (refresh ? 1 : 0) });
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(24_000)]);
     function load(provider: Provider, cursor: string | null, refreshFirst = false) {
       const search = new URLSearchParams();
@@ -393,6 +425,29 @@ export class MusicLibraryStore {
         this.writeData(selected, { pending: false });
       }
     }
+  }
+
+  searchPage(searchId: string, signal: AbortSignal): Promise<PlaylistSearchResult> {
+    const { generation, selected } = this.state;
+    return request<PlaylistSearchResult>(`${root}${this.provider}/search`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Panel-Intent": "music-library" },
+      body: JSON.stringify({ searchId, generation, source: selected, query: this.getList(selected).query }),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(35_000)])
+    });
+  }
+
+  cancelSearch(searchId: string) {
+    void fetch(`${root}${this.provider}/search/${searchId}`, {
+      method: "DELETE", headers: { "X-Panel-Intent": "music-library" }, keepalive: true
+    }).catch(() => {});
+  }
+
+  playPlaylist(): Promise<PlaylistPlayback> {
+    const { generation, selected } = this.state;
+    return request<PlaylistPlayback>(`${root}${this.provider}/play-playlist`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Panel-Intent": "music-library" },
+      body: JSON.stringify({ generation, source: selected })
+    });
   }
 
   async play(record: Recording, choice?: string): Promise<PlayResult> {

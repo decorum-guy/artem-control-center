@@ -407,3 +407,32 @@ def test_repeat_phrase_uses_correlated_reply_with_existing_receiver():
         assert replies.speech is None
 
     asyncio.run(check())
+
+
+def test_volume_is_confirmed_from_local_state_and_uses_tenths():
+    import asyncio
+    import json
+    from panel_agent.station_playback import StationPlaybackCollector, StationReplies
+
+    async def run():
+        station = StationPlaybackCollector(None)
+        await station.update("idle", volume=0.5)
+        sent = []
+
+        class LocalSocket:
+            async def send(self, payload):
+                sent.append(json.loads(payload))
+                message = sent[-1]
+                station._observe_media_reply({"requestId": message["id"], "status": "SUCCESS"}, None)
+                assert not station._media_request[2].done()
+                await station.update("idle", volume=message["payload"]["volume"])
+                station._observe_media_reply({}, {"volume": station.state.volume})
+
+        station._replies = StationReplies(LocalSocket(), "fixture")
+        assert await station.control("volume_down", lambda: True) == "confirmed"
+        assert sent[0]["payload"] == {"command": "setVolume", "volume": 0.4}
+        assert station.state.volume == 0.4
+        assert await station.control("volume_down", lambda: False) == "blocked"
+        assert len(sent) == 1
+
+    asyncio.run(run())

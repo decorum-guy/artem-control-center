@@ -27,7 +27,7 @@ from .contracts import (
 SCHEMA_VERSION = "overview.layout.v2"
 PROFILE_ID = "samsung-control"
 PRESET_ID = "overview.default"
-PRESET_VERSION = 6
+PRESET_VERSION = 7
 VIEWPORT_CLASS = "landscape-12"
 CANONICAL_COLUMNS = 12
 MAX_ITEMS = 32
@@ -59,6 +59,11 @@ WIDGETS: Dict[str, Dict[str, Any]] = {
         "default": "standard",
     },
     "home.light-strip": {
+        "singleton": True,
+        "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (8, 6)},
+        "default": "standard",
+    },
+    "home.bedroom-light-strip": {
         "singleton": True,
         "sizes": {"compact": (4, 4), "standard": (5, 4), "large": (8, 6)},
         "default": "standard",
@@ -632,7 +637,7 @@ def recover_stored_layout(raw: Mapping[str, Any]) -> Tuple[Optional[Dict[str, An
         return None, ["stored layout profile is not recognized"], []
     if raw.get("presetId") not in {None, PRESET_ID}:
         return None, ["stored layout preset is not recognized"], []
-    if raw.get("presetVersion") not in {None, PRESET_VERSION}:
+    if raw.get("presetVersion") not in {None, 6, PRESET_VERSION}:
         return None, ["stored layout preset version is not recognized"], []
     if raw.get("viewportClass") not in {None, VIEWPORT_CLASS}:
         return None, ["stored layout viewport is not recognized"], []
@@ -662,6 +667,18 @@ def recover_stored_layout(raw: Mapping[str, Any]) -> Tuple[Optional[Dict[str, An
             items.append(item)
     if not items and not only_retired_input:
         return None, warnings + ["stored layout has no valid widgets"], unplaced
+    if (raw.get("presetVersion") != PRESET_VERSION
+            and len(items) < MAX_ITEMS
+            and "home.light-strip" in singleton_types
+            and "home.bedroom-light-strip" not in singleton_types):
+        bedroom_id = next(candidate for candidate in (
+            "fixture.bedroom-light-strip",
+            *(f"fixture.bedroom-light-strip.{number}" for number in range(MAX_ITEMS))
+        ) if candidate not in seen_ids)
+        placement = _first_fit(WIDGETS["home.bedroom-light-strip"]["sizes"]["standard"], occupied)
+        if placement["y"] <= 10_000:
+            items.append(_item(bedroom_id, "home.bedroom-light-strip", "standard",
+                               placement["x"], placement["y"]))
     result = {
         "schemaVersion": SCHEMA_VERSION,
         "profileId": PROFILE_ID,

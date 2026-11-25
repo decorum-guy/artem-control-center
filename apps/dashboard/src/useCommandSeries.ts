@@ -112,7 +112,15 @@ export function useCommandSeries<T, R>(options: Options<T, R>) {
     return true;
   }
 
-  return { submit, active: accepted > 0, full: options.mode === "ordered" && accepted >= MAX_VOLUME_STEPS,
+  // An explicit priority action may abandon buffered commands without waiting
+  // for an already dispatched request. Its late result no longer owns the series.
+  const interrupt = useCallback(() => {
+    const series = current.current;
+    cancel();
+    if (series) finish(series);
+  }, [cancel, finish]);
+
+  return { submit, interrupt, active: accepted > 0, full: options.mode === "ordered" && accepted >= MAX_VOLUME_STEPS,
     isActive: () => current.current !== null,
     pending: () => {
       const series = current.current;

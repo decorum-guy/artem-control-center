@@ -40,7 +40,7 @@ def playlist(row: dict) -> Playlist | None:
         return None
     raw = row.get("count")
     count = int(raw) if type(raw) in (int, str) and re.fullmatch(r"[0-9]{1,7}", str(raw)) else None
-    return Playlist(key, "Понравившаяся музыка" if key == "LM" else title,
+    return Playlist(key, "Liked" if key == "LM" else title,
                     "liked" if key == "LM" else "playlist", thumbnail(row.get("thumbnails")), count)
 
 
@@ -279,7 +279,7 @@ def read_page(client, key: str | None, cursor: Continuation | None,
                 raise MusicUnavailable
             next_page = _cursor(legacy, "grid")
         if cursor is None and all(row.key != "LM" for row in rows):
-            rows = (Playlist("LM", "Понравившаяся музыка", "liked"), *rows)
+            rows = (Playlist("LM", "Liked", "liked"), *rows)
         return ProviderPage(rows, next_page)
 
     # Only keys issued by the verified catalogue reach this provider via MusicLibrary.

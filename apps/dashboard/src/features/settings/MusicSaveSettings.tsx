@@ -2,46 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { useInteractionLock } from "../../InteractionLock";
 import { YouTubeConnectionSettings } from "./YouTubeConnectionSettings";
 
-interface MusicOption {
-  id: string;
-  title: string;
-  artist?: string;
-  album?: string;
-  duration?: number;
-}
-
-interface MusicProjection {
-  connection: string;
-  channel: string | null;
-  destination: string;
-  canChoose: boolean;
-  busyEvents: number;
-  operation: { id: string; status: string; title: string | null; options: MusicOption[] } | null;
-}
+import { musicSaveEndpoint as endpoint, resultLabels, type MusicProjection } from "../music/musicSaveApi";
 
 const connectionLabels: Record<string, string> = {
   not_configured: "Подключение не настроено",
-  auth_required: "Нужен вход в Google",
+  auth_required: "Требуется OAuth YouTube Data API",
+  wrong_channel: "OAuth настроен на другой канал",
+  proxy_unavailable: "Прокси Happ недоступен",
+  unchecked: "Нет свежей проверки OAuth",
   unavailable: "YouTube Music сейчас недоступна",
   connected: "Профиль подключён"
 };
-
-const resultLabels: Record<string, string> = {
-  working: "Проверяем песню…",
-  choose_source: "Какая песня играла, когда ты произнёс команду?",
-  choose_version: "Какую запись сохранить?",
-  no_match: "Подходящая запись не найдена.",
-  no_track: "На Мини 2 нет подтверждённого играющего трека.",
-  already_in_music: "Уже есть в понравившейся музыке.",
-  in_music: "Песня появилась в понравившейся музыке.",
-  youtube_like: "Лайк подтверждён в YouTube. Появление в понравившейся музыке пока не подтверждено.",
-  unconfirmed: "Результат записи не подтверждён.",
-  auth_required: "Подключи нужный канал Google.",
-  unavailable: "Не удалось связаться с Music.",
-  blocked: "Сохранение недоступно в текущем профиле."
-};
-
-const endpoint = "/api/v1/station/music-save";
 
 export function MusicSaveSettings() {
   const [state, setState] = useState<MusicProjection>();

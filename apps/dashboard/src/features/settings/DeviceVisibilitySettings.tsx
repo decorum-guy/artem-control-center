@@ -1,11 +1,10 @@
 import { useState } from "react";
-import { DeviceVisibilityApiError, isOverviewLightStripId, overviewLightStripLabels, type DevicePresentationPatch } from "../../deviceVisibilityApi";
+import { DeviceVisibilityApiError, type DevicePresentationPatch } from "../../deviceVisibilityApi";
 import { useDeviceVisibility } from "../../DeviceVisibility";
 import { useInteractionLock } from "../../InteractionLock";
 import { useAccess } from "../../AccessControls";
 import type { DeviceVisibilitySettings } from "@artem/contracts";
 import { Sheet } from "../../Sheet";
-import { SelectField } from "../../ui/SelectField";
 
 export function deviceVisibilitySummary(loading: boolean, settings: DeviceVisibilitySettings | null): string {
   if (loading && !settings) return "Проверяем сохранённое состояние…";
@@ -45,11 +44,7 @@ export function DeviceVisibilitySettingsSheet({ onClose }: { onClose: () => void
     setNotice(null);
     try {
       const saved = await save(patch);
-      if ("overviewLightStripId" in patch) {
-        setNotice("Лента для Обзора выбрана.");
-      } else {
-        setNotice(saved.devices[0]?.visible ? "Сохранено: чайник снова показывается." : "Сохранено: чайник скрыт в Доме и Обзоре.");
-      }
+      setNotice(saved.devices[0]?.visible ? "Сохранено: чайник снова показывается." : "Сохранено: чайник скрыт в Доме и Обзоре.");
     } catch (error) {
       if (error instanceof DeviceVisibilityApiError && error.code === "revision_conflict") {
         await refresh();
@@ -93,21 +88,6 @@ export function DeviceVisibilitySettingsSheet({ onClose }: { onClose: () => void
                 <span className="setting-switch-row__state">{kettle.visible ? "Да" : "Нет"}</span>
               </span>
             </span>
-          </label>
-        )}
-        {settings?.available && (
-          <label className="ai-provider-settings__field">
-            Лента в «Обзоре»
-            <SelectField aria-label="Лента в «Обзоре»" data-testid="overview-light-strip-choice" value={settings.overviewLightStripId ?? ""} disabled={pending || !settings.writesEnabled}
-              onValueChange={(value) => {
-                if (value === "" || isOverviewLightStripId(value)) {
-                  void changePresentation({ overviewLightStripId: value || null }, "Выбрать ленту в Обзоре");
-                }
-              }}>
-              <option value="">Автоматически</option>
-              {Object.entries(overviewLightStripLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-            </SelectField>
-            <small>Обе ленты по-прежнему доступны в «Доме».</small>
           </label>
         )}
         {notice && <p className="settings-notice" role="status" aria-live="polite">{notice}</p>}

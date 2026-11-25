@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .contracts import (
     DashboardSnapshot,
+    ServiceSnapshot,
     DiagnosticsCalendarQuery,
     DiagnosticsCollectorStatus,
     DiagnosticsMutationGates,
@@ -102,8 +103,8 @@ def _local_date_for_timestamp(value: object, time_zone: str) -> str:
         return "unknown"
 
 
-def _service_label(service_id: str) -> str:
-    return _SERVICE_LABELS.get(service_id, "Сервис")
+def _service_label(service: ServiceSnapshot) -> str:
+    return _SERVICE_LABELS.get(service.id, service.title.strip() or service.id)
 
 
 def _problem_summary(label: str, state: str) -> str:
@@ -194,12 +195,12 @@ def _problem_from_service(
     elif service.health == "healthy":
         return None
     state = "degraded" if service.id == "rog_g703gi" and service.health == "healthy" else _HEALTH_STATE.get(service.health, "degraded")
-    summary = _problem_summary(_service_label(service.id), state)
+    summary = service.summary if service.dataContract == "music.connection.v1" else _problem_summary(_service_label(service), state)
     if service.id in {"avalar.main.website", "avalar.stage.website"} and service.source == "live" and error_code in AVALAR_HEALTH_REASONS:
         summary = AVALAR_HEALTH_REASONS[error_code]
     return DiagnosticsProblem(
         id=f"service:{service.id}",
-        subsystem=_service_label(service.id),
+        subsystem=_service_label(service),
         severity=_severity(state),
         state=state,
         current=True,

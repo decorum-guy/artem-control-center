@@ -1112,22 +1112,36 @@ p { color: var(--text-secondary); }
 .timing-stepper button {
   min-width: 48px;
   min-height: 48px;
-  border: 0;
+  padding: 0;
+  border: 1px solid var(--accent);
   border-radius: var(--radius-control);
-  color: var(--accent-strong);
-  background: transparent;
+  color: var(--cc-on-accent);
+  background: var(--accent);
   font-size: 23px;
   line-height: 1;
 }
 .timing-stepper output { color: var(--text); font-size: 16px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
 .timing-stepper output span { color: var(--text-muted); font-size: 12px; font-weight: 500; }
-.timing-form button {
+.timing-form > button {
   min-height: 48px;
   border: 1px solid var(--accent);
   border-radius: var(--radius-control);
   padding: 0 15px;
-  color: var(--button-text);
+  color: var(--cc-on-accent);
   background: var(--accent);
+}
+
+.timing-form .timing-stepper button:not(:disabled):hover,
+.timing-form > button:not(:disabled):hover {
+  background: var(--accent-strong);
+}
+
+.timing-form .timing-stepper button:disabled,
+.timing-form > button:disabled {
+  border-color: var(--border);
+  color: var(--cc-text-secondary);
+  background: var(--surface-secondary);
+  opacity: 1;
 }
 .timing-conflict {
   grid-column: 1 / -1;

@@ -17,7 +17,7 @@ from .home_assistant_maintenance import (
     HomeServerMaintenanceExecutor,
     build_home_assistant_maintenance_router,
 )
-from .main import SETTINGS, access_policy, app, backup_service, effective_immediate_capability_enabled, runtime
+from .main import SETTINGS, access_policy, app, backup_service, effective_immediate_capability_enabled, runtime, station_playback, music_library
 from .rog_g703_power import RogG703ActionExecutor, build_rog_g703_action_router
 from .yandex_rog_voice import YandexRogVoiceBridge
 from .static_dashboard import install_dashboard_routes
@@ -49,6 +49,8 @@ station_actions = StationActionExecutor(
     SETTINGS, access_policy,
     lambda: any(service.id == "alice-tg-bot" and service.health == "healthy" and service.source == "live"
                 for service in runtime.http.services()),
+    station=station_playback,
+    playlist_navigation=music_library.navigate_playlist if music_library is not None else None,
 )
 home_assistant_maintenance = HomeServerMaintenanceExecutor(
     SETTINGS,

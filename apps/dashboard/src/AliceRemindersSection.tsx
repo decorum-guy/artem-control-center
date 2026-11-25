@@ -6,6 +6,8 @@ import { useInteractionLock } from "./InteractionLock";
 import { PlanningSheet } from "./PlanningRoutePrimitives";
 import { RouteHeader } from "./ShellPrimitives";
 import { pageTitleField, useInterfaceCopy } from "./interfaceCopy";
+import { SelectField } from "./ui/SelectField";
+import { v3VisualSkinEnabled } from "./visualShellConfig";
 import { useOwnerWarningDwell } from "./planningWarningDwell";
 
 const dateTime = new Intl.DateTimeFormat("ru-RU", {
@@ -37,6 +39,7 @@ const syncText = {
   stale: statusText.stale
 };
 const writeErrors: Record<string, string> = {
+  unsupported_schedule: "Это расписание можно изменить в приложении «Дом с Алисой».",
   time_must_be_future: "Выберите время в будущем.",
   invalid_time: "Проверьте дату и время.",
   auth_required: "Нужно восстановить вход в Яндекс.",
@@ -50,38 +53,53 @@ const writeErrors: Record<string, string> = {
 };
 type Reminder = StationReminderList["items"][number];
 type Delivery = "station" | "phone" | "both";
+type Repeat = "once" | "daily" | "weekly";
+type ReminderDraft = { title?: string; dueLocal?: string; delivery?: Delivery; repeat?: Repeat };
+const repeatLabels: Record<Repeat, string> = { once: "Один раз", daily: "Каждый день", weekly: "Каждую неделю" };
+const deliveryLabels = { station: "На Станцию", phone: "На телефон", both: "На оба", unknown: "Неизвестно" };
 
 function fields(date: Date) {
   const parts = Object.fromEntries(formTime.formatToParts(date).map(({ type, value }) => [type, value]));
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
 }
 
-function ReminderEditor({ item, writable, voiceReady, onClose, onSave }: {
+function ReminderEditor({ item, writable, voiceReady, canDelete, onClose, onSave }: {
   item: Reminder | null;
   writable: boolean;
   voiceReady: boolean;
   onClose: () => void;
-  onSave: (title: string, dueLocal: string, delivery: Delivery) => Promise<void>;
+  canDelete: boolean;
+  onSave: (draft: ReminderDraft, deleting?: boolean) => Promise<void>;
 }) {
-  const initial = fields(item?.dueAt ? new Date(item.dueAt) : new Date(Date.now() + 30 * 60_000));
+  const scheduleMode = item?.scheduleMode ?? (item?.repeats ? "unknown" : "once");
+  const canChangeSchedule = scheduleMode !== "unknown";
+  const itemStart = item?.repeats ? item.seriesStartAt : item?.dueAt;
+  const [initial] = useState(() => fields(itemStart ? new Date(itemStart) : new Date(Date.now() + 30 * 60_000)));
   const [title, setTitle] = useState(item?.title ?? "");
   const [date, setDate] = useState(initial.date);
   const [time, setTime] = useState(initial.time);
   const [delivery, setDelivery] = useState<Delivery>(voiceReady ? "station" : "phone");
+  const [repeat, setRepeat] = useState(scheduleMode);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unconfirmed, setUnconfirmed] = useState(false);
   const pending = useRef(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const draft: ReminderDraft = {};
+  if (!item || title.trim() !== item.title) draft.title = title;
+  if (canChangeSchedule && (!item || date !== initial.date || time !== initial.time)) draft.dueLocal = `${date}T${time}`;
+  if (repeat !== "unknown" && (!item || repeat !== scheduleMode)) draft.repeat = repeat;
+  if (!item) draft.delivery = delivery;
+
+  async function submit(deleting = false) {
     if (pending.current || !writable) return;
     pending.current = true;
     setSaving(true);
     setError(null);
     try {
-      await onSave(title, `${date}T${time}`, delivery);
+      await onSave(draft, deleting);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : writeErrors.unconfirmed);
       if (!(reason instanceof Error) || reason.message === writeErrors.unconfirmed) setUnconfirmed(true);
@@ -92,14 +110,16 @@ function ReminderEditor({ item, writable, voiceReady, onClose, onSave }: {
   }
 
   return (
-    <PlanningSheet title={item ? "Перенести напоминание" : "Добавить напоминание"} eyebrow="Алиса"
+    <PlanningSheet title={item ? item.repeats ? "Изменить серию" : "Изменить напоминание" : "Добавить напоминание"} eyebrow="Алиса"
       onClose={() => { if (!pending.current) onClose(); }} testId="alice-reminder-editor">
-      <form className="planning-alice-reminders-form" onSubmit={(event) => void submit(event)}>
-        {item ? <p>{item.title}</p> : (
-          <label>О чём напомнить
-            <input required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} />
-          </label>
-        )}
+      <form className="planning-alice-reminders-form" onSubmit={(event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        if (Object.keys(draft).length) void submit();
+      }}>
+        <label>О чём напомнить
+          <input required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} />
+        </label>
+        {item?.repeats && <p className="planning-route-note">Изменения относятся ко всей серии. Дата в форме — её начало.</p>}
         {!item && (
           <div className="planning-alice-reminders-presets" role="group" aria-label="Быстрый выбор времени">
             {presets.map(([minutes, label]) => (
@@ -113,16 +133,27 @@ function ReminderEditor({ item, writable, voiceReady, onClose, onSave }: {
             ))}
           </div>
         )}
-        <div className="planning-alice-reminders-time">
-          <label>Дата
-            <input type="date" required min={fields(new Date()).date} value={date}
-              onChange={(event) => { setDate(event.target.value); setSelectedPreset(null); }} />
-          </label>
-          <label>Время (МСК)
-            <input type="time" required value={time}
-              onChange={(event) => { setTime(event.target.value); setSelectedPreset(null); }} />
-          </label>
-        </div>
+        {canChangeSchedule ? <>
+          <div className="planning-alice-reminders-time">
+            <label>Дата
+              <input type="date" required min={item ? undefined : fields(new Date()).date} value={date}
+                onChange={(event) => { setDate(event.target.value); setSelectedPreset(null); }} />
+            </label>
+            <label>Время (МСК)
+              <input type="time" required value={time}
+                onChange={(event) => { setTime(event.target.value); setSelectedPreset(null); }} />
+            </label>
+          </div>
+          <div className="planning-alice-reminders-repeat">
+            {!v3VisualSkinEnabled && <span aria-hidden="true">Повтор</span>}
+            <SelectField aria-label="Повтор" value={repeat} onValueChange={(value) => setRepeat(value as Repeat)}>
+              {(Object.entries(repeatLabels) as [Repeat, string][]).map(([mode, label]) => (
+                <option key={mode} value={mode}>{label}</option>
+              ))}
+            </SelectField>
+          </div>
+        </> : <p className="planning-route-note">Расписание сохранится без изменений. Этот тип расписания доступен для правки в «Доме с Алисой».</p>}
+        {item && <p className="planning-route-note">Доставка · {deliveryLabels[item.delivery ?? "unknown"]}. Изменение доставки доступно в «Доме с Алисой».</p>}
         {!item && <>
           <fieldset className="planning-alice-reminders-destination">
             <legend>Куда напомнить</legend>
@@ -140,9 +171,17 @@ function ReminderEditor({ item, writable, voiceReady, onClose, onSave }: {
         {!writable && <p role="status" className="planning-route-note">Храним введённые данные. Сохранение временно недоступно.</p>}
         {error && <p role="alert">{error}</p>}
         <button type="submit" className="planning-primary-button" aria-disabled={!writable || undefined}
-          disabled={saving || unconfirmed || !title.trim()}>
+          disabled={saving || unconfirmed || !title.trim() || !Object.keys(draft).length}>
           {saving ? "Проверяем в Алисе…" : "Сохранить"}
         </button>
+        {item && canDelete && (confirmDelete ? <div>
+          <p>{item.repeats ? "Удалить всю серию напоминаний?" : "Удалить напоминание?"}</p>
+          <button type="button" className="planning-secondary-button" disabled={!writable || saving || unconfirmed}
+            onClick={() => void submit(true)}>Подтвердить удаление</button>
+          <button type="button" className="planning-secondary-button" disabled={saving}
+            onClick={() => setConfirmDelete(false)}>Отмена</button>
+        </div> : <button type="button" className="planning-secondary-button" disabled={saving || unconfirmed}
+          onClick={() => setConfirmDelete(true)}>{item.repeats ? "Удалить всю серию" : "Удалить напоминание"}</button>)}
       </form>
     </PlanningSheet>
   );
@@ -195,7 +234,7 @@ export function AliceRemindersSection() {
             // controls mounted for focus, with writes blocked while degraded.
             if ((next.status === "partial" || next.status === "stale")
               && next.observedAt && next.observedAt === previous?.observedAt) {
-              return { ...next, canCreate: previous.canCreate, canReschedule: previous.canReschedule };
+              return { ...next, canCreate: previous.canCreate, canReschedule: previous.canReschedule, canEdit: previous.canEdit, canDelete: previous.canDelete };
             }
             return next;
           });
@@ -222,18 +261,18 @@ export function AliceRemindersSection() {
     };
   }, []);
 
-  async function save(title: string, dueLocal: string, delivery: Delivery) {
+  async function save(draft: ReminderDraft, deleting = false) {
     if (!editor || !guardMutation()) throw new Error("Панель заблокирована.");
     const editing = editor !== "new";
-    if (!writable || !(editing ? list?.canReschedule : list?.canCreate)) throw new Error(writeErrors.source_unavailable);
+    if (!writable || !(deleting ? list?.canDelete : editing ? (list?.canEdit ?? list?.canReschedule) : list?.canCreate)) throw new Error(writeErrors.source_unavailable);
     const endpoint = "/api/v1/station/reminders";
-    const base = { attemptId: crypto.randomUUID(), dueLocal };
+    const base = { attemptId: crypto.randomUUID() };
     readEpoch.current += 1;
     try {
       const response = await fetch(editing ? `${endpoint}/${editor.id}` : endpoint, {
-        method: editing ? "PATCH" : "POST",
+        method: deleting ? "DELETE" : editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json", "X-Panel-Intent": "station-reminders" },
-        body: JSON.stringify(editing ? { ...base, expectedVersion: editor.version } : { ...base, title, delivery })
+        body: JSON.stringify(editing ? { ...base, ...(deleting ? {} : draft), expectedVersion: editor.version } : { ...base, ...draft })
       });
       const result = await response.json();
       if (!response.ok) {
@@ -245,7 +284,7 @@ export function AliceRemindersSection() {
       showNotice({
         id: "station-reminders-saved",
         severity: "success",
-        title: editing ? "Время обновилось в Алисе." : "Напоминание добавлено в Алису.",
+        title: deleting ? "Запись удалена из Алисы." : editing ? "Напоминание обновилось в Алисе." : "Напоминание добавлено в Алису.",
         detail: "Изменение подтверждено повторным чтением."
       });
       setEditor(null);
@@ -289,9 +328,9 @@ export function AliceRemindersSection() {
                   </span>
                   <strong>{item.title}</strong>
                 </div>
-                {list.canReschedule && item.version && item.dueAt && (
+                {(list.canEdit ?? list.canReschedule) && item.version && (
                   <button type="button" className="planning-secondary-button" aria-disabled={!writable || undefined}
-                    onClick={() => { if (writable) setEditor(item); }}>Перенести</button>
+                    onClick={() => { if (writable) setEditor(item); }}>{item.repeats ? "Изменить серию" : "Изменить"}</button>
                 )}
               </li>
             ))}
@@ -299,7 +338,8 @@ export function AliceRemindersSection() {
         )}
       </section>
       {editor && <ReminderEditor item={editor === "new" ? null : editor}
-        writable={writable && Boolean(editor === "new" ? list?.canCreate : list?.canReschedule)}
+        writable={writable && Boolean(editor === "new" ? list?.canCreate : list?.canEdit ?? list?.canReschedule)}
+          canDelete={Boolean(list?.canDelete)}
         voiceReady={list?.voiceTargetConfigured !== false}
         onClose={() => setEditor(null)} onSave={save} />}
     </div>

@@ -25,7 +25,7 @@ describe("Overview edit reducer", () => {
       unplaced: [{ instanceId: "owner.quick", widgetType: "home.quick-actions", reason: "old" }] });
     expect(recovered.items).toEqual(original.items);
     expect(recovered.unplaced).toEqual([]);
-    expect(recovered.presetVersion).toBe(6);
+    expect(recovered.presetVersion).toBe(7);
   });
   it("enters with an in-memory clone and live state does not dirty it", () => {
     const state = createOverviewEditorState(makeShippedOverviewDocument(true));

@@ -107,7 +107,7 @@ from .access_policy import AccessPolicyStore
 from .tv_api import TVExecutorClient, build_tv_router
 from .tv_voice import TVVoiceBridge
 from .music_save import MusicSave, build_music_save_router, dispatch_scenario
-from .music_library import MusicLibrary, build_music_library_router
+from .music_library import MusicLibrary, build_music_library_router, build_station_playlist_router
 from .station_credentials import StationCredentialFile
 from .yandex_library import YandexLibrary
 from .youtube_browser_connect import CONNECT_CAPABILITY, MusicBrowserConnector
@@ -216,13 +216,40 @@ ble_strip = (
 )
 
 
+def youtube_services() -> list[ServiceSnapshot]:
+    if MODE not in {"production", "read_only"}:
+        return []
+    if music_library is None and music_save is None:
+        return []
+    states = (
+        ("youtube-music-library", "YouTube Music · библиотека",
+         music_library.youtube_connection_status() if music_library else "not_configured"),
+        ("youtube-music-oauth", "YouTube Music · сохранение лайков",
+         music_save.connection_status() if music_save else "not_configured"),
+    )
+    reasons = {
+        "ready": "Каталог прочитан", "connected": "Канал OAuth подтверждён",
+        "recovering": "Идёт восстановление доступа к библиотеке",
+        "auth_required": "Требуется авторизация", "wrong_channel": "Обнаружен другой канал",
+        "proxy_unavailable": "Прокси Happ недоступен", "unavailable": "Источник временно недоступен",
+        "not_configured": "Подключение не настроено", "unchecked": "Нет свежей проверки",
+    }
+    return [
+        ServiceSnapshot(id=identity, title=title, dataContract="music.connection.v1", source="live",
+                        health="healthy" if state in {"ready", "connected"} else
+                        "stale" if state == "unchecked" else "degraded",
+                        summary=reasons[state], data={"connection": state, "lastError": state})
+        for identity, title, state in states
+    ]
+
+
 def snapshot_services():
     services = runtime.services()
     if SETTINGS.light_strip_provider == "ble":
         services = [service for service in services if service.id != LIGHT_STRIP_SERVICE_ID]
     if ble_strip is not None:
         services.append(ble_strip.snapshot())
-    return services
+    return services + youtube_services()
 
 
 snapshot_publisher = SnapshotPublisher(
@@ -403,10 +430,30 @@ async def lifespan(_: FastAPI):
         station_reminders.start()
     if ble_strip is not None:
         ble_strip.start()
+    async def watch_music_connections() -> None:
+        next_probe = 0.0
+        while True:
+            now = asyncio.get_running_loop().time()
+            if now >= next_probe:
+                if music_library is not None:
+                    await music_library.probe_youtube()
+                if music_save is not None and (music_save.task is None or music_save.task.done()):
+                    await music_save.verify()
+                next_probe = now + 300
+            await snapshot_publisher.rebuild()
+            await asyncio.sleep(5)
+
+    music_watch = (asyncio.create_task(watch_music_connections(), name="music-connections")
+                   if music_library is not None or music_save is not None else None)
     try:
         yield
     finally:
         startup_lifecycle.mark_stopping()
+        if music_watch is not None:
+            music_watch.cancel()
+            await asyncio.gather(music_watch, return_exceptions=True)
+        if music_library is not None:
+            await music_library.close()
         if music_browser is not None:
             await music_browser.close()
         await station_playback.close()
@@ -446,6 +493,7 @@ app.include_router(build_backup_router(backup_service, access_policy))
 app.include_router(build_station_playback_router(station_playback))
 app.include_router(build_music_save_router(music_save))
 app.include_router(build_music_library_router(music_library))
+app.include_router(build_station_playlist_router(music_library))
 if MODE == "production" and station_reminders is not None:
     station_reminders.writer = StationRemindersWriter(
         station_reminders, access=lambda: access_policy,

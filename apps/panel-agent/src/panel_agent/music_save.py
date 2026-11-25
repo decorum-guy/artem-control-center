@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -18,7 +19,7 @@ from .access_policy import AccessPolicyStore, parse_datetime
 from .alice_voice_feedback import AliceVoiceFeedback
 from .music_matching import Candidate, Track, match
 from .station_playback import StationPlaybackCollector
-from .youtube_music import MusicAuthRequired, MusicSession, MusicUnavailable, YouTubeMusic
+from .youtube_music import MusicAuthRequired, MusicProxyUnavailable, MusicSession, MusicUnavailable, OAuthChannelMismatch, YouTubeMusic
 
 LOGGER = logging.getLogger(__name__)
 CAPABILITY = "media.youtube.save_current"
@@ -63,9 +64,11 @@ class MusicSave:
         self.operation: Operation | None = None
         self.task: asyncio.Task | None = None
         self.seen: OrderedDict[str, None] = OrderedDict()
+        self.uncertain: OrderedDict[tuple[bytes, str], None] = OrderedDict()
         self.saved: OrderedDict[tuple[bytes, str], Candidate] = OrderedDict()
         self.closed = False
-        self.connection = "auth_required" if provider is not None else "not_configured"
+        self.connection = "unchecked" if provider is not None else "not_configured"
+        self.last_connected = 0.0
         self.busy_events = 0
 
     def allowed(self) -> bool:
@@ -94,6 +97,12 @@ class MusicSave:
         if op and op.status in {"choose_source", "choose_version"} and (self.clock() - op.changed_at).total_seconds() > CHOICE_SECONDS:
             self.operation = None
 
+    def connection_status(self) -> str:
+        self._prune()
+        if self.connection == "connected" and time.monotonic() - self.last_connected > 660:
+            return "unchecked"
+        return self.connection
+
     def projection(self) -> dict:
         self._prune()
         op = self.operation
@@ -105,9 +114,10 @@ class MusicSave:
                 [{**asdict(item), "id": item.video_id, "artist": item.artist} for item in op.versions] if op.status == "choose_version" else []
             )
             result = {"id": op.id, "status": op.status, "title": op.title, "options": options}
-        return {"connection": self.connection, "channel": self.session.handle if self.session else None,
+        return {"connection": self.connection_status(), "channel": self.session.handle if self.session else None,
                 "destination": "Понравившаяся музыка", "operation": result, "busyEvents": self.busy_events,
-                "canChoose": self.allowed() and self.session is not None}
+                "canChoose": self.allowed() and self.session is not None,
+                "canStart": self.allowed() and self.provider is not None}
 
     def paired_track(self, video_id: str) -> str | None:
         self._prune()
@@ -149,6 +159,22 @@ class MusicSave:
             self._acknowledge(op, "working", min(fired, now))
             self.task = asyncio.create_task(self._run(op), name="music-save")
 
+    def start_manual(self, track_id: str) -> None:
+        self._prune()
+        if not self.allowed():
+            raise HTTPException(403, "music_write_blocked")
+        if self.provider is None:
+            raise HTTPException(409, "auth_required")
+        if (self.task is not None and not self.task.done()
+                or self.operation is not None and self.operation.status.startswith("choose_")):
+            raise HTTPException(409, "music_busy")
+        now = self.clock()
+        track = self.station.displayed_track(track_id, now)
+        if track is None:
+            raise HTTPException(409, "track_changed")
+        op = self.operation = Operation(title=track.title, track=track, source_options=(track,), changed_at=now)
+        self.task = asyncio.create_task(self._run(op), name="music-save-manual")
+
     async def _run(self, op: Operation, choice: Candidate | None = None) -> None:
         try:
             if self.provider is None:
@@ -163,6 +189,7 @@ class MusicSave:
             if op.session is not None and op.session.generation != self.session.generation:
                 raise MusicAuthRequired
             op.session = self.session
+            self.connection, self.last_connected = "connected", time.monotonic()
             if op.track is None and len(op.source_options) > 1:
                 self._state(op, "choose_source")
                 return
@@ -184,13 +211,14 @@ class MusicSave:
                     return
                 choice = candidate
             await self._save(op, choice, op.session)
-        except MusicAuthRequired:
+        except MusicAuthRequired as exc:
             self.session = None
             self.saved.clear()
-            self.connection = "auth_required" if self.provider else "not_configured"
+            self.connection = ("wrong_channel" if isinstance(exc, OAuthChannelMismatch)
+                               else "auth_required" if self.provider else "not_configured")
             self._state(op, "auth_required")
-        except MusicUnavailable:
-            self.connection = "unavailable"
+        except MusicUnavailable as exc:
+            self.connection = "proxy_unavailable" if isinstance(exc, MusicProxyUnavailable) else "unavailable"
             self._state(op, "unavailable")
         except Exception:
             self._state(op, "unavailable")
@@ -202,11 +230,18 @@ class MusicSave:
             self._state(op, "no_match")
             return
         already_liked = await self.provider.rating(session, candidate) == "like"
+        key = (session.generation, candidate.video_id)
         if not already_liked:
+            if key in self.uncertain:
+                self._state(op, "unconfirmed")
+                return
             self.provider.require_current(session)
             if not self.allowed():
                 self._state(op, "blocked")
                 return
+            self.uncertain[key] = None
+            if len(self.uncertain) > 128:
+                self.uncertain.popitem(last=False)
             try:
                 await self.provider.rate(session, candidate)
             except MusicUnavailable:
@@ -218,6 +253,7 @@ class MusicSave:
             except MusicUnavailable:
                 self._state(op, "unconfirmed")
                 return
+        self.uncertain.pop(key, None)
         try:
             in_music = await self.provider.liked(session, candidate.video_id)
         except (MusicUnavailable, MusicAuthRequired):
@@ -261,17 +297,19 @@ class MusicSave:
         if self.provider is None:
             return
         self.task = asyncio.create_task(self._verify(), name="music-save-account")
-        await self.task
+        await asyncio.shield(self.task)
 
     async def _verify(self) -> None:
         assert self.provider is not None
         try:
             session = await self.provider.sign_in()
-            self.session, self.connection = session, "connected"
-        except MusicAuthRequired:
-            self.connection, self.session = "auth_required", None
-        except MusicUnavailable:
-            self.connection, self.session = "unavailable", None
+            self.session, self.connection, self.last_connected = session, "connected", time.monotonic()
+        except MusicAuthRequired as exc:
+            self.connection = "wrong_channel" if isinstance(exc, OAuthChannelMismatch) else "auth_required"
+            self.session = None
+        except MusicUnavailable as exc:
+            self.connection = "proxy_unavailable" if isinstance(exc, MusicProxyUnavailable) else "unavailable"
+            self.session = None
 
     async def close(self) -> None:
         self.closed = True
@@ -279,6 +317,12 @@ class MusicSave:
             # Provider calls are bounded. Wait for any dispatched write to be
             # checked and disallow the next write even if a search finishes.
             await self.task
+
+
+class ManualMusicSave(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trackId: str = Field(pattern=r"^[0-9]{1,20}$")
 
 
 class MusicChoice(BaseModel):
@@ -320,6 +364,12 @@ def build_music_save_router(service: MusicSave | None) -> APIRouter:
     async def read(response: Response):
         response.headers["Cache-Control"] = "no-store"
         return service.projection() if service is not None else None
+
+    @router.post("/start")
+    async def start(payload: ManualMusicSave, request: Request):
+        target = ready(request)
+        target.start_manual(payload.trackId)
+        return target.projection()
 
     @router.post("/verify")
     async def verify(request: Request):

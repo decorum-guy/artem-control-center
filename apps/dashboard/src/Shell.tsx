@@ -211,7 +211,7 @@ function LegacyProductShell({
               onClick={() => onNavigate("/system")}
             >
               <i aria-hidden="true" />
-              {diagnostics.status === "checking" ? "Проверяем состояние" : attentionCount ? `${attentionCount} требуют внимания` : "Системы в норме"}
+              {diagnostics.status === "checking" ? "Проверяем состояние" : attentionCount ? `${attentionCount} требуют внимания` : diagnostics.status === "unavailable" ? "Диагностика недоступна" : "Системы в норме"}
             </button>
             <button
               className="settings-shortcut"
@@ -386,10 +386,10 @@ function V2ProductShell({
     ? "Проверяем состояние"
     : attentionCount
     ? `${attentionCount} требуют внимания`
-    : "Системы в норме";
+    : diagnostics.status === "unavailable" ? "Диагностика недоступна" : "Системы в норме";
 
-  const systemTone = diagnostics.status === "checking" ? "neutral" : attentionCount ? problemTone(currentProblems![0].state) : "success";
-  const shortSystem = diagnostics.status === "checking" ? "Проверка" : attentionCount ? `Внимание · ${attentionCount}` : "В норме";
+  const systemTone = attentionCount ? problemTone(currentProblems![0].state) : diagnostics.status === "ready" ? "success" : "neutral";
+  const shortSystem = diagnostics.status === "checking" ? "Проверка" : attentionCount ? `Внимание · ${attentionCount}` : diagnostics.status === "unavailable" ? "Нет данных" : "В норме";
   const dateLabel = now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   return (
     <div className="v2-shell" data-testid="v2-shell" data-viewport-layout={portrait ? "portrait" : "landscape"}>
