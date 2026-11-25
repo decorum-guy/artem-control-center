@@ -6,6 +6,8 @@ import { useInteractionLock } from "./InteractionLock";
 import { PlanningSheet } from "./PlanningRoutePrimitives";
 import { RouteHeader } from "./ShellPrimitives";
 import { pageTitleField, useInterfaceCopy } from "./interfaceCopy";
+import { SelectField } from "./ui/SelectField";
+import { v3VisualSkinEnabled } from "./visualShellConfig";
 import { useOwnerWarningDwell } from "./planningWarningDwell";
 
 const dateTime = new Intl.DateTimeFormat("ru-RU", {
@@ -132,23 +134,24 @@ function ReminderEditor({ item, writable, voiceReady, canDelete, onClose, onSave
           </div>
         )}
         {canChangeSchedule ? <>
-        <div className="planning-alice-reminders-time">
-          <label>Дата
-            <input type="date" required min={item ? undefined : fields(new Date()).date} value={date}
-              onChange={(event) => { setDate(event.target.value); setSelectedPreset(null); }} />
-          </label>
-          <label>Время (МСК)
-            <input type="time" required value={time}
-              onChange={(event) => { setTime(event.target.value); setSelectedPreset(null); }} />
-          </label>
-        </div>
-        <label>Повтор
-          <select value={repeat} onChange={(event) => setRepeat(event.target.value as Repeat)}>
-            {(Object.entries(repeatLabels) as [Repeat, string][]).map(([mode, label]) => (
-              <option key={mode} value={mode}>{label}</option>
-            ))}
-          </select>
-        </label>
+          <div className="planning-alice-reminders-time">
+            <label>Дата
+              <input type="date" required min={item ? undefined : fields(new Date()).date} value={date}
+                onChange={(event) => { setDate(event.target.value); setSelectedPreset(null); }} />
+            </label>
+            <label>Время (МСК)
+              <input type="time" required value={time}
+                onChange={(event) => { setTime(event.target.value); setSelectedPreset(null); }} />
+            </label>
+          </div>
+          <div className="planning-alice-reminders-repeat">
+            {!v3VisualSkinEnabled && <span aria-hidden="true">Повтор</span>}
+            <SelectField aria-label="Повтор" value={repeat} onValueChange={(value) => setRepeat(value as Repeat)}>
+              {(Object.entries(repeatLabels) as [Repeat, string][]).map(([mode, label]) => (
+                <option key={mode} value={mode}>{label}</option>
+              ))}
+            </SelectField>
+          </div>
         </> : <p className="planning-route-note">Расписание сохранится без изменений. Этот тип расписания доступен для правки в «Доме с Алисой».</p>}
         {item && <p className="planning-route-note">Доставка · {deliveryLabels[item.delivery ?? "unknown"]}. Изменение доставки доступно в «Доме с Алисой».</p>}
         {!item && <>

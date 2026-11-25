@@ -190,3 +190,27 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 720, height: 1280
     expect(await position(row)).toBe(initialRow);
   });
 }
+
+test("V3 reminder fields use themed touch controls inside the sheet", async ({ page }) => {
+  test.skip(process.env.VITE_V3_VISUAL_SKIN !== "true", "Requires V3");
+  await page.setViewportSize({ width: 720, height: 1280 });
+  await page.route("**/api/v1/station/reminders", (route) => route.fulfill({ json: {
+    status: "fresh", observedAt: "2026-11-25T12:00:00Z", canCreate: true, voiceTargetConfigured: true, items: []
+  } }));
+  for (const theme of ["day", "night"]) {
+    await page.goto(`/reminders?theme=${theme}`);
+    await page.getByTestId("alice-reminders").getByRole("button", { name: "Добавить" }).click();
+    const editor = page.getByTestId("alice-reminder-editor");
+    const fields = editor.locator("input");
+    await expect(fields).toHaveCount(3);
+    for (const field of await fields.all()) {
+      await expect(field).toHaveCSS("border-radius", "10px");
+      await expect(field).toHaveCSS("color-scheme", theme === "day" ? "light" : "dark");
+      expect((await field.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+      await expect(field).not.toHaveCSS("background-color", "rgb(255, 255, 255)");
+    }
+    await editor.getByRole("button", { name: /^Повтор ·/ }).click();
+    await page.getByRole("option", { name: "Каждую неделю" }).click();
+    await expect(editor.getByRole("button", { name: /^Повтор ·/ })).toHaveText(/Каждую неделю/);
+  }
+});

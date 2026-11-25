@@ -1,3 +1,6 @@
+html[data-skin="v3"][data-theme="day"] { color-scheme: light; }
+html[data-skin="v3"][data-theme="night"] { color-scheme: dark; }
+
 html[data-skin="v3"] [data-tone="accent"] { --cc-tone: var(--cc-accent); }
 html[data-skin="v3"] [data-tone="success"] { --cc-tone: var(--cc-success); }
 html[data-skin="v3"] [data-tone="warning"] { --cc-tone: var(--cc-warning); }

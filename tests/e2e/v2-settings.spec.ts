@@ -546,6 +546,34 @@ test.describe("Control Center V2 PR8 Settings information architecture", () => {
     await expect(sheet.locator('output[aria-label="Время разогрева"]')).toHaveText("14 мин");
   });
 
+  test("Coffee timing uses readable Rose accent controls in both themes", async ({ page }) => {
+    test.skip(process.env.VITE_V3_VISUAL_SKIN !== "true", "Requires V3");
+    await mockCoffeeSettings(page);
+    await page.addInitScript(() => localStorage.setItem("artem-control-center.accent", "rose"));
+    for (const theme of ["day", "night"]) {
+      await page.goto(`/settings?theme=${theme}`);
+      await page.getByTestId("settings-summary-coffee").click();
+      await page.mouse.move(0, 0);
+      const controls = page.getByTestId("settings-coffee-sheet").locator(".timing-stepper button, .timing-form > button");
+      await expect(controls).toHaveCount(5);
+      for (const control of await controls.all()) {
+        const colors = await control.evaluate(element => {
+          const computed = getComputedStyle(element);
+          const reference = document.createElement("span");
+          reference.style.color = "var(--cc-on-accent)";
+          reference.style.backgroundColor = "var(--cc-accent)";
+          element.append(reference);
+          const expected = getComputedStyle(reference);
+          const actual = { fg: computed.color, bg: computed.backgroundColor };
+          const tokens = { fg: expected.color, bg: expected.backgroundColor };
+          reference.remove();
+          return { actual, tokens };
+        });
+        expect(colors.actual).toEqual(colors.tokens);
+      }
+    }
+  });
+
   test("Coffee timing retains revision-conflict recovery in the Sheet", async ({ page }) => {
     await mockCoffeeSettings(page, { conflictOnce: true });
     await openSettings(page);
