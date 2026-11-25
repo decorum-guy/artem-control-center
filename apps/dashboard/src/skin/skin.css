@@ -56,7 +56,7 @@ html[data-skin="v3"] .cc-overlay { font-family: var(--cc-font-family); }
   border-color: color-mix(in srgb, var(--cc-heat) 45%, transparent);
   box-shadow: inset 0 1px 0 var(--cc-edge-light), var(--cc-glow-heat);
 }
-html[data-skin="v3"] :is(button, a, input, select, [tabindex]):focus-visible {
+html[data-skin="v3"] :is(button, a, input, textarea, select, [tabindex]):focus-visible {
   outline: 3px solid var(--cc-focus);
   outline-offset: 2px;
 }
