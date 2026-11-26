@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "stateDir": "/var/lib/artem-auto-deploy/adapters",
+  "targets": {
+    "telegram-bot": {
+      "enabled": false,
+      "repository": "decorum-guy/AliceTG_Bot",
+      "checkout": "/REPLACE/homeassistant/TG_Alisa_Assistant_Bot",
+      "composeProjectDir": "/REPLACE/homeassistant",
+      "composeFile": "/REPLACE/homeassistant/compose.yml",
+      "loopbackOverlay": "/REPLACE/homeassistant/TG_Alisa_Assistant_Bot/deploy/compose.control-center-loopback.yml",
+      "service": "telegram-bot",
+      "apiUrl": "http://127.0.0.1:18088"
+    },
+    "home-assistant": {
+      "enabled": false,
+      "repository": "decorum-guy/artem-control-center",
+      "checkout": "/opt/artem-control-center/source",
+      "composeProjectDir": "/REPLACE/homeassistant",
+      "composeFile": "/REPLACE/homeassistant/compose.yml",
+      "loopbackOverlay": "/REPLACE/homeassistant/TG_Alisa_Assistant_Bot/deploy/compose.control-center-loopback.yml",
+      "service": "homeassistant",
+      "apiUrl": "http://127.0.0.1:18123",
+      "tokenFile": "/etc/artem-auto-deploy/ha-deploy-token",
+      "configDir": "/REPLACE/homeassistant/config",
+      "expectedEntities": [
+        "sensor.artem_panel_brightness"
+      ],
+      "imageManifest": null,
+      "allowImageChange": false,
+      "sqliteRecorderConfirmed": false,
+      "managedFiles": [
+        {
+          "source": "integration-patches/home-assistant/config/packages/panel_brightness.yaml",
+          "destination": "packages/panel_brightness.yaml"
+        },
+        {
+          "source": "integration-patches/home-assistant/config/custom_components/artem_panel/__init__.py",
+          "destination": "custom_components/artem_panel/__init__.py"
+        },
+        {
+          "source": "integration-patches/home-assistant/config/custom_components/artem_panel/request_gateway.py",
+          "destination": "custom_components/artem_panel/request_gateway.py"
+        },
+        {
+          "source": "integration-patches/home-assistant/config/custom_components/artem_panel/manifest.json",
+          "destination": "custom_components/artem_panel/manifest.json"
+        },
+        {
+          "source": "integration-patches/home-assistant/config/custom_components/artem_panel/services.yaml",
+          "destination": "custom_components/artem_panel/services.yaml"
+        }
+      ]
+    }
+  }
+}
