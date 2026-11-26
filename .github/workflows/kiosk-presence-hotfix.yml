@@ -1,6 +1,8 @@
 name: Kiosk presence hotfix
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches:
       - main

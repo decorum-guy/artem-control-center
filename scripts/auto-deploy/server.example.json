@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "state_directory": "/var/lib/artem-auto-deploy",
+  "github_token_file": "/etc/artem-auto-deploy/github-token",
+  "webhook_port": 18765,
+  "targets": [
+    {
+      "id": "home-assistant",
+      "enabled": false,
+      "repository": "decorum-guy/artem-control-center",
+      "repository_id": 1315596034,
+      "adapter": "/opt/artem-auto-deploy/deploy_home_server.py",
+      "adapter_config": "/etc/artem-auto-deploy/home-server-deploy.json",
+      "required_workflows": {
+        "ci.yml": [
+          "Validate (ubuntu-latest)",
+          "Validate (windows-latest)"
+        ],
+        "panel-runtime-update.yml": [
+          "Explicit production validation",
+          "Runtime update browser gate"
+        ],
+        "kiosk-presence-hotfix.yml": [
+          "Windows dashboard presence regression"
+        ],
+        "kiosk-process-tree-hotfix.yml": [
+          "Windows Edge process-tree regression"
+        ]
+      }
+    },
+    {
+      "id": "telegram-bot",
+      "enabled": false,
+      "repository": "decorum-guy/AliceTG_Bot",
+      "repository_id": 1223671518,
+      "adapter": "/opt/artem-auto-deploy/deploy_home_server.py",
+      "adapter_config": "/etc/artem-auto-deploy/home-server-deploy.json",
+      "required_workflows": {
+        "ci.yml": [
+          "validate"
+        ]
+      }
+    }
+  ],
+  "webhook_secrets": {
+    "decorum-guy/artem-control-center": "/etc/artem-auto-deploy/panel-webhook-secret",
+    "decorum-guy/AliceTG_Bot": "/etc/artem-auto-deploy/bot-webhook-secret"
+  }
+}

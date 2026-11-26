@@ -374,6 +374,8 @@ Mac success не является Windows hardware acceptance. Hardware-dependen
 - [RULES.md](RULES.md) — обязательные operational/safety rules, truthfulness, protected production boundaries и PR-дисциплина.
 - [docs/INFRASTRUCTURE_ACCESS.md](docs/INFRASTRUCTURE_ACCESS.md) — три SSH alias с Mac, роли Samsung/HA/proxy и актуальность внешних зависимостей.
 - [docs/PROJECT_MAP.md](docs/PROJECT_MAP.md) — где лежат frontend, Panel Agent, provider adapters, contracts, Windows runtime и приватные tunnels.
+- [docs/AUTOMATIC_DEPLOYMENT.md](docs/AUTOMATIC_DEPLOYMENT.md) — автоматическая установка после `main` и успешного CI; первичное подключение хостов и границы автоматического разрешения.
+- [docs/ALICE_PANEL_BRIGHTNESS.md](docs/ALICE_PANEL_BRIGHTNESS.md) — голосовая яркость экрана Samsung, типизированный маршрут и отдельная физическая приёмка.
 - [docs/AGENT_PLAYBOOK.md](docs/AGENT_PLAYBOOK.md) — onboarding sequence, Git preflight, тестирование, PR и отчёт.
 - [docs/TV_ACCESS.md](docs/TV_ACCESS.md) — доступ к телевизору с Mac через SSH Samsung и ADB, снимки `screencap`, живой `tv-mirror`/`scrcpy` и границы подтверждения экрана; прочитать перед диагностикой или приёмкой ТВ.
 - [docs/PRODUCTION_DIAGNOSTICS.md](docs/PRODUCTION_DIAGNOSTICS.md) — read-only Samsung/VPS diagnostics, Calendar/Planning freshness, refresh UI semantics и portrait widget fallback.

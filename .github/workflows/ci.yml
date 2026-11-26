@@ -84,6 +84,7 @@ jobs:
           ./scripts/windows/test-updater-target-handoff.ps1
           ./scripts/windows/test-update-production-recovery.ps1
           ./scripts/windows/test-update-production-runtime-reliability.ps1
+          ./scripts/windows/test-auto-deploy-result.ps1
           ./scripts/windows/test-connectivity-contract.ps1
           ./scripts/windows/test-coffee-upload-ingress.ps1
           ./scripts/windows/test-connectivity-keygen.ps1

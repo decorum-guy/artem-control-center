@@ -1,6 +1,8 @@
 name: Edge kiosk process-tree hotfix
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches:
       - main

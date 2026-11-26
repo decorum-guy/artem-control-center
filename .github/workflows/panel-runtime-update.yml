@@ -1,6 +1,8 @@
 name: Panel runtime update UX
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches:
       - main
