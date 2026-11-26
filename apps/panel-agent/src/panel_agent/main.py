@@ -65,6 +65,7 @@ from .appearance import build_appearance_router
 from .host_battery import router as host_battery_router
 from .runtime_control import router as runtime_control_router
 from .system_controls import WindowsSystemControls, build_system_controls_router
+from .panel_brightness import PanelBrightnessBridge
 from .settings import IntegrationSettings
 from .ble_strip import ADDRESS as BLE_ADDRESS, BleStripManager, build_ble_strip_router
 from .station_playback import StationPlaybackCollector, StationPlaybackSettings, build_station_playback_router
@@ -329,6 +330,16 @@ if MODE in {"production", "read_only"} and os.getenv("PANEL_MUSIC_LIBRARY_ENABLE
         music_save.on_new_like = music_library.invalidate_youtube_likes
 
 system_controls = WindowsSystemControls()
+panel_brightness = None
+if MODE == "production" and SETTINGS.panel_brightness_voice_enabled and runtime.home_assistant.configured:
+    panel_brightness = PanelBrightnessBridge(
+        controls=system_controls,
+        access=lambda: access_policy,
+        write_enabled=lambda: startup_lifecycle.phase == "ready" and _write_allowed(SETTINGS.panel_brightness_voice_enabled),
+        ingress_ready=lambda: runtime.home_assistant.panel_brightness_subscribed,
+        publish=runtime.home_assistant.publish_panel_brightness_state,
+    )
+    runtime.home_assistant.set_panel_brightness_handler(panel_brightness.handle)
 backup_source = PanelConfigSource.from_store_paths(
     overview_layout=overview_layout_store.path,
     calendar_display_colors=calendar_display_preferences_store.path,
@@ -403,10 +414,14 @@ async def lifespan(_: FastAPI):
         station_reminders.start()
     if ble_strip is not None:
         ble_strip.start()
+    if panel_brightness is not None:
+        panel_brightness.start()
     try:
         yield
     finally:
         startup_lifecycle.mark_stopping()
+        if panel_brightness is not None:
+            await panel_brightness.close()
         if music_browser is not None:
             await music_browser.close()
         await station_playback.close()
@@ -1545,6 +1560,7 @@ def _read_only_capability_enabled(capability_id: str) -> bool:
         "rog_g703": SETTINGS.rog_g703_enabled,
         "rog_g703_alice": SETTINGS.rog_g703_alice_enabled,
         "tv_voice": tv_voice is not None and SETTINGS.writes_enabled,
+        "panel_brightness_voice": panel_brightness is not None and SETTINGS.writes_enabled,
         "kiosk_controls": _bool_env("PANEL_KIOSK_CONTROLS_ENABLED"),
         "panel_update_controls": _bool_env("PANEL_UPDATE_CONTROLS_ENABLED"),
     }[capability_id]

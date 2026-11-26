@@ -1,0 +1,30 @@
+# Merge these keys into the existing yandex_smart_home configuration. Never
+# replace an existing filter/entity_config. Requires the separately installed
+# Yandex Smart Home integration and owner account linking; AlexxIT YandexStation
+# alone does not expose HA entities to Alice.
+yandex_smart_home:
+  filter:
+    include_entities:
+      - sensor.artem_panel_brightness
+  entity_config:
+    sensor.artem_panel_brightness:
+      name: Панель
+      type: devices.types.other
+      # Do not set slow: true: that would acknowledge before WMI readback.
+      error_code_template: >-
+        {% if not is_number(states('sensor.artem_panel_brightness'))
+             or state_attr('sensor.artem_panel_brightness', 'writable') != true
+             or not -2 <= as_timestamp(now()) - as_timestamp(state_attr('sensor.artem_panel_brightness', 'observed_at'), 0) < 90 %}
+          DEVICE_UNREACHABLE
+        {% endif %}
+      custom_ranges:
+        brightness:
+          state_entity_id: sensor.artem_panel_brightness
+          set_value:
+            action: artem_panel.set_brightness
+            data:
+              percent: "{{ value }}"
+          range:
+            min: 0
+            max: 100
+            precision: 1
