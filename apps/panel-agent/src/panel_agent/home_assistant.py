@@ -14,6 +14,11 @@ import httpx
 import websockets
 
 from .contracts import ActionDescriptor, ServicePresentation, ServiceSnapshot
+from .panel_brightness import (
+    COMMAND_EVENT as PANEL_BRIGHTNESS_COMMAND_EVENT,
+    STATE_EVENT as PANEL_BRIGHTNESS_STATE_EVENT,
+    TARGET as PANEL_BRIGHTNESS_TARGET,
+)
 from .settings import IntegrationSettings
 
 COFFEE_ENTITY = "switch.kofemashina"
@@ -54,6 +59,7 @@ LOGGER = logging.getLogger(__name__)
 _STATE_CHANGED_SUBSCRIPTION_ID = 1
 _YANDEX_INTENT_SUBSCRIPTION_ID = 2
 _YANDEX_SCENARIO_SUBSCRIPTION_ID = 3
+_PANEL_BRIGHTNESS_SUBSCRIPTION_ID = 4
 _MAX_PRE_ACK_EVENTS = 16
 YandexIntentHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -87,6 +93,8 @@ class HomeAssistantAdapter:
         self._on_change = on_change
         self._yandex_scenario_handler: Callable[[dict[str, Any]], None] | None = None
         self._yandex_scenario_subscribed = False
+        self._panel_brightness_handler: Callable[[dict[str, Any]], None] | None = None
+        self._panel_brightness_subscribed = False
         self._yandex_intent_handler: YandexIntentHandler | None = None
         self._yandex_intent_subscribed = False
         self._yandex_intent_status = "disabled"
@@ -114,6 +122,39 @@ class HomeAssistantAdapter:
 
     def set_yandex_scenario_handler(self, handler: Callable[[dict[str, Any]], None]) -> None:
         self._yandex_scenario_handler = handler
+
+    def set_panel_brightness_handler(self, handler: Callable[[dict[str, Any]], None]) -> None:
+        self._panel_brightness_handler = handler
+
+    @property
+    def panel_brightness_subscribed(self) -> bool:
+        return self._websocket_connected and self._panel_brightness_subscribed
+
+    async def publish_panel_brightness_state(self, report: dict[str, Any]) -> None:
+        """Publish only the fixed display-state event through the private HA API."""
+        allowed = {"target", "available", "value", "writable", "observed_at", "request_id", "outcome"}
+        value, request_id = report.get("value"), report.get("request_id")
+        if (set(report) != allowed or report.get("target") != PANEL_BRIGHTNESS_TARGET
+                or type(report.get("available")) is not bool or type(report.get("writable")) is not bool
+                or (value is not None and (type(value) is not int or not 0 <= value <= 100))
+                or (report.get("available") and value is None)
+                or (report.get("writable") and not report.get("available"))
+                or (request_id is not None and (not isinstance(request_id, str)
+                                               or re.fullmatch(r"[A-Za-z0-9_-]{8,80}", request_id) is None))
+                or report.get("outcome") not in {"observed", "confirmed", "unconfirmed", "blocked", "busy", "expired"}
+                or not isinstance(report.get("observed_at"), str)
+                or len(report["observed_at"]) > 40):
+            raise ValueError("Invalid panel brightness state")
+        async with httpx.AsyncClient(
+            base_url=self._settings.ha_url,
+            headers={"Authorization": f"Bearer {self._settings.ha_token}"},
+            timeout=4,
+            follow_redirects=False,
+            trust_env=False,
+            transport=self._transport,
+        ) as client:
+            response = await client.post(f"/api/events/{PANEL_BRIGHTNESS_STATE_EVENT}", json=report)
+            response.raise_for_status()
 
     async def respond_to_yandex_intent(self, text: str) -> None:
         """Send one fixed yandex_dialogs response event to Home Assistant."""
@@ -522,6 +563,7 @@ class HomeAssistantAdapter:
                         "snapshotConfirmed": self._snapshot_confirmed_for_transport,
                         "yandexIntentSubscribed": self._yandex_intent_subscribed,
                         "yandexIntentStatus": self._yandex_intent_status,
+                        "panelBrightnessSubscribed": self.panel_brightness_subscribed,
                         "lastSuccessfulRestAt": _iso(self._last_successful_rest_at),
                         "lastTransportConnectedAt": _iso(
                             self._last_transport_connected_at
@@ -827,6 +869,14 @@ class HomeAssistantAdapter:
                 "type": "subscribe_events",
                 "event_type": "yandex_scenario",
             }))
+        self._panel_brightness_subscribed = False
+        brightness_requested = self._panel_brightness_handler is not None
+        if brightness_requested:
+            await socket.send(json.dumps({
+                "id": _PANEL_BRIGHTNESS_SUBSCRIPTION_ID,
+                "type": "subscribe_events",
+                "event_type": PANEL_BRIGHTNESS_COMMAND_EVENT,
+            }))
         for message in pre_ack_events:
             await self._handle_websocket_event(message)
         async for raw in socket:
@@ -839,6 +889,12 @@ class HomeAssistantAdapter:
                 self._yandex_scenario_subscribed = message.get("success") is True
                 if not self._yandex_scenario_subscribed:
                     LOGGER.warning("TV voice HA subscription denied")
+                continue
+            if (brightness_requested and isinstance(message, dict)
+                    and message.get("type") == "result" and message.get("id") == _PANEL_BRIGHTNESS_SUBSCRIPTION_ID):
+                self._panel_brightness_subscribed = message.get("success") is True
+                if not self._panel_brightness_subscribed:
+                    LOGGER.warning("Panel brightness HA subscription denied")
                 continue
             await self._handle_websocket_event(message)
 
@@ -899,6 +955,13 @@ class HomeAssistantAdapter:
                 self._yandex_scenario_handler(event)
             except Exception:
                 LOGGER.warning("TV voice HA event handler failed")
+        if (event_type == PANEL_BRIGHTNESS_COMMAND_EVENT and message.get("type") == "event"
+                and message.get("id") == _PANEL_BRIGHTNESS_SUBSCRIPTION_ID
+                and self.panel_brightness_subscribed and self._panel_brightness_handler):
+            try:
+                self._panel_brightness_handler(event)
+            except Exception:
+                LOGGER.warning("Panel brightness HA event handler failed")
 
     async def _dispatch_yandex_intent(self, data: dict[str, Any]) -> None:
         handler = self._yandex_intent_handler
@@ -996,6 +1059,7 @@ class HomeAssistantAdapter:
         should_record_failure = was_connected or self._source == "live"
         self._websocket_connected = False
         self._yandex_scenario_subscribed = False
+        self._panel_brightness_subscribed = False
         self._yandex_intent_subscribed = False
         self._yandex_intent_status = "disabled"
         self._snapshot_confirmed_for_transport = False

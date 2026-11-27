@@ -1,0 +1,14 @@
+set_brightness:
+  name: Яркость панели
+  description: Установить процент и дождаться фактического уровня Samsung.
+  fields:
+    percent:
+      name: Яркость
+      description: Целое число процентов от 0 до 100.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"

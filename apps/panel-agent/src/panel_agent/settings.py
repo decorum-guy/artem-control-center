@@ -76,6 +76,7 @@ class IntegrationSettings:
     rog_g703_health_poll_seconds: float = 15.0
     rog_g703_response_limit_bytes: int = 16 * 1024
     writes_enabled: bool = False
+    panel_brightness_voice_enabled: bool = False
     todoist_api_token: str = field(default="", repr=False)
     todoist_enabled: bool | None = None
     todoist_writes_enabled: bool = False
@@ -343,6 +344,7 @@ class IntegrationSettings:
                 max(1024, int(os.getenv("PANEL_ROG_G703_RESPONSE_LIMIT_BYTES", str(16 * 1024)))),
             ),
             writes_enabled=_bool_env("PANEL_WRITES_ENABLED", False),
+            panel_brightness_voice_enabled=_bool_env("PANEL_BRIGHTNESS_VOICE_ENABLED", False),
             todoist_api_token=os.getenv("PANEL_TODOIST_API_TOKEN", "").strip(),
             todoist_enabled=(
                 _bool_env("PANEL_TODOIST_ENABLED", False)

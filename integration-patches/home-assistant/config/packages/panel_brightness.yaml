@@ -1,0 +1,55 @@
+artem_panel: {}
+
+# Install as one HA package. No secret, shell command or public Panel Agent URL.
+# Samsung publishes actual WMI observations over its existing private HA API.
+template:
+  - triggers:
+      - trigger: event
+        event_type: artem_panel_brightness_state
+        event_data:
+          target: samsung_panel
+      - trigger: time_pattern
+        seconds: "/30"
+      - trigger: homeassistant
+        event: start
+    sensor:
+      - name: Artem Panel Brightness
+        unique_id: artem_panel_brightness
+        unit_of_measurement: "%"
+        icon: mdi:monitor
+        state: >-
+          {% if trigger.platform == 'event' and trigger.event.data.available == true %}
+            {{ trigger.event.data.value }}
+          {% else %}
+            {{ this.state }}
+          {% endif %}
+        availability: >-
+          {% if trigger.platform == 'event' %}
+            {{ trigger.event.data.available == true
+               and trigger.event.data.value is number
+               and 0 <= trigger.event.data.value <= 100
+               and -2 <= as_timestamp(now()) - as_timestamp(trigger.event.data.observed_at, 0) < 90 }}
+          {% elif trigger.platform == 'homeassistant' %}
+            {{ false }}
+          {% else %}
+            {{ this.attributes.get('available', false)
+               and -2 <= as_timestamp(now()) - as_timestamp(this.attributes.get('observed_at'), 0) < 90 }}
+          {% endif %}
+        attributes:
+          available: >-
+            {{ trigger.event.data.available if trigger.platform == 'event'
+               else false if trigger.platform == 'homeassistant'
+               else this.attributes.get('available', false) }}
+          writable: >-
+            {{ trigger.event.data.writable if trigger.platform == 'event'
+               else false if trigger.platform == 'homeassistant'
+               else this.attributes.get('writable', false) }}
+          observed_at: >-
+            {{ trigger.event.data.observed_at if trigger.platform == 'event'
+               else this.attributes.get('observed_at') }}
+          request_id: >-
+            {{ trigger.event.data.request_id if trigger.platform == 'event'
+               else this.attributes.get('request_id') }}
+          outcome: >-
+            {{ trigger.event.data.outcome if trigger.platform == 'event'
+               else this.attributes.get('outcome', 'observed') }}

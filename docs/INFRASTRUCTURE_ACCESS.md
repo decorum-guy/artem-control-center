@@ -35,7 +35,7 @@
 | Mac → три SSH alias | Административный доступ для разработки и порученной диагностики. |
 | Samsung → `ha-vps` | Приватные HA/Planning forwards; документированы Samsung loopback `18123` и `18088`. Это не публичные API через Caddy. |
 | Telegram-бот на `ha-vps` → `kz-bot` → Telegram | Подтверждённая владельцем исходящая proxy-зависимость. Других потребителей без inspection не добавлять. |
-| Samsung → Станция / BLE-лента | Прямые локальные источники в кандидате PR #372. Наличие кода в PR не доказывает установку в основном runtime. |
+| Samsung → Станция / BLE-лента | Прямые локальные источники присутствуют в проверенном `main` `36e8f7d`. Фактическую версию и состояние Samsung сверять отдельно; старый статус кандидата PR #372 больше не описывает состояние исходников. |
 | Mac → Samsung → Android TV | ADB, `screencap`, существующий `tv-mirror` / `scrcpy`; [подробный маршрут](TV_ACCESS.md). |
 | Внешний TV-пульт → существующий ограниченный вход → Samsung TV Executor | Отдельный маршрут управления ТВ. Его нельзя автоматически приравнивать к `kz-bot` или к приватным HA forwards. |
 
@@ -70,3 +70,4 @@ Mac — инструмент разработки и наблюдения, а н
 - [PRIVATE_PRODUCTION_CONNECTIVITY.md](PRIVATE_PRODUCTION_CONNECTIVITY.md) — ограниченный Windows tunnel identity и приватные API.
 - [TV_ACCESS.md](TV_ACCESS.md) — экран и управление Android TV.
 - [WINDOWS_PRODUCTION_RUNTIME.md](WINDOWS_PRODUCTION_RUNTIME.md) — запуск, установка и откат панели.
+- [AUTOMATIC_DEPLOYMENT.md](AUTOMATIC_DEPLOYMENT.md) — первоначальное подключение автоматических обновлений Samsung/VPS и проверка точной ревизии после успешного CI.

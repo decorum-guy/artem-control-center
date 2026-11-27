@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "state_directory": "C:\\Users\\ARTEM-PANEL\\AppData\\Local\\ArtemControlCenterAutoDeploy",
+  "github_token_file": "C:\\Users\\ARTEM-PANEL\\AppData\\Local\\ArtemControlCenterAutoDeploy\\github-token.txt",
+  "targets": [
+    {
+      "id": "panel",
+      "enabled": false,
+      "repository": "decorum-guy/artem-control-center",
+      "repository_id": 1315596034,
+      "checkout": "C:\\Users\\ARTEM-PANEL\\Projects\\artem-control-center",
+      "required_workflows": {
+        "ci.yml": [
+          "Validate (ubuntu-latest)",
+          "Validate (windows-latest)"
+        ],
+        "panel-runtime-update.yml": [
+          "Explicit production validation",
+          "Runtime update browser gate"
+        ],
+        "kiosk-presence-hotfix.yml": [
+          "Windows dashboard presence regression"
+        ],
+        "kiosk-process-tree-hotfix.yml": [
+          "Windows Edge process-tree regression"
+        ]
+      },
+      "adapter": "C:\\Users\\ARTEM-PANEL\\AppData\\Local\\ArtemControlCenterAutoDeploy\\agent\\apply-automatic-update.ps1"
+    }
+  ]
+}

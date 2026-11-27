@@ -1,0 +1,29 @@
+[Unit]
+Description=Artem signed GitHub deployment notifications and exact-main worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The VPS adapters need only the separately reviewed Docker/HA privileges.
+# Choose this account and its access during installation, not via webhook.
+User=artem-auto-deploy
+Group=artem-auto-deploy
+WorkingDirectory=/opt/artem-auto-deploy
+ExecStart=/usr/bin/python3 /opt/artem-auto-deploy/auto_deploy.py serve --config /etc/artem-auto-deploy/coordinator.json
+Restart=on-failure
+RestartSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Extend only to actual installed server-adapter checkout, HA package and
+# compose paths after reviewing that adapter. Do not grant / or /etc wholesale.
+ReadWritePaths=/var/lib/artem-auto-deploy
+# Interrupted mutation persists uncertain and requires runtime verification.
+KillMode=mixed
+TimeoutStopSec=2200
+
+[Install]
+WantedBy=multi-user.target

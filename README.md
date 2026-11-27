@@ -60,6 +60,8 @@
 - [Приёмка #375 и UX #376](docs/plans/GOOGLE_LOGIN_UX_AND_NEXT_RELEASE_2026_11_24.md) — вход Google, проверка профиля и выбор ленты в «Обзоре».
 - [`docs/TV_CONTROL.md`](docs/TV_CONTROL.md) — виджет телевизора, веб-пульт, контракты API и отзыв сессий.
 - [`docs/WINDOWS_PRODUCTION_RUNTIME.md`](docs/WINDOWS_PRODUCTION_RUNTIME.md) — production runtime, автозапуск, обновление, rollback и Samsung acceptance.
+- [`docs/AUTOMATIC_DEPLOYMENT.md`](docs/AUTOMATIC_DEPLOYMENT.md) — автоматическая установка после main и успешного CI, первоначальное подключение Samsung/VPS и диагностика.
+- [`docs/ALICE_PANEL_BRIGHTNESS.md`](docs/ALICE_PANEL_BRIGHTNESS.md) — настройка яркости экрана Samsung голосом, HA/Яндекс и аппаратная приёмка.
 - [`docs/INTEGRATIONS_AND_HEALTH.md`](docs/INTEGRATIONS_AND_HEALTH.md) — реестр проектов, health-контракты и control actions.
 - [`docs/NOTIFICATION_ARCHITECTURE.md`](docs/NOTIFICATION_ARCHITECTURE.md) —
   владельцы событий, подтверждённые coffee notification paths и защищённый

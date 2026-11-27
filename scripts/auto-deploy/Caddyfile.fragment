@@ -1,0 +1,16 @@
+# Inside an existing TLS site. This fragment does NOT expose Panel Agent.
+# Register a native GitHub repository webhook with application/json,
+# events push + workflow_run, and the matching per-repository secret file.
+handle /hooks/github {
+    request_body {
+        max_size 512KB
+    }
+    reverse_proxy 127.0.0.1:18765 {
+        transport http {
+            dial_timeout 3s
+            response_header_timeout 10s
+        }
+    }
+}
+# Rate-limit this exact path at the existing edge where available. Do not
+# route /status, /reset, command paths, or any Samsung loopback service here.
