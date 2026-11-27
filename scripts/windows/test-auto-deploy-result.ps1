@@ -25,7 +25,51 @@ $case.PreviousHealthy=$false
 Assert-True ($null -eq (Get-ArtemAutomaticUpdateResult @case)) "Unverified rollback must remain unknown"
 $case.PreviousHealthy=$true; $case.State.result="pre_update_failed"
 $result = Get-ArtemAutomaticUpdateResult @case
-Assert-True ($result.status -eq "failed_healthy" -and $result.code -eq 1) "Safe pre-cutover failure is not success"
+Assert-True ($result.status -eq "deferred" -and $result.code -eq 1) "Request-bound pre-update failure must permit another bounded preflight"
+$case.State.result="build_failed"
+$result = Get-ArtemAutomaticUpdateResult @case
+Assert-True ($result.status -eq "failed_healthy" -and $result.code -eq 1) "A real failed candidate must not be automatically replayed"
+
+# Read-only preflight failure cannot poison a candidate during cold startup.
+# Unknown prior transaction or possible CreateProcess always require recovery.
+foreach ($possible in @($false, $true)) {
+    foreach ($clear in @($false, $true)) {
+        $failure = Get-ArtemAutomaticFailureResult -PossibleDispatch $possible -TransactionStateKnownClear $clear
+        $expectedStatus = if (-not $possible -and $clear) { "deferred" } else { "uncertain" }
+        Assert-True ($failure.status -eq $expectedStatus) "Preflight/dispatch boundary classification must fail closed"
+    }
+}
+$unknownPayload = New-ArtemAutomaticResultPayload -Status "deferred" -Revision $null | ConvertTo-Json -Compress | ConvertFrom-Json
+Assert-True ($null -eq $unknownPayload.revision -and $unknownPayload.status -eq "deferred") "Deferred unknown revision must be JSON null, never empty string"
+
+# Execute the actual spawn function against a deliberately failing cmdlet stub.
+# No powershell updater/device process is created by this test.
+$oldStartProcessFunction = Get-Item Function:Start-Process -ErrorAction SilentlyContinue
+try {
+    function Start-Process {
+        param($FilePath, $ArgumentList, $WorkingDirectory, $WindowStyle, [switch]$PassThru)
+        $script:spawnSawPossible = $script:possibleForTest
+        if ($script:spawnTestMode -eq "throw") { throw "synthetic CreateProcess result unavailable" }
+        return [pscustomobject]@{ Id = 0 }
+    }
+    foreach ($mode in @("throw", "unconfirmed-pid")) {
+        $script:spawnTestMode = $mode
+        $script:possibleForTest = $false
+        $script:spawnSawPossible = $false
+        $thrown = $false
+        try {
+            $null = Start-ArtemAutomaticUpdater -Paths ([pscustomobject]@{ UpdateScript="unused.ps1"; RepoRoot="unused" }) `
+                -CurrentHead $previous -TargetHead $target -UpdateRequestId $request `
+                -PossibleDispatch ([ref]$script:possibleForTest)
+        } catch { $thrown = $true }
+        $failure = Get-ArtemAutomaticFailureResult -PossibleDispatch $script:possibleForTest -TransactionStateKnownClear $true
+        Assert-True ($thrown -and $script:spawnSawPossible -and $failure.status -eq "uncertain") "Ambiguous spawn must be marked before invocation and freeze replay"
+    }
+}
+finally {
+    Remove-Item Function:Start-Process -ErrorAction SilentlyContinue
+    if ($null -ne $oldStartProcessFunction) { Set-Item Function:Start-Process -Value $oldStartProcessFunction.ScriptBlock }
+}
 # Real PS5.1 -> native Python argv smoke. setup-python owns PATH in CI.
 $python = (Get-Command python -ErrorAction Stop).Source
 . (Join-Path $PSScriptRoot "install-auto-deploy.ps1") -PythonPath $python -ConfigPath "not-read-in-contract-test" -ContractTest
@@ -47,4 +91,4 @@ try {
 finally {
     if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
 }
-Write-Output "Automatic deployment: 9 state checks, native Python probe, 2 relocated-path checks passed (no device IO)."
+Write-Output "Automatic deployment: 10 state, 4 preflight, 1 JSON-null, 2 spawn-boundary, 1 native Python and 2 relocated-path checks passed (20 total; no device IO)."

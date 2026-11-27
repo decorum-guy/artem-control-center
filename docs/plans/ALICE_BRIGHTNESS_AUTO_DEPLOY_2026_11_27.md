@@ -85,9 +85,14 @@ GitHub подтвердил отсутствие загруженных арте
   прошли **32 coordinator tests**, **34 Linux server-adapter tests** и 3 теста
   согласованности CI policy. Server orchestration тесты используют контролируемые
   Git/Docker/HTTP ответы, не живой Docker/VPS.
+- В завершающем просмотре исправлена Windows-классификация до запуска updater:
+  временно неготовая панель после logon и подтверждённый `pre_update_failed`
+  откладывают попытку. Возможный spawn и неизвестная прежняя transaction по-прежнему
+  блокируют повтор. Неизвестная ревизия передаётся как JSON `null`.
 - `npm run build:production`, `npm run test:production-smoke` и
   `git diff --check` прошли.
-- Windows CI запускает 12 проверок adapter: terminal-state decisions, настоящий
+- Windows CI запускает 20 проверок adapter: terminal/preflight decisions,
+  сериализация неизвестной ревизии, исключения на границе spawn, настоящий
   вызов системного Python из PowerShell и разрешение путей реального adapter,
   перенесённого за пределы checkout. Локального PowerShell в Linux-среде нет.
   Итог Windows/GitHub CI относится к точному head PR и указан в его checks/body;
