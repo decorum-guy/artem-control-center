@@ -218,10 +218,18 @@ class State:
         if os.name != "nt":
             self.path.chmod(0o600)
 
+    @contextlib.contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=5)
-        db.row_factory = sqlite3.Row
-        return db
+        try:
+            db.row_factory = sqlite3.Row
+            # Connection.__exit__ commits/rolls back but does not close the
+            # handle. Always close explicitly, including statement/commit
+            # failures; Windows must release state.sqlite3 without GC.
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def get(self, target):
         with self.connect() as db:

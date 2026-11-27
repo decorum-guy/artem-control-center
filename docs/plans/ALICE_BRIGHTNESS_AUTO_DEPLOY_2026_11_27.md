@@ -82,13 +82,17 @@ GitHub подтвердил отсутствие загруженных арте
   ошибок нет. Первый проход обнаружил отсутствие новой возможности в общем
   реестре; классификация исправлена и полный check повторён успешно.
 - После завершающих исправлений остановки worker и восстановления после ошибки
-  прошли **32 coordinator tests**, **34 Linux server-adapter tests** и 3 теста
+  прошли **35 coordinator tests**, **34 Linux server-adapter tests** и 3 теста
   согласованности CI policy. Server orchestration тесты используют контролируемые
   Git/Docker/HTTP ответы, не живой Docker/VPS.
 - В завершающем просмотре исправлена Windows-классификация до запуска updater:
   временно неготовая панель после logon и подтверждённый `pre_update_failed`
   откладывают попытку. Возможный spawn и неизвестная прежняя transaction по-прежнему
   блокируют повтор. Неизвестная ревизия передаётся как JSON `null`.
+- Windows CI обнаружил удержание `state.sqlite3`: контекст SQLite выполнял
+  commit/rollback, но не закрывал connection. Добавлено явное закрытие в `finally`
+  и три регрессии с реальными удерживаемыми connection objects, без помощи GC.
+  Проверяются освобождение после успеха/ошибки и атомарный откат `State.transition`.
 - `npm run build:production`, `npm run test:production-smoke` и
   `git diff --check` прошли.
 - Windows CI запускает 20 проверок adapter: terminal/preflight decisions,

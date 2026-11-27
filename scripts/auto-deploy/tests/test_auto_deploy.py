@@ -147,6 +147,59 @@ class StubGitHub:
         return []
 
 
+class StateConnectionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+
+    def assert_connection_closed(self, connection):
+        # Keep the actual connection alive: closure must not depend on its
+        # destructor, cyclic garbage collection, or directory-cleanup retries.
+        with self.assertRaisesRegex(m.sqlite3.ProgrammingError, "closed"):
+            connection.execute("SELECT 1")
+
+    def test_success_commits_and_closes_retained_connection(self):
+        state = m.State(self.temp.name)
+        with state.connect() as connection:
+            connection.execute("INSERT INTO deliveries VALUES (?, ?)", ("committed", 1))
+        self.assert_connection_closed(connection)
+        with state.connect() as reader:
+            self.assertEqual(reader.execute("SELECT id FROM deliveries").fetchone()["id"], "committed")
+        self.assert_connection_closed(reader)
+
+    def test_exception_rolls_back_and_closes_retained_connection(self):
+        state = m.State(self.temp.name)
+        with self.assertRaisesRegex(RuntimeError, "synthetic transaction failure"):
+            with state.connect() as connection:
+                connection.execute("INSERT INTO deliveries VALUES (?, ?)", ("must-rollback", 1))
+                raise RuntimeError("synthetic transaction failure")
+        self.assert_connection_closed(connection)
+        with state.connect() as reader:
+            self.assertIsNone(reader.execute("SELECT id FROM deliveries").fetchone())
+        self.assert_connection_closed(reader)
+
+    def test_transition_failure_rolls_back_both_writes_and_closes_every_handle(self):
+        real_connect = m.sqlite3.connect
+        retained = []
+        def track_connection(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            retained.append(connection)
+            return connection
+        with patch.object(m.sqlite3, "connect", side_effect=track_connection):
+            state = m.State(self.temp.name)
+            with state.connect() as setup:
+                setup.execute("CREATE TRIGGER reject_target BEFORE INSERT ON targets BEGIN SELECT RAISE(ABORT, 'synthetic target failure'); END")
+            with self.assertRaisesRegex(m.sqlite3.IntegrityError, "synthetic target failure"):
+                state.transition("panel", SHA, "deploying")
+            # The attempt insert happened before the failing target insert.
+            # Both must roll back, otherwise a later pass could be poisoned.
+            self.assertIsNone(state.attempt("panel", SHA))
+            self.assertIsNone(state.get("panel"))
+        self.assertGreaterEqual(len(retained), 5)
+        for connection in retained:
+            self.assert_connection_closed(connection)
+
+
 class ReconcileTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
